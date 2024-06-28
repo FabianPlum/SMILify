@@ -195,7 +195,9 @@ def export_smpl_model(start_frame, stop_frame):
     
     smpl_dict["shapedirs"] = np.zeros((num_verts, 3))
 
-    smpl_dict["posedirs"] = np.zeros((num_verts, 3))
+    smpl_dict["posedirs"] = np.empty(0) # leave empty if there are no pose blend shapes
+    
+    print(smpl_dict["posedirs"].shape)
     
 
     armature_obj = next((obj for obj in bpy.data.objects if obj.type == 'ARMATURE'), None)
@@ -307,3 +309,4 @@ def test_export_functions():
 
 # Export SMPL-style model
 export_smpl_model(start_frame=1, stop_frame=20)
+# D:\SMAL\SMILify\data\SMALST\smpl_models
