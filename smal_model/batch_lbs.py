@@ -72,7 +72,9 @@ def batch_lrotmin(theta):
 
     return lrotmin
 
-def batch_global_rigid_transformation(Rs, Js, parent, rotate_base = False, betas_logscale=None, opts=None):
+def batch_global_rigid_transformation(Rs, Js, parent, rotate_base = False,
+                                      betas_logscale=None, opts=None,
+                                      num_joints=35):
     """
     Computes absolute joint locations given pose.
 
@@ -108,7 +110,7 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base = False, betas
         tail_joints = list(range(25, 32))
         ear_joints = [33, 34]
 
-        beta_scale_mask = torch.zeros(35, 3, 6).to(betas_logscale.device)
+        beta_scale_mask = torch.zeros(num_joints, 3, 6).to(betas_logscale.device)
         beta_scale_mask[leg_joints, [2], [0]] = 1.0 # Leg lengthening
         beta_scale_mask[leg_joints, [0], [1]] = 1.0 # Leg fatness
         beta_scale_mask[leg_joints, [1], [1]] = 1.0 # Leg fatness
@@ -121,10 +123,10 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base = False, betas
         beta_scale_mask[ear_joints, [2], [5]] = 1.0 # Ear z
 
         beta_scale_mask = torch.transpose(
-            beta_scale_mask.reshape(35*3, 6), 0, 1)
+            beta_scale_mask.reshape(num_joints*3, 6), 0, 1)
 
         betas_scale = torch.exp(betas_logscale @ beta_scale_mask)
-        scaling_factors = betas_scale.reshape(-1, 35, 3)
+        scaling_factors = betas_scale.reshape(-1, num_joints, 3)
 
     scale_factors_3x3 = torch.diag_embed(scaling_factors, dim1=-2, dim2=-1)
 
@@ -161,7 +163,7 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base = False, betas
     # how much the bone moved (not the final location of the bone)
     # but (final_bone - init_bone)
     # ---
-    Js_w0 = torch.cat([Js_orig, torch.zeros([N, 35, 1, 1]).to(Rs.device)], 2)
+    Js_w0 = torch.cat([Js_orig, torch.zeros([N, num_joints, 1, 1]).to(Rs.device)], 2)
     init_bone = torch.matmul(results, Js_w0)
     # Append empty 4 x 3:
     init_bone = torch.nn.functional.pad(init_bone, (3,0,0,0,0,0,0,0))
