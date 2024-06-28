@@ -1,14 +1,63 @@
-# SMALify
+# SMILify
 
-<img src="docs/badja_result.gif">
+This repository is based on [SMALify]() with the aim to turn any rigged 3D model into
+a SMAL compatible model. There are Blender files to convert your mesh and lots of code 
+changes to deal with arbitrary armature configurations, rather than assuming a fixed
+quadruped model.
 
-This repository contains an implementation for performing 3D animal (quadruped) reconstruction from a monocular image or video. The system adapts the pose (limb positions) and shape (animal type/height/weight) parameters for the SMAL deformable quadruped model, as well as camera parameters until the projected SMAL model aligns with 2D keypoints and silhouette segmentations extracted from the input frame(s).
+For now, I'll focus on insects, hence **SMIL**.
 
-The code can be thought of as a modernization of the fitting code used in [Creatures Great and SMAL](https://arxiv.org/abs/1811.05804) paper; Chainer/ChumPy has been replaced with PyTorch, OpenDR replaced with PyTorch3D etc. However, I have also included some recent innovations from the [Who Left the Dogs Out?](https://arxiv.org/abs/2007.11110) such as the inclusion of limb scaling parameters, and an improved shape prior.
+## Installation (mesh registration)
+1. Clone the repository **with submodules** and enter directory
+   ```
+   git clone --recurse-submodules https://github.com/benjiebob/SMALify
+   cd SMALify
+   ```
+   Note: If you don't clone with submodules you won't get the sample data from BADJA/StanfordExtra/SMALST.
 
-The aim of this repository is to provided demonstrative fitting code to benefit computer vision researchers but also those working in animal/veterinary science. In either case, I'd be delighted to hear from you!
+2. install pytorch (and Co.)
+   ```
+   conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+   conda install -c conda-forge -c fvcore iopath ninja
+   pip install yacs
+   ```
 
-## Installation
+3. clone pytorch3d and install
+   ```
+   git clone https://github.com/facebookresearch/pytorch3d.git
+   cd pytorch3d
+   pip install -e .
+   cd ..
+   ```
+
+4. some more dependencies
+   ```
+   pip install matplotlib scipy chumpy opencv-python nibabel
+   ```
+   
+5. Test your installation by running mesh registration with custom models
+   ```
+   python -m fitter_3d.optimise --mesh_dir .\fitter_3d\ATTA_BOI\ --yaml_src fitter_3d/example_cfg.yaml
+   ```
+
+In case you get an error back with chumpy complaining about legacy imports and not finding numpy.bool, simply update the
+__init__.py file linked in the error message:
+
+replace
+```
+from numpy import bool, int, float, ...
+```
+with
+```
+from numpy import bool_ as bool_
+from numpy import int_ as int_
+from numpy import float_ as float_
+from numpy import object_ as object__
+from numpy import inf_ as inf_
+```
+
+
+## Installation (all functionality)
 1. Clone the repository **with submodules** and enter directory
    ```
    git clone --recurse-submodules https://github.com/benjiebob/SMALify
