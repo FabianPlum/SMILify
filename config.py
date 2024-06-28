@@ -33,12 +33,9 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 
 # custom elements added:
-# SMAL_FILE = join(SMAL_MODEL_PATH, 'smpl_ATTA.pkl')
-# -> currently skeleton configuration is messed up with IK controllers
-SMAL_FILE = join(SMAL_MODEL_PATH, 'smpl_ATTA_ALT.pkl')
+SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
 SMAL_SHAPES = None # "D:/SMAL/SMALify/fit3d_results_ALL_ANTS_ALL_METHODS/Stage3.npz"
 ignore_sym = True
-ignore_betas = False
 
 DEBUG = False
 
