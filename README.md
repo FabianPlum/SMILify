@@ -20,6 +20,7 @@ For now, I'll focus on insects, hence **SMIL**.
    conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
    conda install -c conda-forge -c fvcore iopath ninja
    pip install yacs
+   pip install --upgrade iopath
    ```
 
 3. clone pytorch3d and install
