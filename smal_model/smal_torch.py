@@ -81,7 +81,7 @@ class SMAL(nn.Module):
             # add vertex template to deformations
             learned_shapes += np.repeat(v_template[np.newaxis, :, :], 81, axis=0)
             # add zeros array so the template model can be used as a viable shape
-            #learned_shapes = np.insert(learned_shapes, 0, np.zeros(v_template.shape), axis=0)
+            # learned_shapes = np.insert(learned_shapes, 0, np.zeros(v_template.shape), axis=0)
 
             self.shapedirs = Variable(
                 torch.Tensor(learned_shapes), requires_grad=False).to(device)
@@ -143,14 +143,18 @@ class SMAL(nn.Module):
         # Pose blend shape basis
         num_pose_basis = dd['posedirs'].shape[-1]
 
-        posedirs = np.reshape(
-            undo_chumpy(dd['posedirs']), [-1, num_pose_basis]).T
+        # If there are no pose blend shapes, create a zeros tensor of appropriate size
+        if dd['posedirs'] != np.empty(0):
+            posedirs = np.reshape(
+                undo_chumpy(dd['posedirs']), [-1, num_pose_basis]).T
 
-        """ TEMPORARY TO TEST WHICH POSEDIR SHAPE IS APPROPRIATE """
-        if config.ignore_sym:
             self.posedirs = Variable(
-                torch.zeros(486, 30921), requires_grad=False).to(device)
+                torch.Tensor(posedirs), requires_grad=False).to(device)
         else:
+            # shape joints - 1 (root bone) * 3 * 3 , vertices * 3
+            posedirs = np.zeros(((self.J_regressor.shape[1] - 1) * 3 * 3,
+                                 self.v_template.shape[0] * 3))
+
             self.posedirs = Variable(
                 torch.Tensor(posedirs), requires_grad=False).to(device)
 
@@ -164,11 +168,7 @@ class SMAL(nn.Module):
 
     def __call__(self, beta, theta, trans=None, del_v=None, betas_logscale=None, get_skin=True, v_template=None):
 
-        if not config.ignore_betas:
-            nBetas = beta.shape[1]
-        else:
-            nBetas = 0
-
+        nBetas = beta.shape[1]
 
         # DEBUG: set nBetas to zero, assuming no blend shapes have been registered yet.
         # comment out line, once blend shapes are included
