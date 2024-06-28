@@ -6,6 +6,16 @@ __pycache__/
 # C extensions
 *.so
 
+# Temp results
+Fitter_RESULTS/
+
+#pycharm dev
+.idea/
+.vscode/
+__pycache__/
+fitter_3d/__pycache__/
+
+
 # Distribution / packaging
 .Python
 build/
