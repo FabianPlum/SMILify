@@ -193,7 +193,7 @@ def export_smpl_model(start_frame, stop_frame):
     
     """
     
-    smpl_dict["shapedirs"] = export_posedirs(obj, start_frame, stop_frame, posedirs_npy_path)[1]
+    smpl_dict["shapedirs"] = np.zeros((num_verts, 3))
 
     smpl_dict["posedirs"] = np.zeros((num_verts, 3))
     
