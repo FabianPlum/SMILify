@@ -9,6 +9,11 @@ __pycache__/
 # Temp results
 Fitter_RESULTS/
 
+# All models
+fitter_3d/ALL_ANTS/
+fitter_3d/ATTA_ALL/
+fitter_3d/DOG_BOI/
+
 #pycharm dev
 .idea/
 .vscode/
