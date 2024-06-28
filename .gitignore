@@ -8,6 +8,7 @@ __pycache__/
 
 # Temp results
 Fitter_RESULTS/
+fit3d_results
 
 # All models
 fitter_3d/ALL_ANTS/
