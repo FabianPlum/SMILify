@@ -87,6 +87,7 @@ def plot_mesh(ax, mesh: Meshes, label="", colour="blue", equalize=True, zoom=1.5
     """
 
     ax.plot([], [], color=colour, label=label)
+    ax.legend(loc='upper right')
 
     return trisurfs
 
@@ -122,6 +123,7 @@ def plot_meshes(target_meshes, src_meshes, mesh_names=[], title="", figtitle="",
 
         try_mkdir(out_dir)
 
+        plt.legend(loc='upper right')
         plt.savefig(
             f"{out_dir}/{name} - {title}.png")
         plt.close(fig)
@@ -174,6 +176,7 @@ def plot_pointclouds(target_meshes, src_meshes, mesh_names=[], title="", figtitl
 
         try_mkdir(out_dir)
 
+        plt.legend(loc='upper right')
         plt.savefig(
             f"{out_dir}/{name} - {title}.png")
         plt.close(fig)
