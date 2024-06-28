@@ -3,12 +3,12 @@
 stages:
   Stage0: # Initialisation stage (see next stage for comments)
     scheme: 'init'
-    nits: 200 # number of iterations for this stage
+    nits: 100 # number of iterations for this stage
     lr: 0.05 # Adam optimiser learning rate
 
   Stage1: # chosen name of stage
-      scheme: 'default' # one of 'init', 'default', 'shape', 'pose', 'deform'. See README for explanation
-      nits: 500 # number of iterations for this stage
+      scheme: 'pose' # one of 'init', 'default', 'shape', 'pose', 'deform'. See README for explanation
+      nits: 300 # number of iterations for this stage
       lr: 0.03 # Adam optimiser learning rate
 
       loss_weights: # optional, any not provided will revert to default
@@ -18,12 +18,23 @@ stages:
           w_laplacian: 0.01
 
       custom_lrs: # optional, used to provide different learning rates to certain parameters
-        joint_rot: 0.005
+        joint_rot: 0.002
 
   Stage2:
-    scheme: 'default'
+    scheme: 'deform'
+    nits: 1000
+    lr: 0.002
+
+    loss_weights: # optional, any not provided will revert to default
+      w_chamfer: 1.
+      w_edge: 0.8
+      w_normal: 0.02
+      w_laplacian: 0.01
+
+  Stage3:
+    scheme: 'deform'
     nits: 2000
-    lr: 0.015
+    lr: 0.001
 
 # Custom arguments. These will *overwrite* any command line arguments passed into the script
 args:
