@@ -16,9 +16,9 @@ fitter_3d/ATTA_ALL/
 fitter_3d/DOG_BOI/
 
 # datasets
-data/BADJA/
-data/SMALST/
-data/StanfordExtra/
+data/BADJA/*
+data/SMALST/*
+data/StanfordExtra/*
 
 #pycharm dev
 .idea/
