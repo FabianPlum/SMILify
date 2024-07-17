@@ -15,6 +15,11 @@ fitter_3d/ALL_ANTS/
 fitter_3d/ATTA_ALL/
 fitter_3d/DOG_BOI/
 
+# datasets
+data/BADJA/
+data/SMALST/
+data/StanfordExtra/
+
 #pycharm dev
 .idea/
 .vscode/
