@@ -122,6 +122,11 @@ def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath):
     np.save(filepath, J_regressor)
     return filepath, J_regressor
 
+"""
+This is currently not supported.
+The posedir created here captures the mesh shape at every frame
+This is however not hwo the posedir is used in the original implementaiton and thus disabled for now.
+"""
 @ensure_mesh
 def export_posedirs(mesh_obj, start_frame, stop_frame, filepath):
     bpy.context.view_layer.objects.active = mesh_obj
@@ -139,7 +144,7 @@ def export_posedirs(mesh_obj, start_frame, stop_frame, filepath):
 
 
 # Export all model elements as a dict following the SMPL convention, contained in a .pkl file
-def export_smpl_model(start_frame, stop_frame):
+def export_smpl_model(start_frame=0, stop_frame=1):
     smpl_dict = {
         "f": [],
         "J_regressor": [],
@@ -308,5 +313,4 @@ def test_export_functions():
         print(f"export_J_regressor_to_npy failed: {e}")
 
 # Export SMPL-style model
-export_smpl_model(start_frame=1, stop_frame=20)
-# D:\SMAL\SMILify\data\SMALST\smpl_models
+export_smpl_model()
