@@ -7,6 +7,11 @@ quadruped model.
 
 For now, I'll focus on insects, hence **SMIL**.
 
+> [!Important] 
+> While SMILify does run under Windows, there are currently unresolved issues regarding the precomputed
+> "SMAL_DATA_FILE" leading to strange artefacts when using "deform" during mesh registration. Until this
+> issue is addressed, use this repo only under Ubuntu!
+
 ## Installation (mesh registration)
 1. Clone the repository **with submodules** and enter directory
    ```
