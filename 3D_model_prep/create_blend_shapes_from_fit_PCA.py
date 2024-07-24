@@ -19,8 +19,8 @@ npz_filepath = "../fit3d_results/Stage3.npz"
 try:
     from sklearn.decomposition import PCA
 except:
-    print("\nWARNING: Module sklearn not found! 
-          Un-comment pip install at the top of the script!\n")
+    print("nWARNING: Module sklearn not found!" + 
+          "Un-comment pip install at the top of the script!\n")
     blendshapes_from_PCA = False
 
 def load_pkl_file(filepath):
