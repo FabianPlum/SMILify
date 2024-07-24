@@ -1,15 +1,27 @@
 import bpy
 import numpy as np
 import pickle
-from sklearn.decomposition import PCA
-from mathutils import Vector
+
+"""
+# to install required packages, in case sklearn is not found
+import pip
+import sys
+pip.main(['install', 'scikit-learn', '--target', (sys.exec_prefix) + '\\lib\\site-packages'])
+"""
 
 # User settings
 blendshapes_from_PCA = True
 number_of_PC = 10
 # Update these file paths to your actual file locations
-pkl_filepath = "/home/fabi/dev/SMILify/3D_model_prep/smpl_ATTA.pkl"
-npz_filepath = "/home/fabi/dev/SMILify/fit3d_results/Stage3.npz"
+pkl_filepath = "smpl_ATTA.pkl"
+npz_filepath = "../fit3d_results/Stage3.npz"
+
+try:
+    from sklearn.decomposition import PCA
+except:
+    print("\nWARNING: Module sklearn not found! 
+          Un-comment pip install at the top of the script!\n")
+    blendshapes_from_PCA = False
 
 def load_pkl_file(filepath):
     try:
