@@ -6,7 +6,7 @@ import pickle
 # to install required packages, in case sklearn is not found
 import pip
 import sys
-pip.main(['install', 'scikit-learn', '--target', (sys.exec_prefix) + '\\lib\\site-packages'])
+pip.main(['install', 'scikit-learn', 'matplotlib' '--target', (sys.exec_prefix) + '\\lib\\site-packages'])
 """
 
 # User settings
@@ -18,6 +18,7 @@ npz_filepath = "../fit3d_results/Stage3.npz"
 
 try:
     from sklearn.decomposition import PCA
+    import matplotlib.pyplot as plt
 except:
     print("nWARNING: Module sklearn not found!" + 
           "Un-comment pip install at the top of the script!\n")
@@ -135,7 +136,7 @@ def create_blendshapes(data, obj):
 def apply_pca_and_create_blendshapes(data, obj, num_components=10):
     """ Apply PCA on deformation vertices and create blendshapes based on the principal components. """
     # Reshape data for PCA (flattening the vertex coordinates into a single dimension per sample)
-    data_reshaped = data.reshape(-1, data.shape[0])
+    data_reshaped = data.reshape(-1, data.shape[0], order="F")
 
     # Initialize and fit PCA
     pca = PCA(n_components=num_components)
@@ -144,12 +145,35 @@ def apply_pca_and_create_blendshapes(data, obj, num_components=10):
     print("Explained variance by component:", explained_variance)
 
     if not obj.data.shape_keys:
-        obj.shape_key_add(name="Basis")
+        shape_key = obj.shape_key_add(name="Basis")
+        # create new mean shape
+        mean_shape = np.mean(data, axis=0)
+        
+        fig = plt.figure(figsize=(12, 12))
+        ax = fig.add_subplot(projection='3d')
+
+        ax.scatter(mean_shape[:,0], 
+                   mean_shape[:,1], 
+                   mean_shape[:,2])
+        plt.savefig('mean_shape.png')
+        
+        
+        for vert_index, vert in enumerate(mean_shape):
+            shape_key.data[vert_index].co = vert
     
     for i in range(num_components):
-        pc_reshaped = principal_components[:, i].reshape(-1, 3)
+        pc_reshaped = principal_components[:, i].reshape(-1, 3, order="F")
         shape_key_name = f"PC_{i+1}"
         shape_key = obj.shape_key_add(name=shape_key_name)
+        
+        fig = plt.figure(figsize=(12, 12))
+        ax = fig.add_subplot(projection='3d')
+
+        ax.scatter(pc_reshaped[:,0], 
+                   pc_reshaped[:,1], 
+                   pc_reshaped[:,2])
+        plt.savefig(shape_key_name +'.png')
+        
         for vert_index, vert in enumerate(pc_reshaped):
             shape_key.data[vert_index].co = vert
         
