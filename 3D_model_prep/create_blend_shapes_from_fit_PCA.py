@@ -1,6 +1,7 @@
 import bpy
 import numpy as np
 import pickle
+import os
 
 """
 # WINDOWS
@@ -27,7 +28,7 @@ blendshapes_from_PCA = True
 number_of_PC = 10
 USE_DEFORM = False
 REGRESS_JOINTS = True
-
+EXPORT_MODEL = True
 
 # Windows -> can use local paths
 # Update these file paths to your actual file locations
@@ -277,6 +278,43 @@ def recalculate_joint_positions(obj, pkl_data):
 
     bpy.ops.object.mode_set(mode='OBJECT')
     print("Joint positions recalculated and updated.")
+    
+    return joint_positions
+    
+def export_smpl_model(obj, pkl_data, export_path, joint_positions):
+    """
+    Export the updated model as a new SMPL file with the blendshapes stored in the model's shapedirs.
+
+    Args:
+    - obj (bpy.types.Object): The mesh object with the updated vertex locations and blendshapes.
+    - pkl_data (dict): Dictionary containing the original SMPL data.
+    - export_path (str): The file path where the new SMPL file will be saved.
+    """
+    # Update "v_template" with the newly computed vertex locations of the mesh
+    updated_vertices = np.array([np.array(v.co) for v in obj.data.vertices])
+    pkl_data["v_template"] = updated_vertices
+    
+    pkl_data["J"] = joint_positions
+
+    # Update "shapedirs" with the content of the blendshapes
+    num_blendshapes = len(obj.data.shape_keys.key_blocks) - 1  # Exclude the "Basis" shape key
+    num_vertices = len(updated_vertices)
+    shapedirs = np.zeros((num_vertices, 3, num_blendshapes))
+
+    for i, shape_key in enumerate(obj.data.shape_keys.key_blocks[1:], start=0):  # Exclude the "Basis" shape key
+        for j, vert in enumerate(shape_key.data):
+            shapedirs[j, :, i] = np.array(vert.co) - updated_vertices[j]
+
+    pkl_data["shapedirs"] = shapedirs
+
+    # Write out the new pkl file to the same location as the input pkl file with the name SMPL_fit.pkl
+    output_path = os.path.join(os.path.dirname(export_path), "SMPL_fit.pkl")
+    try:
+        with open(output_path, 'wb') as f:
+            pickle.dump(pkl_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print(f"New SMPL file saved successfully at {output_path}.")
+    except Exception as e:
+        print(f"Failed to save new SMPL file: {e}")
 
 
 def main(pkl_filepath, npz_filepath):        
@@ -303,7 +341,12 @@ def main(pkl_filepath, npz_filepath):
                     create_blendshapes(npz_data, obj)
                     
                 if REGRESS_JOINTS:
-                    recalculate_joint_positions(obj, pkl_data)
+                    joint_positions = recalculate_joint_positions(obj, pkl_data)
+                else:
+                    joint_positions = pkl_data["J"]
+                    
+                if EXPORT_MODEL:
+                    export_smpl_model(obj, pkl_data, export_path=os.path.basename(pkl_filepath), joint_positions=joint_positions)
                     
             except Exception as e:
                 print(f"Failed to load or process blendshapes data: {e}")
