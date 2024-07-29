@@ -3,18 +3,45 @@ import numpy as np
 import pickle
 
 """
+# WINDOWS
 # to install required packages, in case sklearn is not found
+
 import pip
 import sys
 pip.main(['install', 'scikit-learn', 'matplotlib' '--target', (sys.exec_prefix) + '\\lib\\site-packages'])
 """
 
+"""
+# UBUNTU
+# to install required packages, in case sklearn is not found
+# here, we need to run the following from the command line instead, as blender does not want to pip install things while running
+# so, go to the python executable that was shipped with blender and make sure the --target is correct
+
+./python3.11 -m pip install matplotlib scikit-learn --target /home/fabi/Downloads/blender-4.2.0-linux-x64/4.2/python/lib/python3.11/site-packages
+
+# if you are very bored, implement this with subprocess
+"""
+
 # User settings
-blendshapes_from_PCA = True
+blendshapes_from_PCA = False
 number_of_PC = 10
+USE_DEFORM = False
+
+"""
+# Windows -> can use local paths
 # Update these file paths to your actual file locations
 pkl_filepath = "smpl_ATTA.pkl"
 npz_filepath = "../fit3d_results/Stage3.npz"
+"""
+
+
+# Ubuntu -> use absolute paths
+# Update these file paths to your actual file locations
+pkl_filepath = "/home/fabi/dev/SMILify/3D_model_prep/smpl_ATTA.pkl"
+# ATTA ONLY
+npz_filepath = "/home/fabi/dev/SMILify/fit3d_results/Stage3.npz"
+# ALL SPECIES
+#npz_filepath = "/home/fabi/dev/SMILify/Fitter_RESULTS/fit3d_results_ALL_ANTS_ALL_METHODS/Stage3.npz"
 
 try:
     from sklearn.decomposition import PCA
@@ -117,8 +144,11 @@ def create_blendshapes(data, obj):
     if "verts" not in data or "labels" not in data:
         print("No 'verts' or 'labels' key found in the .npz file.")
         return
-
-    deform_verts = data["verts"]
+    
+    if USE_DEFORM:
+        deform_verts = data["deform_verts"]
+    else:
+        deform_verts = data["verts"]
     target_shape_names = data["labels"]
 
     if not obj.data.shape_keys:
@@ -128,12 +158,46 @@ def create_blendshapes(data, obj):
         shape_key_name = target_shape_names[i]
         shape_key = obj.shape_key_add(name=shape_key_name)
         for vert_index, vert in enumerate(deform):
-            shape_key.data[vert_index].co = vert
+            if USE_DEFORM:
+                shape_key.data[vert_index].co = np.array(obj.data.vertices[vert_index].co) + vert 
+            else:
+                shape_key.data[vert_index].co = vert
 
     print(f"Created {len(deform_verts)} blendshapes.")
-                    
+
+
+def apply_pca_and_create_blendshapes(scans, obj, num_components=10):
+    if USE_DEFORM:
+        base_mesh = np.array([np.array(i.co) for i in obj.data.vertices])
+        
+        scans += base_mesh
+    
+    n, v, _ = scans.shape
+    # Reshape the scans into (n, v*3)
+    scans_reshaped = scans.reshape(n, v * 3)
+    
+    # Perform PCA
+    pca = PCA(n_components=num_components)
+    pca.fit(scans_reshaped)
+    
+    # Mean shape
+    mean_shape = pca.mean_.reshape(v, 3)
+    
+    # Principal components (reshape each component back to (v, 3))
+    blendshapes = [component.reshape(v, 3) for component in pca.components_]
+    
+    shape_key = obj.shape_key_add(name="Basis")        
+    for vert_index, vert in enumerate(mean_shape):
+        shape_key.data[vert_index].co = vert
+    
+    # Add blendshapes as shape keys
+    for i, blendshape in enumerate(blendshapes):
+        shape_key = obj.shape_key_add(name=f"PC_{i+1}")        
+        for j, vertex in enumerate(blendshape):
+            shape_key.data[j].co = mean_shape[j] + vertex
+                                
                 
-def apply_pca_and_create_blendshapes(data, obj, num_components=10):
+def apply_pca_and_create_blendshapes_ALT(data, obj, num_components=10):
     """ Apply PCA on deformation vertices and create blendshapes based on the principal components. """
     # Reshape data for PCA (flattening the vertex coordinates into a single dimension per sample)
     data_reshaped = data.reshape(-1, data.shape[0], order="F")
@@ -156,7 +220,7 @@ def apply_pca_and_create_blendshapes(data, obj, num_components=10):
                    mean_shape[:,1], 
                    mean_shape[:,2])
         plt.savefig('mean_shape.png')
-        
+        plt.close()
         
         for vert_index, vert in enumerate(mean_shape):
             shape_key.data[vert_index].co = vert
@@ -168,38 +232,21 @@ def apply_pca_and_create_blendshapes(data, obj, num_components=10):
         
         fig = plt.figure(figsize=(12, 12))
         ax = fig.add_subplot(projection='3d')
-
-        ax.scatter(pc_reshaped[:,0], 
-                   pc_reshaped[:,1], 
-                   pc_reshaped[:,2])
+        
+        print(np.abs(pc_reshaped / np.max(np.abs(pc_reshaped))))
+        
+        # use colouration of element to indicate magnitude of change for each vertex (regardless of direction)
+        ax.scatter(mean_shape[:,0], 
+                   mean_shape[:,1], 
+                   mean_shape[:,2],
+                   c=np.mean(np.abs(pc_reshaped / np.max(np.abs(pc_reshaped))), axis=1))
+        
+        print(shape_key_name +'.png')
         plt.savefig(shape_key_name +'.png')
+        plt.close()
         
         for vert_index, vert in enumerate(pc_reshaped):
-            shape_key.data[vert_index].co = vert
-        
-    """
-
-    # Create blendshapes for the first num_components principal components
-    for i in range(num_components):
-        shape_key_name = f"PC_{i+1}"
-        shape_key = obj.shape_key_add(name=shape_key_name)
-        pc_shape = principal_components[:, i].reshape(-1, 3)  # reshape to (v, 3)
-        print(principal_components[:,i].shape)
-        print(pc_shape.shape)
-
-        # Ensure vertex count matches
-        if len(obj.data.vertices) != pc_shape.shape[0]:
-            print("Error: The number of vertices does not match the number of PCA component entries.")
-            return
-        
-        for vert_index, vert in enumerate(obj.data.shape_keys.key_blocks["Basis"].data):
-            shape_key.data[vert_index].co = vert
-            # Convert NumPy array to Vector before adding
-            additional_vector = Vector((pc_shape[vert_index][0], pc_shape[vert_index][1], pc_shape[vert_index][2]))
-            vert.co += additional_vector
-    
-    """
-         
+            shape_key.data[vert_index].co = vert 
 
     print(f"Created {num_components} PCA blendshapes based on explained variance.")
 
@@ -213,8 +260,10 @@ def main(pkl_filepath, npz_filepath):
             create_armature_and_weights(pkl_data, obj)
             try:
                 npz_data = np.load(npz_filepath, allow_pickle=True)
-                verts_data = npz_data['verts']
-                # deform_data = npz_data ['deform_verts']
+                if USE_DEFORM:
+                    verts_data = npz_data['deform_verts']
+                else:
+                    verts_data = npz_data['verts']
                 
                 if verts_data.shape[1] != len(obj.data.vertices):
                     print(f"Error: Vertex count mismatch between mesh ({len(obj.data.vertices)}) and deformation data ({verts_data.shape[1]}).")
