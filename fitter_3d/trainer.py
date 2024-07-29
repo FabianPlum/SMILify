@@ -143,7 +143,7 @@ class SMALParamGroup:
         "init": ["global_rot", "trans"],
         "default": ["global_rot", "joint_rot", "trans", "betas", "log_beta_scales"],
         "shape": ["global_rot", "trans", "betas", "log_beta_scales"],
-        "pose": ["global_rot", "trans", "joint_rot"],
+        "pose": ["global_rot", "trans", "joint_rot", "betas"],
         "deform": ["deform_verts"],
     }  # map of param_type : all attributes in SMAL used in optim
 
@@ -318,7 +318,7 @@ class StageManager:
 
     def run(self):
         for n, stage in enumerate(self.stages):
-            stage.run(plot=True)
+            stage.run(plot=config.PLOT_RESULTS)
             stage.save_npz(labels=self.labels)
 
         self.plot_losses()
