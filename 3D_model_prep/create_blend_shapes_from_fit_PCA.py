@@ -55,6 +55,7 @@ except:
 def load_pkl_file(filepath):
     try:
         with open(filepath, 'rb') as f:
+            print("\nReading in contents of SMPL file...")
             data = pickle.load(f, encoding='latin1')
             print("\nContents of loaded SMPL file:")
             for key in data:
@@ -65,6 +66,21 @@ def load_pkl_file(filepath):
         return data
     except Exception as e:
         print(f"Failed to load .pkl file: {e}")
+        return None
+    
+def load_npz_file(filepath):
+    try:
+        print("\nReading in contents of fitted model file...")
+        data = np.load(filepath, allow_pickle=True)
+        print("\nContents of loaded .npz file:")
+        for key in data:
+            print(key)
+            if isinstance(data[key], np.ndarray):
+                print(data[key].shape)
+        print("Loaded .npz file successfully.")
+        return data
+    except Exception as e:
+        print(f"Failed to load .npz file: {e}")
         return None
 
 def create_mesh_from_pkl(data):
@@ -271,7 +287,7 @@ def main(pkl_filepath, npz_filepath):
         if obj:
             create_armature_and_weights(pkl_data, obj)
             try:
-                npz_data = np.load(npz_filepath, allow_pickle=True)
+                npz_data = load_npz_file(npz_filepath)
                 if USE_DEFORM:
                     verts_data = npz_data['deform_verts']
                 else:
