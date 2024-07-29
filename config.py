@@ -33,7 +33,8 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 
 # custom elements added:
-SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
+#SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
+SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 SMAL_SHAPES = None  # "D:/SMAL/SMALify/fit3d_results_ALL_ANTS_ALL_METHODS/Stage3.npz"
 ignore_sym = True # ignore provided symmetry file, when using custom models
 PLOT_RESULTS = False # if False, no plots are saved during fitting which massively speeds up the process

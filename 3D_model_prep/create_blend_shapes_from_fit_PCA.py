@@ -25,7 +25,7 @@ pip.main(['install', 'scikit-learn', 'matplotlib' '--target', (sys.exec_prefix) 
 
 # User settings
 blendshapes_from_PCA = True
-number_of_PC = 10
+number_of_PC = 19
 USE_DEFORM = False
 REGRESS_JOINTS = True
 EXPORT_MODEL = True
@@ -299,11 +299,11 @@ def export_smpl_model(obj, pkl_data, export_path, joint_positions):
     # Update "shapedirs" with the content of the blendshapes
     num_blendshapes = len(obj.data.shape_keys.key_blocks) - 1  # Exclude the "Basis" shape key
     num_vertices = len(updated_vertices)
-    shapedirs = np.zeros((num_vertices, 3, num_blendshapes))
+    shapedirs = np.zeros((num_vertices, 3, num_blendshapes + 1)) # add 1 for one base blendshape
 
     for i, shape_key in enumerate(obj.data.shape_keys.key_blocks[1:], start=0):  # Exclude the "Basis" shape key
         for j, vert in enumerate(shape_key.data):
-            shapedirs[j, :, i] = np.array(vert.co) - updated_vertices[j]
+            shapedirs[j, :, i + 1] = np.array(vert.co) - updated_vertices[j]
 
     pkl_data["shapedirs"] = shapedirs
 
