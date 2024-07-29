@@ -23,18 +23,18 @@ pip.main(['install', 'scikit-learn', 'matplotlib' '--target', (sys.exec_prefix) 
 """
 
 # User settings
-blendshapes_from_PCA = False
+blendshapes_from_PCA = True
 number_of_PC = 10
 USE_DEFORM = False
+REGRESS_JOINTS = True
 
-"""
+
 # Windows -> can use local paths
 # Update these file paths to your actual file locations
 pkl_filepath = "smpl_ATTA.pkl"
 npz_filepath = "../fit3d_results/Stage3.npz"
+
 """
-
-
 # Ubuntu -> use absolute paths
 # Update these file paths to your actual file locations
 pkl_filepath = "/home/fabi/dev/SMILify/3D_model_prep/smpl_ATTA.pkl"
@@ -42,6 +42,7 @@ pkl_filepath = "/home/fabi/dev/SMILify/3D_model_prep/smpl_ATTA.pkl"
 npz_filepath = "/home/fabi/dev/SMILify/fit3d_results/Stage3.npz"
 # ALL SPECIES
 #npz_filepath = "/home/fabi/dev/SMILify/Fitter_RESULTS/fit3d_results_ALL_ANTS_ALL_METHODS/Stage3.npz"
+"""
 
 try:
     from sklearn.decomposition import PCA
@@ -58,6 +59,8 @@ def load_pkl_file(filepath):
             print("\nContents of loaded SMPL file:")
             for key in data:
                 print(key)
+                if type(data[key]) is not str:
+                    print(data[key].shape)
         print("Loaded .pkl file successfully.")
         return data
     except Exception as e:
@@ -165,11 +168,10 @@ def create_blendshapes(data, obj):
 
     print(f"Created {len(deform_verts)} blendshapes.")
 
-
-def apply_pca_and_create_blendshapes(scans, obj, num_components=10):
+            
+def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_mesh=False, std_range=2):
     if USE_DEFORM:
         base_mesh = np.array([np.array(i.co) for i in obj.data.vertices])
-        
         scans += base_mesh
     
     n, v, _ = scans.shape
@@ -183,72 +185,82 @@ def apply_pca_and_create_blendshapes(scans, obj, num_components=10):
     # Mean shape
     mean_shape = pca.mean_.reshape(v, 3)
     
-    # Principal components (reshape each component back to (v, 3))
-    blendshapes = [component.reshape(v, 3) for component in pca.components_]
-    
-    shape_key = obj.shape_key_add(name="Basis")        
-    for vert_index, vert in enumerate(mean_shape):
-        shape_key.data[vert_index].co = vert
-    
-    # Add blendshapes as shape keys
-    for i, blendshape in enumerate(blendshapes):
-        shape_key = obj.shape_key_add(name=f"PC_{i+1}")        
-        for j, vertex in enumerate(blendshape):
-            shape_key.data[j].co = mean_shape[j] + vertex
-                                
-                
-def apply_pca_and_create_blendshapes_ALT(data, obj, num_components=10):
-    """ Apply PCA on deformation vertices and create blendshapes based on the principal components. """
-    # Reshape data for PCA (flattening the vertex coordinates into a single dimension per sample)
-    data_reshaped = data.reshape(-1, data.shape[0], order="F")
-
-    # Initialize and fit PCA
-    pca = PCA(n_components=num_components)
-    principal_components = pca.fit_transform(data_reshaped)
-    explained_variance = pca.explained_variance_ratio_
-    print("Explained variance by component:", explained_variance)
-
-    if not obj.data.shape_keys:
-        shape_key = obj.shape_key_add(name="Basis")
-        # create new mean shape
-        mean_shape = np.mean(data, axis=0)
-        
-        fig = plt.figure(figsize=(12, 12))
-        ax = fig.add_subplot(projection='3d')
-
-        ax.scatter(mean_shape[:,0], 
-                   mean_shape[:,1], 
-                   mean_shape[:,2])
-        plt.savefig('mean_shape.png')
-        plt.close()
-        
+    if overwrite_mesh:
+        # Overwrite the mesh vertex coordinates with the mean shape
+        for vert_index, vert in enumerate(mean_shape):
+            obj.data.vertices[vert_index].co = vert
+         # then add a basis shape key
+        shape_key = obj.shape_key_add(name="Basis") 
+    else:
+        # Add the mean shape as a blendshape
+        if not obj.data.shape_keys:
+            obj.shape_key_add(name="Basis")
+        shape_key = obj.data.shape_keys.key_blocks["Basis"]
         for vert_index, vert in enumerate(mean_shape):
             shape_key.data[vert_index].co = vert
     
-    for i in range(num_components):
-        pc_reshaped = principal_components[:, i].reshape(-1, 3, order="F")
+    # Principal components (reshape each component back to (v, 3))
+    blendshapes = [component.reshape(v, 3) for component in pca.components_]
+    
+    # Standard deviations of the principal components
+    std_devs = np.sqrt(pca.explained_variance_)
+
+    # Add blendshapes as shape keys with min and max range
+    for i, (blendshape, std_dev) in enumerate(zip(blendshapes, std_devs)):
         shape_key_name = f"PC_{i+1}"
         shape_key = obj.shape_key_add(name=shape_key_name)
-        
-        fig = plt.figure(figsize=(12, 12))
-        ax = fig.add_subplot(projection='3d')
-        
-        print(np.abs(pc_reshaped / np.max(np.abs(pc_reshaped))))
-        
-        # use colouration of element to indicate magnitude of change for each vertex (regardless of direction)
-        ax.scatter(mean_shape[:,0], 
-                   mean_shape[:,1], 
-                   mean_shape[:,2],
-                   c=np.mean(np.abs(pc_reshaped / np.max(np.abs(pc_reshaped))), axis=1))
-        
-        print(shape_key_name +'.png')
-        plt.savefig(shape_key_name +'.png')
-        plt.close()
-        
-        for vert_index, vert in enumerate(pc_reshaped):
-            shape_key.data[vert_index].co = vert 
 
-    print(f"Created {num_components} PCA blendshapes based on explained variance.")
+        # Calculate min and max range for the shape key
+        min_range = -std_range * std_dev
+        max_range = std_range * std_dev
+        
+        # Update the shape key vertex positions
+        for j, vertex in enumerate(blendshape):
+            shape_key.data[j].co = mean_shape[j] + vertex
+        
+        # Set min and max range for the shape key
+        shape_key.slider_min = min_range
+        shape_key.slider_max = max_range
+        
+    print(f"Created {num_components} PCA blendshapes with custom min and max ranges based on standard deviations.")
+                                
+
+def recalculate_joint_positions(obj, pkl_data):
+    """
+    Recalculate the positions of joints based on the mean shape and vertex weights.
+
+    Args:
+    - obj (bpy.types.Object): The mesh object with the updated mean shape.
+    - pkl_data (dict): Dictionary containing the joint weights information from the .pkl file.
+    """
+    mean_shape = np.array([np.array(v.co) for v in obj.data.vertices])
+    weights = pkl_data["J_regressor"]
+
+    j, n = weights.shape
+    assert mean_shape.shape[0] == n, "Number of vertices in mean shape and weights must match."
+    
+    # Initialize the joint positions array
+    joint_positions = np.zeros((j, 3))
+    
+    # Calculate the position of each joint
+    for i in range(j):
+        joint_positions[i] = np.sum(weights[i, :, None] * mean_shape, axis=0)
+
+    # Update the armature with the new joint positions
+    armature = bpy.data.objects.get("SMPL_Armature")
+    if not armature:
+        print("SMPL_Armature not found.")
+        return
+    
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    for i, bone in enumerate(armature.data.edit_bones):
+        bone.head = joint_positions[i]
+        bone.tail = joint_positions[i] + [0,0,0.1]
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+    print("Joint positions recalculated and updated.")
 
 
 def main(pkl_filepath, npz_filepath):        
@@ -270,9 +282,12 @@ def main(pkl_filepath, npz_filepath):
                     return
                 
                 if blendshapes_from_PCA:
-                    apply_pca_and_create_blendshapes(verts_data, obj, number_of_PC)
+                    apply_pca_and_create_blendshapes(verts_data, obj, number_of_PC, overwrite_mesh=True)
                 else:
                     create_blendshapes(npz_data, obj)
+                    
+                if REGRESS_JOINTS:
+                    recalculate_joint_positions(obj, pkl_data)
                     
             except Exception as e:
                 print(f"Failed to load or process blendshapes data: {e}")
