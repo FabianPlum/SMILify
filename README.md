@@ -15,8 +15,8 @@ For now, I'll focus on insects, hence **SMIL**.
 ## Installation (mesh registration)
 1. Clone the repository **with submodules** and enter directory
    ```
-   git clone --recurse-submodules https://github.com/benjiebob/SMALify
-   cd SMALify
+   git clone --recurse-submodules https://github.com/FabianPlum/SMILify
+   cd SMILify
    ```
    Note: If you don't clone with submodules you won't get the sample data from BADJA/StanfordExtra/SMALST.
 
