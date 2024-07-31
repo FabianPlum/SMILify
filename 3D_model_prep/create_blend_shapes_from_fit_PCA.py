@@ -3,6 +3,7 @@ import numpy as np
 import pickle
 import os
 from scipy.spatial import KDTree
+from mathutils import Vector
 
 """
 # WINDOWS
@@ -29,7 +30,7 @@ blendshapes_from_PCA = True
 number_of_PC = 20
 USE_DEFORM = False
 REGRESS_JOINTS = True
-EXPORT_MODEL = False
+EXPORT_MODEL = True
 SYMMETRISE = True
 
 """
@@ -326,52 +327,99 @@ def rebuild_symmetry_array(vertices_on_symmetry_axis, all_vertices, axis='y', to
 
     return symIdx
 
-def make_symmetrical(obj, pkl_data):
+
+def make_symmetrical(obj, pkl_data, center_tolerance=0.005):
     """
     Enforces the symmetry of the original model by updating the position of all vertices lying on the
     symmetry axis, finding corresponding vertices and mirroring their positions either left or right
     """
     
-    ### from smal_basics.py ###
-    
-    # -> with v being the input vertices from obj
+    print("Enforcing symmetry...")
     
     I = pkl_data["sym_verts"]
     v = pkl_data["v_template"]
     
-    v = v - np.mean(v)
+    v = v - np.mean(v, axis=0)
     y = np.mean(v[I, 1])
     v[:, 1] = v[:, 1] - y
     v[I, 1] = 0
 
-    left = v[:, 1] < 0
-    right = v[:, 1] > 0
-    center = v[:, 1] == 0
+    left = v[:, 1] <= -center_tolerance
+    right = v[:, 1] >= center_tolerance
+    center = ~(left | right)
     
+    left_inds = np.where(left)[0]
+    right_inds = np.where(right)[0]
+    center_inds = np.where(center)[0]
+    
+    try:
+        assert len(left_inds) == len(right_inds)
+        print(len(left_inds), len(right_inds), len(center_inds))
+    except AssertionError:
+        print("WHOOPS")
+
     symIdx = rebuild_symmetry_array(vertices_on_symmetry_axis=I,
-                                        all_vertices=v, axis='y',
-                                        tolerance=0.001)
-    print(symIdx)
-    print(symIdx.shape)
-    
-    ### THIS FAILS AS I DO INDEXING WRONG ###
-    
-    obj.data.vertices[left[symIdx]] = np.array([1, -1, 1]) * obj.data.vertices[left]
-    
-    """ 
+                                    all_vertices=v, axis='y',
+                                    tolerance=0.001)
+
+    # Check if the object has shape keys
+    if obj.data.shape_keys:
+        shape_keys = obj.data.shape_keys.key_blocks
+    else:
+        shape_keys = None
+
     for i, vertex in enumerate(obj.data.vertices):
-        vertex.co = 
-    """
-    
-    
-    # find symmetry axis of original mesh (from pkl data)
-    
-    # align points along the symmetry line with the y axis (setting their y position to 0)
-    
-    # finding matching vertices in orginal mesh
-    
-    # copying the positons of right vertices to their left mirrored vertex
-    
+        # enforce mesh centering
+        if center[i]:
+            new_position = Vector([vertex.co.x, 0, vertex.co.z])
+        # mirror remaining vertices
+        elif left[i]:
+            corresponding_vertex = obj.data.vertices[symIdx[i]]
+            new_position = Vector([corresponding_vertex.co.x, -corresponding_vertex.co.y, corresponding_vertex.co.z])
+        else:
+            new_position = vertex.co
+
+        # Update the main vertex position
+        vertex.co = new_position
+        
+        # Also update all shape keys' vertex positions if they exist
+        if shape_keys:
+            for shape_key in shape_keys:
+                shape_vertex = shape_keys[shape_key.name].data[i]
+                if center[i]:
+                    shape_vertex.co = Vector([shape_vertex.co.x, 0, shape_vertex.co.z])
+                elif left[i]:
+                    corresponding_shape_vertex = shape_keys[shape_key.name].data[symIdx[i]]
+                    shape_vertex.co = Vector([corresponding_shape_vertex.co.x, -corresponding_shape_vertex.co.y, corresponding_shape_vertex.co.z])
+                else:
+                    shape_vertex.co = shape_vertex.co
+        
+        # Update the mesh to reflect the changes
+        obj.data.update()
+
+def cleanup_mesh(obj, center_tolerance=0.005):
+    # Enter edit mode to merge vertices by distance
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='DESELECT')
+
+    # Select vertices with y coordinate close to 0
+    bpy.ops.object.mode_set(mode='OBJECT')
+    for vertex in obj.data.vertices:
+        if abs(vertex.co.y) < center_tolerance:
+            vertex.select = True
+
+    # Merge selected vertices by distance
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.remove_doubles(threshold=0.001)
+
+    # Recalculate mesh normals
+    bpy.ops.mesh.normals_make_consistent(inside=False)
+
+    # Return to object mode
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
 def export_smpl_model(obj, pkl_data, export_path, joint_positions):
     """
     Export the updated model as a new SMPL file with the blendshapes stored in the model's shapedirs.
@@ -432,14 +480,20 @@ def main(pkl_filepath, npz_filepath):
                     apply_pca_and_create_blendshapes(verts_data, obj, number_of_PC, overwrite_mesh=True)
                 else:
                     create_blendshapes(npz_data, obj)
-                    
+                
+                if SYMMETRISE:
+                    make_symmetrical(obj, pkl_data)
+                    """
+                    TODO: Mesh cleanup breaks the code at the moment as it leads
+                    to changes in the number of vertices that is not reflected in
+                    the blendshapes. anyway, we're getting there
+                    """
+                    #cleanup_mesh(obj)
+                
                 if REGRESS_JOINTS:
                     joint_positions = recalculate_joint_positions(obj, pkl_data)
                 else:
                     joint_positions = pkl_data["J"]
-                    
-                if SYMMETRISE:
-                    make_symmetrical(obj, pkl_data)
                     
                     
                 if EXPORT_MODEL:
