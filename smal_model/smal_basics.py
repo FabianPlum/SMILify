@@ -52,6 +52,7 @@ def rebuild_symmetry_array(vertices_on_symmetry_axis, all_vertices, axis='y', to
 
 def align_smal_template_to_symmetry_axis(v, sym_file=None, I=None):
     # These are the indexes of the points that are on the symmetry axis
+    # This is hard-coded for the dog model, so it doesn't apply to our stuff
     if I is None:
         I = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
              29, 30, 31, 32, 37, 55, 119, 120, 163, 209, 210, 211, 213, 216, 227, 326, 395, 452, 578, 910, 959, 964,
@@ -66,9 +67,20 @@ def align_smal_template_to_symmetry_axis(v, sym_file=None, I=None):
     v[:, 1] = v[:, 1] - y
     v[I, 1] = 0
 
+    """
+    # ORIGINALLY
+    
     left = v[:, 1] < 0
     right = v[:, 1] > 0
     center = v[:, 1] == 0
+    """
+
+    # WIP!!!
+    center_tolerance = 0.01
+    left = v[:, 1] <= -center_tolerance
+    right = v[:, 1] >= center_tolerance
+    center = ~(left | right)
+
 
     if sym_file is not None:
         with open(sym_file, 'rb') as f:
@@ -78,7 +90,8 @@ def align_smal_template_to_symmetry_axis(v, sym_file=None, I=None):
     else:
         # DEV -> compute vertex pairs:
         symIdx = rebuild_symmetry_array(vertices_on_symmetry_axis=I,
-                                        all_vertices=v, axis='y')
+                                        all_vertices=v, axis='y',
+                                        tolerance=0.001)
 
         print(symIdx)
         print(symIdx.shape)
