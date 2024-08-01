@@ -396,26 +396,44 @@ def make_symmetrical(obj, pkl_data, center_tolerance=0.005):
         
         # Update the mesh to reflect the changes
         obj.data.update()
-
+    
 def cleanup_mesh(obj, center_tolerance=0.005):
-    # Enter edit mode to merge vertices by distance
+    """
+    Cleans up the mesh by merging vertices close to the symmetry axis
+    and recalculating normals. Applies the same cleanup to all blendshapes.
+    Removes all interior faces.
+    """
+    # Ensure we're working on the correct object
     bpy.context.view_layer.objects.active = obj
+    
+    # Apply the cleanup for the base mesh
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_all(action='DESELECT')
-
-    # Select vertices with y coordinate close to 0
+    
+    # Select vertices with y coordinate close to 0 in the base mesh
     bpy.ops.object.mode_set(mode='OBJECT')
     for vertex in obj.data.vertices:
         if abs(vertex.co.y) < center_tolerance:
             vertex.select = True
-
-    # Merge selected vertices by distance
+    
+    # Merge selected vertices by distance in the base mesh
     bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.remove_doubles(threshold=0.001)
-
-    # Recalculate mesh normals
+    bpy.ops.mesh.remove_doubles(threshold=center_tolerance)
+    
+    # Recalculate mesh normals for the base mesh
     bpy.ops.mesh.normals_make_consistent(inside=False)
-
+    
+    # Ensure that the base mesh cleanup is applied before moving to blendshapes
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    # Remove interior faces
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.delete_loose()
+    bpy.ops.mesh.fill_holes(sides=0)
+    bpy.ops.mesh.select_interior_faces()
+    bpy.ops.mesh.delete(type='FACE')
+    
     # Return to object mode
     bpy.ops.object.mode_set(mode='OBJECT')
 
@@ -483,22 +501,22 @@ def main(pkl_filepath, npz_filepath):
                 
                 if SYMMETRISE:
                     make_symmetrical(obj, pkl_data)
-                    """
-                    TODO: Mesh cleanup breaks the code at the moment as it leads
-                    to changes in the number of vertices that is not reflected in
-                    the blendshapes. anyway, we're getting there
-                    """
-                    #cleanup_mesh(obj)
                 
                 if REGRESS_JOINTS:
                     joint_positions = recalculate_joint_positions(obj, pkl_data)
                 else:
                     joint_positions = pkl_data["J"]
-                    
+                
+                # clean up the mesh at the end of the process
+                # otherwise the weights and J_regressor are incorrect
+                cleanup_mesh(obj, center_tolerance=0.005)
+                
+                # Afterwards update the weight and regressors to ensure consistent
+                # vertex IDs and array shapes. This is handled in export_smpl_model()
                     
                 if EXPORT_MODEL:
                     export_smpl_model(obj, pkl_data, export_path=pkl_filepath, joint_positions=joint_positions)
-                    
+                 
             except Exception as e:
                 print(f"Failed to load or process blendshapes data: {e}")
         else:
