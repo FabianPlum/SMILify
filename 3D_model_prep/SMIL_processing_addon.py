@@ -17,6 +17,9 @@ from mathutils import Vector
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 
+# global, so the model is not re-loaded
+pkl_data = None
+
 """
 SMIL-ify
 """
@@ -392,7 +395,7 @@ def create_blendshapes(data, obj):
     print(f"Created {len(deform_verts)} blendshapes.")
 
             
-def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_mesh=False, std_range=2):
+def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_mesh=False, std_range=1):
     n, v, _ = scans.shape
     # Reshape the scans into (n, v*3)
     scans_reshaped = scans.reshape(n, v * 3)
@@ -480,8 +483,6 @@ def recalculate_joint_positions(obj, pkl_data):
 
     bpy.ops.object.mode_set(mode='OBJECT')
     print("Joint positions recalculated and updated.")
-    
-    return joint_positions
 
 def compute_symmetric_pairs(vertices, axis='y', tolerance=0.01):
     """
@@ -636,7 +637,7 @@ def cleanup_mesh(obj, center_tolerance=0.005):
     bpy.ops.object.mode_set(mode='OBJECT')
 
 
-def export_smpl_model(obj, pkl_data, export_path, joint_positions):
+def export_smpl_model(obj, pkl_data, export_path):
     """
     Export the updated model as a new SMPL file with the blendshapes stored in the model's shapedirs.
 
@@ -650,13 +651,12 @@ def export_smpl_model(obj, pkl_data, export_path, joint_positions):
     print(pkl_data["v_template"].shape, updated_vertices.shape)
     pkl_data["v_template"] = updated_vertices
     
-    pkl_data["J"] = joint_positions
-    
     # update all changed elements due to topoly changes
     
     vertices_npy_path = bpy.path.abspath('//test_vertices.npy')
     faces_npy_path = bpy.path.abspath('//test_faces.npy')
     vertex_groups_npy_path = bpy.path.abspath('//test_vertex_groups.npy')
+    joint_locations_npy_path = bpy.path.abspath('//test_joint_locations.npy')
     j_regressor_npy_path = bpy.path.abspath('//test_joint_regressor.npy')
     y_axis_vertices_npy_path = bpy.path.abspath('//test_y_axis_vertices.npy')
     
@@ -672,7 +672,8 @@ def export_smpl_model(obj, pkl_data, export_path, joint_positions):
         return
 
     print("Found armature object:", armature_obj.name)
-
+    
+    pkl_data["J"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1]
     pkl_data["J_regressor"] = export_J_regressor_to_npy(obj, armature_obj, 20, j_regressor_npy_path)[1]
 
     # Update "shapedirs" with the content of the blendshapes
@@ -716,6 +717,8 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "npz_filepath")
         layout.prop(smpl_tool, "blendshapes_from_PCA")
         layout.prop(smpl_tool, "number_of_PC")
+        layout.prop(smpl_tool, "clean_mesh")
+        layout.prop(smpl_tool, "merging_threshold")
         layout.prop(smpl_tool, "regress_joints")
         layout.prop(smpl_tool, "export_model")
         layout.prop(smpl_tool, "symmetrise")
@@ -728,6 +731,8 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
     bl_label = "Import SMPL Model"
 
     def execute(self, context):
+        global pkl_data  # Declare global pkl_data
+        
         scene = context.scene
         smpl_tool = scene.smpl_tool
 
@@ -758,6 +763,9 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
 
                     if smpl_tool.regress_joints:
                         recalculate_joint_positions(obj, pkl_data)
+                        
+                    if smpl_tool.clean_mesh:
+                        cleanup_mesh(obj, center_tolerance=smpl_tool.merging_threshold)
 
                     self.report({'INFO'}, "SMPL Model imported successfully.")
                     return {'FINISHED'}
@@ -777,18 +785,22 @@ class SMPL_OT_ExportModel(bpy.types.Operator):
     bl_label = "Export SMPL Model"
 
     def execute(self, context):
+        global pkl_data  # Declare global pkl_data
+        
+        if pkl_data is None:
+            self.report({'ERROR'}, f"No SMPL model found: {e}")
+            return {'CANCELLED'}
+
         scene = context.scene
         smpl_tool = scene.smpl_tool
 
         try:
-            pkl_data = load_pkl_file(smpl_tool.pkl_filepath)
             obj = bpy.context.active_object
             if not obj or obj.type != 'MESH':
                 self.report({'ERROR'}, "No valid mesh object selected.")
                 return {'CANCELLED'}
-
-            joint_positions = recalculate_joint_positions(obj, pkl_data)
-            export_smpl_model(obj, pkl_data, export_path=smpl_tool.pkl_filepath, joint_positions=joint_positions)
+            
+            export_smpl_model(obj, pkl_data, export_path=bpy.path.abspath(smpl_tool.pkl_filepath))
 
             self.report({'INFO'}, "SMPL Model exported successfully.")
             return {'FINISHED'}
@@ -828,6 +840,18 @@ class SMPLProperties(bpy.types.PropertyGroup):
         name="Regress Joints",
         description="Regress joint positions",
         default=True
+    )
+    
+    clean_mesh: bpy.props.BoolProperty(
+        name="Auto Clean-up Mesh",
+        description="Merges overlapping vertices and removes inward facing faces",
+        default=True
+    )
+    
+    merging_threshold: bpy.props.FloatProperty(
+        name="Minimal vertex distance",
+        description="Minimal distance between vertices on centre line during mesh cleanup",
+        default=0.001
     )
 
     export_model: bpy.props.BoolProperty(
