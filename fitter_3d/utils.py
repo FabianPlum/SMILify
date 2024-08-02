@@ -1,8 +1,13 @@
 import os
 import torch
+from multiprocessing import Pool, cpu_count, set_start_method
 
 import numpy as np
-from matplotlib import pyplot as plt
+import matplotlib
+
+matplotlib.use('Agg')  # Use Agg backend for non-GUI/non-interactive plotting
+
+import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from pytorch3d.io import load_obj
 from pytorch3d.structures import Meshes
@@ -10,6 +15,9 @@ from pytorch3d.structures import Meshes
 from matplotlib.tri import Triangulation
 
 import config
+
+# Set the multiprocessing start method to "spawn"
+set_start_method('spawn', force=True)
 
 
 def try_mkdir(loc):
@@ -92,41 +100,50 @@ def plot_mesh(ax, mesh: Meshes, label="", colour="blue", equalize=True, zoom=1.5
     return trisurfs
 
 
+def plot_set_of_meshes(args):
+    target_mesh, src_mesh, name, title, figtitle, out_dir = args
+
+    fig = plt.figure(figsize=(15, 5))
+    axes = [fig.add_subplot(int(f"13{n}"), projection="3d") for n in range(1, 4)]
+
+    for ax in axes:
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_zlabel('z')
+
+    colours = ["green", "blue"]
+    labels = ["target", "SMAL"]
+    for i, mesh in enumerate([target_mesh, src_mesh]):
+        for j, ax in enumerate([axes[1 + i == 1], axes[2]]):
+            plot_mesh(ax, mesh, colour=colours[i], label=labels[i], alpha=[1, 0.5][j])
+
+    fig.suptitle(figtitle)
+    for ax in axes:
+        ax.legend(loc='upper right')
+
+    try_mkdir(out_dir)
+
+    plt.savefig(f"{out_dir}/{name} - {title}.png")
+    plt.close(fig)
+
+
 def plot_meshes(target_meshes, src_meshes, mesh_names=[], title="", figtitle="",
-                out_dir="static_fits_output/pointclouds"):
-    """Plot and save fig of point clouds, with 3 sublpots side by side:
-    [target mesh, src_mesh, both]"""
+                out_dir="static_fits_output/pointclouds", max_workers=None):
+    """Plot and save figures of point clouds using multiprocessing"""
+    if max_workers is None:
+        max_workers = cpu_count()
 
-    for n in range(len(target_meshes)):
-        fig = plt.figure(figsize=(15, 5))
-        axes = [fig.add_subplot(int(f"13{n}"), projection="3d") for n in range(1, 4)]
+    # Detach the tensors before passing them to the multiprocessing pool
+    target_meshes_detached = [mesh.clone().detach() for mesh in target_meshes]
+    src_meshes_detached = [mesh.clone().detach() for mesh in src_meshes]
 
-        for ax in axes:
-            ax.set_xlabel('x')
-            ax.set_ylabel('y')
-            ax.set_zlabel('z')
+    args_list = []
+    for n in range(len(target_meshes_detached)):
+        name = n if not mesh_names else mesh_names[n]
+        args_list.append((target_meshes_detached[n], src_meshes_detached[n], name, title, figtitle, out_dir))
 
-        colours = ["green", "blue"]
-        labels = ["target", "SMAL"]
-        for i, mesh in enumerate([target_meshes[n], src_meshes[n]]):
-            for j, ax in enumerate([axes[1 + i == 1], axes[2]]):
-                plot_mesh(ax, mesh, colour=colours[i], label=labels[i], alpha=[1, 0.5][j])
-
-        fig.suptitle(figtitle)
-        for ax in axes:
-            ax.legend()
-
-        if not mesh_names:
-            name = n
-        else:
-            name = mesh_names[n]
-
-        try_mkdir(out_dir)
-
-        plt.legend(loc='upper right')
-        plt.savefig(
-            f"{out_dir}/{name} - {title}.png")
-        plt.close(fig)
+    with Pool(processes=max_workers) as pool:
+        pool.map(plot_set_of_meshes, args_list)
 
 
 def plot_pointcloud(ax, mesh, label="", colour="blue",

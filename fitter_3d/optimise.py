@@ -2,6 +2,12 @@ import torch
 import argparse
 import yaml
 import os
+import warnings
+
+# suppress warning relating to deprecated pytorch functions
+# Suppress the specific warning from PyTorch
+warnings.filterwarnings("ignore", message=".*torch.sparse.SparseTensor.*")
+
 
 # add correct paths
 import sys
