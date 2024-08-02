@@ -207,7 +207,7 @@ class SMALFitter(nn.Module):
         self.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.mean(scale_list, axis = 0)).float().to(self.device))
 
     def generate_visualization(self, image_exporter):
-        rot_matrix = torch.from_numpy(R.from_euler('y', 180.0, degrees=True).as_dcm()).float().to(self.device)
+        rot_matrix = torch.from_numpy(R.from_euler('y', 180.0, degrees=True).as_matrix()).float().to(self.device)
         for j in range(0, self.num_images, self.batch_size):
             batch_range = list(range(j, min(self.num_images, j + self.batch_size)))
             batch_params = {

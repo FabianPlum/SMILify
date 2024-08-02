@@ -65,7 +65,9 @@ class Renderer(torch.nn.Module):
         mesh = Meshes(verts=vertices, faces=faces, textures=textures)
         sil_images = self.silhouette_renderer(mesh)[..., -1].unsqueeze(1)
         screen_size = torch.ones(vertices.shape[0], 2).to(vertices.device) * self.image_size
-        proj_points = self.cameras.transform_points_screen(points, screen_size)[:, :, [1, 0]]
+        # fix discussed here: https://github.com/benjiebob/SMALify/issues/30
+        # answer by mshooter
+        proj_points = self.cameras.transform_points_screen(points, image_size=screen_size)[:, :, [1, 0]]
 
         if render_texture:
             color_image = self.color_renderer(mesh).permute(0, 3, 1, 2)[:, :3, :, :]
