@@ -13,7 +13,7 @@ import pickle as pkl
 import torch
 import imageio
 
-from data_loader import load_badja_sequence, load_stanford_sequence
+from data_loader import load_badja_sequence, load_stanford_sequence, load_SMIL_sequence
 import trimesh
 
 from tqdm import trange
@@ -67,9 +67,14 @@ def main():
         data, filenames = load_badja_sequence(
             config.BADJA_PATH, name, 
             config.CROP_SIZE, image_range=config.IMAGE_RANGE)
-    else:
+    elif dataset == "stanfordextra":
         data, filenames = load_stanford_sequence(
             config.STANFORD_EXTRA_PATH, name,
+            config.CROP_SIZE
+        )
+    else:
+        data, filenames = load_SMIL_sequence(
+            config.REPLICANT_PATH, name,
             config.CROP_SIZE
         )
 
