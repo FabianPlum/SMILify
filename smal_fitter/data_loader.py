@@ -134,6 +134,7 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
     :param SMIL_COCO: Directory containing the configuration files and images.
     :param image_name: Name of the image file to load.
     :param crop_size: The size to which the image should be cropped.
+    THIS PARAMETER IS FUNCTIONLESS AT THE MOMENT
     :return: A tuple containing the loaded image and associated segmentation mask.
     """
     # Define paths to images and JSON files
@@ -151,6 +152,9 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
     annotations = {ann['image_id']: ann for ann in json_data['annotations']}
 
     def decode_rle(rle):
+        """
+        TODO THIS DOES NOT WORK YET! THIS IS MERELY THE SKELETON FOR SENSIBLE CODE
+        """
         """
         Decodes a Run Length Encoded (RLE) mask.
         """

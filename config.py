@@ -22,6 +22,10 @@ ALLOW_LIMB_SCALING = True  # Allow scaling parameters, see Who Left the Dogs Out
 SHAPE_FAMILY = 1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. Dog/Wolf), Equine (e.g. Horse/Zebra), Bovine (e.g. Cow), Hippo
 #SEQUENCE_OR_IMAGE_NAME = "badja:rs_dog"
 #SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176.jpg"
+"""
+TODO This is just a test, and not functional yet. Uncomment the above examples to ensure
+the code is still working for non-novel cases
+"""
 SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_07_synth.jpg"
 IMAGE_RANGE = range(0, 1)  # Frames to process from sequence. Ignored for stanford extra
 WINDOW_SIZE = 10  # Changed number of frames processed in one go.
