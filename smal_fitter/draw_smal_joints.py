@@ -37,7 +37,8 @@ class SMALJointDrawer():
                 if not vis:
                     x_co, y_co = inv_ctr * 10, 0
                     inv_ctr += 1
-                cv2.drawMarker(image_sgl, (x_co, y_co), (int(color[0]), int(color[1]), int(color[2])), marker_type, 8, thickness = 3)
+                cv2.drawMarker(image_sgl, (int(x_co), int(y_co)), (int(color[0]), int(color[1]), int(color[2])),
+                               marker_type, 8, thickness = 3)
 
             return_images.append(image_sgl)
 

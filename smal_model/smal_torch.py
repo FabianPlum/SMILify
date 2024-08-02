@@ -144,7 +144,7 @@ class SMAL(nn.Module):
         num_pose_basis = dd['posedirs'].shape[-1]
 
         # If there are no pose blend shapes, create a zeros tensor of appropriate size
-        if dd['posedirs'] != np.empty(0):
+        if dd['posedirs'].size != 0: # != np.empty(0):
             posedirs = np.reshape(
                 undo_chumpy(dd['posedirs']), [-1, num_pose_basis]).T
 
