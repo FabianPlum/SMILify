@@ -23,7 +23,7 @@ For now, I'll focus on insects, hence **SMIL**.
 2. install pytorch (and Co.)
    ```
    conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
-   conda install -c conda-forge -c fvcore iopath ninja
+   conda install -c conda-forge -c fvcore iopath ninja imageio
    pip install yacs
    pip install --upgrade iopath
    ```
@@ -47,7 +47,7 @@ For now, I'll focus on insects, hence **SMIL**.
    ```
 
 In case you get an error back with chumpy complaining about legacy imports and not finding numpy.bool, simply update the
-__init__.py file linked in the error message:
+__init__.py file of **chumpy**git :
 
 replace
 ```
@@ -55,11 +55,15 @@ from numpy import bool, int, float, ...
 ```
 with
 ```
-from numpy import bool_ as bool_
-from numpy import int_ as int_
-from numpy import float_ as float_
-from numpy import object_ as object__
-from numpy import inf_ as inf_
+from numpy import bool_ as bool
+from numpy import int_ as int
+from numpy import complex_ as int
+from numpy import unicode_ as unicode
+from numpy import str_ as str
+from numpy import float_ as float
+from numpy import object_ as object
+from numpy import inf as inf
+from numpy import nan as nan
 ```
 
 
