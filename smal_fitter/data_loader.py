@@ -126,5 +126,67 @@ def load_stanford_sequence(STANFORD_EXTRA, image_name, crop_size):
 
     return (rgb, sil, joints, visibility), file_names
 
-    
+
+def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
+    """
+    Loads custom configuration data and image.
+
+    :param SMIL_COCO: Directory containing the configuration files and images.
+    :param image_name: Name of the image file to load.
+    :param crop_size: The size to which the image should be cropped.
+    :return: A tuple containing the loaded image and associated segmentation mask.
+    """
+    # Define paths to images and JSON files
+    img_dir = os.path.join(SMIL_COCO, "data")
+    json_loc = os.path.join(SMIL_COCO, "labels.json")
+
+    # Load JSON data into memory
+    with open(json_loc) as infile:
+        json_data = json.load(infile)
+
+    # Convert JSON data to a dictionary of img_path: all_data for easy lookup
+    json_dict = {entry['file_name']: entry for entry in json_data['images']}
+
+    # Load the annotation data
+    annotations = {ann['image_id']: ann for ann in json_data['annotations']}
+
+    def decode_rle(rle):
+        """
+        Decodes a Run Length Encoded (RLE) mask.
+        """
+        size = rle['size']
+        counts = rle['counts']
+
+        # The following decoding is based on the specific implementation and format of RLE
+        # which might differ. Adjust as necessary to your specific format.
+        mask = np.zeros(size[0] * size[1], dtype=np.uint8)
+        idx = 0
+        for i, count in enumerate(counts):
+            mask[idx:idx + count] = i % 2
+            idx += count
+        mask = mask.reshape(size)
+        return mask
+
+    def get_seg_from_entry(entry_seg, entry_img):
+        """Given a JSON entry, returns the binary mask as a numpy array."""
+        rle = {
+            "size": [entry_img['height'], entry_img['width']],
+            "counts": entry_seg['segmentation']
+        }
+        decoded = decode_rle(rle)
+        return decoded
+
+    def get_image_and_mask(name):
+        data = json_dict[name]
+        annotation = annotations[data['id']]
+
+        # Load image
+        img_data = imageio.imread(os.path.join(img_dir, data['file_name']))
+
+        # Load segmentation mask
+        seg_data = get_seg_from_entry(annotation, data)
+
+        return img_data, seg_data
+
+    return get_image_and_mask(image_name)
     

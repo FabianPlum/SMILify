@@ -7,10 +7,11 @@ import time
 data_path = "data"
 BADJA_PATH = "data/BADJA"
 STANFORD_EXTRA_PATH = "data/StanfordExtra"
+REPLICANT_PATH = "data/replicAnt_trials/SMIL_COCO"
 OUTPUT_DIR = "checkpoints/{0}".format(time.strftime("%Y%m%d-%H%M%S"))
 
-CROP_SIZE = 256
-VIS_FREQUENCY = 100
+CROP_SIZE = 512 # image resolution for output
+VIS_FREQUENCY = 10 # every how many iterations the model plots are to be generated
 GPU_IDS = "0"  # GPU number to run on (not applicable for CPU)
 
 # Run settings (I wouldn't recommend changing these unless you have good reason)
@@ -19,8 +20,9 @@ ALLOW_LIMB_SCALING = True  # Allow scaling parameters, see Who Left the Dogs Out
 
 # Sequence/Image Settings
 SHAPE_FAMILY = 1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. Dog/Wolf), Equine (e.g. Horse/Zebra), Bovine (e.g. Cow), Hippo
-# SEQUENCE_OR_IMAGE_NAME = "badja:rs_dog"
-SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176.jpg"
+#SEQUENCE_OR_IMAGE_NAME = "badja:rs_dog"
+#SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176.jpg"
+SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_07_synth.jpg"
 IMAGE_RANGE = range(0, 1)  # Frames to process from sequence. Ignored for stanford extra
 WINDOW_SIZE = 10  # Changed number of frames processed in one go.
 
@@ -34,9 +36,9 @@ SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 
 # custom elements added:
 #SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
-#SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
+SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 SMAL_SHAPES = None  # "D:/SMAL/SMALify/fit3d_results_ALL_ANTS_ALL_METHODS/Stage3.npz"
-ignore_sym = False # ignore provided symmetry file, when using custom models
+ignore_sym = True # ignore provided symmetry file, when using custom models
 PLOT_RESULTS = True # if False, no plots are saved during fitting which massively speeds up the process
 DEBUG = False # use to get A LOT of "useful" messages
 
