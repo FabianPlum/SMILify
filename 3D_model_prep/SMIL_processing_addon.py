@@ -121,8 +121,9 @@ def export_vertex_groups_to_npy(obj, filepath):
 def export_joint_locations_to_npy(armature_obj, filepath):
     joints = armature_obj.data.bones
     joint_locations = np.array([bone.head_local for bone in joints], dtype=np.float32)
+    joint_names = [bone.name for bone in joints]
     np.save(filepath, joint_locations)
-    return filepath, joint_locations
+    return filepath, joint_locations, joint_names
 
 @ensure_armature
 def export_joint_hierarchy_to_npy(armature_obj, filepath):
@@ -260,7 +261,7 @@ def export_smpl_model(start_frame=0, stop_frame=1):
     print("Found armature object:", armature_obj.name)
 
     smpl_dict["kintree_table"] = export_joint_hierarchy_to_npy(armature_obj, joint_hierarchy_npy_path)[1]
-    smpl_dict["J"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1]
+    smpl_dict["J"], smpl_dict["J_names"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1:]
     smpl_dict["J_regressor"] = export_J_regressor_to_npy(obj, armature_obj, 20, j_regressor_npy_path)[1]
 
     with open(smpl_file_path, "wb") as f:
@@ -276,8 +277,11 @@ def load_pkl_file(filepath):
             print("\nContents of loaded SMPL file:")
             for key in data:
                 print(key)
-                if type(data[key]) is not str:
-                    print(data[key].shape)
+                try:
+                    if type(data[key]) is not str:
+                        print(data[key].shape)
+                except:
+                    print(len(data[key]))
         print("Loaded .pkl file successfully.")
         return data
     except Exception as e:
@@ -332,6 +336,7 @@ def create_armature_and_weights(data, obj):
         return None
 
     joints = data["J"]
+    joint_names = data["J_names"]
     weights = data["weights"]
     kintree_table = data["kintree_table"]
 
@@ -343,13 +348,14 @@ def create_armature_and_weights(data, obj):
 
     # Add bones based on hierarchy
     bones = []
-    for i, (parent_idx, child_idx) in enumerate(zip(kintree_table[0], kintree_table[1])):
-        bone = armature.data.edit_bones.new(f"Bone_{child_idx}")
+    for i, (parent_idx, child_idx, bone_name) in enumerate(zip(kintree_table[0], kintree_table[1], joint_names)):
+        print(bone_name)
+        bone = armature.data.edit_bones.new(bone_name)
         bone.head = joints[child_idx]
         bone.tail = joints[child_idx] + np.array([0, 0, 0.1])
         bones.append(bone)
         if parent_idx != -1:
-            bone.parent = armature.data.edit_bones[f"Bone_{parent_idx}"]
+            bone.parent = armature.data.edit_bones[joint_names[parent_idx]]
 
     bpy.ops.object.mode_set(mode='OBJECT')
 
@@ -360,11 +366,11 @@ def create_armature_and_weights(data, obj):
 
     # Assign vertex weights
     for i, vertex_weights in enumerate(weights):
-        for j, weight in enumerate(vertex_weights):
+        for j, (weight, bone_name) in enumerate(zip(vertex_weights, joint_names)):
             if weight > 0:
-                vertex_group = obj.vertex_groups.get(f"Bone_{j}")
+                vertex_group = obj.vertex_groups.get(bone_name)
                 if vertex_group is None:
-                    vertex_group = obj.vertex_groups.new(name=f"Bone_{j}")
+                    vertex_group = obj.vertex_groups.new(name=bone_name)
                 vertex_group.add([i], weight, 'ADD')
     
 
@@ -673,7 +679,7 @@ def export_smpl_model(obj, pkl_data, export_path):
 
     print("Found armature object:", armature_obj.name)
     
-    pkl_data["J"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1]
+    pkl_data["J"], pkl_data["J_names"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1:]
     pkl_data["J_regressor"] = export_J_regressor_to_npy(obj, armature_obj, 20, j_regressor_npy_path)[1]
 
     # Update "shapedirs" with the content of the blendshapes
