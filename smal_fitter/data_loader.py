@@ -1,5 +1,5 @@
-
 import sys
+
 sys.path.append('../')
 
 import numpy as np
@@ -15,10 +15,12 @@ from csv import DictReader
 from PIL import Image, ImageFilter
 from pycocotools.mask import decode as decode_RLE
 from copy import copy
+from skimage.draw import polygon
 
 import config
 
-def load_badja_sequence(BADJA_PATH, sequence_name, crop_size, image_range = None):
+
+def load_badja_sequence(BADJA_PATH, sequence_name, crop_size, image_range=None):
     file_names = []
     rgb_imgs = []
     sil_imgs = []
@@ -53,20 +55,21 @@ def load_badja_sequence(BADJA_PATH, sequence_name, crop_size, image_range = None
                 file_names.append(os.path.basename(image_annotation['image_path']))
 
             elif os.path.exists(file_name):
-                print ("BADJA SEGMENTATION file path: {0} is missing".format(seg_name))
+                print("BADJA SEGMENTATION file path: {0} is missing".format(seg_name))
             else:
-                print ("BADJA IMAGE file path: {0} is missing".format(file_name))
+                print("BADJA IMAGE file path: {0} is missing".format(file_name))
 
-    rgb = torch.FloatTensor(np.stack(rgb_imgs, axis = 0)).permute(0, 3, 1, 2)
-    sil = torch.FloatTensor(np.stack(sil_imgs, axis = 0))[:, None, :, :]
-    joints = torch.FloatTensor(np.stack(joints, axis = 0))
-    visibility = torch.FloatTensor(np.stack(visibility, axis = 0).astype(np.float))
+    rgb = torch.FloatTensor(np.stack(rgb_imgs, axis=0)).permute(0, 3, 1, 2)
+    sil = torch.FloatTensor(np.stack(sil_imgs, axis=0))[:, None, :, :]
+    joints = torch.FloatTensor(np.stack(joints, axis=0))
+    visibility = torch.FloatTensor(np.stack(visibility, axis=0).astype(np.float))
 
     ## Sets invalid joints (i.e. not labelled) as invisible
     invalid_joints = np.array(config.BADJA_ANNOTATED_CLASSES) == -1
     visibility[:, invalid_joints] = 0.0
-    
+
     return (rgb, sil, joints, visibility), file_names
+
 
 def load_stanford_sequence(STANFORD_EXTRA, image_name, crop_size):
     # edit this to the location of the extracted StanfordDogs tar file (e.g. /.../Images).
@@ -81,7 +84,7 @@ def load_stanford_sequence(STANFORD_EXTRA, image_name, crop_size):
 
     # convert json data to a dictionary of img_path : all_data, for easy lookup
     json_dict = {i['img_path']: i for i in json_data}
-    
+
     def get_seg_from_entry(entry):
         """Given a .json entry, returns the binary mask as a numpy array"""
 
@@ -112,10 +115,10 @@ def load_stanford_sequence(STANFORD_EXTRA, image_name, crop_size):
 
     # add an extra dummy invisble joint for tail_mid which wasn't annotated in Stanford-Extra
     raw_joints = np.concatenate([
-        np.array(loaded_data['joints']), [[0.0, 0.0, 0.0]]], axis = 0)
+        np.array(loaded_data['joints']), [[0.0, 0.0, 0.0]]], axis=0)
 
     sil_img, rgb_img, landmarks = crop_to_silhouette(
-        loaded_data['seg_data'], loaded_data['img_data'] / 255.0, 
+        loaded_data['seg_data'], loaded_data['img_data'] / 255.0,
         raw_joints[:, [1, 0]], crop_size)
 
     rgb = torch.FloatTensor(rgb_img)[None, ...].permute(0, 3, 1, 2)
@@ -146,51 +149,57 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
         json_data = json.load(infile)
 
     # Convert JSON data to a dictionary of img_path: all_data for easy lookup
-    json_dict = {entry['file_name']: entry for entry in json_data['images']}
+    images_dict = {entry['file_name']: entry for entry in json_data['images']}
 
     # Load the annotation data
-    annotations = {ann['image_id']: ann for ann in json_data['annotations']}
-
-    def decode_rle(rle):
-        """
-        TODO THIS DOES NOT WORK YET! THIS IS MERELY THE SKELETON FOR SENSIBLE CODE
-        """
-        """
-        Decodes a Run Length Encoded (RLE) mask.
-        """
-        size = rle['size']
-        counts = rle['counts']
-
-        # The following decoding is based on the specific implementation and format of RLE
-        # which might differ. Adjust as necessary to your specific format.
-        mask = np.zeros(size[0] * size[1], dtype=np.uint8)
-        idx = 0
-        for i, count in enumerate(counts):
-            mask[idx:idx + count] = i % 2
-            idx += count
-        mask = mask.reshape(size)
-        return mask
+    annotations_dict = {ann['image_id']: ann for ann in json_data['annotations']}
 
     def get_seg_from_entry(entry_seg, entry_img):
         """Given a JSON entry, returns the binary mask as a numpy array."""
-        rle = {
-            "size": [entry_img['height'], entry_img['width']],
-            "counts": entry_seg['segmentation']
-        }
-        decoded = decode_rle(rle)
-        return decoded
+        height, width = entry_img['height'], entry_img['width']
+        mask = np.zeros((height, width), dtype=np.uint8)
+
+        # Process each segmentation polygon
+        for segmentation in entry_seg['segmentation']:
+            coords = np.array(segmentation).reshape(-1, 2)
+            rr, cc = polygon(coords[:, 1], coords[:, 0], mask.shape)
+            mask[rr, cc] = 1
+
+        return mask
 
     def get_image_and_mask(name):
-        data = json_dict[name]
-        annotation = annotations[data['id']]
+        image_entry = images_dict[name]
+        annotation = annotations_dict[image_entry['id']]
 
         # Load image
-        img_data = imageio.imread(os.path.join(img_dir, data['file_name']))
+        img_data = imageio.imread(os.path.join(img_dir, image_entry['file_name']))
+
+        # convert value range to 0 - 1
+        img_data = img_data / 255.0
 
         # Load segmentation mask
-        seg_data = get_seg_from_entry(annotation, data)
+        seg_data = get_seg_from_entry(annotation, image_entry)
 
         return img_data, seg_data
 
-    return get_image_and_mask(image_name)
-    
+    img_data, seg_data = get_image_and_mask(image_name)
+
+    raw_joints = np.array(annotations_dict[images_dict[image_name]['id']]['keypoints']).reshape(-1, 3)
+    joint_locs = raw_joints[:, :2]
+    visibility = raw_joints[:, 2]
+
+    if config.DEBUG:
+        cv2.imshow("test img",img_data)
+        cv2.waitKey(0)
+
+        cv2.imshow("test seg", seg_data)
+        cv2.waitKey(0)
+
+
+    rgb = torch.FloatTensor(img_data)[None, ...].permute(0, 3, 1, 2)
+    sil = torch.FloatTensor(seg_data)[None, None, ...]
+    joints = torch.FloatTensor(joint_locs)[:, :2].unsqueeze(0)
+    visibility = torch.FloatTensor(visibility).unsqueeze(0)
+    file_names = [os.path.basename(image_name)]
+
+    return (rgb, sil, joints, visibility), file_names
