@@ -17,6 +17,8 @@ GPU_IDS = "0"  # GPU number to run on (not applicable for CPU)
 # Run settings (I wouldn't recommend changing these unless you have good reason)
 FORCE_SMAL_PRIOR = True  # Allow the more recent Unity-based prior for dogs.
 ALLOW_LIMB_SCALING = True  # Allow scaling parameters, see Who Left the Dogs Out?
+# moved up the following line to have in one place with other prior data
+UNITY_SHAPE_PRIOR = join(data_path, 'priors', 'unity_betas.npz')
 
 # Sequence/Image Settings
 SHAPE_FAMILY = 1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. Dog/Wolf), Equine (e.g. Horse/Zebra), Bovine (e.g. Cow), Hippo
@@ -43,6 +45,7 @@ SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 #SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 SMAL_SHAPES = None  # "D:/SMAL/SMALify/fit3d_results_ALL_ANTS_ALL_METHODS/Stage3.npz"
 ignore_sym = True # ignore provided symmetry file, when using custom models
+ignore_hardcoded_body = True # ignore model joints in config file and use what's contained in the SMPL file
 PLOT_RESULTS = True # if False, no plots are saved during fitting which massively speeds up the process
 DEBUG = True # use to get A LOT of "useful" messages
 
@@ -70,8 +73,6 @@ else:
 
     # PRIORS
     WALKING_PRIOR_FILE = join(data_path, 'priors', 'walking_toy_symmetric_pose_prior_with_cov_35parts.pkl')
-
-UNITY_SHAPE_PRIOR = join(data_path, 'priors', 'unity_betas.npz')
 
 # DATALOADER
 IMG_RES = 224
@@ -148,6 +149,7 @@ MARKER_COLORS = [
     [128, 0, 0], [128, 0, 0],  # withers, throat, maroon
     [240, 50, 230]]  # tail middle
 
+# TODO - remove N_POSE variable, as the number of joints should be taken from the input SMPL file instead of hard-coded
 N_POSE = 34  # not including global rotation
 # WARNING -> Now overwritten in trainer.py line 78
 N_BETAS = 20  # number of SMAL shape parameters to optimize over
