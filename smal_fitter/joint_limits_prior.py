@@ -1,5 +1,12 @@
 import numpy as np
 
+# TODO - JESUS CHRIST, IT'S ALL HARD CODED. Well.
+# We'll start by assuming everything is a ball joint within reason
+# Our bug stuff can just be hinge joints for the legs, that's good.
+# Ideally, set the ranges in blender and then read them out here.
+# Everything else is not maintainable.
+
+
 Ranges = {
     'pelvis': [[0, 0], [0, 0], [0, 0]],
     'pelvis0': [[-0.3, 0.3], [-1.2, 0.5], [-0.1, 0.1]],
