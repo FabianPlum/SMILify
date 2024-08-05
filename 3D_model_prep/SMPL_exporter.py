@@ -74,8 +74,9 @@ def export_vertex_groups_to_npy(obj, filepath):
 def export_joint_locations_to_npy(armature_obj, filepath):
     joints = armature_obj.data.bones
     joint_locations = np.array([bone.head_local for bone in joints], dtype=np.float32)
+    joint_names = [bone.name for bone in joints]
     np.save(filepath, joint_locations)
-    return filepath, joint_locations
+    return filepath, joint_locations, joint_names
 
 @ensure_armature
 def export_joint_hierarchy_to_npy(armature_obj, filepath):
@@ -200,10 +201,7 @@ def export_smpl_model(start_frame=0, stop_frame=1):
     
     smpl_dict["shapedirs"] = np.zeros((num_verts, 3))
 
-    smpl_dict["posedirs"] = np.empty(0) # leave empty if there are no pose blend shapes
-    
-    print(smpl_dict["posedirs"].shape)
-    
+    smpl_dict["posedirs"] = np.empty(0) # leave empty if there are no pose blend shapes    
 
     armature_obj = next((obj for obj in bpy.data.objects if obj.type == 'ARMATURE'), None)
     if not armature_obj:
@@ -213,7 +211,7 @@ def export_smpl_model(start_frame=0, stop_frame=1):
     print("Found armature object:", armature_obj.name)
 
     smpl_dict["kintree_table"] = export_joint_hierarchy_to_npy(armature_obj, joint_hierarchy_npy_path)[1]
-    smpl_dict["J"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1]
+    smpl_dict["J"], smpl_dict["J_names"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1:]
     smpl_dict["J_regressor"] = export_J_regressor_to_npy(obj, armature_obj, 20, j_regressor_npy_path)[1]
 
     with open(smpl_file_path, "wb") as f:
