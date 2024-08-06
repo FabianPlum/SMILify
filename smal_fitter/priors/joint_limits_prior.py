@@ -1,5 +1,9 @@
 import numpy as np
 
+# TODO - read out J_names from input smpl file and treat all joints as ball joints for now
+# Once that works, in Blender allow for setting up joint limits on the model
+# Then, read those in here, all stored in the SMPL file and replace the hard-coded nightmare below.
+
 Ranges = {
     'pelvis': [[0, 0], [0, 0], [0, 0]],
     'pelvis0': [[-0.3, 0.3], [-1.2, 0.5], [-0.1, 0.1]],
