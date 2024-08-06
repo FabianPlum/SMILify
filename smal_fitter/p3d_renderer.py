@@ -27,7 +27,7 @@ class Renderer(torch.nn.Module):
         raster_settings = RasterizationSettings(
             image_size=self.image_size, 
             blur_radius=np.log(1. / 1e-4 - 1.) * blend_params.sigma, 
-            faces_per_pixel=100, 
+            faces_per_pixel=100, bin_size=0
         )
 
         self.silhouette_renderer = MeshRenderer(
