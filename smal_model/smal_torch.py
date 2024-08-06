@@ -86,6 +86,7 @@ class SMAL(nn.Module):
                 data = u.load()
 
             betas = data['cluster_means'][shape_family_id]
+            # TODO - THESE CLUSTER MEANS ARE NOT GOING TO BE USED IN OUR SMIL MODEL FOR NOW!
             v_template = v_template + np.matmul(betas[None, :], shapedir).reshape(
                 -1, self.size[0], self.size[1])[0]
 
