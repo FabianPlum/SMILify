@@ -22,7 +22,7 @@ ALLOW_LIMB_SCALING = True  # Allow scaling parameters, see Who Left the Dogs Out
 UNITY_SHAPE_PRIOR = join(data_path, 'priors', 'unity_betas.npz')
 
 # Sequence/Image Settings
-SHAPE_FAMILY = 1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. Dog/Wolf), Equine (e.g. Horse/Zebra), Bovine (e.g. Cow), Hippo
+SHAPE_FAMILY = -1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. Dog/Wolf), Equine (e.g. Horse/Zebra), Bovine (e.g. Cow), Hippo
 # SEQUENCE_OR_IMAGE_NAME = "badja:rs_dog"
 # SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176.jpg"
 """
@@ -106,12 +106,16 @@ if ignore_hardcoded_body:
     joint_names = dd["J_names"]
     if DEBUG:
         print(joint_names)
-
-    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem.split("_")[0] == "b"]
     # IDs of every joint that starts with b, referring to the animal body, including the tail
+    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem.split("_")[0] == "b"]
 
-    CANONICAL_MODEL_JOINTS = [i for i in range(len(joint_names)) if i not in TORSO_JOINTS]
-    # all joints not in body joints
+    # exclude wings
+    WING_JOINTS = [i for i, elem in enumerate(joint_names) if elem.split("_")[0] == "w"]
+
+    # all joints not in wing joints
+    CANONICAL_MODEL_JOINTS = [i for i in range(len(joint_names)) if i not in WING_JOINTS]
+
+    print(len(CANONICAL_MODEL_JOINTS))
 
     # same for all joints
     MARKER_TYPE = [cv2.MARKER_STAR for i in range(len(CANONICAL_MODEL_JOINTS))]
