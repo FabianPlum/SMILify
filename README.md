@@ -23,7 +23,7 @@ For now, I'll focus on insects, hence **SMIL**.
 2. install pytorch (and Co.)
    ```
    conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
-   conda install -c conda-forge -c fvcore iopath ninja imageio
+   conda install -c conda-forge -c fvcore iopath ninja imageio scikit-image
    pip install yacs pycocotools
    pip install --upgrade iopath
    ```
