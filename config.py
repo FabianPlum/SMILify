@@ -1,4 +1,5 @@
 from os.path import join
+import pickle as pkl
 import cv2
 import os
 import time
@@ -10,8 +11,8 @@ STANFORD_EXTRA_PATH = "data/StanfordExtra"
 REPLICANT_PATH = "data/replicAnt_trials/SMIL_COCO"
 OUTPUT_DIR = "checkpoints/{0}".format(time.strftime("%Y%m%d-%H%M%S"))
 
-CROP_SIZE = 512 # image resolution for output
-VIS_FREQUENCY = 10 # every how many iterations the model plots are to be generated
+CROP_SIZE = 512  # image resolution for output
+VIS_FREQUENCY = 10  # every how many iterations the model plots are to be generated
 GPU_IDS = "0"  # GPU number to run on (not applicable for CPU)
 
 # Run settings (I wouldn't recommend changing these unless you have good reason)
@@ -21,9 +22,9 @@ ALLOW_LIMB_SCALING = True  # Allow scaling parameters, see Who Left the Dogs Out
 UNITY_SHAPE_PRIOR = join(data_path, 'priors', 'unity_betas.npz')
 
 # Sequence/Image Settings
-SHAPE_FAMILY = 1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. Dog/Wolf), Equine (e.g. Horse/Zebra), Bovine (e.g. Cow), Hippo
-#SEQUENCE_OR_IMAGE_NAME = "badja:rs_dog"
-#SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176.jpg"
+SHAPE_FAMILY = 0  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. Dog/Wolf), Equine (e.g. Horse/Zebra), Bovine (e.g. Cow), Hippo
+# SEQUENCE_OR_IMAGE_NAME = "badja:rs_dog"
+# SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176.jpg"
 """
 TODO This is just a test, and not functional yet. Uncomment the above examples to ensure
 the code is still working for non-novel cases
@@ -41,13 +42,13 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 
 # custom elements added:
-#SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
-#SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
+# SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
+SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 SMAL_SHAPES = None  # "D:/SMAL/SMALify/fit3d_results_ALL_ANTS_ALL_METHODS/Stage3.npz"
-ignore_sym = True # ignore provided symmetry file, when using custom models
-ignore_hardcoded_body = True # ignore model joints in config file and use what's contained in the SMPL file
-PLOT_RESULTS = True # if False, no plots are saved during fitting which massively speeds up the process
-DEBUG = True # use to get A LOT of "useful" messages
+ignore_sym = True  # ignore provided symmetry file, when using custom models
+ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
+PLOT_RESULTS = True  # if False, no plots are saved during fitting which massively speeds up the process
+DEBUG = False  # use to get A LOT of "useful" messages
 
 if os.name == 'nt':
     ## If WINDOWS
@@ -92,64 +93,107 @@ OPT_WEIGHTS = [
     [150, 400, 600, 800],  # Num iterations
     [5e-3, 5e-3, 5e-4, 1e-4]]  # Learning Rate
 
-# JOINT DEFINITIONS
-TORSO_JOINTS = [2, 5, 8, 11, 12, 23]
+if ignore_hardcoded_body:
+    # this is NOT a great place for reading this in, but unless I hide the hard-coded dog stuff elsewhere,
+    # this is the only low-effort way to get the info dynamically without making bigger changes in smal_torch.py and co
 
-CANONICAL_MODEL_JOINTS = [
-    10, 9, 8,  # upper_left [paw, middle, top]
-    20, 19, 18,  # lower_left [paw, middle, top]
-    14, 13, 12,  # upper_right [paw, middle, top]
-    24, 23, 22,  # lower_right [paw, middle, top]
-    25, 31,  # tail [start, end]
-    33, 34,  # ear base [left, right]
-    35, 36,  # nose, chin
-    38, 37,  # ear tip [left, right]
-    39, 40,  # eyes [left, right]
-    15, 15,  # withers, throat (TODO: Labelled same as throat for now), throat
-    28]  # tail middle
+    # read in smpl file
+    with open(SMAL_FILE, 'rb') as f:
+        u = pkl._Unpickler(f)
+        u.encoding = 'latin1'
+        dd = u.load()
 
-# indicate invalid joints (i.e. not labelled) by -1
-BADJA_ANNOTATED_CLASSES = [
-    14, 13, 12,  # upper_left [paw, middle, top]
-    24, 23, 22,  # lower_left [paw, middle, top]
-    10, 9, 8,  # upper_right [paw, middle, top]
-    20, 19, 18,  # lower_right [paw, middle, top]
-    25, 31,  # tail [start, end] (note, missing the tail middle point)
-    -1, -1,  # ear base [left, right]
-    33, -1,  # nose, chin (note, missing the 'jaw base' point)
-    36, 35,  # ear tip [left, right]
-    -1, -1,  # eyes [left, right]
-    -1, 15,  # withers, throat
-    28]  # tail middle
+    # get J_names  |  names of joints
+    joint_names = dd["J_names"]
+    if DEBUG:
+        print(joint_names)
 
-# Visualization
-MARKER_TYPE = [
-    cv2.MARKER_TRIANGLE_DOWN, cv2.MARKER_STAR, cv2.MARKER_CROSS,  # upper_left
-    cv2.MARKER_TRIANGLE_DOWN, cv2.MARKER_STAR, cv2.MARKER_CROSS,  # lower_left
-    cv2.MARKER_TRIANGLE_DOWN, cv2.MARKER_STAR, cv2.MARKER_CROSS,  # upper_right
-    cv2.MARKER_TRIANGLE_DOWN, cv2.MARKER_STAR, cv2.MARKER_CROSS,  # lower_right
-    cv2.MARKER_CROSS, cv2.MARKER_TRIANGLE_DOWN,  # tail
-    cv2.MARKER_CROSS, cv2.MARKER_CROSS,  # right_ear, left_ear
-    cv2.MARKER_CROSS, cv2.MARKER_STAR,  # nose, chin
-    cv2.MARKER_TRIANGLE_DOWN, cv2.MARKER_TRIANGLE_DOWN,  # right_tip, left_tip
-    cv2.MARKER_CROSS, cv2.MARKER_CROSS,  # right_eye, left_eye
-    cv2.MARKER_CROSS, cv2.MARKER_CROSS,  # withers, throat
-    cv2.MARKER_STAR]  # tail middle
+    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem.split("_")[0] == "b"]
+    # IDs of every joint that starts with b, referring to the animal body, including the tail
 
-MARKER_COLORS = [
-    [230, 25, 75], [230, 25, 75], [230, 25, 75],  # upper_left, red
-    [255, 255, 25], [255, 255, 25], [255, 255, 25],  # lower_left, yellow
-    [60, 180, 75], [60, 180, 75], [60, 180, 75],  # upper_right, green
-    [0, 130, 200], [0, 130, 200], [0, 130, 200],  # lower_right, blue
-    [240, 50, 230], [240, 50, 230],  # tail, majenta
-    [255, 153, 204], [29, 98, 115],  # left_ear, pink & right_ear, turquoise
-    [245, 130, 48], [245, 130, 48],  # nose, chin
-    [255, 153, 204], [29, 98, 115],  # left_ear, pink & right_tip, turquoise
-    [0, 0, 0], [0, 0, 0],  # right eye, left eye: black
-    [128, 0, 0], [128, 0, 0],  # withers, throat, maroon
-    [240, 50, 230]]  # tail middle
+    CANONICAL_MODEL_JOINTS = [i for i in range(len(joint_names)) if i not in TORSO_JOINTS]
+    # all joints not in body joints
 
-# TODO - remove N_POSE variable, as the number of joints should be taken from the input SMPL file instead of hard-coded
-N_POSE = 34  # not including global rotation
-# WARNING -> Now overwritten in trainer.py line 78
-N_BETAS = 20  # number of SMAL shape parameters to optimize over
+    # same for all joints
+    MARKER_TYPE = [cv2.MARKER_STAR for i in range(len(CANONICAL_MODEL_JOINTS))]
+
+    # make it a fun rainbow, no specifics
+    MARKER_COLORS = [[int(255 - i * 255 / len(CANONICAL_MODEL_JOINTS)), 100, int(i * 255 / len(CANONICAL_MODEL_JOINTS))]
+                     for i in
+                     range(len(CANONICAL_MODEL_JOINTS))]
+
+    N_POSE = len(joint_names) - 1  # not including global rotation
+    # WARNING -> Now overwritten in trainer.py line 78
+    try:
+        N_BETAS = dd["shapedirs"].shape[2]  # number of SMAL shape parameters to optimize over
+        if DEBUG:
+            print("INFO: Found custom betas:", N_BETAS)
+    except IndexError:
+        # if no learned betas / shapedirs are provided default to 20
+        N_BETAS = 20
+        if DEBUG:
+            print("INFO: Using default num betas of", N_BETAS)
+
+
+else:  # use joint and plotting configuration of default dog model:
+    # JOINT DEFINITIONS
+    TORSO_JOINTS = [2, 5, 8, 11, 12, 23]
+
+    CANONICAL_MODEL_JOINTS = [
+        10, 9, 8,  # upper_left [paw, middle, top]
+        20, 19, 18,  # lower_left [paw, middle, top]
+        14, 13, 12,  # upper_right [paw, middle, top]
+        24, 23, 22,  # lower_right [paw, middle, top]
+        25, 31,  # tail [start, end]
+        33, 34,  # ear base [left, right]
+        35, 36,  # nose, chin
+        38, 37,  # ear tip [left, right]
+        39, 40,  # eyes [left, right]
+        15, 15,  # withers, throat (TODO: Labelled same as throat for now), throat
+        28]  # tail middle
+
+    # indicate invalid joints (i.e. not labelled) by -1
+    BADJA_ANNOTATED_CLASSES = [
+        14, 13, 12,  # upper_left [paw, middle, top]
+        24, 23, 22,  # lower_left [paw, middle, top]
+        10, 9, 8,  # upper_right [paw, middle, top]
+        20, 19, 18,  # lower_right [paw, middle, top]
+        25, 31,  # tail [start, end] (note, missing the tail middle point)
+        -1, -1,  # ear base [left, right]
+        33, -1,  # nose, chin (note, missing the 'jaw base' point)
+        36, 35,  # ear tip [left, right]
+        -1, -1,  # eyes [left, right]
+        -1, 15,  # withers, throat
+        28]  # tail middle
+
+    # Visualization
+    MARKER_TYPE = [
+        cv2.MARKER_TRIANGLE_DOWN, cv2.MARKER_STAR, cv2.MARKER_CROSS,  # upper_left
+        cv2.MARKER_TRIANGLE_DOWN, cv2.MARKER_STAR, cv2.MARKER_CROSS,  # lower_left
+        cv2.MARKER_TRIANGLE_DOWN, cv2.MARKER_STAR, cv2.MARKER_CROSS,  # upper_right
+        cv2.MARKER_TRIANGLE_DOWN, cv2.MARKER_STAR, cv2.MARKER_CROSS,  # lower_right
+        cv2.MARKER_CROSS, cv2.MARKER_TRIANGLE_DOWN,  # tail
+        cv2.MARKER_CROSS, cv2.MARKER_CROSS,  # right_ear, left_ear
+        cv2.MARKER_CROSS, cv2.MARKER_STAR,  # nose, chin
+        cv2.MARKER_TRIANGLE_DOWN, cv2.MARKER_TRIANGLE_DOWN,  # right_tip, left_tip
+        cv2.MARKER_CROSS, cv2.MARKER_CROSS,  # right_eye, left_eye
+        cv2.MARKER_CROSS, cv2.MARKER_CROSS,  # withers, throat
+        cv2.MARKER_STAR]  # tail middle
+
+    MARKER_COLORS = [
+        [230, 25, 75], [230, 25, 75], [230, 25, 75],  # upper_left, red
+        [255, 255, 25], [255, 255, 25], [255, 255, 25],  # lower_left, yellow
+        [60, 180, 75], [60, 180, 75], [60, 180, 75],  # upper_right, green
+        [0, 130, 200], [0, 130, 200], [0, 130, 200],  # lower_right, blue
+        [240, 50, 230], [240, 50, 230],  # tail, majenta
+        [255, 153, 204], [29, 98, 115],  # left_ear, pink & right_ear, turquoise
+        [245, 130, 48], [245, 130, 48],  # nose, chin
+        [255, 153, 204], [29, 98, 115],  # left_ear, pink & right_tip, turquoise
+        [0, 0, 0], [0, 0, 0],  # right eye, left eye: black
+        [128, 0, 0], [128, 0, 0],  # withers, throat, maroon
+        [240, 50, 230]]  # tail middle
+
+    # TODO - remove N_POSE variable, as the number of joints should be taken from the input SMPL file instead of hard-coded
+    N_POSE = 34  # not including global rotation
+    # WARNING -> Now overwritten in trainer.py line 78
+    N_BETAS = 20  # number of SMAL shape parameters to optimize over
