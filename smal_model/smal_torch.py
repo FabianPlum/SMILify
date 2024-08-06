@@ -66,32 +66,12 @@ class SMAL(nn.Module):
         """
         READ IN LEARNED BLEND SHAPES
         """
-        if config.SMAL_SHAPES is not None:
-            smal_fitting_results = np.load(config.SMAL_SHAPES)
-            for file in smal_fitting_results.files:
-                print(file)
-                print(smal_fitting_results[file].shape)
-
-            # check why deformations are oddly large
-            # perhaps the transforms need to be included here to account for scaling differences
-            learned_shapes = smal_fitting_results["deform_verts"] / 10
-            # add vertex template to deformations
-            learned_shapes += np.repeat(v_template[np.newaxis, :, :], 81, axis=0)
-            # add zeros array so the template model can be used as a viable shape
-            # learned_shapes = np.insert(learned_shapes, 0, np.zeros(v_template.shape), axis=0)
-
-            self.shapedirs = Variable(
-                torch.Tensor(learned_shapes), requires_grad=False).to(device)
-            self.num_betas = learned_shapes.shape[0]
-
-            self.shapedirs = torch.reshape(self.shapedirs, [self.num_betas, 3 * v_template.shape[0]])
-        else:
-            self.num_betas = dd['shapedirs'].shape[-1]
-            # Shape blend shape basis -> betas are blend shapes(?)
-            shapedir = np.reshape(
-                undo_chumpy(dd['shapedirs']), [-1, self.num_betas]).T.copy()
-            self.shapedirs = Variable(
-                torch.Tensor(shapedir), requires_grad=False).to(device)
+        self.num_betas = dd['shapedirs'].shape[-1]
+        # Shape blend shape basis -> betas are blend shapes(?)
+        shapedir = np.reshape(
+            undo_chumpy(dd['shapedirs']), [-1, self.num_betas]).T.copy()
+        self.shapedirs = Variable(
+            torch.Tensor(shapedir), requires_grad=False).to(device)
 
         if config.DEBUG:
             print("\nBETAS AND SHAPES:")
