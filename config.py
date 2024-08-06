@@ -22,7 +22,7 @@ ALLOW_LIMB_SCALING = True  # Allow scaling parameters, see Who Left the Dogs Out
 UNITY_SHAPE_PRIOR = join(data_path, 'priors', 'unity_betas.npz')
 
 # Sequence/Image Settings
-SHAPE_FAMILY = 0  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. Dog/Wolf), Equine (e.g. Horse/Zebra), Bovine (e.g. Cow), Hippo
+SHAPE_FAMILY = 1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. Dog/Wolf), Equine (e.g. Horse/Zebra), Bovine (e.g. Cow), Hippo
 # SEQUENCE_OR_IMAGE_NAME = "badja:rs_dog"
 # SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176.jpg"
 """
@@ -44,7 +44,6 @@ SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 # custom elements added:
 # SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
 SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
-SMAL_SHAPES = None  # "D:/SMAL/SMALify/fit3d_results_ALL_ANTS_ALL_METHODS/Stage3.npz"
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
 PLOT_RESULTS = True  # if False, no plots are saved during fitting which massively speeds up the process
