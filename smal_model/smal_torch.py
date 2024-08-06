@@ -48,9 +48,6 @@ class SMAL(nn.Module):
                         pass
                     print(value)
 
-                    if key == "weights":
-                        np.savetxt(key + ".csv", value, delimiter=",")
-
         self.f = dd['f']
 
         self.faces = torch.from_numpy(self.f.astype(int)).to(device)
