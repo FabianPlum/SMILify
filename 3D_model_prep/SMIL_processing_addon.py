@@ -726,7 +726,6 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "clean_mesh")
         layout.prop(smpl_tool, "merging_threshold")
         layout.prop(smpl_tool, "regress_joints")
-        layout.prop(smpl_tool, "export_model")
         layout.prop(smpl_tool, "symmetrise")
 
         layout.operator("smpl.import_model", text="Import SMPL Model")
@@ -858,12 +857,6 @@ class SMPLProperties(bpy.types.PropertyGroup):
         name="Minimal vertex distance",
         description="Minimal distance between vertices on centre line during mesh cleanup",
         default=0.001
-    )
-
-    export_model: bpy.props.BoolProperty(
-        name="Export Model",
-        description="Export the final model",
-        default=True
     )
 
     symmetrise: bpy.props.BoolProperty(
