@@ -1,86 +1,103 @@
 import numpy as np
+import config
 
 # TODO - read out J_names from input smpl file and treat all joints as ball joints for now
 # Once that works, in Blender allow for setting up joint limits on the model
 # Then, read those in here, all stored in the SMPL file and replace the hard-coded nightmare below.
 
-Ranges = {
-    'pelvis': [[0, 0], [0, 0], [0, 0]],
-    'pelvis0': [[-0.3, 0.3], [-1.2, 0.5], [-0.1, 0.1]],
-    'spine': [[-0.4, 0.4], [-1.0, 0.9], [-0.8, 0.8]],
-    'spine0': [[-0.4, 0.4], [-1.0, 0.9], [-0.8, 0.8]],
-    'spine1': [[-0.4, 0.4], [-0.5, 1.2], [-0.4, 0.4]],
-    'spine3': [[-0.5, 0.5], [-0.6, 1.4], [-0.8, 0.8]],
-    'spine2': [[-0.5, 0.5], [-0.4, 1.4], [-0.5, 0.5]],
-    'RFootBack': [[-0.2, 0.3], [-0.3, 1.1], [-0.3, 0.5]],
-    'LFootBack': [[-0.3, 0.2], [-0.3, 1.1], [-0.5, 0.3]],
-    'LLegBack1': [[-0.2, 0.3], [-0.5, 0.8], [-0.5, 0.4]],
-    'RLegBack1': [[-0.3, 0.2], [-0.5, 0.8], [-0.4, 0.5]],
-    'Head': [[-0.5, 0.5], [-1.0, 0.9], [-0.9, 0.9]],
-    'RLegBack2': [[-0.3, 0.2], [-0.6, 0.8], [-0.5, 0.6]],
-    'LLegBack2': [[-0.2, 0.3], [-0.6, 0.8], [-0.6, 0.5]],
-    'RLegBack3': [[-0.2, 0.3], [-0.8, 0.2], [-0.4, 0.5]],
-    'LLegBack3': [[-0.3, 0.2], [-0.8, 0.2], [-0.5, 0.4]],
-    'Mouth': [[-0.1, 0.1], [-1.1, 0.5], [-0.1, 0.1]],
-    'Neck': [[-0.8, 0.8], [-1.0, 1.0], [-1.1, 1.1]],
-    'LLeg1': [[-0.05, 0.05], [-1.3, 0.8], [-0.6, 0.6]],  # Extreme
-    'RLeg1': [[-0.05, 0.05], [-1.3, 0.8], [-0.6, 0.6]],
-    'RLeg2': [[-0.05, 0.05], [-1.0, 0.9], [-0.6, 0.6]],  # Extreme
-    'LLeg2': [[-0.05, 0.05], [-1.0, 1.1], [-0.6, 0.6]],
-    'RLeg3': [[-0.1, 0.4], [-0.3, 1.4], [-0.4, 0.7]],  # Extreme
-    'LLeg3': [[-0.4, 0.1], [-0.3, 1.4], [-0.7, 0.4]],
-    'LFoot': [[-0.3, 0.1], [-0.4, 1.5], [-0.7, 0.3]],  # Extreme
-    'RFoot': [[-0.1, 0.3], [-0.4, 1.5], [-0.3, 0.7]],
-    'Tail7': [[-0.1, 0.1], [-0.7, 1.1], [-0.9, 0.8]],
-    'Tail6': [[-0.1, 0.1], [-1.4, 1.4], [-1.0, 1.0]],
-    'Tail5': [[-0.1, 0.1], [-1.0, 1.0], [-0.8, 0.8]],
-    'Tail4': [[-0.1, 0.1], [-1.0, 1.0], [-0.8, 0.8]],
-    'Tail3': [[-0.1, 0.1], [-1.0, 1.0], [-0.8, 0.8]],
-    'Tail2': [[-0.1, 0.1], [-1.0, 1.0], [-0.8, 0.8]],
-    'Tail1': [[-0.1, 0.1], [-1.5, 1.4], [-1.2, 1.2]],
-}
+if config.ignore_hardcoded_body:
+    Ranges = {}  # for now all joints get [[-1,1], [-1,1], [-1,1]]
+    for joint in config.dd["J_names"]:
+        # fix root bone
+        if joint == "b_t":
+            Ranges[joint] = [[0, 0], [0, 0], [0, 0]]
+        else:
+            Ranges[joint] = [[-1, 1], [-1, 1], [-1, 1]]  # for now, treat all joints as ball joints (see TODO above)
+else:
+    Ranges = {
+        'pelvis': [[0, 0], [0, 0], [0, 0]],
+        'pelvis0': [[-0.3, 0.3], [-1.2, 0.5], [-0.1, 0.1]],
+        'spine': [[-0.4, 0.4], [-1.0, 0.9], [-0.8, 0.8]],
+        'spine0': [[-0.4, 0.4], [-1.0, 0.9], [-0.8, 0.8]],
+        'spine1': [[-0.4, 0.4], [-0.5, 1.2], [-0.4, 0.4]],
+        'spine3': [[-0.5, 0.5], [-0.6, 1.4], [-0.8, 0.8]],
+        'spine2': [[-0.5, 0.5], [-0.4, 1.4], [-0.5, 0.5]],
+        'RFootBack': [[-0.2, 0.3], [-0.3, 1.1], [-0.3, 0.5]],
+        'LFootBack': [[-0.3, 0.2], [-0.3, 1.1], [-0.5, 0.3]],
+        'LLegBack1': [[-0.2, 0.3], [-0.5, 0.8], [-0.5, 0.4]],
+        'RLegBack1': [[-0.3, 0.2], [-0.5, 0.8], [-0.4, 0.5]],
+        'Head': [[-0.5, 0.5], [-1.0, 0.9], [-0.9, 0.9]],
+        'RLegBack2': [[-0.3, 0.2], [-0.6, 0.8], [-0.5, 0.6]],
+        'LLegBack2': [[-0.2, 0.3], [-0.6, 0.8], [-0.6, 0.5]],
+        'RLegBack3': [[-0.2, 0.3], [-0.8, 0.2], [-0.4, 0.5]],
+        'LLegBack3': [[-0.3, 0.2], [-0.8, 0.2], [-0.5, 0.4]],
+        'Mouth': [[-0.1, 0.1], [-1.1, 0.5], [-0.1, 0.1]],
+        'Neck': [[-0.8, 0.8], [-1.0, 1.0], [-1.1, 1.1]],
+        'LLeg1': [[-0.05, 0.05], [-1.3, 0.8], [-0.6, 0.6]],  # Extreme
+        'RLeg1': [[-0.05, 0.05], [-1.3, 0.8], [-0.6, 0.6]],
+        'RLeg2': [[-0.05, 0.05], [-1.0, 0.9], [-0.6, 0.6]],  # Extreme
+        'LLeg2': [[-0.05, 0.05], [-1.0, 1.1], [-0.6, 0.6]],
+        'RLeg3': [[-0.1, 0.4], [-0.3, 1.4], [-0.4, 0.7]],  # Extreme
+        'LLeg3': [[-0.4, 0.1], [-0.3, 1.4], [-0.7, 0.4]],
+        'LFoot': [[-0.3, 0.1], [-0.4, 1.5], [-0.7, 0.3]],  # Extreme
+        'RFoot': [[-0.1, 0.3], [-0.4, 1.5], [-0.3, 0.7]],
+        'Tail7': [[-0.1, 0.1], [-0.7, 1.1], [-0.9, 0.8]],
+        'Tail6': [[-0.1, 0.1], [-1.4, 1.4], [-1.0, 1.0]],
+        'Tail5': [[-0.1, 0.1], [-1.0, 1.0], [-0.8, 0.8]],
+        'Tail4': [[-0.1, 0.1], [-1.0, 1.0], [-0.8, 0.8]],
+        'Tail3': [[-0.1, 0.1], [-1.0, 1.0], [-0.8, 0.8]],
+        'Tail2': [[-0.1, 0.1], [-1.0, 1.0], [-0.8, 0.8]],
+        'Tail1': [[-0.1, 0.1], [-1.5, 1.4], [-1.2, 1.2]],
+    }
+
 
 class LimitPrior(object):
     def __init__(self):
-        self.parts = {
-            'pelvis0': 0,
-            'spine': 1,
-            'spine0': 2,
-            'spine1': 3,
-            'spine2': 4,
-            'spine3': 5,
-            'LLeg1': 6,
-            'LLeg2': 7,
-            'LLeg3': 8,
-            'LFoot': 9,
-            'RLeg1': 10,
-            'RLeg2': 11,
-            'RLeg3': 12,
-            'RFoot': 13,
-            'Neck': 14,
-            'Head': 15,
-            'LLegBack1': 16,
-            'LLegBack2': 17,
-            'LLegBack3': 18,
-            'LFootBack': 19,
-            'RLegBack1': 20,
-            'RLegBack2': 21,
-            'RLegBack3': 22,
-            'RFootBack': 23,
-            'Tail1': 24,
-            'Tail2': 25,
-            'Tail3': 26,           
-            'Tail4': 27,
-            'Tail5': 28,
-            'Tail6': 29,
-            'Tail7': 30,
-            'Mouth': 31
-        }
+        if config.ignore_hardcoded_body:
+            self.parts = {}
+            for j, joint in enumerate(config.dd["J_names"]):
+                self.parts[joint] = j
+        else:
+            self.parts = {
+                'pelvis0': 0,
+                'spine': 1,
+                'spine0': 2,
+                'spine1': 3,
+                'spine2': 4,
+                'spine3': 5,
+                'LLeg1': 6,
+                'LLeg2': 7,
+                'LLeg3': 8,
+                'LFoot': 9,
+                'RLeg1': 10,
+                'RLeg2': 11,
+                'RLeg3': 12,
+                'RFoot': 13,
+                'Neck': 14,
+                'Head': 15,
+                'LLegBack1': 16,
+                'LLegBack2': 17,
+                'LLegBack3': 18,
+                'LFootBack': 19,
+                'RLegBack1': 20,
+                'RLegBack2': 21,
+                'RLegBack3': 22,
+                'RFootBack': 23,
+                'Tail1': 24,
+                'Tail2': 25,
+                'Tail3': 26,
+                'Tail4': 27,
+                'Tail5': 28,
+                'Tail6': 29,
+                'Tail7': 30,
+                'Mouth': 31
+            }
         self.id2name = {v: k for k, v in self.parts.items()}
         # Ignore the first joint.
         self.prefix = 3
         self.part_ids = np.array(sorted(self.parts.values()))
-        self.min_values = np.hstack([np.array(np.array(Ranges[self.id2name[part_id]])[:, 0]) for part_id in self.part_ids])
+        self.min_values = np.hstack(
+            [np.array(np.array(Ranges[self.id2name[part_id]])[:, 0]) for part_id in self.part_ids])
         self.max_values = np.hstack([
             np.array(np.array(Ranges[self.id2name[part_id]])[:, 1])
             for part_id in self.part_ids
