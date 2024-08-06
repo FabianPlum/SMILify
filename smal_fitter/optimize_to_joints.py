@@ -81,9 +81,12 @@ def main():
     dataset_size = len(filenames)
     print ("Dataset size: {0}".format(dataset_size))
 
-    assert config.SHAPE_FAMILY >= 0, "Shape family should be greater than 0"
+    if not config.ignore_hardcoded_body:
+        assert config.SHAPE_FAMILY >= 0, "Shape family should be greater than 0"
 
-    use_unity_prior = config.SHAPE_FAMILY == 1 and not config.FORCE_SMAL_PRIOR
+        use_unity_prior = config.SHAPE_FAMILY == 1 and not config.FORCE_SMAL_PRIOR
+    else:
+        use_unity_prior = False
 
     if not use_unity_prior and not config.ALLOW_LIMB_SCALING:
         print("WARNING: Limb scaling is only recommended for the new Unity prior. TODO: add a regularizer to constrain scale parameters.")
