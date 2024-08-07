@@ -10,6 +10,7 @@ from tqdm import tqdm
 from utils import crop_to_silhouette
 import os
 import json
+from pathlib import Path
 
 from csv import DictReader
 from PIL import Image, ImageFilter
@@ -130,7 +131,9 @@ def load_stanford_sequence(STANFORD_EXTRA, image_name, crop_size):
     return (rgb, sil, joints, visibility), file_names
 
 
-def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
+def load_SMIL_sequence(SMIL_COCO, image_name, crop_size,
+                       alt_seg=True,
+                       use_crop=False):
     """
     Loads custom configuration data and image.
 
@@ -167,6 +170,17 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
 
         return mask
 
+    def get_alt_seg(entry_img):
+        """Get segmentation from ID pass instead of polygon approximation from COCO dataset"""
+        mask_name = entry_img['file_name'][:-9] + "ID.png"
+        print(mask_name)
+        mask_data = imageio.imread(os.path.join(Path(img_dir).parent.parent.absolute(),"SMIL", mask_name))
+
+        # only the red chanel contains ID data in the current convention
+        mask_gray = mask_data[:,:,0]
+
+        return mask_gray
+
     def get_image_and_mask(name):
         image_entry = images_dict[name]
         annotation = annotations_dict[image_entry['id']]
@@ -178,7 +192,10 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
         img_data = img_data / 255.0
 
         # Load segmentation mask
-        seg_data = get_seg_from_entry(annotation, image_entry)
+        if alt_seg:
+            seg_data = get_alt_seg(image_entry)
+        else:
+            seg_data = get_seg_from_entry(annotation, image_entry)
 
         return img_data, seg_data
 
@@ -197,7 +214,7 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
     for o, orig_joint in enumerate(config.dd["J_names"]):
         for m, mapped_joints in enumerate(json_data["categories"][0]["keypoints"]):
             if orig_joint == mapped_joints:
-                new_joint_locs[o] = [joint_locs[m][1], joint_locs[m][0]] # flip x and y
+                new_joint_locs[o] = [joint_locs[m][1], joint_locs[m][0]]  # flip x and y
                 new_visibility[o] = visibility[m]
 
     if config.DEBUG:
@@ -207,13 +224,16 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
                 img_copy = cv2.circle(img_copy, (key_point[1], key_point[0]),
                                       radius=3, color=(255, 0, 255), thickness=-1)
 
-        cv2.imshow("test img",img_copy)
+        cv2.imshow("test img", img_copy)
         cv2.waitKey(1000)
         cv2.destroyAllWindows()
 
-    sil_img, rgb_img, landmarks = crop_to_silhouette(
-        seg_data, img_data,
-        new_joint_locs, crop_size)
+    if use_crop:
+        sil_img, rgb_img, landmarks = crop_to_silhouette(
+            seg_data, img_data,
+            new_joint_locs, crop_size)
+    else:
+        sil_img, rgb_img, landmarks = seg_data, img_data, new_joint_locs
 
     rgb = torch.FloatTensor(rgb_img)[None, ...].permute(0, 3, 1, 2)
     sil = torch.FloatTensor(sil_img)[None, None, ...]

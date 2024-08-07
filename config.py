@@ -83,14 +83,14 @@ MESH_COLOR = [0, 172, 223]
 # OPTIMIZER - You may need to adjust these depending on the sequence.
 OPT_WEIGHTS = [
     [25.0, 10.0, 7.5, 5.0],  # Joint
-    [0.0, 500.0, 5000.0, 5000.0],  # Sil Reproj
+    [0.0, 500.0, 500.0, 500.0],  # Sil Reproj
     [0.0, 1.0, 1.0, 1.0],  # Betas
     [0.0, 1.0, 1.0, 1.0],  # Pose
     [0.0, 100.0, 100.0, 100.0],  # Limits TODO!
     [0.0, 0.1, 0.1, 0.1],  # Splay
     [500.0, 100.0, 100.0, 100.0],  # Temporal
     [600, 400, 600, 800],  # Num iterations
-    [3e-2, 5e-3, 5e-4, 1e-4]]  # Learning Rate
+    [2.9e-2, 5e-3, 5e-4, 1e-4]]  # Learning Rate
 
 if ignore_hardcoded_body:
     # this is NOT a great place for reading this in, but unless I hide the hard-coded dog stuff elsewhere,

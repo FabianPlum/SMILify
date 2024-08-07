@@ -8,11 +8,12 @@ import config
 if config.ignore_hardcoded_body:
     Ranges = {}  # for now all joints get [[-1,1], [-1,1], [-1,1]]
     for joint in config.dd["J_names"]:
-        # fix root bone
-        if joint == "b_t":
+        # fix root bone when those are not actuated
+        # TODO - handle mandibles in replicAnt data!
+        if joint == "b_t" or joint == "ma_r" or joint == "ma_l":
             Ranges[joint] = [[0, 0], [0, 0], [0, 0]]
         else:
-            Ranges[joint] = [[-1, 1], [-1, 1], [-1, 1]]  # for now, treat all joints as ball joints (see TODO above)
+            Ranges[joint] = [[-0.3, 0.3], [-0.3, 0.3], [-0.3, 0.3]]  # for now, treat all joints as ball joints (see TODO above)
 else:
     Ranges = {
         'pelvis': [[0, 0], [0, 0], [0, 0]],
