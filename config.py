@@ -12,7 +12,7 @@ REPLICANT_PATH = "data/replicAnt_trials/SMIL_COCO"
 OUTPUT_DIR = "checkpoints/{0}".format(time.strftime("%Y%m%d-%H%M%S"))
 
 CROP_SIZE = 512  # image resolution for output
-VIS_FREQUENCY = 10  # every how many iterations the model plots are to be generated
+VIS_FREQUENCY = 25  # every how many iterations the model plots are to be generated
 GPU_IDS = "0"  # GPU number to run on (not applicable for CPU)
 
 # Run settings (I wouldn't recommend changing these unless you have good reason)
@@ -29,7 +29,7 @@ SHAPE_FAMILY = -1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. D
 TODO This is just a test, and not functional yet. Uncomment the above examples to ensure
 the code is still working for non-novel cases
 """
-SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_07_synth.jpg"
+SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_03_synth.jpg"
 IMAGE_RANGE = range(0, 1)  # Frames to process from sequence. Ignored for stanford extra
 WINDOW_SIZE = 10  # Changed number of frames processed in one go.
 
@@ -42,8 +42,8 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 
 # custom elements added:
-# SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
-SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
+SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
+#SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
 PLOT_RESULTS = True  # if False, no plots are saved during fitting which massively speeds up the process
@@ -89,8 +89,8 @@ OPT_WEIGHTS = [
     [0.0, 100.0, 100.0, 100.0],  # Limits TODO!
     [0.0, 0.1, 0.1, 0.1],  # Splay
     [500.0, 100.0, 100.0, 100.0],  # Temporal
-    [150, 400, 600, 800],  # Num iterations
-    [5e-3, 5e-3, 5e-4, 1e-4]]  # Learning Rate
+    [600, 400, 600, 800],  # Num iterations
+    [2e-2, 5e-3, 5e-4, 1e-4]]  # Learning Rate
 
 if ignore_hardcoded_body:
     # this is NOT a great place for reading this in, but unless I hide the hard-coded dog stuff elsewhere,
@@ -106,14 +106,16 @@ if ignore_hardcoded_body:
     joint_names = dd["J_names"]
     if DEBUG:
         print(joint_names)
+
     # IDs of every joint that starts with b, referring to the animal body, including the tail
-    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem.split("_")[0] == "b"]
+    # as this is used for the initial alignment, we include the mandibles as well to provide a sense of left vs right
+    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem in ["b_a_1","l_1_co_r", "l_1_co_l", "b_h"]]
 
     # exclude wings
     WING_JOINTS = [i for i, elem in enumerate(joint_names) if elem.split("_")[0] == "w"]
 
-    # all joints not in wing joints
-    CANONICAL_MODEL_JOINTS = [i for i in range(len(joint_names)) if i not in WING_JOINTS]
+    # all joints
+    CANONICAL_MODEL_JOINTS = [i for i in range(len(joint_names))]
 
     print(len(CANONICAL_MODEL_JOINTS))
 
@@ -121,7 +123,9 @@ if ignore_hardcoded_body:
     MARKER_TYPE = [cv2.MARKER_STAR for i in range(len(CANONICAL_MODEL_JOINTS))]
 
     # make it a fun rainbow, no specifics
-    MARKER_COLORS = [[int(255 - i * 255 / len(CANONICAL_MODEL_JOINTS)), 100, int(i * 255 / len(CANONICAL_MODEL_JOINTS))]
+    MARKER_COLORS = [[int(255 - i * 255 / len(CANONICAL_MODEL_JOINTS)),
+                      int(i * 255 / len(CANONICAL_MODEL_JOINTS)),
+                      100]
                      for i in
                      range(len(CANONICAL_MODEL_JOINTS))]
 

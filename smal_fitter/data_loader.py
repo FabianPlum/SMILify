@@ -188,21 +188,37 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
     joint_locs = raw_joints[:, :2]
     visibility = raw_joints[:, 2]
 
-    if config.DEBUG:
-        cv2.imshow("test img",img_data)
-        cv2.waitKey(0)
+    print(joint_locs.shape)
+    print(visibility.shape)
 
-        cv2.imshow("test seg", seg_data)
-        cv2.waitKey(0)
+    # map joint names with correct ids regardless of order
+    new_joint_locs = np.zeros((len(config.dd["J_names"]), 2), int)
+    new_visibility = np.zeros((len(config.dd["J_names"])), int)
+    for o, orig_joint in enumerate(config.dd["J_names"]):
+        for m, mapped_joints in enumerate(json_data["categories"][0]["keypoints"]):
+            if orig_joint == mapped_joints:
+                new_joint_locs[o] = [joint_locs[m][1], joint_locs[m][0]] # flip x and y
+                new_visibility[o] = visibility[m]
+
+    if config.DEBUG:
+        img_copy = img_data.copy()
+        for k, key_point in enumerate(new_joint_locs):
+            if k in config.TORSO_JOINTS:
+                img_copy = cv2.circle(img_copy, (key_point[1], key_point[0]),
+                                      radius=3, color=(255, 0, 255), thickness=-1)
+
+        cv2.imshow("test img",img_copy)
+        cv2.waitKey(1000)
+        cv2.destroyAllWindows()
 
     sil_img, rgb_img, landmarks = crop_to_silhouette(
         seg_data, img_data,
-        joint_locs, crop_size)
+        new_joint_locs, crop_size)
 
     rgb = torch.FloatTensor(rgb_img)[None, ...].permute(0, 3, 1, 2)
     sil = torch.FloatTensor(sil_img)[None, None, ...]
     joints = torch.FloatTensor(landmarks)[:, :2].unsqueeze(0)
-    visibility = torch.FloatTensor(visibility).unsqueeze(0)
+    visibility = torch.FloatTensor(new_visibility).unsqueeze(0)
     file_names = [os.path.basename(image_name)]
 
     return (rgb, sil, joints, visibility), file_names
