@@ -195,10 +195,13 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size):
         cv2.imshow("test seg", seg_data)
         cv2.waitKey(0)
 
+    sil_img, rgb_img, landmarks = crop_to_silhouette(
+        seg_data, img_data,
+        joint_locs, crop_size)
 
-    rgb = torch.FloatTensor(img_data)[None, ...].permute(0, 3, 1, 2)
-    sil = torch.FloatTensor(seg_data)[None, None, ...]
-    joints = torch.FloatTensor(joint_locs)[:, :2].unsqueeze(0)
+    rgb = torch.FloatTensor(rgb_img)[None, ...].permute(0, 3, 1, 2)
+    sil = torch.FloatTensor(sil_img)[None, None, ...]
+    joints = torch.FloatTensor(landmarks)[:, :2].unsqueeze(0)
     visibility = torch.FloatTensor(visibility).unsqueeze(0)
     file_names = [os.path.basename(image_name)]
 
