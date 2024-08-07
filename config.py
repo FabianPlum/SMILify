@@ -12,7 +12,7 @@ REPLICANT_PATH = "data/replicAnt_trials/SMIL_COCO"
 OUTPUT_DIR = "checkpoints/{0}".format(time.strftime("%Y%m%d-%H%M%S"))
 
 CROP_SIZE = 512  # image resolution for output
-VIS_FREQUENCY = 25  # every how many iterations the model plots are to be generated
+VIS_FREQUENCY = 10  # every how many iterations the model plots are to be generated
 GPU_IDS = "0"  # GPU number to run on (not applicable for CPU)
 
 # Run settings (I wouldn't recommend changing these unless you have good reason)
@@ -29,7 +29,7 @@ SHAPE_FAMILY = -1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. D
 TODO This is just a test, and not functional yet. Uncomment the above examples to ensure
 the code is still working for non-novel cases
 """
-SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_03_synth.jpg"
+SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_07_synth.jpg"
 IMAGE_RANGE = range(0, 1)  # Frames to process from sequence. Ignored for stanford extra
 WINDOW_SIZE = 10  # Changed number of frames processed in one go.
 
@@ -90,7 +90,7 @@ OPT_WEIGHTS = [
     [0.0, 0.1, 0.1, 0.1],  # Splay
     [500.0, 100.0, 100.0, 100.0],  # Temporal
     [600, 400, 600, 800],  # Num iterations
-    [2e-2, 5e-3, 5e-4, 1e-4]]  # Learning Rate
+    [3e-2, 5e-3, 5e-4, 1e-4]]  # Learning Rate
 
 if ignore_hardcoded_body:
     # this is NOT a great place for reading this in, but unless I hide the hard-coded dog stuff elsewhere,
