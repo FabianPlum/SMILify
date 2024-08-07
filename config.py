@@ -11,8 +11,8 @@ STANFORD_EXTRA_PATH = "data/StanfordExtra"
 REPLICANT_PATH = "data/replicAnt_trials/SMIL_COCO"
 OUTPUT_DIR = "checkpoints/{0}".format(time.strftime("%Y%m%d-%H%M%S"))
 
-CROP_SIZE = 512  # image resolution for output
-VIS_FREQUENCY = 10  # every how many iterations the model plots are to be generated
+CROP_SIZE = 256  # image resolution for output
+VIS_FREQUENCY = 100  # every how many iterations the model plots are to be generated
 GPU_IDS = "0"  # GPU number to run on (not applicable for CPU)
 
 # Run settings (I wouldn't recommend changing these unless you have good reason)

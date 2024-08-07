@@ -84,7 +84,7 @@ from numpy import nan as nan
 ## QuickStart: Running the Fitter
 
 - Run on a sample video from the [BADJA](https://github.com/benjiebob/BADJA) dataset.
-      <img src="docs/badja_opt.gif">
+      <img src="docs/SMIL-fit-ATTA.gif">
    - Run the python script
       ```
       python smal_fitter/optimize_to_joints.py

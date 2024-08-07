@@ -30,9 +30,9 @@ def create_video_from_images(image_folder, video_name, frame_rate):
 
 
 # Parameters
-image_folder = '/home/fabi/dev/SMILify/checkpoints/20240807-155427/SMIL_07_synth'  # Replace with the path to your folder containing PNGs
-video_name = "SMIL-fit-" + image_folder.split("/")[-1] + '-output_video.mp4'  # The name of the output video file
-frame_rate = 25  # You can adjust the frame rate
+image_folder = '/home/fabi/dev/SMILify/checkpoints/20240807-164813/SMIL_07_synth'  # Replace with the path to your folder containing PNGs
+video_name = "SMIL-fit-" + image_folder.split("/")[-1] + '-output_video_5fps.mp4'  # The name of the output video file
+frame_rate = 5  # You can adjust the frame rate
 
 # Create video from images
 create_video_from_images(image_folder, video_name, frame_rate)
