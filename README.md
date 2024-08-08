@@ -16,30 +16,35 @@ For now, I'll focus on insects, hence **SMIL**.
 1. Clone the repository **with submodules** and enter directory
    ```
    git clone --recurse-submodules https://github.com/FabianPlum/SMILify
-   cd SMILify
    ```
    Note: If you don't clone with submodules you won't get the sample data from BADJA/StanfordExtra/SMALST.
 
 2. install pytorch (and Co.)
    ```
    conda create -n pytorch3d python=3.10
-   conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+   conda activate pytorch3d
+   conda install pytorch=2.3.1 torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
    conda install -c conda-forge -c fvcore iopath ninja imageio scikit-image
    pip install yacs pycocotools
    pip install --upgrade iopath
    ```
 
-3. clone pytorch3d and install
+3. clone pytorch3d and install (WINDOWS)
    ```
    git clone https://github.com/facebookresearch/pytorch3d.git
    cd pytorch3d
    pip install -e .
    cd ..
    ```
+   
+   on LINUX just run
+   ```
+   conda install pytorch3d -c pytorch3d
+   ```
 
 4. some more dependencies
    ```
-   pip install matplotlib scipy chumpy opencv-python nibabel
+   pip install matplotlib scipy chumpy opencv-python nibabel trimesh
    ```
    
 5. Test your installation by running mesh registration with custom models
@@ -48,7 +53,7 @@ For now, I'll focus on insects, hence **SMIL**.
    ```
 
 In case you get an error back with chumpy complaining about legacy imports and not finding numpy.bool, simply update the
-__init__.py file of **chumpy**git :
+__init__.py file of **chumpy**:
 
 replace
 ```
@@ -58,7 +63,7 @@ with
 ```
 from numpy import bool_ as bool
 from numpy import int_ as int
-from numpy import complex_ as int
+from numpy import complex_ as complex
 from numpy import unicode_ as unicode
 from numpy import str_ as str
 from numpy import float_ as float
