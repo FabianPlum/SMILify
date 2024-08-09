@@ -413,6 +413,16 @@ def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_me
     # Mean shape
     mean_shape = pca.mean_.reshape(v, 3)
     
+    print("\n PCA STUFF \n")
+    print(pca)
+    COV = pca.get_covariance()
+    print("COV shape:", COV.shape)
+    eigenvectors = pca.components_
+    print("eigenvectors shape", eigenvectors.shape)
+    eigenvalues = pca.explained_variance_
+    print("eigenvalues shape", eigenvalues.shape)
+    print("\n\n")
+    
     if overwrite_mesh:
         # Overwrite the mesh vertex coordinates with the mean shape
         for vert_index, vert in enumerate(mean_shape):
@@ -451,7 +461,8 @@ def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_me
         shape_key.slider_max = max_range
         
     print(f"Created {num_components} PCA blendshapes with custom min and max ranges based on standard deviations.")
-                                
+    
+    return COV, eigenvectors, eigenvalues                          
 
 def recalculate_joint_positions(obj, pkl_data):
     """
