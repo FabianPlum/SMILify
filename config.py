@@ -46,7 +46,7 @@ SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
 #SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
-PLOT_RESULTS = True  # if False, no plots are saved during fitting which massively speeds up the process
+PLOT_RESULTS = False  # only applies to 3D fitting (fitter_3d/optimise.py)
 DEBUG = False  # use to get A LOT of "useful" messages
 
 if os.name == 'nt':
@@ -119,8 +119,6 @@ if ignore_hardcoded_body:
 
     # ignore joints (in case annotation conventions differ)
     IGNORE_JOINTS = ["b_t", "ma_r", "ma_l"] # temporary -> replicAnt data places these in different locations then SMIL
-
-    print(len(CANONICAL_MODEL_JOINTS))
 
     # same for all joints
     MARKER_TYPE = [cv2.MARKER_STAR for i in range(len(CANONICAL_MODEL_JOINTS))]
