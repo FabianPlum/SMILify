@@ -13,7 +13,8 @@ if config.ignore_hardcoded_body:
         if joint == "b_t" or joint == "ma_r" or joint == "ma_l":
             Ranges[joint] = [[0, 0], [0, 0], [0, 0]]
         else:
-            Ranges[joint] = [[-0.3, 0.3], [-0.3, 0.3], [-0.3, 0.3]]  # for now, treat all joints as ball joints (see TODO above)
+            # for now, treat all joints as ball joints (see TODO above)
+            Ranges[joint] = [[-0.1, 0.1], [-0.1, 0.1], [-0.1, 0.1]]
 else:
     Ranges = {
         'pelvis': [[0, 0], [0, 0], [0, 0]],
