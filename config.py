@@ -90,7 +90,7 @@ OPT_WEIGHTS = [
     [0.0, 0.1, 0.1, 0.1],  # Splay
     [500.0, 100.0, 100.0, 100.0],  # Temporal
     [600, 400, 600, 800],  # Num iterations
-    [2.9e-2, 5e-3, 5e-4, 1e-4]]  # Learning Rate
+    [3e-2, 5e-3, 5e-4, 1e-4]]  # Learning Rate
 
 if ignore_hardcoded_body:
     # this is NOT a great place for reading this in, but unless I hide the hard-coded dog stuff elsewhere,

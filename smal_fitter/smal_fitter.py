@@ -134,9 +134,13 @@ class SMALFitter(nn.Module):
         self.pose_prior = Prior(config.WALKING_PRIOR_FILE, device)
 
         # TODO: Limit Prior, **shouldn't** be too important for simple sequences :)
-        # limit_prior = LimitPrior()
-        # self.max_limits = torch.FloatTensor(limit_prior.max_values).view(config.N_POSE, 3).to(device)
-        # self.min_limits = torch.FloatTensor(limit_prior.min_values).view(config.N_POSE, 3).to(device)
+        # Well, let's use it now because bugs have a lot of joints!
+        # Instead of using these as hard limits here, I'll include them in the loss, so large deviations from
+        # the default pose are penalised.
+        limit_prior = LimitPrior()
+        # exclude root joint
+        self.max_limits = torch.FloatTensor(limit_prior.max_values[3:]).view(config.N_POSE, 3).to(device)
+        self.min_limits = torch.FloatTensor(limit_prior.min_values[3:]).view(config.N_POSE, 3).to(device)
 
         global_rotation_np = eul_to_axis(np.array([-np.pi / 2, 0, -np.pi / 2]))
         global_rotation = torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0).repeat(self.num_images,
@@ -205,11 +209,11 @@ class SMALFitter(nn.Module):
             objs['joint'] = w_j2d * F.mse_loss(rendered_joints, target_joints)
 
         # TODO
-        # if w_limit > 0:
-        #     zeros = torch.zeros_like(batch_params['joint_rotations'])
-        #     objs['limit'] = w_limit * torch.mean(
-        #         torch.max(batch_params['joint_rotations'] - self.max_limits, zeros) + \
-        #         torch.max(self.min_limits - batch_params['joint_rotations'], zeros))
+        if w_limit > 0:
+            zeros = torch.zeros_like(batch_params['joint_rotations'])
+            objs['limit'] = w_limit * torch.mean(
+                torch.max(batch_params['joint_rotations'] - self.max_limits, zeros) + \
+                torch.max(self.min_limits - batch_params['joint_rotations'], zeros))
 
         if w_pose > 0:
             objs['pose'] = w_pose * self.pose_prior(
