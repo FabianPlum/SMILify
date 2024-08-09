@@ -88,12 +88,6 @@ def plot_mesh(ax, mesh: Meshes, label="", colour="blue", equalize=True, zoom=1.5
 
         ax.scatter(X, Y, Z, s=0.02, color="red")
 
-    """
-    print(torch.any(torch.eq(faces, 0)))
-    for elem in faces:
-        print(elem)
-    """
-
     ax.plot([], [], color=colour, label=label)
     ax.legend(loc='upper right')
 

@@ -93,20 +93,12 @@ def align_smal_template_to_symmetry_axis(v, sym_file=None, I=None):
                                         all_vertices=v, axis='y',
                                         tolerance=0.001)
 
-        print(symIdx)
-        print(symIdx.shape)
-
     v[left[symIdx]] = np.array([1, -1, 1]) * v[left]
 
     if config.DEBUG:
         print("\n left:", left)
         print("\n right:", right)
         print("\n center:", center, "\n")
-
-    """
-    for e, elem in enumerate(zip(left, right, center, v)):
-        print(e, elem)
-    """
 
     left_inds = np.where(left)[0]
     right_inds = np.where(right)[0]
