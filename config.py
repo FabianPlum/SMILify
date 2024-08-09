@@ -117,6 +117,9 @@ if ignore_hardcoded_body:
     # all joints
     CANONICAL_MODEL_JOINTS = [i for i in range(len(joint_names))]
 
+    # ignore joints (in case annotation conventions differ)
+    IGNORE_JOINTS = ["b_t", "ma_r", "ma_l"] # temporary -> replicAnt data places these in different locations then SMIL
+
     print(len(CANONICAL_MODEL_JOINTS))
 
     # same for all joints

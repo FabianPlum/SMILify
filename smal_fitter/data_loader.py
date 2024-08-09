@@ -174,10 +174,10 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size,
         """Get segmentation from ID pass instead of polygon approximation from COCO dataset"""
         mask_name = entry_img['file_name'][:-9] + "ID.png"
         print(mask_name)
-        mask_data = imageio.imread(os.path.join(Path(img_dir).parent.parent.absolute(),"SMIL", mask_name))
+        mask_data = imageio.imread(os.path.join(Path(img_dir).parent.parent.absolute(), "SMIL", mask_name))
 
         # only the red chanel contains ID data in the current convention
-        mask_gray = mask_data[:,:,0]
+        mask_gray = mask_data[:, :, 0]
 
         return mask_gray
 
@@ -214,8 +214,11 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size,
     for o, orig_joint in enumerate(config.dd["J_names"]):
         for m, mapped_joints in enumerate(json_data["categories"][0]["keypoints"]):
             if orig_joint == mapped_joints:
+                if orig_joint in config.IGNORE_JOINTS:
+                    new_visibility[o] = 0  # set ignored joints to be invisible
+                else:
+                    new_visibility[o] = visibility[m]
                 new_joint_locs[o] = [joint_locs[m][1], joint_locs[m][0]]  # flip x and y
-                new_visibility[o] = visibility[m]
 
     if config.DEBUG:
         img_copy = img_data.copy()
