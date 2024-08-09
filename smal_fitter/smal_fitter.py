@@ -118,7 +118,16 @@ class SMALFitter(nn.Module):
             # Either pad with zeros or restrict to less than 20
             self.log_beta_scales = torch.nn.Parameter(self.mean_betas[20:].clone())
         else:
+            if config.ignore_hardcoded_body:
+                print("Using shape prior learned from 3D scanned models")
+
             model_covs = np.array(smal_data['cluster_cov'])[[shape_family]][0]
+            print(smal_data['cluster_cov'][0].shape)
+            # okay, this is different from the vertex PCA stuff.
+            # this is the covariance matrix of the shape space
+            print(smal_data['cluster_means'][[shape_family]][0])
+            # here, might as well just use the explained variance values (eigenvalues) here
+            print("\n\nUPDATE SMAL-FITTER!\n\n")
 
             invcov = np.linalg.inv(model_covs + 1e-5 * np.eye(model_covs.shape[0]))
             prec = np.linalg.cholesky(invcov)
@@ -126,6 +135,7 @@ class SMALFitter(nn.Module):
             self.betas_prec = torch.FloatTensor(prec)[:config.N_BETAS, :config.N_BETAS].to(device)
             self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
                 device)
+
             self.betas = nn.Parameter(
                 self.mean_betas.clone())  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
             self.log_beta_scales = torch.nn.Parameter(
@@ -133,10 +143,7 @@ class SMALFitter(nn.Module):
 
         self.pose_prior = Prior(config.WALKING_PRIOR_FILE, device)
 
-        # TODO: Limit Prior, **shouldn't** be too important for simple sequences :)
-        # Well, let's use it now because bugs have a lot of joints!
-        # Instead of using these as hard limits here, I'll include them in the loss, so large deviations from
-        # the default pose are penalised.
+        # treating everything as ball joints for now, see priors/joint_limits_prior.py
         limit_prior = LimitPrior()
         # exclude root joint
         self.max_limits = torch.FloatTensor(limit_prior.max_values[3:]).view(config.N_POSE, 3).to(device)
