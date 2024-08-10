@@ -12,6 +12,10 @@ For now, I'll focus on insects, hence **SMIL**.
 > "SMAL_DATA_FILE" leading to strange artefacts when using "deform" during mesh registration. Until this
 > issue is addressed, use this repo only under Ubuntu!
 
+> [!Warning] 
+> There appears to be a memory leak when running fitter_3d/optimise.py! If you have more than 10 meshes to fit to
+> and only about 16GB of RAM this becomes problematic. I'll try to fix this asap.
+
 ## Installation (mesh registration)
 1. Clone the repository **with submodules** and enter directory
    ```
