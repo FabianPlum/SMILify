@@ -24,7 +24,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--results_dir', type=str, default='fit3d_results', help="Directory in which results are stored")
 
 # Mesh loading arguments
-parser.add_argument('--mesh_dir', type=str, default='fitter_3d/example_meshes',
+parser.add_argument('--mesh_dir', type=str, default='fitter_3d/ATTA_BOI',
 					help="Directory (relative to SMALify) in which meshes are stored")
 parser.add_argument('--frame_step', type=int, default=1,
 					help="If directory is a sequence of animated frames, only take every nth frame")
