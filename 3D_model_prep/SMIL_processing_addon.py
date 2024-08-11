@@ -15,6 +15,7 @@ import os
 from scipy.spatial import KDTree
 from mathutils import Vector
 from sklearn.decomposition import PCA
+from sklearn.covariance import EmpiricalCovariance
 import matplotlib.pyplot as plt
 
 
@@ -446,9 +447,9 @@ def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_me
     # Mean shape
     mean_shape = pca.mean_.reshape(v, 3)
 
-    print("\n PCA STUFF \n")
-    print(pca)
-    COV = pca.get_covariance()
+    print("\nGet COV and initial betas\n")
+    print(pca.components_.shape)
+    COV = EmpiricalCovariance().fit(pca.components_)
     print("COV shape:", COV.shape)
     eigenvectors = pca.components_
     print("eigenvectors shape", eigenvectors.shape)
