@@ -236,6 +236,7 @@ class SMALFitter(nn.Module):
                 all_betas = torch.cat([batch_params['betas'], batch_params['log_betascale']], dim=1)
             else:
                 # TODO: Add a simple regularizer to penalize log_betascale for this case.
+                # Right now, only when using the unity prior (WLDO) we take joint length scaling into consideration
                 all_betas = batch_params['betas']
 
             diff_betas = (all_betas - self.mean_betas.unsqueeze(0))  # N, B

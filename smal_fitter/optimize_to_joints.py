@@ -130,6 +130,7 @@ def main():
                 acc_loss += loss.mean()
                 # print ("Optimizing Stage: {}\t Epoch: {}, Range: {}, Loss: {}, Detail: {}".format(stage_id, epoch_id, batch_range, loss.data, losses))
 
+            # get weighted losses from model (the weights refer to those set up in the config)
             joint_loss, global_loss, trans_loss = model.get_temporal(w_temp)
 
             desc = "EPOCH: Optimizing Stage: {}\t Epoch: {}, Loss: {:.2f}, Temporal: ({}, {}, {})".format(
@@ -140,8 +141,11 @@ def main():
             t.set_description(desc)
             t.refresh()
 
+            # get loss from all partial losses
             acc_loss = acc_loss + joint_loss + global_loss + trans_loss
+            # get gradients by running backprop
             acc_loss.backward()
+            # update parameters
             optimizer.step()
 
             if epoch_id % config.VIS_FREQUENCY == 0:
