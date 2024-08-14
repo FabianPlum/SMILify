@@ -408,7 +408,7 @@ def create_armature_and_weights(data, obj):
                 vertex_group.add([i], weight, 'ADD')
 
 
-def create_blendshapes(data, obj):
+def create_blendshapes(data, obj, get_cov=False):
     """
     Create blendshapes from deformation vertices in the new mesh object.
 
@@ -431,11 +431,20 @@ def create_blendshapes(data, obj):
         shape_key = obj.shape_key_add(name=shape_key_name)
         for vert_index, vert in enumerate(deform):
             shape_key.data[vert_index].co = vert
+            
+    if get_cov:
+        print("\nWARNING: COMPUTING THE COV FOR DIRECT BLENDSHAPES REQUIRES A LOT OF TIME AND RAM!\n")
+        print("... and is currently not supported")
+        print("\n\n")
+    else:
+        COV = None
+        eigenvectors = None
+        eigenvalues = None
 
     print(f"Created {len(deform_verts)} blendshapes.")
 
 
-def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_mesh=False, std_range=1):
+def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_mesh=False, std_range=1, get_cov=False):
     n, v, _ = scans.shape
     # Reshape the scans into (n, v*3)
     scans_reshaped = scans.reshape(n, v * 3)
@@ -446,16 +455,22 @@ def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_me
 
     # Mean shape
     mean_shape = pca.mean_.reshape(v, 3)
-
-    print("\nGet COV and initial betas\n")
-    print(pca.components_.shape)
-    COV = EmpiricalCovariance().fit(pca.components_)
-    print("COV shape:", COV.shape)
-    eigenvectors = pca.components_
-    print("eigenvectors shape", eigenvectors.shape)
-    eigenvalues = pca.explained_variance_
-    print("eigenvalues shape", eigenvalues.shape)
-    print("\n\n")
+    
+    if get_cov:
+        print("\nGet COV and initial betas\n")
+        print(pca.components_.shape)
+        COV = EmpiricalCovariance().fit(pca.components_)
+        print("COV shape:", COV.shape)
+        eigenvectors = pca.components_ # this is not the correct way to do this
+                                       # I'm just wrapping up writing out these values first. This is a placeholder.
+        print("eigenvectors shape", eigenvectors.shape)
+        eigenvalues = pca.explained_variance_ # same thing here, wrong variance
+        print("eigenvalues shape", eigenvalues.shape)
+        print("\n\n")
+    else:
+        COV = None
+        eigenvectors = None
+        eigenvalues = None
 
     if overwrite_mesh:
         # Overwrite the mesh vertex coordinates with the mean shape
@@ -773,6 +788,7 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "pkl_filepath")
         layout.prop(smpl_tool, "npz_filepath")
         layout.prop(smpl_tool, "blendshapes_from_PCA")
+        layout.prop(smpl_tool, "get_cov")
         layout.prop(smpl_tool, "number_of_PC")
         layout.prop(smpl_tool, "clean_mesh")
         layout.prop(smpl_tool, "merging_threshold")
@@ -811,9 +827,21 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                         return {'CANCELLED'}
 
                     if smpl_tool.blendshapes_from_PCA:
-                        apply_pca_and_create_blendshapes(verts_data, obj, smpl_tool.number_of_PC, overwrite_mesh=True)
+                        cov, eigvec, eigval = apply_pca_and_create_blendshapes(verts_data, 
+                                                                               obj, 
+                                                                               smpl_tool.number_of_PC, 
+                                                                               overwrite_mesh=True,
+                                                                               get_cov=smpl_tool.get_cov)
+                        pkl_data["shapce_cov"] = cov
+                        pkl_data["shape_eigenvectors"] = eigvec
+                        pkl_data["shape_eigenvalues"] = eigval
                     else:
-                        create_blendshapes(npz_data, obj)
+                        cov, eigvec, eigval = create_blendshapes(npz_data, 
+                                                                 obj,
+                                                                 get_cov=smpl_tool.get_cov)
+                        pkl_data["shapce_cov"] = cov
+                        pkl_data["shape_eigenvectors"] = eigvec
+                        pkl_data["shape_eigenvalues"] = eigval
 
                     if smpl_tool.symmetrise:
                         make_symmetrical(obj, pkl_data)
@@ -897,6 +925,12 @@ class SMPLProperties(bpy.types.PropertyGroup):
         name="Regress Joints",
         description="Regress joint positions",
         default=True
+    )
+    
+    get_cov: bpy.props.BoolProperty(
+        name="Get shape covariance matrix",
+        description="Compute the covariance matrix, eigenvalues, and eigenvectors for the computed shapes (PCA or direct models)",
+        default=False
     )
 
     clean_mesh: bpy.props.BoolProperty(
