@@ -220,14 +220,14 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size,
                 new_joint_locs[o] = [joint_locs[m][1], joint_locs[m][0]]  # flip x and y
 
     if config.DEBUG:
-        img_copy = img_data.copy()
+        img_copy = cv2.convertScaleAbs(img_data.copy() * 255)
         for k, (key_point, name) in enumerate(zip(new_joint_locs, joint_names)):
             print(k, key_point, name)
             if k in config.TORSO_JOINTS:
                 img_copy = cv2.circle(img_copy, (key_point[1], key_point[0]),
                                       radius=3, color=(255, 0, 255), thickness=-1)
 
-        cv2.imshow("test img", img_copy)
+        cv2.imshow("test img", cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB))
         cv2.waitKey(1000)
         cv2.destroyAllWindows()
 
