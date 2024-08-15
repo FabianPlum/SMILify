@@ -26,20 +26,25 @@ import config
 if config.ignore_hardcoded_body:
     class Prior(object):
         def __init__(self, prior_path, device):
-            with open(prior_path, "rb") as f:
-                res = pkl.load(f, encoding='latin1')
 
-            for key in res.keys():
-                print(key)
-                print(res[key].shape)
-                print(res[key])
-                print("\n")
+            # Remove this part once the pose prior (or lack thereof) is verified to work correctly.
+            if config.DEBUG:
+                print("\nPOSE PRIOR INFO: LOADED FROM PROVIDED DATA FILE, NOT THE SMIL MODEL!")
+                with open(prior_path, "rb") as f:
+                    res = pkl.load(f, encoding='latin1')
+                for key in res.keys():
+                        print(key)
+                        print(res[key].shape)
+                        print(res[key])
+                        print("\n")
 
             pose_len = len(config.dd["J_names"]) * 3
 
-            # for now, assume the mean pose is equivalent to the default pose
+            # for now, assume the mean pose is equivalent to the default pose so set the angles to zero
             self.mean_ch = np.zeros(pose_len)
-            # use an identity matrix for whatever pic is. No idea. No docs.
+            # the shape of 'pic' in the prior dict is 105 x 105 , which is 35 (joints) x 3 (angles)
+            # I reckon, this is a covariance matrix of the joint angles to explain how they influence one another
+            # As a starting point, I'll assume that the angles are independent of one another and use an identity matrix
             self.precs_ch = np.identity(pose_len)
 
             self.precs = torch.from_numpy(np.identity(pose_len).copy()).float().to(device)
@@ -53,22 +58,6 @@ if config.ignore_hardcoded_body:
             self.use_ind[:3] = False # ignore rotation of base joint
 
             self.use_ind_tch = torch.from_numpy(self.use_ind).float().to(device)
-
-            """
-            # TODO check if bringing in ignoring certain joints is sensible
-            ignore_names = get_ignore_names(prior_path)
-
-            if len(ignore_names) > 0:
-                ignore_joints = sorted([name2id[name] for name in ignore_names])
-                # ignore_inds = np.hstack([3 + np.array(ig * 3) + np.arange(0, 3)
-                #                         for ig in ignore_joints])
-                # Silvia: why we do not start from 0?
-                ignore_inds = np.hstack([np.array(ig * 3) + np.arange(0, 3)
-                                         for ig in ignore_joints])
-                self.use_ind[ignore_inds] = False
-
-                # Test to make sure that the ignore indices are ok.
-            """
 
         def __call__(self, x):
             mean_sub = x.reshape(-1, len(config.dd["J_names"]) * 3) - self.mean.unsqueeze(0)
@@ -120,16 +109,18 @@ class SMALFitter(nn.Module):
         else:
             if config.ignore_hardcoded_body:
                 print("Using shape prior learned from 3D scanned models")
+                model_covs = config.dd["shape_cov"]
+                self.mean_betas = torch.FloatTensor(config.dd["shape_mean_betas"])[:config.N_BETAS].to(
+                    device)
+            else:
+                model_covs = np.array(smal_data['cluster_cov'])[[shape_family]][0]
+                self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
+                    device)
 
-            model_covs = np.array(smal_data['cluster_cov'])[[shape_family]][0]
-            print(smal_data['cluster_cov'][0].shape)
-            # okay, this is different from the vertex PCA stuff.
-            # this is the covariance matrix of the shape space
-            print(smal_data['cluster_means'][[shape_family]][0])
-            # here, might as well just use the explained variance values (eigenvalues) here
-            print("\n\nUPDATE SMAL-FITTER!\n\n")
+            print(model_covs)
+            print(self.mean_betas)
 
-            invcov = np.linalg.inv(model_covs + 1e-5 * np.eye(model_covs.shape[0]))
+            invcov = np.linalg.inv(model_covs + 1e-5 * np.eye(model_covs.shape[0])) # why the addition? Avoiding zeroes?
             prec = np.linalg.cholesky(invcov)
 
             self.betas_prec = torch.FloatTensor(prec)[:config.N_BETAS, :config.N_BETAS].to(device)
