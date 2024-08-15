@@ -8,13 +8,14 @@ quadruped model.
 For now, I'll focus on insects, hence **SMIL**.
 
 > [!Important] 
-> While SMILify does run under Windows, there are currently unresolved issues regarding the precomputed
+> While SMILify do[SMPL_exporter.py](3D_model_prep/SMPL_exporter.py)es run under Windows, there are currently unresolved issues regarding the precomputed
 > "SMAL_DATA_FILE" leading to strange artefacts when using "deform" during mesh registration. Until this
 > issue is addressed, use this repo only under Ubuntu!
 
 > [!Warning] 
-> There appears to be a memory leak when running fitter_3d/optimise.py! If you have more than 10 meshes to fit to
-> and only about 16GB of RAM this becomes problematic. I'll try to fix this asap.
+> Produced poses may be unrealistic, as we currently don't have a learned pose prior and are instead working
+> with user-defined joint limits (currently set in smal_fitter/priors/joint_limits_prior.py but soon to be 
+> adjustable interactively in the accompanying blender addon)
 
 ## Installation (mesh registration)
 1. Clone the repository **with submodules** and enter directory
