@@ -12,7 +12,7 @@ REPLICANT_PATH = "data/replicAnt_trials/SMIL_COCO"
 OUTPUT_DIR = "checkpoints/{0}".format(time.strftime("%Y%m%d-%H%M%S"))
 
 CROP_SIZE = 512  # image resolution for output
-VIS_FREQUENCY = 100  # every how many iterations the model plots are to be generated
+VIS_FREQUENCY = 50  # every how many iterations the model plots are to be generated
 GPU_IDS = "0"  # GPU number to run on (not applicable for CPU)
 
 # Run settings (I wouldn't recommend changing these unless you have good reason)
@@ -47,7 +47,7 @@ SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
 PLOT_RESULTS = False  # only applies to 3D fitting (fitter_3d/optimise.py)
-DEBUG = True  # use to get A LOT of "useful" messages
+DEBUG = False  # use to get A LOT of "useful" messages
 
 if os.name == 'nt':
     ## If WINDOWS
@@ -90,7 +90,7 @@ OPT_WEIGHTS = [
     [0.0, 0.1, 0.1, 0.1],  # Splay
     [500.0, 100.0, 100.0, 100.0],  # Temporal
     [600, 400, 600, 500],  # Num iterations
-    [3e-2, 5e-3, 5e-4, 1e-4]]  # Learning Rate
+    [9e-2, 5e-3, 5e-4, 1e-4]]  # Learning Rate
 
 if ignore_hardcoded_body:
     # this is NOT a great place for reading this in, but unless I hide the hard-coded dog stuff elsewhere,
@@ -109,16 +109,8 @@ if ignore_hardcoded_body:
 
     # IDs of every joint that starts with b, referring to the animal body, including the tail
     # as this is used for the initial alignment, we include the mandibles as well to provide a sense of left vs right
-    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem in ["b_a_1","l_1_co_r", "l_1_co_l", "b_h"]]
-    # TODO - Fix joints in synth data! At the moment tr (trochanter) and fe (femur) are collapsed!!!
-    """
-    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem in ["l_2_co_r",
-                                                                        "l_2_tr_r",
-                                                                        "l_2_fe_r",
-                                                                        "l_2_ti_r",
-                                                                        "l_2_ta_r",
-                                                                        "l_2_pt_r"]]
-    """
+    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem in ["b_a_1","l_1_co_r", "l_1_co_l",
+                                                                        "b_h", "ma_l", "ma_r"]]
 
     # exclude wings
     WING_JOINTS = [i for i, elem in enumerate(joint_names) if elem.split("_")[0] == "w"]
@@ -127,7 +119,8 @@ if ignore_hardcoded_body:
     CANONICAL_MODEL_JOINTS = [i for i in range(len(joint_names))]
 
     # ignore joints (in case annotation conventions differ)
-    IGNORE_JOINTS = ["b_t", "ma_r", "ma_l"] # temporary -> replicAnt data places these in different locations then SMIL
+    IGNORE_JOINTS = ["b_t", "b_a_4", "b_a_5"] # temporary
+    # -> replicAnt data places these in different locations then SMIL, see also smal_fitter/priors/joint_limits.py
 
     # same for all joints
     MARKER_TYPE = [cv2.MARKER_STAR for i in range(len(CANONICAL_MODEL_JOINTS))]
