@@ -1,5 +1,7 @@
 import sys
 
+from config import joint_names
+
 sys.path.append('../')
 
 import numpy as np
@@ -114,7 +116,7 @@ def load_stanford_sequence(STANFORD_EXTRA, image_name, crop_size):
 
     loaded_data = get_dog(image_name)
 
-    # add an extra dummy invisble joint for tail_mid which wasn't annotated in Stanford-Extra
+    # add an extra dummy invisible joint for tail_mid which wasn't annotated in Stanford-Extra
     raw_joints = np.concatenate([
         np.array(loaded_data['joints']), [[0.0, 0.0, 0.0]]], axis=0)
 
@@ -205,9 +207,6 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size,
     joint_locs = raw_joints[:, :2]
     visibility = raw_joints[:, 2]
 
-    print(joint_locs.shape)
-    print(visibility.shape)
-
     # map joint names with correct ids regardless of order
     new_joint_locs = np.zeros((len(config.dd["J_names"]), 2), int)
     new_visibility = np.zeros((len(config.dd["J_names"])), int)
@@ -222,7 +221,8 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size,
 
     if config.DEBUG:
         img_copy = img_data.copy()
-        for k, key_point in enumerate(new_joint_locs):
+        for k, (key_point, name) in enumerate(zip(new_joint_locs, joint_names)):
+            print(k, key_point, name)
             if k in config.TORSO_JOINTS:
                 img_copy = cv2.circle(img_copy, (key_point[1], key_point[0]),
                                       radius=3, color=(255, 0, 255), thickness=-1)

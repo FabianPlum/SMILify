@@ -117,8 +117,11 @@ class SMALFitter(nn.Module):
                 self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
                     device)
 
-            print(model_covs)
-            print(self.mean_betas)
+            if config.DEBUG:
+                print("\nShape covariance matrix")
+                print(model_covs)
+                print("\nShape mean betas")
+                print(self.mean_betas, "\n")
 
             invcov = np.linalg.inv(model_covs + 1e-5 * np.eye(model_covs.shape[0])) # why the addition? Avoiding zeroes?
             prec = np.linalg.cholesky(invcov)
