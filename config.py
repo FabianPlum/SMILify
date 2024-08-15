@@ -11,12 +11,12 @@ STANFORD_EXTRA_PATH = "data/StanfordExtra"
 REPLICANT_PATH = "data/replicAnt_trials/SMIL_COCO"
 OUTPUT_DIR = "checkpoints/{0}".format(time.strftime("%Y%m%d-%H%M%S"))
 
-CROP_SIZE = 256  # image resolution for output
+CROP_SIZE = 512  # image resolution for output
 VIS_FREQUENCY = 100  # every how many iterations the model plots are to be generated
 GPU_IDS = "0"  # GPU number to run on (not applicable for CPU)
 
 # Run settings (I wouldn't recommend changing these unless you have good reason)
-FORCE_SMAL_PRIOR = True  # Allow the more recent Unity-based prior for dogs.
+FORCE_SMAL_PRIOR = False  # Allow the more recent Unity-based prior for dogs.
 ALLOW_LIMB_SCALING = True  # Allow scaling parameters, see Who Left the Dogs Out?
 # moved up the following line to have in one place with other prior data
 UNITY_SHAPE_PRIOR = join(data_path, 'priors', 'unity_betas.npz')
@@ -42,8 +42,8 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 
 # custom elements added:
-SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
-#SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
+#SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
+SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
 PLOT_RESULTS = False  # only applies to 3D fitting (fitter_3d/optimise.py)
@@ -75,7 +75,7 @@ else:
     WALKING_PRIOR_FILE = join(data_path, 'priors', 'walking_toy_symmetric_pose_prior_with_cov_35parts.pkl')
 
 # DATALOADER
-IMG_RES = 224
+IMG_RES = 512
 
 # RENDERER
 MESH_COLOR = [0, 172, 223]
@@ -83,13 +83,13 @@ MESH_COLOR = [0, 172, 223]
 # OPTIMIZER - You may need to adjust these depending on the sequence.
 OPT_WEIGHTS = [
     [25.0, 10.0, 7.5, 5.0],  # Joint
-    [0.0, 500.0, 500.0, 500.0],  # Sil Reproj
+    [0.0, 500.0, 1000.0, 1000.0],  # Sil Reproj
     [0.0, 1.0, 1.0, 1.0],  # Betas
     [0.0, 1.0, 1.0, 1.0],  # Pose
     [0.0, 100.0, 100.0, 100.0],  # Limits TODO!
     [0.0, 0.1, 0.1, 0.1],  # Splay
     [500.0, 100.0, 100.0, 100.0],  # Temporal
-    [600, 400, 600, 800],  # Num iterations
+    [600, 400, 600, 500],  # Num iterations
     [3e-2, 5e-3, 5e-4, 1e-4]]  # Learning Rate
 
 if ignore_hardcoded_body:
