@@ -1,6 +1,6 @@
 # SMILify
 
-This repository is based on [SMALify]() with the aim to turn any rigged 3D model into
+This repository is based on [SMALify](https://github.com/benjiebob/SMALify) with the aim to turn any rigged 3D model into
 a SMAL compatible model. There are Blender files to convert your mesh and lots of code 
 changes to deal with arbitrary armature configurations, rather than assuming a fixed
 quadruped model.
@@ -8,11 +8,6 @@ quadruped model.
 For now, I'll focus on insects, hence **SMIL**.
 
 > [!Important] 
-> While SMILify do[SMPL_exporter.py](3D_model_prep/SMPL_exporter.py)es run under Windows, there are currently unresolved issues regarding the precomputed
-> "SMAL_DATA_FILE" leading to strange artefacts when using "deform" during mesh registration. Until this
-> issue is addressed, use this repo only under Ubuntu!
-
-> [!Warning] 
 > Produced poses may be unrealistic, as we currently don't have a learned pose prior and are instead working
 > with user-defined joint limits (currently set in smal_fitter/priors/joint_limits_prior.py but soon to be 
 > adjustable interactively in the accompanying blender addon)
