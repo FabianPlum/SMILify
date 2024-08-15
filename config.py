@@ -29,7 +29,7 @@ SHAPE_FAMILY = -1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. D
 TODO This is just a test, and not functional yet. Uncomment the above examples to ensure
 the code is still working for non-novel cases
 """
-SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_07_synth.jpg"
+SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_09_synth.jpg"
 IMAGE_RANGE = range(0, 1)  # Frames to process from sequence. Ignored for stanford extra
 WINDOW_SIZE = 10  # Changed number of frames processed in one go.
 
@@ -47,7 +47,7 @@ SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
 PLOT_RESULTS = False  # only applies to 3D fitting (fitter_3d/optimise.py)
-DEBUG = False  # use to get A LOT of "useful" messages
+DEBUG = True  # use to get A LOT of "useful" messages
 
 if os.name == 'nt':
     ## If WINDOWS
@@ -110,6 +110,15 @@ if ignore_hardcoded_body:
     # IDs of every joint that starts with b, referring to the animal body, including the tail
     # as this is used for the initial alignment, we include the mandibles as well to provide a sense of left vs right
     TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem in ["b_a_1","l_1_co_r", "l_1_co_l", "b_h"]]
+    # TODO - Fix joints in synth data! At the moment tr (trochanter) and fe (femur) are collapsed!!!
+    """
+    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem in ["l_2_co_r",
+                                                                        "l_2_tr_r",
+                                                                        "l_2_fe_r",
+                                                                        "l_2_ti_r",
+                                                                        "l_2_ta_r",
+                                                                        "l_2_pt_r"]]
+    """
 
     # exclude wings
     WING_JOINTS = [i for i, elem in enumerate(joint_names) if elem.split("_")[0] == "w"]
