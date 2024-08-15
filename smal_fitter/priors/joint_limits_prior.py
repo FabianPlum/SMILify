@@ -9,12 +9,15 @@ if config.ignore_hardcoded_body:
     Ranges = {}  # for now all joints get [[-1,1], [-1,1], [-1,1]]
     for joint in config.dd["J_names"]:
         # fix root bone when those are not actuated
-        # TODO - handle mandibles in replicAnt data!
-        if joint == "b_t" or joint == "ma_r" or joint == "ma_l":
+        # TODO the abdomen joints, by default clamp to the bottom of the abdomen due to the way the joint regressor
+        # currently estimates their relative position. The joint regressor uses the relative position to the n closest
+        # vertices to reposition the joints. Due to the vertical asymmetry of the abdomen, The lower vertices
+        # disproportionally contribute to the location.
+        if joint == "b_t" or joint == "b_a_3" or joint == "b_a_4" or joint == "b_a_5":
             Ranges[joint] = [[0, 0], [0, 0], [0, 0]]
         else:
             # for now, treat all joints as ball joints (see TODO above)
-            Ranges[joint] = [[-0.1, 0.1], [-0.1, 0.1], [-0.1, 0.1]]
+            Ranges[joint] = [[-0.01, 0.01], [-0.01, 0.01], [-0.01, 0.01]]
 else:
     Ranges = {
         'pelvis': [[0, 0], [0, 0], [0, 0]],
