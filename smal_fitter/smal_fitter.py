@@ -171,8 +171,10 @@ class SMALFitter(nn.Module):
         print(grad_output)
 
     def forward(self, batch_range, weights, stage_id):
+        # weights, here, correspond to the optimisation weighting set in the config file
         w_j2d, w_reproj, w_betas, w_pose, w_limit, w_splay = weights
 
+        # these parameters are then the ones written out at each saved stage to the respective .pkl file
         batch_params = {
             'global_rotation': self.global_rotation[batch_range] * self.global_mask,
             'joint_rotations': self.joint_rotations[batch_range] * self.rotation_mask,
@@ -185,6 +187,10 @@ class SMALFitter(nn.Module):
         target_visibility = self.target_visibility[batch_range].to(self.device)
         sil_imgs = self.sil_imgs[batch_range].to(self.device)
 
+        # Then, have the model retain its current 'appearance' taking as input the currently estimated model parameters
+        # betas (shape input)
+        # phi (global and model joint rotations)
+        # optionally scale parameters
         verts, joints, Rs, v_shaped = self.smal_model(
             batch_params['betas'],
             torch.cat([
