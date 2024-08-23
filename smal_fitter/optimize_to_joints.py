@@ -32,12 +32,12 @@ class ImageExporter():
         if not os.path.exists(root_directory):
             os.mkdir(root_directory)
 
-        output_dirs = [] 
+        output_dirs = []
         for filename in filename_batch:
             filename_path = os.path.join(root_directory, os.path.splitext(filename)[0])
             output_dirs.append(filename_path)
             os.mkdir(filename_path)
-        
+
         return output_dirs
 
     def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces):
@@ -65,7 +65,7 @@ def main():
 
     if dataset == "badja":
         data, filenames = load_badja_sequence(
-            config.BADJA_PATH, name, 
+            config.BADJA_PATH, name,
             config.CROP_SIZE, image_range=config.IMAGE_RANGE)
     elif dataset == "stanfordextra":
         data, filenames = load_stanford_sequence(
@@ -101,18 +101,23 @@ def main():
         epochs = int(weights[7])
         lr = weights[8]
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=(0.5, 0.999))
+        optimizer = torch.optim.Adam([
+            {'params': [param for name, param in model.named_parameters() if name != 'fov'], 'lr': lr},  # Exclude fov
+            {'params': [model.fov], 'lr': 1}  # Include fov with its own (much higher) learning rate
+        ], lr=lr, betas=(0.5, 0.999))
 
         if stage_id == 0:
             model.joint_rotations.requires_grad = False
             model.betas.requires_grad = False
             model.log_beta_scales.requires_grad = False
+            model.fov.requires_grad = True
             target_visibility = model.target_visibility.clone()
             model.target_visibility *= 0
             model.target_visibility[:, config.TORSO_JOINTS] = target_visibility[:, config.TORSO_JOINTS] # Turn on only torso points
         else:
             model.joint_rotations.requires_grad = True
             model.betas.requires_grad = True
+            model.fov.requires_grad = True
             if config.ALLOW_LIMB_SCALING:
                 model.log_beta_scales.requires_grad = True
             model.target_visibility = data[-1].clone()
@@ -134,8 +139,8 @@ def main():
             joint_loss, global_loss, trans_loss = model.get_temporal(w_temp)
 
             desc = "EPOCH: Optimizing Stage: {}\t Epoch: {}, Loss: {:.2f}, Temporal: ({}, {}, {})".format(
-                stage_id, epoch_id, 
-                acc_loss.data, joint_loss.data, 
+                stage_id, epoch_id,
+                acc_loss.data, joint_loss.data,
                 global_loss.data, trans_loss.data)
 
             t.set_description(desc)
