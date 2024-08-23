@@ -166,6 +166,8 @@ class SMALFitter(nn.Module):
         # setup SMAL skinning & differentiable renderer
         self.smal_model = SMAL(device, shape_family_id=shape_family)
         self.renderer = Renderer(self.image_size, device)
+        # Adding the camera FOV as a tunable parameter
+        self.fov = nn.Parameter(self.renderer.cameras.fov)
 
     def print_grads(self, grad_output):
         print(grad_output)
@@ -181,6 +183,7 @@ class SMALFitter(nn.Module):
             'betas': self.betas.expand(len(batch_range), self.n_betas),
             'log_betascale': self.log_beta_scales.expand(len(batch_range), 6),
             'trans': self.trans[batch_range],
+            'fov': self.fov[batch_range]
         }
 
         target_joints = self.target_joints[batch_range].to(self.device)
@@ -203,6 +206,7 @@ class SMALFitter(nn.Module):
 
         canonical_model_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
 
+        self.renderer.cameras.fov = self.fov
         rendered_silhouettes, rendered_joints = self.renderer(
             verts, canonical_model_joints,
             self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1))
@@ -291,6 +295,7 @@ class SMALFitter(nn.Module):
                 'betas': self.betas.expand(len(batch_range), self.n_betas),
                 'log_betascale': self.log_beta_scales.expand(len(batch_range), 6),
                 'trans': self.trans[batch_range],
+                'fov': self.fov[batch_range]
             }
 
             target_joints = self.target_joints[batch_range]
