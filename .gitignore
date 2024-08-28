@@ -22,6 +22,7 @@ fitter_3d/DOG_BOI/
 data/BADJA/
 data/SMALST/
 data/StanfordExtra/
+LOCAL_TEST/
 
 #pycharm dev
 .idea/
