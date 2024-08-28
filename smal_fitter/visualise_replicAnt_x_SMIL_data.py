@@ -76,6 +76,18 @@ def return_placeholder_data(input_image=None, num_joints=55):
     return (rgb, sil, joints, visibility), filenames
 
 
+def map_joint_order(joint_names_smil, joint_names_input, joints):
+    # map joint names with correct ids regardless of order
+    new_joint_locs = np.zeros((len(joint_names_smil), 3), float)
+
+    for o, orig_joint in enumerate(joint_names_smil):
+        for m, mapped_joints in enumerate(joint_names_input):
+            if orig_joint == mapped_joints:
+                new_joint_locs[o] = joints[m]  # flip x and y
+
+    return new_joint_locs
+
+
 if __name__ == '__main__':
     """
     STEP 1 - LOAD replicAnt generated SMIL data
@@ -98,14 +110,16 @@ if __name__ == '__main__':
                                                pitch=pose_data[key]["eulerAngles"]["y"],
                                                yaw=pose_data[key]["eulerAngles"]["z"]))
 
-    joint_angles = np.array(joint_angles)
+    np_joint_angles = np.array(joint_angles)
+    # map joints, in case the order differs. The root bone is expected to be the first entry
+    np_joint_angles_mapped = map_joint_order(config.dd["J_names"], joint_names, np_joint_angles)
 
     # Convert shape betas to a NumPy array
     shape_betas = np.array(shape_betas)
 
     # Display the extracted data
     print("Shape Betas:", shape_betas.shape)
-    print("Pose Data:", joint_angles.shape)
+    print("Pose Data:", np_joint_angles_mapped.shape)
 
     """
     STEP 2 - LOAD SMIL MODEL
@@ -113,7 +127,7 @@ if __name__ == '__main__':
 
     data_json, filenames = return_placeholder_data(
         input_image=input_image,
-        num_joints=len(joint_angles))  # in the shape of the default convention returned by the dataloaders
+        num_joints=len(np_joint_angles_mapped))  # in the shape of the default convention returned by the dataloaders
 
     print("\nINFO: Preparing SMIL model...")
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -140,7 +154,7 @@ if __name__ == '__main__':
     """
 
     model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
-    model.joint_rotations = torch.nn.Parameter(torch.Tensor(joint_angles[1:]).reshape((1, 54, 3)).to(device))
+    model.joint_rotations = torch.nn.Parameter(torch.Tensor(np_joint_angles_mapped[1:]).reshape((1, 54, 3)).to(device))
 
     """
     STEP 4 - RENDER POSED MESH
