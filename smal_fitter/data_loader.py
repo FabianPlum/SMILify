@@ -44,8 +44,8 @@ def load_badja_sequence(BADJA_PATH, sequence_name, crop_size, image_range=None):
                 landmarks = np.array(image_annotation['joints'])[config.BADJA_ANNOTATED_CLASSES]
                 visibility.append(np.array(image_annotation['visibility'])[config.BADJA_ANNOTATED_CLASSES])
 
-                rgb_img = imageio.imread(file_name) / 255.0
-                sil_img = imageio.imread(seg_name)[:, :, 0] / 255.0
+                rgb_img = imageio.v2.imread(file_name) / 255.0
+                sil_img = imageio.v2.imread(seg_name)[:, :, 0] / 255.0
 
                 rgb_h, rgb_w, _ = rgb_img.shape
                 sil_img = cv2.resize(sil_img, (rgb_w, rgb_h), cv2.INTER_NEAREST)
@@ -103,7 +103,7 @@ def load_stanford_sequence(STANFORD_EXTRA, image_name, crop_size):
         data = json_dict[name]
 
         # load img
-        img_data = imageio.imread(os.path.join(img_dir, data['img_path']))
+        img_data = imageio.v2.imread(os.path.join(img_dir, data['img_path']))
 
         # load seg
         seg_data = get_seg_from_entry(data)
@@ -176,7 +176,7 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size,
         """Get segmentation from ID pass instead of polygon approximation from COCO dataset"""
         mask_name = entry_img['file_name'][:-9] + "ID.png"
         print(mask_name)
-        mask_data = imageio.imread(os.path.join(Path(img_dir).parent.parent.absolute(), "SMIL", mask_name))
+        mask_data = imageio.v2.imread(os.path.join(Path(img_dir).parent.parent.absolute(), "SMIL", mask_name))
 
         # only the red chanel contains ID data in the current convention
         mask_gray = mask_data[:, :, 0]
@@ -188,7 +188,7 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size,
         annotation = annotations_dict[image_entry['id']]
 
         # Load image
-        img_data = imageio.imread(os.path.join(img_dir, image_entry['file_name']))
+        img_data = imageio.v2.imread(os.path.join(img_dir, image_entry['file_name']))
 
         # convert value range to 0 - 1
         img_data = img_data / 255.0
