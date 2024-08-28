@@ -114,6 +114,9 @@ if __name__ == '__main__':
     # map joints, in case the order differs. The root bone is expected to be the first entry
     np_joint_angles_mapped = map_joint_order(config.dd["J_names"], joint_names, np_joint_angles)
 
+    # TODO - Fix joint angle translation issues.
+    np_joint_angles_mapped -= np_joint_angles_mapped[0]
+
     # Convert shape betas to a NumPy array
     shape_betas = np.array(shape_betas)
 
@@ -155,6 +158,7 @@ if __name__ == '__main__':
 
     model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
     model.joint_rotations = torch.nn.Parameter(torch.Tensor(np_joint_angles_mapped[1:]).reshape((1, 54, 3)).to(device))
+    model.fov = torch.nn.Parameter(torch.Tensor([data['iterationData']['camera']["FOV"]]).to(device))
 
     """
     STEP 4 - RENDER POSED MESH
