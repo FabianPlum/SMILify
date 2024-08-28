@@ -18,7 +18,7 @@ import trimesh
 
 from tqdm import trange
 
-import os, time
+import os, time, shutil
 import sys
 import config
 
@@ -28,9 +28,14 @@ class ImageExporter():
         self.stage_id = 0
         self.epoch_name = 0
 
-    def generate_output_folders(self, root_directory, filename_batch):
-        if not os.path.exists(root_directory):
-            os.mkdir(root_directory)
+    def generate_output_folders(self, root_directory, filename_batch, overwrite=True):
+        if overwrite:
+            if os.path.exists(root_directory):
+                shutil.rmtree(root_directory)
+            os.makedirs(root_directory)
+        else:
+            if not os.path.exists(root_directory):
+                os.mkdir(root_directory)
 
         output_dirs = []
         for filename in filename_batch:
