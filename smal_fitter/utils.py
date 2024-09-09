@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from nibabel import eulerangles
+import torch
 
 def crop_to_silhouette(sil_img, rgb_img, joints, target_size):
     assert len(sil_img.shape) == 2, "Silhouette image is not HxW"
