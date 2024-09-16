@@ -93,14 +93,10 @@ def get_iteration_data(json_file_path):
         for key, value in subject_data['keypoints'].items():
             subject_3d_locations[key] = value['3DPos']
             subject_rotations[key] = value['eulerAngles']
-            subject_global_rotations[key] = value['globalRotation']
-
-        # Extract global rotation for the root bone 'b_t'
-        global_subject_rotation = subject_global_rotations['b_t']
 
         return (image, camera_angles, camera_translation, 
                 camera_intrinsics, subject_3d_locations, subject_rotations, 
-                camera_view_matrix, global_subject_rotation)
+                camera_view_matrix)
 
     except FileNotFoundError:
         raise FileNotFoundError(f"JSON file not found: {json_file_path}")
@@ -134,8 +130,9 @@ def visualize_3d_scene(camera_translation, camera_intrinsics, subject_3d_locatio
 
     # Plot root bone coordinate system
     root_location = subject_3d_locations['b_t']
+    root_rotation = subject_rotations['b_t']
     plot_coordinate_system(ax, [root_location['x'], root_location['y'], root_location['z']], 
-                           global_subject_rotation, scale=5)
+                           root_rotation, scale=5)
 
     # Plot camera
     plot_camera(ax, camera_translation, camera_intrinsics['FOV'], camera_view_matrix)
@@ -174,7 +171,8 @@ def plot_coordinate_system(ax, origin, rotation, scale=1.0):
     Returns:
         None. Plots the coordinate system on the given axes.
     """
-    R = rotation_matrix([rotation['roll'], rotation['pitch'], rotation['yaw']])
+
+    R = rotation_matrix([rotation['x'], rotation['y'], rotation['z']])
 
     for i, (color, label) in enumerate(zip(['r', 'g', 'b'], ['X', 'Y', 'Z'])):
         axis = np.array([0, 0, 0])
@@ -287,14 +285,6 @@ def rotation_matrix_z(angle):
 def unreal_to_pytorch3d_coords(coords):
     """Convert Unreal Engine coordinates to PyTorch3D coordinates."""
     return np.array([-coords['y'], coords['z'], coords['x']])
-
-def unreal_to_pytorch3d_rotation(rotation):
-    """Convert Unreal Engine rotation to PyTorch3D rotation."""
-    return unreal_euler_to_pytorch3d_rodrigues(
-        x=rotation['x'],
-        y=rotation['y'],
-        z=rotation['z']
-    )
 
 def return_placeholder_data(input_image=None, num_joints=54):
     image_size = (512, 512)
@@ -417,17 +407,15 @@ if __name__ == '__main__':
                 print("JSON data loaded successfully")
             
             # Get the iteration data
-            image, camera_angles, camera_translation, camera_intrinsics, subject_3d_locations, subject_rotations, camera_view_matrix, global_subject_rotation = get_iteration_data(json_file_path)
+            image, camera_angles, camera_translation, camera_intrinsics, subject_3d_locations, subject_rotations, camera_view_matrix = get_iteration_data(json_file_path)
 
             # Check if image is None before visualization
             if image is None:
                 print("Warning: Image not loaded. Proceeding with visualization without image.")
 
             # Visualize the 3D scene
-            visualize_3d_scene(camera_translation, camera_intrinsics, subject_3d_locations, global_subject_rotation, camera_view_matrix)
+            visualize_3d_scene(camera_translation, camera_intrinsics, subject_3d_locations, subject_rotations, camera_view_matrix)
 
-            # You can now use global_subject_rotation in your visualization or other processing
-            print("Global Subject Rotation (root bone 'b_t'):", global_subject_rotation)
 
         except Exception as e:
             print(f"An error occurred: {str(e)}")
@@ -451,7 +439,7 @@ if __name__ == '__main__':
     model.betas = torch.nn.Parameter(torch.tensor(shape_betas, device=device).float().unsqueeze(0))
 
     # Handle global rotation separately
-    global_rotation = unreal_to_pytorch3d_rotation(subject_rotations['b_t'])
+    global_rotation = unreal_euler_to_pytorch3d_rodrigues(subject_rotations['b_t']['x'], subject_rotations['b_t']['y'], subject_rotations['b_t']['z'])
     model.global_rotation = torch.nn.Parameter(torch.tensor(global_rotation, device=device).float().unsqueeze(0))
 
     # TODO get and apply subject angles, akin to visualise_replicAnt_x_SMIL_data.py

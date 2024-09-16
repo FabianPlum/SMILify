@@ -96,11 +96,18 @@ class SMAL(nn.Module):
             print("No symmetry axis vertices provided - using default values!")
             symmetry_axis_vertices = None
 
-        v_sym, self.left_inds, self.right_inds, self.center_inds = align_smal_template_to_symmetry_axis(
-            v_template,
-            sym_file=config.SMAL_SYM_FILE,
-            I=symmetry_axis_vertices)
-        # symmetry file
+        if config.ignore_hardcoded_body:
+            v_sym, self.left_inds, self.right_inds, self.center_inds = align_smal_template_to_symmetry_axis(
+                v_template,
+                sym_file=None,
+                I=symmetry_axis_vertices)
+            # symmetry file
+        else:
+            v_sym, self.left_inds, self.right_inds, self.center_inds = align_smal_template_to_symmetry_axis(
+                v_template,
+                sym_file=config.SMAL_SYM_FILE,
+                I=symmetry_axis_vertices)
+            # symmetry file
 
         # Mean template vertices
         self.v_template = Variable(
