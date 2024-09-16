@@ -25,19 +25,7 @@ import config
 # outside of specific quadruped meshes, dynamically generate these instead of using the hard-coded files
 if config.ignore_hardcoded_body:
     class Prior(object):
-        def __init__(self, prior_path, device):
-
-            # Remove this part once the pose prior (or lack thereof) is verified to work correctly.
-            if config.DEBUG:
-                print("\nPOSE PRIOR INFO: LOADED FROM PROVIDED DATA FILE, NOT THE SMIL MODEL!")
-                with open(prior_path, "rb") as f:
-                    res = pkl.load(f, encoding='latin1')
-                for key in res.keys():
-                        print(key)
-                        print(res[key].shape)
-                        print(res[key])
-                        print("\n")
-
+        def __init__(self, device):
             pose_len = len(config.dd["J_names"]) * 3
 
             # for now, assume the mean pose is equivalent to the default pose so set the angles to zero
@@ -86,10 +74,6 @@ class SMALFitter(nn.Module):
         self.n_betas = config.N_BETAS
 
         self.shape_family_list = np.array(shape_family)
-        with open(config.SMAL_DATA_FILE, 'rb') as f:
-            u = pkl._Unpickler(f)
-            u.encoding = 'latin1'
-            smal_data = u.load()
 
         if use_unity_prior:
             unity_data = np.load(config.UNITY_SHAPE_PRIOR)
@@ -106,13 +90,20 @@ class SMALFitter(nn.Module):
             # TODO: edit self.betas here according to N_BETAS. 
             # Either pad with zeros or restrict to less than 20
             self.log_beta_scales = torch.nn.Parameter(self.mean_betas[20:].clone())
+            self.pose_prior = Prior(config.WALKING_PRIOR_FILE, device)
         else:
             if config.ignore_hardcoded_body:
                 print("Using shape prior learned from 3D scanned models")
                 model_covs = config.dd["shape_cov"]
                 self.mean_betas = torch.FloatTensor(config.dd["shape_mean_betas"])[:config.N_BETAS].to(
                     device)
+                # Updated prior class at the beginning of this script, when ignore_hardcoded_body is True
+                self.pose_prior = Prior(device)
             else:
+                with open(config.SMAL_DATA_FILE, 'rb') as f:
+                    u = pkl._Unpickler(f)
+                    u.encoding = 'latin1'
+                    smal_data = u.load()
                 model_covs = np.array(smal_data['cluster_cov'])[[shape_family]][0]
                 self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
                     device)
@@ -127,15 +118,12 @@ class SMALFitter(nn.Module):
             prec = np.linalg.cholesky(invcov)
 
             self.betas_prec = torch.FloatTensor(prec)[:config.N_BETAS, :config.N_BETAS].to(device)
-            self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
-                device)
+
 
             self.betas = nn.Parameter(
                 self.mean_betas.clone())  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
             self.log_beta_scales = torch.nn.Parameter(
                 torch.zeros(self.num_images, 6).to(device), requires_grad=False)
-
-        self.pose_prior = Prior(config.WALKING_PRIOR_FILE, device)
 
         # treating everything as ball joints for now, see priors/joint_limits_prior.py
         limit_prior = LimitPrior()
@@ -226,6 +214,7 @@ class SMALFitter(nn.Module):
                 torch.max(batch_params['joint_rotations'] - self.max_limits, zeros) + \
                 torch.max(self.min_limits - batch_params['joint_rotations'], zeros))
 
+        # TODO Currently we don't have a valid pose prior! Double check the initialisation and that this does not violate our laoded joints!
         if w_pose > 0:
             objs['pose'] = w_pose * self.pose_prior(
                 torch.cat([

@@ -42,37 +42,12 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 
 # custom elements added:
-#SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
+# SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
 SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
 PLOT_RESULTS = False  # only applies to 3D fitting (fitter_3d/optimise.py)
 DEBUG = False  # use to get A LOT of "useful" messages
-
-if os.name == 'nt':
-    ## If WINDOWS
-    SMAL_DATA_FILE = join(SMAL_MODEL_PATH, 'my_smpl_data_00781_4_all_WIN.pkl')
-    SMAL_UV_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all_template_w_tex_uv_001_WIN.pkl')
-    if not ignore_sym:
-        SMAL_SYM_FILE = join(SMAL_MODEL_PATH, 'symIdx_WIN.pkl')
-    else:
-        SMAL_SYM_FILE = None
-
-    if not os.path.exists(SMAL_FILE):
-        print("Unable to find Windows file. Please run ./utilities/convert_smal_windows.ps1")
-
-    # PRIORS
-    WALKING_PRIOR_FILE = join(data_path, 'priors', 'walking_toy_symmetric_pose_prior_with_cov_35parts_WIN.pkl')
-else:
-    SMAL_DATA_FILE = join(SMAL_MODEL_PATH, 'my_smpl_data_00781_4_all.pkl')
-    SMAL_UV_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all_template_w_tex_uv_001.pkl')
-    if not ignore_sym:
-        SMAL_SYM_FILE = join(SMAL_MODEL_PATH, 'symIdx.pkl')
-    else:
-        SMAL_SYM_FILE = None
-
-    # PRIORS
-    WALKING_PRIOR_FILE = join(data_path, 'priors', 'walking_toy_symmetric_pose_prior_with_cov_35parts.pkl')
 
 # DATALOADER
 IMG_RES = 512
@@ -109,7 +84,7 @@ if ignore_hardcoded_body:
 
     # IDs of every joint that starts with b, referring to the animal body, including the tail
     # as this is used for the initial alignment, we include the mandibles as well to provide a sense of left vs right
-    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem in ["b_a_1","l_1_co_r", "l_1_co_l",
+    TORSO_JOINTS = [i for i, elem in enumerate(joint_names) if elem in ["b_a_1", "l_1_co_r", "l_1_co_l",
                                                                         "b_h", "ma_l", "ma_r"]]
 
     # exclude wings
@@ -119,7 +94,7 @@ if ignore_hardcoded_body:
     CANONICAL_MODEL_JOINTS = [i for i in range(len(joint_names))]
 
     # ignore joints (in case annotation conventions differ)
-    IGNORE_JOINTS = ["b_t", "b_a_4", "b_a_5"] # temporary
+    IGNORE_JOINTS = ["b_t", "b_a_4", "b_a_5"]  # temporary
     # -> replicAnt data places these in different locations then SMIL, see also smal_fitter/priors/joint_limits.py
 
     # same for all joints
@@ -146,6 +121,26 @@ if ignore_hardcoded_body:
 
 
 else:  # use joint and plotting configuration of default dog model:
+
+    if os.name == 'nt':
+        ## If WINDOWS
+        SMAL_DATA_FILE = join(SMAL_MODEL_PATH, 'my_smpl_data_00781_4_all_WIN.pkl')
+        SMAL_UV_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all_template_w_tex_uv_001_WIN.pkl')
+        SMAL_SYM_FILE = join(SMAL_MODEL_PATH, 'symIdx_WIN.pkl')
+
+        if not os.path.exists(SMAL_FILE):
+            print("Unable to find Windows file. Please run ./utilities/convert_smal_windows.ps1")
+
+        # PRIORS
+        WALKING_PRIOR_FILE = join(data_path, 'priors', 'walking_toy_symmetric_pose_prior_with_cov_35parts_WIN.pkl')
+    else:
+        SMAL_DATA_FILE = join(SMAL_MODEL_PATH, 'my_smpl_data_00781_4_all.pkl')
+        SMAL_UV_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all_template_w_tex_uv_001.pkl')
+        SMAL_SYM_FILE = join(SMAL_MODEL_PATH, 'symIdx.pkl')
+
+        # PRIORS
+        WALKING_PRIOR_FILE = join(data_path, 'priors', 'walking_toy_symmetric_pose_prior_with_cov_35parts.pkl')
+
     # JOINT DEFINITIONS
     TORSO_JOINTS = [2, 5, 8, 11, 12, 23]
 
