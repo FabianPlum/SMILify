@@ -123,19 +123,24 @@ def visualize_3d_scene(camera_translation, camera_intrinsics, subject_3d_locatio
     fig = plt.figure(figsize=(12, 12))
     ax = fig.add_subplot(111, projection='3d')
 
+    root_location = subject_3d_locations['b_t']
+    root_rotation = subject_rotations['b_t']
+
     # Plot subject keypoints
     colors = plt.cm.jet(np.linspace(0, 1, len(subject_3d_locations)))
     for i, ((key, location), color) in enumerate(zip(subject_3d_locations.items(), colors)):
-        ax.scatter(location['x'], location['y'], location['z'], c=[color], label=key)
+        location = np.array([location['x'], location['y'], location['z']])
+        root_location_transcribed = np.array([root_location['x'], root_location['y'], root_location['z']])
+        location_rel = location - root_location_transcribed
+        ax.scatter(location_rel[0], location_rel[1], location_rel[2], c=[color], label=key)
+
 
     # Plot root bone coordinate system
-    root_location = subject_3d_locations['b_t']
-    root_rotation = subject_rotations['b_t']
-    plot_coordinate_system(ax, [root_location['x'], root_location['y'], root_location['z']], 
+    plot_coordinate_system(ax, [0,0,0], 
                            root_rotation, scale=5)
 
     # Plot camera
-    plot_camera(ax, camera_translation, camera_intrinsics['FOV'], camera_view_matrix)
+    plot_camera(ax, camera_translation, camera_intrinsics['FOV'], camera_view_matrix, root_rel=root_location_transcribed)
 
     # Set equal aspect ratio
     ax.set_box_aspect((1, 1, 1))
@@ -186,7 +191,7 @@ def plot_coordinate_system(ax, origin, rotation, scale=1.0):
                   rotated_axis[0]*scale, rotated_axis[1]*scale, rotated_axis[2]*scale,
                   color=color, label=f'{label} axis')
 
-def plot_camera(ax, location, fov, view_matrix):
+def plot_camera(ax, location, fov, view_matrix, root_rel=None):
     """
     Plot the camera and its field of view using the camera view matrix.
 
@@ -201,10 +206,13 @@ def plot_camera(ax, location, fov, view_matrix):
         None. Plots the camera on the given axes.
     """
     cam_loc = np.array([location['x'], location['y'], location['z']])
+    if root_rel is not None:
+        cam_loc = cam_loc - root_rel
+
     ax.scatter(*cam_loc, c='k', s=100, label='Camera')
 
     # Extract rotation matrix from view matrix
-    R = view_matrix[:3, :3].T  # Transpose because view matrix is inverse of camera matrix
+    R = view_matrix[:3, :3].T  # Transpose
 
     # Camera looks along positive Z in Unreal Engine convention
     camera_dir = R[:, 2]
@@ -320,21 +328,33 @@ def return_placeholder_data(input_image=None, num_joints=54):
 
     return (rgb, sil, joints, visibility), filenames
 
+def map_joint_order(joint_names_smil, joint_names_input, joints):
+    # map joint names with correct ids regardless of order
+    new_joint_locs = np.zeros((len(joint_names_smil), 3), float)
+
+    for o, orig_joint in enumerate(joint_names_smil):
+        for m, mapped_joints in enumerate(joint_names_input):
+            if orig_joint == mapped_joints:
+                new_joint_locs[o] = joints[m]  # flip x and y
+
+    return new_joint_locs
+
+"""
 def unreal_euler_to_pytorch3d_rodrigues(x, y, z):
-    """
-    Convert Unreal Engine Euler angles to PyTorch3D Rodrigues vector.
     
-    Args:
-        x (float): Rotation around X-axis in degrees.
-        y (float): Rotation around Y-axis in degrees.
-        z (float): Rotation around Z-axis in degrees.
+    # Convert Unreal Engine Euler angles to PyTorch3D Rodrigues vector.
+    # 
+    # Args:
+    #    x (float): Rotation around X-axis in degrees.
+    #    y (float): Rotation around Y-axis in degrees.
+    #    z (float): Rotation around Z-axis in degrees.
+    # 
+    # Returns:
+    #    numpy.ndarray: Rodrigues vector in PyTorch3D coordinate system.
     
-    Returns:
-        numpy.ndarray: Rodrigues vector in PyTorch3D coordinate system.
-    """
     # Convert degrees to radians
     x, y, z = np.radians([x, y, z])
-    
+
     # Create rotation matrix
     Rx = rotation_matrix_x(x)
     Ry = rotation_matrix_y(y)
@@ -354,34 +374,128 @@ def unreal_euler_to_pytorch3d_rodrigues(x, y, z):
     
     # Convert to PyTorch3D coordinate system
     return np.array([-rodrigues[1], rodrigues[2], rodrigues[0]])
+"""
 
-def convert_camera_parameters(camera_translation, camera_view_matrix):
+def unreal_euler_to_pytorch3d_rodrigues(pitch, yaw, roll, return_R=False):
+    """
+    Converts Unreal Engine Euler angles (pitch, yaw, roll) to a Rodrigues vector
+    in the PyTorch3D coordinate system. If set return_R == True, the function will instead return
+    the rotation matrix of the input (as is required for the camera object of the fitter)
+
+    Unreal Engine uses:
+    - Pitch: rotation around X-axis
+    - Yaw: rotation around Z-axis
+    - Roll: rotation around Y-axis
+
+    PyTorch3D uses a right-handed coordinate system:
+    - X: left
+    - Y: up
+    - Z: forward
+
+    Args:
+        pitch (float): Rotation around X-axis in degrees (Unreal Engine).
+        yaw (float): Rotation around Z-axis in degrees (Unreal Engine).
+        roll (float): Rotation around Y-axis in degrees (Unreal Engine).
+
+    Returns:
+        rodrigues_vector (np.array): A Rodrigues vector in PyTorch3D coordinate system.
+    """
+
+    # Step 1: Convert Euler angles from degrees to radians
+    pitch = np.radians(pitch)
+    yaw = np.radians(yaw)
+    roll = np.radians(roll)
+
+    # Step 2: Create the rotation matrices in Unreal Engine's coordinate system
+    R_x = np.array([
+        [1, 0, 0],
+        [0, np.cos(pitch), -np.sin(pitch)],
+        [0, np.sin(pitch), np.cos(pitch)]
+    ])
+
+    R_y = np.array([
+        [np.cos(roll), 0, np.sin(roll)],
+        [0, 1, 0],
+        [-np.sin(roll), 0, np.cos(roll)]
+    ])
+
+    R_z = np.array([
+        [np.cos(yaw), -np.sin(yaw), 0],
+        [np.sin(yaw), np.cos(yaw), 0],
+        [0, 0, 1]
+    ])
+
+    # Step 3: Combine the rotation matrices
+    # Unreal Engine applies rotations in ZYX order: R = R_z * R_y * R_x
+    R_unreal = R_z @ R_y @ R_x
+
+    # Step 4: Adjust for the coordinate system transformation to PyTorch3D
+    # Unreal Engine to PyTorch3D: +X -> -Y, +Y -> +Z, +Z -> +X
+    conversion_matrix = np.array([
+        [0, 1, 0],  # X' = Y
+        [0, 0, 1],  # Y' = Z
+        [1, 0, 0]  # Z' = X
+    ])
+
+    # Apply the conversion matrix
+    R_pytorch3d = conversion_matrix @ R_unreal @ conversion_matrix.T
+
+    # when requiring only the rotation matrix, not the Rodrigues vector
+    if return_R:
+        return R_pytorch3d
+
+    # Step 5: Convert the adjusted rotation matrix to a Rodrigues vector
+    theta = np.arccos(np.clip((np.trace(R_pytorch3d) - 1) / 2, -1, 1))
+
+    if np.isclose(theta, 0):
+        # Small rotation, return zero vector
+        return np.zeros(3)
+    else:
+        rodrigues_vector = (1 / (2 * np.sin(theta))) * np.array([
+            R_pytorch3d[2, 1] - R_pytorch3d[1, 2],
+            R_pytorch3d[0, 2] - R_pytorch3d[2, 0],
+            R_pytorch3d[1, 0] - R_pytorch3d[0, 1]
+        ]) * theta
+
+    return rodrigues_vector
+
+def convert_camera_parameters(camera_translation, camera_view_matrix, subject_location=None):
     """
     Convert camera parameters from Unreal Engine to PyTorch3D convention.
 
     Args:
         camera_translation (dict): Camera location in Unreal Engine coordinates.
         camera_view_matrix (np.ndarray): 4x4 camera view matrix from Unreal Engine.
+        subject_location (dict, optional): Subject location in Unreal Engine coordinates.
 
     Returns:
         tuple: (camera_location, camera_rotation) in PyTorch3D convention.
     """
     camera_location = unreal_to_pytorch3d_coords(camera_translation)
-    
+
+    if subject_location is not None:
+        subject_location = unreal_to_pytorch3d_coords(subject_location)
+        camera_location = camera_location - subject_location
+
     # Convert UE5 view matrix to OpenGL/PyTorch3D convention
-    opengl_from_ue = np.array([
+    ue_to_opengl = np.array([
+        [0, 1, 0],
         [0, 0, 1],
-        [1, 0, 0],
-        [0, 1, 0]
+        [1, 0, 0]
     ])
+
+    # Extract rotation matrix from view matrix and invert it
+    R = np.linalg.inv(camera_view_matrix[:3, :3])
     
-    # Invert the view matrix as it's typically done for camera transformations
-    inverted_view_matrix = np.linalg.inv(camera_view_matrix[:3, :3])
+    # Convert from UE to OpenGL/PyTorch3D coordinate system
+    opengl_rotation = ue_to_opengl @ R @ ue_to_opengl.T
     
-    opengl_view_matrix = opengl_from_ue @ inverted_view_matrix @ opengl_from_ue.T
-    
-    # The rotation matrix is now directly usable (no need for transpose)
-    camera_rotation = opengl_view_matrix
+    # Adjust rotation to make camera face the subject
+    camera_rotation = opengl_rotation @ np.array([
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, 0, -1]
+    ])
 
     return camera_location, camera_rotation
 
@@ -394,7 +508,7 @@ if __name__ == '__main__':
     print(f"Current directory: {current_dir}")
     
     # Construct the path to the JSON file
-    json_file_path = os.path.abspath(os.path.join(current_dir, "..", "data", "replicAnt_trials", "TEST_ANGLES", "TEST_ANGLES_00.json"))
+    json_file_path = os.path.abspath(os.path.join(current_dir, "..", "data", "replicAnt_trials", "TEST_ANGLES", "TEST_ANGLES_46.json"))
     
     # Check if the file exists
     if not os.path.exists(json_file_path):
@@ -414,7 +528,7 @@ if __name__ == '__main__':
                 print("Warning: Image not loaded. Proceeding with visualization without image.")
 
             # Visualize the 3D scene
-            visualize_3d_scene(camera_translation, camera_intrinsics, subject_3d_locations, subject_rotations, camera_view_matrix)
+            #visualize_3d_scene(camera_translation, camera_intrinsics, subject_3d_locations, subject_rotations, camera_view_matrix)
 
 
         except Exception as e:
@@ -424,7 +538,7 @@ if __name__ == '__main__':
                 print(f"File permissions: {oct(os.stat(json_file_path).st_mode)[-3:]}")
 
     """
-    STEP 2 - LOAD SMIL MODEL AND RENDER OUTPUT
+    STEP 2 - LOAD SMIL MODEL AND SET MODEL PARAMETERS
     """
     print("\nINFO: Loading SMIL model and rendering output...")
 
@@ -434,42 +548,82 @@ if __name__ == '__main__':
     data_json, filenames = return_placeholder_data(input_image=image_path, num_joints=54)
     model = SMALFitter(device, data_json, config.WINDOW_SIZE, config.SHAPE_FAMILY, use_unity_prior=False)
 
-    # Apply shape betas and joint rotations
+    # Apply shape betas [check if these are applied to the base mesh or if these are deviations from the mean betas]
     shape_betas = data['iterationData']['subject Data'][0]["1"]["shape betas"]
-    model.betas = torch.nn.Parameter(torch.tensor(shape_betas, device=device).float().unsqueeze(0))
+
+    joint_angles = []
+    joint_names = []
+
+    for key in subject_rotations:
+        joint_names.append(key)
+
+        rodrigues_angle = unreal_euler_to_pytorch3d_rodrigues(pitch=subject_rotations[key]["y"],
+                                                              yaw=subject_rotations[key]["z"],
+                                                              roll=subject_rotations[key]["x"])
+
+        print(key, rodrigues_angle)
+        joint_angles.append(rodrigues_angle)
+
+    np_joint_angles = np.array(joint_angles)
+
+    # map joints, in case the order differs. The root bone is expected to be the first entry
+    np_joint_angles_mapped = map_joint_order(config.dd["J_names"], joint_names, np_joint_angles)
+
+    # Convert shape betas to a NumPy array
+    if len(shape_betas) == 0:
+        shape_betas = np.zeros(20)
+    else:
+        shape_betas = np.array(shape_betas)
+
+    # Display the extracted data
+    print("Shape Betas:", shape_betas.shape)
+    print("Pose Data:", np_joint_angles_mapped.shape)
+
+    # applmodel parameters
+    # model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
+    model.joint_rotations = torch.nn.Parameter(
+        torch.Tensor(np_joint_angles_mapped[1:]).reshape((1, np_joint_angles_mapped[1:].shape[0], 3)).to(device))
+
 
     # Handle global rotation separately
-    global_rotation = unreal_euler_to_pytorch3d_rodrigues(subject_rotations['b_t']['x'], subject_rotations['b_t']['y'], subject_rotations['b_t']['z'])
+    global_rotation = unreal_euler_to_pytorch3d_rodrigues(pitch=subject_rotations['b_t']['y'], 
+                                                          yaw=subject_rotations['b_t']['z'],
+                                                          roll=-subject_rotations['b_t']['x']) # TODO: Check if this needs to be negated
     model.global_rotation = torch.nn.Parameter(torch.tensor(global_rotation, device=device).float().unsqueeze(0))
 
-    # TODO get and apply subject angles, akin to visualise_replicAnt_x_SMIL_data.py
-    
+    """
+    STEP 3 - APPLY CAMERA PARAMETERS
+    """
+
     # Set camera parameters
     camera_data = data['iterationData']['camera']
     fov = torch.tensor([camera_data['FOV']], device=device)
     model.fov = torch.nn.Parameter(fov)
     model.renderer.cameras.fov = fov
-
-    """
-    # TODO: Fix camera parameter setting as currently the model goes out of view when this is applied
     
-    # Convert camera parameters
-    camera_location, camera_rotation = convert_camera_parameters(camera_translation, camera_view_matrix)
+    # Convert camera parameters and keep subject location fixed at origin, so move the camera by their offset
+    camera_location, camera_rotation = convert_camera_parameters(camera_translation, camera_view_matrix, subject_location=subject_3d_locations['b_t'])
 
     # Convert to torch tensor and add batch dimension
     R = torch.from_numpy(camera_rotation).to(device).float().unsqueeze(0)
     T = torch.from_numpy(camera_location).to(device).float().unsqueeze(0)
+    fov = torch.tensor([camera_intrinsics['FOV']], device=device).float()
 
-    model.renderer.cameras.R = R
-    model.renderer.cameras.T = T
+    # TODO: Fix camera parameter setting as currently the model goes out of view when this is applied
+    #model.renderer.set_camera_parameters(R, T, fov)
 
-    # Set model translation (root position)
-    root_position = unreal_to_pytorch3d_coords(subject_3d_locations['b_t'])
-    model.trans = torch.nn.Parameter(torch.tensor(root_position, device=device).float().unsqueeze(0))
+    print(model.renderer.cameras.R)
+    print(model.renderer.cameras.T)
+
+    print("\n")
+
+    print(R)
+    print(T)
+
     """
-
-    # Render output
-    print("\nINFO: Rendering output")
+    STEP 4 - RENDER OUTPUT
+    """
+    print("\nINFO: Rendering output...")
     
     # Create a new output directory at the base of the repo
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

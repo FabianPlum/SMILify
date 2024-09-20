@@ -20,14 +20,11 @@ class Renderer(torch.nn.Module):
         super(Renderer, self).__init__()
 
         self.image_size = image_size
-        # The distance (dist) is somewhat arbitrary, and only chosen to roughly align with what to expect when the
-        # model fills the majority of the screen at the given size at the default FOV of 60 degrees
+        self.device = device
+
+        # Initialize with default camera parameters
         R, T = look_at_view_transform(2.7, 0, 0, device=device)
         self.cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T, fov=60)
-        # TODO -> At the moment the camera intrinsics are not updated by the fitter so a constant FOV is used!
-        # Add the FOV as a tuneable parameter, so distortion can be estimated as well.
-        # This may however lead to strange results here, as the default pipeline crops the image to the bounds of the
-        # silhouette. Perhaps I leave this untouched. Now I know what's happening. That's valuable.
         print("Camera field of view:", str(self.cameras.fov.item()), "degrees")
         self.mesh_color = torch.FloatTensor(config.MESH_COLOR).to(device)[None, None, :] / 255.0
 
@@ -65,6 +62,19 @@ class Renderer(torch.nn.Module):
                 lights=lights,
             )
         )
+
+    def set_camera_parameters(self, R, T, fov):
+        """
+        Set the camera parameters for the renderer.
+
+        Args:
+            R (torch.Tensor): Rotation matrix of the camera.
+            T (torch.Tensor): Translation vector of the camera.
+            fov (torch.Tensor): Field of view of the camera.
+        """
+        self.cameras = OpenGLPerspectiveCameras(device=self.device, R=R, T=T, fov=fov)
+        self.silhouette_renderer.rasterizer.cameras = self.cameras
+        self.color_renderer.rasterizer.cameras = self.cameras
 
     def forward(self, vertices, points, faces, render_texture=False):
         tex = torch.ones_like(vertices) * self.mesh_color  # (1, V, 3)
