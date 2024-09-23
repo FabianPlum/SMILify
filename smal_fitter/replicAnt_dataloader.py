@@ -9,10 +9,10 @@ import imageio.v2 as imageio
 import numpy as np
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import torch
 from smal_fitter import SMALFitter
 from optimize_to_joints import ImageExporter
+from scipy.spatial.transform import Rotation
 import config
 
 
@@ -459,7 +459,11 @@ def unreal_euler_to_pytorch3d_rodrigues(pitch, yaw, roll, return_R=False):
 
     return rodrigues_vector
 
-def convert_camera_parameters(camera_translation, camera_view_matrix, subject_location=None, scale_factor=1.0):
+def convert_camera_parameters(camera_translation, 
+                              camera_view_matrix, 
+                              subject_location=None, 
+                              scale_factor=1.0,
+                              camera_rotation=None):
     """
     Convert camera parameters from Unreal Engine to PyTorch3D convention.
 
@@ -472,34 +476,36 @@ def convert_camera_parameters(camera_translation, camera_view_matrix, subject_lo
         tuple: (camera_location, camera_rotation) in PyTorch3D convention.
     """
 
-    """
-    # dummy matrix to test
-    camera_view_matrix = np.array([
-        [-1, 0, 0, 0],
-        [0, -1, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-    ])
-    """
+    use_dummy_matrix = False
+
+    if use_dummy_matrix:
+        # dummy matrix to test
+        camera_view_matrix = np.array([
+            [-1, 0, 0, 0], # X' = Y
+            [0, -1, 0, 0], # Y' = Z
+            [0, 0, 1, 0],  # Z' = X
+            [0, 0, 0, 1]
+        ])
+
 
     # Convert camera location to PyTorch3D coordinates
     camera_location = unreal_to_pytorch3d_coords(camera_translation)
+
+    print("camera_location", camera_location)
+    print("subject_location", subject_location)
  
     if subject_location is not None:
         subject_location = unreal_to_pytorch3d_coords(subject_location)
-        camera_location = (camera_location - subject_location) # * scale_factor
+        camera_location = camera_location - subject_location
         # because the camera points in negative x direction, we need to invert the x axis
         camera_location[2] = -camera_location[2]
     
-    #dummy translation
-    # Okay, so this shows, there is a difference in scale between how the model is treated the UE and PyTorch3D
-    # The scale factor here is just a best guess and needs to be checked both in the Unreal and PyTorch3D parts
-    camera_location = np.array([0, 0, np.linalg.norm(camera_location) * scale_factor])
+    camera_location *= scale_factor
     # so for now, we'll apply a scale factor to the camera location to make sure the model is roughly to scale
+    camera_location = np.array([0,0,5])
 
     # Extract rotation matrix from view matrix
     R_ue = camera_view_matrix[:3, :3] # Transpose
-    
     # Convert from UE to PyTorch3D coordinate system
     conversion_matrix = np.array([
         [0, 1, 0],  # X' = Y
@@ -508,6 +514,14 @@ def convert_camera_parameters(camera_translation, camera_view_matrix, subject_lo
     ])
 
     R_pytorch3d = conversion_matrix @ R_ue @ conversion_matrix.T
+
+    if camera_rotation is not None:
+        x = camera_rotation['roll']
+        y = camera_rotation['pitch']
+        z = camera_rotation['yaw']
+        R_pytorch3d = Rotation.from_euler('zyx', [z, y, x], degrees=True).as_matrix()
+
+        R_pytorch3d = conversion_matrix @ R_pytorch3d.T @ conversion_matrix.T
 
     return camera_location, R_pytorch3d
 
@@ -540,7 +554,7 @@ if __name__ == '__main__':
                 print("Warning: Image not loaded. Proceeding with visualization without image.")
 
             # Visualize the 3D scene
-            visualize_3d_scene(camera_translation, camera_intrinsics, subject_3d_locations, subject_rotations, camera_view_matrix)
+            # visualize_3d_scene(camera_translation, camera_intrinsics, subject_3d_locations, subject_rotations, camera_view_matrix)
 
 
         except Exception as e:
@@ -593,9 +607,9 @@ if __name__ == '__main__':
 
     # apply model parameters
     # betas
-    #model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
+    model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
     
-    """
+    
     # joint rotations
     model.joint_rotations = torch.nn.Parameter(
         torch.Tensor(np_joint_angles_mapped[1:]).reshape((1, np_joint_angles_mapped[1:].shape[0], 3)).to(device))
@@ -605,9 +619,10 @@ if __name__ == '__main__':
     # Handle global rotation separately
     global_rotation = unreal_euler_to_pytorch3d_rodrigues(pitch=subject_rotations['b_t']['y'], 
                                                           yaw=subject_rotations['b_t']['z'],
-                                                          roll=subject_rotations['b_t']['x']) # TODO: Check if this needs to be negated
+                                                          roll=-subject_rotations['b_t']['x']) # TODO: Check if this needs to be negated
+    
     model.global_rotation = torch.nn.Parameter(torch.tensor(global_rotation, device=device).float().unsqueeze(0))
-    """
+    
 
     """
     STEP 3 - APPLY CAMERA PARAMETERS
@@ -615,14 +630,17 @@ if __name__ == '__main__':
 
     # Set camera parameters
     camera_data = data['iterationData']['camera']
+    camera_rotation = camera_data['Rotation']
+    
     fov = torch.tensor([camera_data['FOV']], device=device)
-    model.fov = torch.nn.Parameter(fov)
-    model.renderer.cameras.fov = fov
+    #model.fov = torch.nn.Parameter(fov)
+    #model.renderer.cameras.fov = fov
     
     # Convert camera parameters
     camera_location, camera_rotation = convert_camera_parameters(camera_translation, camera_view_matrix, 
                                                                  subject_location=subject_3d_locations['b_t'],
-                                                                 scale_factor=1/20.0)
+                                                                 scale_factor=1/20.0,
+                                                                 camera_rotation=camera_rotation)
 
     print("Camera R:", model.renderer.cameras.R)
     print("Camera T:", model.renderer.cameras.T)
@@ -635,15 +653,13 @@ if __name__ == '__main__':
 
     # TODO: Fix camera parameter setting as currently the model goes out of view when this is applied
     model.renderer.set_camera_parameters(R, T, fov)
-
-    print("Camera R:", R)
-    print("Camera T:", T)
-    print("Camera FOV:", fov)
+    
+    print("Camera R:", model.renderer.cameras.R)
+    print("Camera T:", model.renderer.cameras.T)
+    print("Camera FOV:", model.renderer.cameras.fov)
 
     print("\n")
 
-    print(R)
-    print(T)
 
     """
     STEP 4 - RENDER OUTPUT
