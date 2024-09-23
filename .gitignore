@@ -12,6 +12,11 @@ __pycache__/
 # Temp results
 Fitter_RESULTS/
 fit3d_results
+output/
+
+# unless specifically added, ignore videos
+*.mp4
+
 
 # All models
 fitter_3d/ALL_ANTS/
