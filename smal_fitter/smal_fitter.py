@@ -74,12 +74,13 @@ class SMALFitter(nn.Module):
         self.n_betas = config.N_BETAS
 
         self.shape_family_list = np.array(shape_family)
-        with open(config.SMAL_DATA_FILE, 'rb') as f:
-            u = pkl._Unpickler(f)
-            u.encoding = 'latin1'
-            smal_data = u.load()
 
         if use_unity_prior:
+            with open(config.SMAL_DATA_FILE, 'rb') as f:
+                u = pkl._Unpickler(f)
+                u.encoding = 'latin1'
+                smal_data = u.load()
+
             unity_data = np.load(config.UNITY_SHAPE_PRIOR)
             model_covs = unity_data['cov'][:-1, :-1]
             mean_betas = torch.from_numpy(unity_data['mean'][:-1]).float().to(device)
@@ -115,7 +116,14 @@ class SMALFitter(nn.Module):
                     device)
                 self.pose_prior = Prior(device)
             else:
+                with open(config.SMAL_DATA_FILE, 'rb') as f:
+                    u = pkl._Unpickler(f)
+                    u.encoding = 'latin1'
+                    smal_data = u.load()
+
                 model_covs = np.array(smal_data['cluster_cov'])[[shape_family]][0]
+                self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
+                    device)
                 self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
                     device)
                 
@@ -142,8 +150,6 @@ class SMALFitter(nn.Module):
             prec = np.linalg.cholesky(invcov)
 
             self.betas_prec = torch.FloatTensor(prec)[:config.N_BETAS, :config.N_BETAS].to(device)
-            self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
-                device)
 
             self.betas = nn.Parameter(
                 self.mean_betas.clone())  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
