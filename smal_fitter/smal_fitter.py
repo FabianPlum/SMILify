@@ -342,6 +342,7 @@ class SMALFitter(nn.Module):
                 verts_mean = verts - torch.mean(verts, dim=1, keepdim=True)
                 joints_mean = canonical_joints - torch.mean(verts, dim=1, keepdim=True)
 
+                # render image with camera rotated 180 degrees to provide a separate view
                 _, rev_joints, rev_images = self.renderer(
                     (rot_matrix @ verts_mean.unsqueeze(-1)).squeeze(-1),
                     (rot_matrix @ joints_mean.unsqueeze(-1)).squeeze(-1),
