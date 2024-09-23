@@ -34,7 +34,6 @@ IMAGE_RANGE = range(0, 1)  # Frames to process from sequence. Ignored for stanfo
 WINDOW_SIZE = 10  # Changed number of frames processed in one go.
 
 # Generate video settings
-CHECKPOINT_NAME = "20240923-131313"  # the directory to run
 EPOCH_NAME = "st10_ep0"  # convention used for the final output file. Don't change this without good reason.
 
 # SMAL
