@@ -459,7 +459,7 @@ def unreal_euler_to_pytorch3d_rodrigues(pitch, yaw, roll, return_R=False):
 
     return rodrigues_vector
 
-def convert_camera_parameters(camera_translation, camera_view_matrix, subject_location=None):
+def convert_camera_parameters(camera_translation, camera_view_matrix, subject_location=None, scale_factor=1.0):
     """
     Convert camera parameters from Unreal Engine to PyTorch3D convention.
 
@@ -471,33 +471,45 @@ def convert_camera_parameters(camera_translation, camera_view_matrix, subject_lo
     Returns:
         tuple: (camera_location, camera_rotation) in PyTorch3D convention.
     """
-    camera_location = unreal_to_pytorch3d_coords(camera_translation)
 
+    """
+    # dummy matrix to test
+    camera_view_matrix = np.array([
+        [-1, 0, 0, 0],
+        [0, -1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ])
+    """
+
+    # Convert camera location to PyTorch3D coordinates
+    camera_location = unreal_to_pytorch3d_coords(camera_translation)
+ 
     if subject_location is not None:
         subject_location = unreal_to_pytorch3d_coords(subject_location)
-        camera_location = camera_location - subject_location
+        camera_location = (camera_location - subject_location) # * scale_factor
+        # because the camera points in negative x direction, we need to invert the x axis
+        camera_location[2] = -camera_location[2]
+    
+    #dummy translation
+    # Okay, so this shows, there is a difference in scale between how the model is treated the UE and PyTorch3D
+    # The scale factor here is just a best guess and needs to be checked both in the Unreal and PyTorch3D parts
+    camera_location = np.array([0, 0, np.linalg.norm(camera_location) * scale_factor])
+    # so for now, we'll apply a scale factor to the camera location to make sure the model is roughly to scale
 
-    # Convert UE5 view matrix to OpenGL/PyTorch3D convention
-    ue_to_opengl = np.array([
-        [0, 1, 0],
-        [0, 0, 1],
-        [1, 0, 0]
+    # Extract rotation matrix from view matrix
+    R_ue = camera_view_matrix[:3, :3] # Transpose
+    
+    # Convert from UE to PyTorch3D coordinate system
+    conversion_matrix = np.array([
+        [0, 1, 0],  # X' = Y
+        [0, 0, 1],  # Y' = Z
+        [1, 0, 0]   # Z' = X
     ])
 
-    # Extract rotation matrix from view matrix and invert it
-    R = np.linalg.inv(camera_view_matrix[:3, :3])
-    
-    # Convert from UE to OpenGL/PyTorch3D coordinate system
-    opengl_rotation = ue_to_opengl @ R @ ue_to_opengl.T
-    
-    # Adjust rotation to make camera face the subject
-    camera_rotation = opengl_rotation @ np.array([
-        [-1, 0, 0],
-        [0, 1, 0],
-        [0, 0, -1]
-    ])
+    R_pytorch3d = conversion_matrix @ R_ue @ conversion_matrix.T
 
-    return camera_location, camera_rotation
+    return camera_location, R_pytorch3d
 
 if __name__ == '__main__':
     """
@@ -508,7 +520,7 @@ if __name__ == '__main__':
     print(f"Current directory: {current_dir}")
     
     # Construct the path to the JSON file
-    json_file_path = os.path.abspath(os.path.join(current_dir, "..", "data", "replicAnt_trials", "TEST_ANGLES", "TEST_ANGLES_46.json"))
+    json_file_path = os.path.abspath(os.path.join(current_dir, "..", "data", "replicAnt_trials", "TEST_ANGLES", "TEST_ANGLES_00.json"))
     
     # Check if the file exists
     if not os.path.exists(json_file_path):
@@ -528,7 +540,7 @@ if __name__ == '__main__':
                 print("Warning: Image not loaded. Proceeding with visualization without image.")
 
             # Visualize the 3D scene
-            #visualize_3d_scene(camera_translation, camera_intrinsics, subject_3d_locations, subject_rotations, camera_view_matrix)
+            visualize_3d_scene(camera_translation, camera_intrinsics, subject_3d_locations, subject_rotations, camera_view_matrix)
 
 
         except Exception as e:
@@ -548,9 +560,6 @@ if __name__ == '__main__':
     data_json, filenames = return_placeholder_data(input_image=image_path, num_joints=54)
     model = SMALFitter(device, data_json, config.WINDOW_SIZE, config.SHAPE_FAMILY, use_unity_prior=False)
 
-    # Apply shape betas [check if these are applied to the base mesh or if these are deviations from the mean betas]
-    shape_betas = data['iterationData']['subject Data'][0]["1"]["shape betas"]
-
     joint_angles = []
     joint_names = []
 
@@ -569,6 +578,9 @@ if __name__ == '__main__':
     # map joints, in case the order differs. The root bone is expected to be the first entry
     np_joint_angles_mapped = map_joint_order(config.dd["J_names"], joint_names, np_joint_angles)
 
+    # load shape betas [check if these are applied to the base mesh or if these are deviations from the mean betas]
+    shape_betas = data['iterationData']['subject Data'][0]["1"]["shape betas"]
+
     # Convert shape betas to a NumPy array
     if len(shape_betas) == 0:
         shape_betas = np.zeros(20)
@@ -579,17 +591,23 @@ if __name__ == '__main__':
     print("Shape Betas:", shape_betas.shape)
     print("Pose Data:", np_joint_angles_mapped.shape)
 
-    # applmodel parameters
-    # model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
+    # apply model parameters
+    # betas
+    #model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
+    
+    """
+    # joint rotations
     model.joint_rotations = torch.nn.Parameter(
         torch.Tensor(np_joint_angles_mapped[1:]).reshape((1, np_joint_angles_mapped[1:].shape[0], 3)).to(device))
 
 
+    
     # Handle global rotation separately
     global_rotation = unreal_euler_to_pytorch3d_rodrigues(pitch=subject_rotations['b_t']['y'], 
                                                           yaw=subject_rotations['b_t']['z'],
-                                                          roll=-subject_rotations['b_t']['x']) # TODO: Check if this needs to be negated
+                                                          roll=subject_rotations['b_t']['x']) # TODO: Check if this needs to be negated
     model.global_rotation = torch.nn.Parameter(torch.tensor(global_rotation, device=device).float().unsqueeze(0))
+    """
 
     """
     STEP 3 - APPLY CAMERA PARAMETERS
@@ -601,8 +619,14 @@ if __name__ == '__main__':
     model.fov = torch.nn.Parameter(fov)
     model.renderer.cameras.fov = fov
     
-    # Convert camera parameters and keep subject location fixed at origin, so move the camera by their offset
-    camera_location, camera_rotation = convert_camera_parameters(camera_translation, camera_view_matrix, subject_location=subject_3d_locations['b_t'])
+    # Convert camera parameters
+    camera_location, camera_rotation = convert_camera_parameters(camera_translation, camera_view_matrix, 
+                                                                 subject_location=subject_3d_locations['b_t'],
+                                                                 scale_factor=1/20.0)
+
+    print("Camera R:", model.renderer.cameras.R)
+    print("Camera T:", model.renderer.cameras.T)
+    print("Camera FOV:", model.renderer.cameras.fov)
 
     # Convert to torch tensor and add batch dimension
     R = torch.from_numpy(camera_rotation).to(device).float().unsqueeze(0)
@@ -610,10 +634,11 @@ if __name__ == '__main__':
     fov = torch.tensor([camera_intrinsics['FOV']], device=device).float()
 
     # TODO: Fix camera parameter setting as currently the model goes out of view when this is applied
-    #model.renderer.set_camera_parameters(R, T, fov)
+    model.renderer.set_camera_parameters(R, T, fov)
 
-    print(model.renderer.cameras.R)
-    print(model.renderer.cameras.T)
+    print("Camera R:", R)
+    print("Camera T:", T)
+    print("Camera FOV:", fov)
 
     print("\n")
 
