@@ -1,8 +1,6 @@
 import sys, os
-
 import cv2
 import imageio
-
 sys.path.append(os.path.dirname(sys.path[0]))
 import numpy as np
 import config
@@ -651,10 +649,6 @@ if __name__ == '__main__':
     # Y + = up
     # Z + = away from camera
 
-    X_hom_pytorch = np.array([-X_hom[1], X_hom[2], X_hom[0]])
-
-    X_hom_pytorch = X_hom_pytorch.reshape((3,-1))
-
     # next, we want the rotation (of the model's root (b_t), so model.global_rotation
 
     # TODO get rotation relative to camera
@@ -682,10 +676,19 @@ if __name__ == '__main__':
     """
     model.renderer.cameras.R = R.clone().detach().to(device).unsqueeze(0)
     model.renderer.cameras.T = T.clone().detach().to(device).unsqueeze(0)
-    
     """
-    model.trans = torch.nn.Parameter(torch.tensor(X_hom_pytorch).to(device).unsqueeze(0))
+    
+    print("model.trans")
+    print(model.trans.shape)
+    print(model.trans)
+    
+    X_hom_pytorch = np.array([-X_hom[1], X_hom[2], X_hom[0]], dtype=float)
+    X_hom_pytorch = X_hom_pytorch.reshape(1, 3)  # Reshape to (1, 3)
+    model.trans = torch.nn.Parameter(torch.tensor(X_hom_pytorch, dtype=torch.float32).to(device))
 
+    print("model.trans")
+    print(model.trans.shape)
+    print(model.trans)
 
     # camera -> X+ left, Y+ up, Z+ forward (away from camera)
     # the model is located at the origin
