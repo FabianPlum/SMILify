@@ -29,6 +29,9 @@ data/SMALST/
 data/StanfordExtra/
 LOCAL_TEST/
 
+#scraped data
+custom_processing/antscan_data/
+
 #pycharm dev
 .idea/
 .vscode/
