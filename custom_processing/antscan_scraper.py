@@ -11,6 +11,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from remove_temp_files import remove_temp_files, remove_empty_and_no_stl_directories, count_valid_scans
 
 # URL to scrape
 BASE_URL = "https://biomedisa.info/antscan/?show_all=True#"
@@ -162,3 +163,10 @@ if __name__ == "__main__":
     print("Starting download of STL files...")
     downloaded_files = scrape_stl_files(specimen_links, DOWNLOAD_DIR)
     print("Downloaded files:", downloaded_files)
+
+    # Perform cleaning after scraping
+    print(f"\nCleaning temporary files in {DOWNLOAD_DIR}...")
+    remove_temp_files(DOWNLOAD_DIR)
+    remove_empty_and_no_stl_directories(DOWNLOAD_DIR)
+    valid_scans = count_valid_scans(DOWNLOAD_DIR)
+    print(f"Cleaning complete. Number of valid scans: {valid_scans}")
