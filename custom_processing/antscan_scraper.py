@@ -10,6 +10,7 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # URL to scrape
 BASE_URL = "https://biomedisa.info/antscan/?show_all=True#"
@@ -50,15 +51,13 @@ def get_specimen_links(base_url):
     print(f"Found {len(specimen_links)} unique specimen links.")
     return list(specimen_links)  # Convert the set back to a list
 
-def scrape_stl_files(specimen_links, download_dir):
-    downloaded_files = []  # List to store paths of downloaded files
-
-    # Set up Selenium WebDriver
+def process_specimen(specimen_url, download_dir, extension_path):
     options = Options()
+    options.add_argument(f"--load-extension={extension_path}")
     driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
 
-    for i, specimen_url in enumerate(specimen_links):
-        print(f"Processing specimen {i + 1}/{len(specimen_links)}: {specimen_url}")
+    try:
+        print(f"Processing specimen: {specimen_url}")
         driver.get(specimen_url)
         time.sleep(2)  # Wait for the page to load
 
@@ -68,11 +67,10 @@ def scrape_stl_files(specimen_links, download_dir):
 
         if not download_buttons:
             print(f"No download buttons found for specimen {specimen_url}")
-            continue
+            return None
 
         # Extract metadata from input fields
         metadata = {}
-        
         for input_tag in soup.find_all('input', id=True):
             if input_tag['id'].startswith('id_'):
                 key = input_tag['id'][3:]  # Remove 'id_' prefix
@@ -126,7 +124,6 @@ def scrape_stl_files(specimen_links, download_dir):
                                     new_file_path = os.path.join(specimen_dir, new_file)
                                     new_file_renamed = os.path.join(specimen_dir, f"{base_filename}.stl")
                                     os.rename(new_file_path, new_file_renamed)
-                                    downloaded_files.append(new_file_renamed)  # Add the downloaded file path to the list
                                     print(f"Successfully downloaded and renamed to {new_file_renamed}")
                                     download_complete = True
                                     break
@@ -142,7 +139,22 @@ def scrape_stl_files(specimen_links, download_dir):
                     print(f"Error clicking download button for {specimen_url}: {e}")
                 time.sleep(5)  # Wait for 5 seconds before the next download
 
-    driver.quit()
+    finally:
+        driver.quit()
+
+    return specimen_dir  # Return the specimen directory path
+
+def scrape_stl_files(specimen_links, download_dir, max_workers=5):
+    extension_path = os.path.join(os.path.dirname(__file__), "chrome_extension")
+    downloaded_files = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_specimen, url, download_dir, extension_path): url for url in specimen_links}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                downloaded_files.append(result)
+
     return downloaded_files  # Return the list of downloaded file paths
 
 if __name__ == "__main__":
