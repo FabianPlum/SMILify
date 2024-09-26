@@ -5,6 +5,7 @@ from mathutils import Vector
 import math
 import addon_utils
 import numpy as np
+import os
 
 def ensure_addon_enabled(addon_name):
     """
@@ -227,12 +228,45 @@ def find_largest_component(obj):
     
     bpy.ops.object.mode_set(mode='OBJECT')
 
-def process_stl(stl_path, max_vertices=20000, ray_density=1000, secondary_rays=5):
+def export_mesh_to_obj(obj, filepath):
+    if obj.type != 'MESH':
+        raise TypeError("The selected object is not a mesh.")
+
+    # Convert mesh to triangles
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.quads_convert_to_tris()
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    mesh = obj.data
+    vertices = []
+    faces = []
+
+    for vert in mesh.vertices:
+        vertices.append(vert.co)
+
+    for poly in mesh.polygons:
+        if len(poly.vertices) == 3:
+            faces.append(poly.vertices)
+        else:
+            raise ValueError(f"Face with vertices {poly.vertices} is not a triangle and will be skipped.")
+
+    with open(filepath, 'w') as file:
+        for vert in vertices:
+            file.write(f"v {vert.x} {vert.y} {vert.z}\n")
+
+        for face in faces:
+            file.write(f"f {face[0] + 1} {face[1] + 1} {face[2] + 1}\n")
+
+    return filepath
+
+def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000, secondary_rays=5):
     """
     Processes an STL file by importing, cleaning, simplifying, and decimating the mesh.
 
     Args:
         stl_path (str): The file path of the STL file to process.
+        output_dir (str, optional): The directory to save the processed mesh. If None, saves in the same directory as the input file.
         max_vertices (int): The maximum number of vertices to keep after decimation.
         ray_density (int): The density of primary rays for internal geometry cleaning.
         secondary_rays (int): The number of secondary rays for internal geometry cleaning.
@@ -269,31 +303,32 @@ def process_stl(stl_path, max_vertices=20000, ray_density=1000, secondary_rays=5
     initial_vertices = len(obj.data.vertices)
     current_vertices = initial_vertices
 
-    while current_vertices > max_vertices:
-        modifier = obj.modifiers.new(name="Decimate", type='DECIMATE')
-        modifier.decimate_type = 'COLLAPSE'
-        modifier.use_symmetry = False
-        modifier.use_collapse_triangulate = True
+    if current_vertices > max_vertices:
+        while current_vertices > max_vertices:
+            modifier = obj.modifiers.new(name="Decimate", type='DECIMATE')
+            modifier.decimate_type = 'COLLAPSE'
+            modifier.use_symmetry = False
+            modifier.use_collapse_triangulate = True
 
-        # Apply decimation with a ratio of 0.5 if more than twice the target vertices
-        if current_vertices / max_vertices > 2:
-            modifier.ratio = 0.5
-        else:
-            modifier.ratio = max_vertices / current_vertices
-
-        bpy.context.view_layer.objects.active = obj
-        try:
-            bpy.ops.object.modifier_apply(modifier="Decimate")
-        except RuntimeError as e:
-            if "Modifiers cannot be applied to multi-user data" in str(e):
-                print("Making mesh data single-user and retrying...")
-                bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=False)
-                bpy.ops.object.modifier_apply(modifier="Decimate")
+            # Apply decimation with a ratio of 0.5 if more than twice the target vertices
+            if current_vertices / max_vertices > 2:
+                modifier.ratio = 0.5
             else:
-                raise
+                modifier.ratio = max_vertices / current_vertices
 
-        current_vertices = len(obj.data.vertices)
-        print(f"Current vertices after decimation: {current_vertices}")
+            bpy.context.view_layer.objects.active = obj
+            try:
+                bpy.ops.object.modifier_apply(modifier="Decimate")
+            except RuntimeError as e:
+                if "Modifiers cannot be applied to multi-user data" in str(e):
+                    print("Making mesh data single-user and retrying...")
+                    bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=False)
+                    bpy.ops.object.modifier_apply(modifier="Decimate")
+                else:
+                    raise
+
+            current_vertices = len(obj.data.vertices)
+            print(f"Current vertices after decimation: {current_vertices}")
     
     # Calculate the dimensions of the bounding box
     dimensions = obj.dimensions
@@ -319,9 +354,22 @@ def process_stl(stl_path, max_vertices=20000, ray_density=1000, secondary_rays=5
     remaining_vertices = len(obj.data.vertices)
     print(f"Number of remaining vertices: {remaining_vertices}")
     
+    # Determine the output directory
+    if output_dir is None:
+        output_dir = os.path.dirname(stl_path)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    original_file_name = os.path.splitext(os.path.basename(stl_path))[0]
+    export_path = os.path.join(output_dir, f"{original_file_name}_processed.obj")
+    
+    print(f"Exporting the processed mesh to {export_path}...")
+    export_mesh_to_obj(obj, export_path)
+    print("Mesh exported successfully.")
+    
     return remaining_vertices
 
 # Example usage
 stl_path = "/home/fabi/dev/SMILify/custom_processing/antscan_data/Platythyrea_MG01_CASENT0840864-D4/Platythyrea_MG01_CASENT0840864-D4.stl"
-vertex_count = process_stl(stl_path, ray_density=10000, max_vertices=50000, secondary_rays=1000)  # Increased ray density and added secondary rays
+output_dir = "/home/fabi/dev/SMILify/custom_processing/antscan_processed"
+vertex_count = process_stl(stl_path, output_dir=output_dir, max_vertices=50000, ray_density=10000, secondary_rays=1000)
 print(f"Processed STL file. Final vertex count: {vertex_count}")
