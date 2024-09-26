@@ -1,7 +1,7 @@
 import bpy
 import bmesh
 import mathutils
-from mathutils import Vector
+from mathutils import Vector, Matrix
 import math
 import addon_utils
 import numpy as np
@@ -115,7 +115,7 @@ def clean_internal_geometry(obj, ray_density=1000, secondary_rays=50):
             tuple: A tuple containing hit (bool), location (Vector), and face_index (int).
         """
         hit, loc, norm, face_index = obj.ray_cast(obj.matrix_world.inverted() @ origin, direction)
-        return hit, loc, face_index
+        return hit, face_index
     
     def add_face_and_connected(face, vertices_to_keep):
         """
@@ -153,7 +153,7 @@ def clean_internal_geometry(obj, ray_density=1000, secondary_rays=50):
             main_direction = (center - origin).normalized()
             
             # Cast main ray
-            hit, loc, face_index = cast_ray(origin, main_direction)
+            hit, face_index = cast_ray(origin, main_direction)
             if hit and face_index < len(bm.faces):
                 face = bm.faces[face_index]
                 add_face_and_connected(face, vertices_to_keep)
@@ -161,14 +161,14 @@ def clean_internal_geometry(obj, ray_density=1000, secondary_rays=50):
             # Cast secondary rays
             for _ in range(secondary_rays):
                 # Generate random offset angles
-                azimuth_offset = np.random.uniform(-np.pi/18, np.pi/18)  # ±10 degrees
-                elevation_offset = np.random.uniform(-np.pi/18, np.pi/18)  # ±10 degrees
+                azimuth_offset = np.random.uniform(-np.pi/9, np.pi/9)  # ±20 degrees
+                elevation_offset = np.random.uniform(-np.pi/9, np.pi/9)  # ±20 degrees
                 
                 # Apply rotation to the main direction
                 offset_direction = main_direction.copy()
                 offset_direction.rotate(mathutils.Euler((elevation_offset, 0, azimuth_offset)))
                 
-                hit, loc, face_index = cast_ray(origin, offset_direction)
+                hit, face_index = cast_ray(origin, offset_direction)
                 if hit and face_index < len(bm.faces):
                     face = bm.faces[face_index]
                     add_face_and_connected(face, vertices_to_keep)
@@ -300,14 +300,14 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
     bpy.ops.wm.stl_import(filepath=stl_path)
     obj = bpy.context.selected_objects[0]
     
-    # Set the origin to the center of mass
-    bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_VOLUME', center='MEDIAN')
-    
-    # Set the object's location to the world origin
-    obj.location = Vector((0, 0, 0))
-    
     # Find and keep only the largest component
     find_largest_component(obj)
+
+    # Set the origin to the center of mass
+    bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_VOLUME', center='MEDIAN')
+
+    # Set the object's location to the world origin
+    obj.location = Vector((0, 0, 0))
 
     # Clean internal geometry using ray casting
     print("Cleaning internal geometry...")
@@ -352,26 +352,95 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
             current_vertices = len(obj.data.vertices)
             print(f"Current vertices after decimation: {current_vertices}")
     
-    # Calculate the dimensions of the bounding box
-    dimensions = obj.dimensions
+    # Get mesh data
+    mesh = obj.data
     
-    # Determine the longest axis
-    longest_axis = max(range(3), key=lambda i: dimensions[i])
+    # Convert vertices to numpy array for easier computation
+    vertices = np.array([obj.matrix_world @ v.co for v in mesh.vertices])
     
-    # Calculate rotation to align longest axis with X-axis
-    if longest_axis == 0:  # Already aligned with X-axis
-        rotation = (0, 0, 0)
-    elif longest_axis == 1:  # Y is longest, rotate -90 degrees around Z
-        rotation = (0, 0, -math.pi/2)
-    else:  # Z is longest, rotate 90 degrees around Y
-        rotation = (0, math.pi/2, 0)
+    # Calculate the covariance matrix
+    cov_matrix = np.cov(vertices.T)
     
-    # Apply the rotation
-    obj.rotation_euler = rotation
+    # Calculate eigenvectors and eigenvalues
+    eigenvalues, eigenvectors = np.linalg.eig(cov_matrix)
+    
+    # Sort eigenvectors by eigenvalues in descending order
+    sort_indices = np.argsort(eigenvalues)[::-1]
+    eigenvectors = eigenvectors[:, sort_indices]
+    
+    # Create rotation matrix to align principal axis with X-axis
+    rotation_matrix = Matrix(eigenvectors).to_4x4().inverted()
+    
+    # Apply rotation
+    obj.matrix_world = rotation_matrix @ obj.matrix_world
     
     # Apply the rotation to make it permanent
     bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
     
+    print("Aligned model with X-axis based on principal component analysis.")
+    
+    # Get mesh data again after the initial alignment
+    mesh = obj.data
+    vertices = np.array([obj.matrix_world @ v.co for v in mesh.vertices])
+
+    # Calculate the variance along Y and Z axes
+    y_variance = np.var(vertices[:, 1])
+    z_variance = np.var(vertices[:, 2])
+
+    # Determine if we need to rotate 90 degrees around X-axis
+    if y_variance < z_variance:
+        rotation_matrix = Matrix.Rotation(np.pi/2, 4, 'X')
+        obj.matrix_world = rotation_matrix @ obj.matrix_world
+        print("Rotated model 90 degrees around X-axis to put legs down.")
+
+    # Ensure the "up" direction is positive Z
+    vertices = np.array([obj.matrix_world @ v.co for v in mesh.vertices])
+    z_min, z_max = vertices[:, 2].min(), vertices[:, 2].max()
+    z_center = (z_min + z_max) / 2
+    z_median = np.median(vertices[:, 2])
+
+    if z_median < z_center:
+        rotation_matrix = Matrix.Rotation(np.pi, 4, 'X')
+        obj.matrix_world = rotation_matrix @ obj.matrix_world
+        print("Flipped model 180 degrees around X-axis to ensure positive Z is up.")
+
+    # Apply the rotations to make them permanent
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+
+    # After ensuring positive Z is up
+    print("Ensured positive Z is up.")
+
+    # Get mesh data again
+    mesh = obj.data
+    vertices = np.array([obj.matrix_world @ v.co for v in mesh.vertices])
+
+    # Divide the model into slices along the X-axis
+    num_slices = 20
+    x_min, x_max = vertices[:, 0].min(), vertices[:, 0].max()
+    slice_width = (x_max - x_min) / num_slices
+    
+    slice_densities = []
+    for i in range(num_slices):
+        slice_start = x_min + i * slice_width
+        slice_end = slice_start + slice_width
+        slice_vertices = vertices[(vertices[:, 0] >= slice_start) & (vertices[:, 0] < slice_end)]
+        
+        # Calculate the density of the slice (number of vertices / volume)
+        slice_volume = slice_width * (slice_vertices[:, 1].max() - slice_vertices[:, 1].min()) * (slice_vertices[:, 2].max() - slice_vertices[:, 2].min())
+        slice_density = len(slice_vertices) / slice_volume if slice_volume > 0 else 0
+        slice_densities.append(slice_density)
+
+    # The end with lower density is likely to be the antennae end (head)
+    head_end = 'start' if np.mean(slice_densities[:3]) < np.mean(slice_densities[-3:]) else 'end'
+
+    if head_end == 'end':
+        rotation_matrix = Matrix.Rotation(np.pi, 4, 'Z')
+        obj.matrix_world = rotation_matrix @ obj.matrix_world
+        print("Rotated model 180 degrees around Z-axis to ensure head is in positive X direction.")
+
+    # Apply the rotation to make it permanent
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+
     # Report the number of remaining vertices
     remaining_vertices = len(obj.data.vertices)
     print(f"Number of remaining vertices: {remaining_vertices}")
@@ -396,7 +465,7 @@ def main():
     # Example usage
     stl_path = "/home/fabi/dev/SMILify/custom_processing/antscan_data/Platythyrea_MG01_CASENT0840864-D4/Platythyrea_MG01_CASENT0840864-D4.stl"
     output_dir = "/home/fabi/dev/SMILify/custom_processing/antscan_processed"
-    vertex_count = process_stl(stl_path, output_dir=output_dir, max_vertices=50000, ray_density=10000, secondary_rays=2000)
+    vertex_count = process_stl(stl_path, output_dir=output_dir, max_vertices=50000, ray_density=2000, secondary_rays=5000)
     print(f"Processed STL file. Final vertex count: {vertex_count}")
 
     end_time = time.time()  # Stop the timer
