@@ -7,6 +7,7 @@ import addon_utils
 import numpy as np
 import os
 import time
+import sys
 
 def ensure_addon_enabled(addon_name):
     """
@@ -462,10 +463,14 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
 def main():
     start_time = time.time()  # Start the timer
 
-    # Example usage
-    stl_path = "/home/fabi/dev/SMILify/custom_processing/antscan_data/Platythyrea_MG01_CASENT0840864-D4/Platythyrea_MG01_CASENT0840864-D4.stl"
-    output_dir = "/home/fabi/dev/SMILify/custom_processing/antscan_processed"
-    vertex_count = process_stl(stl_path, output_dir=output_dir, max_vertices=50000, ray_density=2000, secondary_rays=5000)
+    if len(sys.argv) < 3:
+        print("Usage: blender --background --python prepare_antscan_data_for_mesh_fitting.py -- <input_stl_path> <output_dir>")
+        sys.exit(1)
+
+    stl_path = sys.argv[-2]
+    output_dir = sys.argv[-1]
+
+    vertex_count = process_stl(stl_path, output_dir=output_dir, max_vertices=10000, ray_density=10000, secondary_rays=5000)
     print(f"Processed STL file. Final vertex count: {vertex_count}")
 
     end_time = time.time()  # Stop the timer
@@ -474,3 +479,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
