@@ -21,19 +21,40 @@ def ensure_addon_enabled(addon_name):
         addon_utils.enable(addon_name, default_set=True)
         print(f"Enabled addon: {addon_name}")
 
-def apply_modifiers(obj, edge_split_angle=1.5708, weld_merge_threshold=2, dissolve_angle_limit=0.01):
+def apply_modifiers(obj, edge_split_angle=1.5708, weld_merge_threshold=None, dissolve_angle_limit=0.01):
     """
     Applies a series of modifiers to the given object to simplify and clean up the mesh.
 
     Args:
         obj (bpy.types.Object): The Blender object to modify.
         edge_split_angle (float): The angle threshold for the Edge Split modifier (in radians).
-        weld_merge_threshold (float): The distance threshold for the Weld modifier.
+        weld_merge_threshold (float): If explicitly provided, the distance threshold for the Weld modifier. 
+                                      If None, weld_merge_threshold is calculated based on the object's dimensions.
         dissolve_angle_limit (float): The angle limit for the Limited Dissolve operation.
 
     Returns:
         None
     """
+    if weld_merge_threshold is None:
+        # Get the bounding box size
+        bbox_size = obj.dimensions
+        print(f"Bounding box size: {bbox_size}")
+
+        # Calculate the weld_merge_threshold based on object size
+        max_dimension = max(bbox_size)
+        weld_merge_threshold = max_dimension * 0.002  # 0.2% of the largest dimension
+
+        print(f"Calculated weld_merge_threshold: {weld_merge_threshold}")
+
+        # Update the weld_merge_threshold parameter
+        if weld_merge_threshold > 0:
+            weld_merge_threshold = weld_merge_threshold
+        else:
+            print("Warning: Calculated weld_merge_threshold is 0 or negative. Using default value.")
+            weld_merge_threshold = 2
+    else:
+        weld_merge_threshold = 2
+
     # Apply Edge Split Modifier
     edge_split = obj.modifiers.new(name="EdgeSplit", type='EDGE_SPLIT')
     edge_split.split_angle = edge_split_angle
