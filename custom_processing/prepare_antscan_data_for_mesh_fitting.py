@@ -100,7 +100,7 @@ def clean_internal_geometry(obj, ray_density=1000, secondary_rays=50):
     
     # Calculate bounding sphere
     center = (bbox_max + bbox_min) / 2
-    radius = (bbox_max - bbox_min).length # twice as large, so hard to sample corners are hit
+    radius = (bbox_max - bbox_min).length * 2 # four as large, so hard to sample corners are hit
     
     def cast_ray(origin, direction):
         """
@@ -392,5 +392,5 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
 # Example usage
 stl_path = "/home/fabi/dev/SMILify/custom_processing/antscan_data/Platythyrea_MG01_CASENT0840864-D4/Platythyrea_MG01_CASENT0840864-D4.stl"
 output_dir = "/home/fabi/dev/SMILify/custom_processing/antscan_processed"
-vertex_count = process_stl(stl_path, output_dir=output_dir, max_vertices=50000, ray_density=10000, secondary_rays=1000)
+vertex_count = process_stl(stl_path, output_dir=output_dir, max_vertices=50000, ray_density=10000, secondary_rays=2000)
 print(f"Processed STL file. Final vertex count: {vertex_count}")
