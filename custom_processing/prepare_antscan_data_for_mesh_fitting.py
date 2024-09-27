@@ -592,7 +592,7 @@ def main():
     if bpy.context.space_data is not None and bpy.context.space_data.type == 'TEXT_EDITOR':
         # Running within Blender
         stl_path = bpy.path.abspath("/home/fabi/dev/SMILify/custom_processing/antscan_data/Platythyrea_MG01_CASENT0840864-D4/Platythyrea_MG01_CASENT0840864-D4.stl")  # Update this path
-        output_dir = None  # if not provided, saves in the same directory as the input file
+        output_dir = "/home/fabi/dev/SMILify/custom_processing/antscan_processed"  # if not provided, saves in the same directory as the input file
     else:
         # Running as a standalone script
         if len(sys.argv) < 3:
