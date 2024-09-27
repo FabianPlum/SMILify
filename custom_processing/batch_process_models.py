@@ -67,7 +67,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for processed OBJ files")
     parser.add_argument("--blender_path", type=str, required=True, help="Path to Blender executable")
     parser.add_argument("--script_path", type=str, required=True, help="Path to Blender Python script")
-    parser.add_argument("--num_processes", type=int, default=multiprocessing.cpu_count(), help="Number of parallel processes to use")
+    parser.add_argument("--num_processes", type=int, default=int(multiprocessing.cpu_count()/2), help="Number of parallel processes to use")
 
     args = parser.parse_args()
     main(args)
