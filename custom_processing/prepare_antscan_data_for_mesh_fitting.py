@@ -10,6 +10,7 @@ import time
 import sys
 import random
 import json
+
 def ensure_addon_enabled(addon_name):
     """
     Ensures that the specified Blender addon is enabled.
@@ -360,6 +361,63 @@ def count_holes(obj):
     
     return hole_count
 
+def calculate_face_size_cov(obj):
+    """
+    Calculates the coefficient of variation of face sizes in the given mesh object.
+
+    Args:
+        obj (bpy.types.Object): The Blender object to analyze.
+
+    Returns:
+        float: The standard deviation of face sizes.
+    """
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    
+    face_areas = [f.calc_area() for f in bm.faces]
+    
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    return np.round(np.std(face_areas) / np.mean(face_areas), 3)
+
+def calculate_mesh_smoothness(obj):
+    """
+    Calculates the average angle between face normals as a measure of mesh smoothness.
+
+    Args:
+        obj (bpy.types.Object): The Blender object to analyze.
+
+    Returns:
+        float: The average angle between face normals in degrees.
+    """
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    
+    total_angle = 0
+    total_comparisons = 0
+    
+    for face in bm.faces:
+        for edge in face.edges:
+            adjacent_face = [f for f in edge.link_faces if f != face]
+            if adjacent_face:
+                angle = face.normal.angle(adjacent_face[0].normal)
+                total_angle += math.degrees(angle)
+                total_comparisons += 1
+    
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    if total_comparisons > 0:
+        average_angle = total_angle / total_comparisons
+        return np.round(average_angle, 3)
+    else:
+        return 0.0
+
 def decimate_mesh(obj, max_vertices):
     """
     Decimates the mesh to reduce the number of vertices.
@@ -412,6 +470,38 @@ def decimate_mesh(obj, max_vertices):
 
     return current_vertices
 
+def reduce_vertices_by_distance(obj, target_vertices=1000000, max_iterations=100):
+    """
+    Iteratively increases the merge distance to reduce the number of vertices.
+
+    Args:
+        obj (bpy.types.Object): The Blender object to process.
+        target_vertices (int): The target number of vertices.
+        max_iterations (int): Maximum number of iterations to attempt.
+
+    Returns:
+        int: The final number of vertices.
+    """
+    initial_vertices = len(obj.data.vertices)
+    if initial_vertices <= target_vertices:
+        return initial_vertices
+
+    bpy.context.view_layer.objects.active = obj
+    
+    for i in range(max_iterations):
+        merge_distance = 1 * (2 ** i)  # Exponentially increase merge distance
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.remove_doubles(threshold=merge_distance)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        
+        current_vertices = len(obj.data.vertices)
+        print(f"Iteration {i+1}: Merge distance = {merge_distance:.6f}, Vertices = {current_vertices}")
+        
+        if current_vertices <= target_vertices:
+            break
+    
+    return current_vertices
+
 def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000, secondary_rays=5, random_seed=42):
     """
     Processes an STL file by importing, cleaning, simplifying, and decimating the mesh.
@@ -430,6 +520,13 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
     # Import the STL file
     bpy.ops.wm.stl_import(filepath=stl_path)
     obj = bpy.context.selected_objects[0]
+    
+    # Reduce vertices if necessary
+    initial_vertices = len(obj.data.vertices)
+    if initial_vertices > 2000000:
+        print(f"Initial vertex count: {initial_vertices}. Reducing vertices...")
+        reduced_vertices = reduce_vertices_by_distance(obj)
+        print(f"Reduced vertex count: {reduced_vertices}")
     
     # Find and keep only the largest component
     find_largest_component(obj)
@@ -551,6 +648,14 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
     hole_count = count_holes(obj)
     print(f"Number of holes in the processed mesh: {hole_count}")
 
+    # Calculate standard deviation of face sizes
+    face_size_cov = calculate_face_size_cov(obj)
+    print(f"Coefficient of variation of face sizes: {face_size_cov}")
+
+    # Calculate mesh smoothness
+    mesh_smoothness = calculate_mesh_smoothness(obj)
+    print(f"Average angle between face normals: {mesh_smoothness} degrees")
+
     # Determine the output directory
     if output_dir is None:
         output_dir = os.path.dirname(stl_path)
@@ -576,6 +681,8 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
         
         json_data['processed_vertex_count'] = remaining_vertices
         json_data['processed_hole_count'] = hole_count
+        json_data['processed_face_size_cov'] = face_size_cov
+        json_data['processed_mesh_smoothness'] = mesh_smoothness
         
         with open(json_path, 'w') as f:
             json.dump(json_data, f, indent=4)
@@ -583,7 +690,7 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
     else:
         print(f"Warning: Corresponding JSON file not found at {json_path}")
     
-    return remaining_vertices, hole_count  # Return both vertex count and hole count
+    return remaining_vertices, hole_count, face_size_cov, mesh_smoothness  # Return vertex count, hole count, face size cov, and mesh smoothness
 
 def main():
     start_time = time.time()  # Start the timer
@@ -591,6 +698,7 @@ def main():
     # Check if the script is run from Blender's text editor
     if bpy.context.space_data is not None and bpy.context.space_data.type == 'TEXT_EDITOR':
         # Running within Blender
+        stl_path = bpy.path.abspath("/home/fabi/dev/SMILify/custom_processing/antscan_data/Acanthomyrmex_glabfemoralis_CASENT0744002/Acanthomyrmex_glabfemoralis_CASENT0744002.stl")  # Update this path
         stl_path = bpy.path.abspath("/home/fabi/dev/SMILify/custom_processing/antscan_data/Platythyrea_MG01_CASENT0840864-D4/Platythyrea_MG01_CASENT0840864-D4.stl")  # Update this path
         output_dir = "/home/fabi/dev/SMILify/custom_processing/antscan_processed"  # if not provided, saves in the same directory as the input file
     else:
@@ -601,9 +709,11 @@ def main():
         stl_path = sys.argv[-2]
         output_dir = sys.argv[-1]
 
-    vertex_count, hole_count = process_stl(stl_path, output_dir=output_dir, max_vertices=50000, ray_density=1000, secondary_rays=10000, random_seed=0)
+    vertex_count, hole_count, face_size_cov, mesh_smoothness = process_stl(stl_path, output_dir=output_dir, max_vertices=50000, ray_density=1000, secondary_rays=10000, random_seed=0)
     print(f"Processed STL file. Final vertex count: {vertex_count}")
     print(f"Number of holes in the processed mesh: {hole_count}")
+    print(f"Coefficient of variation of face sizes: {face_size_cov}")
+    print(f"Mesh smoothness (average angle between face normals): {mesh_smoothness} degrees")
 
     end_time = time.time()  # Stop the timer
     processing_time = end_time - start_time
