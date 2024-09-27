@@ -8,6 +8,7 @@ import numpy as np
 import os
 import time
 import sys
+import random
 
 def ensure_addon_enabled(addon_name):
     """
@@ -74,7 +75,7 @@ def apply_modifiers(obj, edge_split_angle=1.5708, weld_merge_threshold=None, dis
     bpy.ops.mesh.dissolve_limited(angle_limit=dissolve_angle_limit)
     bpy.ops.object.mode_set(mode='OBJECT')
 
-def clean_internal_geometry(obj, ray_density=1000, secondary_rays=50):
+def clean_internal_geometry(obj, ray_density=1000, secondary_rays=50, random_seed=0):
     """
     Cleans internal geometry of the object using ray casting.
 
@@ -82,10 +83,15 @@ def clean_internal_geometry(obj, ray_density=1000, secondary_rays=50):
         obj (bpy.types.Object): The Blender object to clean.
         ray_density (int): The density of primary rays to cast.
         secondary_rays (int): The number of secondary rays to cast for each primary ray.
+        random_seed (int): Seed for random number generation to ensure consistent results.
 
     Returns:
         None
     """
+    # Set the random seed for numpy and Python's random module
+    np.random.seed(random_seed)
+    random.seed(random_seed)
+
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.mode_set(mode='OBJECT')  # Ensure we're in Object mode
     
@@ -283,7 +289,109 @@ def export_mesh_to_obj(obj, filepath):
 
     return filepath
 
-def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000, secondary_rays=5):
+def count_holes(obj):
+    """
+    Counts the number of holes in the given mesh object.
+
+    Args:
+        obj (bpy.types.Object): The Blender object to analyze.
+
+    Returns:
+        int: The number of holes in the mesh.
+    """
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.edges.ensure_lookup_table()
+    
+    boundary_edges = [e for e in bm.edges if len(e.link_faces) == 1]
+    
+    hole_count = 0
+    visited_edges = set()
+    
+    for edge in boundary_edges:
+        if edge not in visited_edges:
+            # Start of a new hole or boundary
+            hole_count += 1
+            current_edge = edge
+            loop_edges = set()
+            
+            while current_edge not in visited_edges:
+                visited_edges.add(current_edge)
+                loop_edges.add(current_edge)
+                
+                # Find the next edge in the boundary loop
+                next_vert = current_edge.verts[1] if current_edge.verts[0] in current_edge.link_faces[0].verts else current_edge.verts[0]
+                next_edges = [e for e in next_vert.link_edges if e in boundary_edges and e != current_edge]
+                
+                if not next_edges:
+                    # We've reached an open end
+                    break
+                
+                current_edge = next_edges[0]
+                
+                if current_edge in loop_edges:
+                    # We've completed a loop
+                    break
+    
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    return hole_count
+
+def decimate_mesh(obj, max_vertices):
+    """
+    Decimates the mesh to reduce the number of vertices.
+
+    Args:
+        obj (bpy.types.Object): The Blender object to decimate.
+        max_vertices (int): The target maximum number of vertices.
+
+    Returns:
+        int: The number of remaining vertices after decimation.
+    """
+    print("Applying mesh decimation...")
+    initial_vertices = len(obj.data.vertices)
+    current_vertices = initial_vertices
+    iteration_count = 0
+    last_vertex_count = current_vertices
+
+    while current_vertices > max_vertices:
+        modifier = obj.modifiers.new(name="Decimate", type='DECIMATE')
+        modifier.decimate_type = 'COLLAPSE'
+        modifier.use_symmetry = False
+        modifier.use_collapse_triangulate = True
+
+        # Apply decimation with a ratio of 0.5 if more than twice the target vertices
+        if current_vertices / max_vertices > 2:
+            modifier.ratio = 0.5
+        else:
+            modifier.ratio = max_vertices / current_vertices
+
+        bpy.context.view_layer.objects.active = obj
+        try:
+            bpy.ops.object.modifier_apply(modifier="Decimate")
+        except RuntimeError as e:
+            if "Modifiers cannot be applied to multi-user data" in str(e):
+                print("Making mesh data single-user and retrying...")
+                bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=False)
+                bpy.ops.object.modifier_apply(modifier="Decimate")
+            else:
+                raise
+
+        current_vertices = len(obj.data.vertices)
+        print(f"Current vertices after decimation: {current_vertices}")
+
+        # Edge case detection
+        iteration_count += 1
+        if current_vertices >= last_vertex_count or iteration_count > 10:
+            print(f"Decimation stopped after {iteration_count} iterations.")
+            break
+        last_vertex_count = current_vertices
+
+    return current_vertices
+
+def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000, secondary_rays=5, random_seed=42):
     """
     Processes an STL file by importing, cleaning, simplifying, and decimating the mesh.
 
@@ -293,6 +401,7 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
         max_vertices (int): The maximum number of vertices to keep after decimation.
         ray_density (int): The density of primary rays for internal geometry cleaning.
         secondary_rays (int): The number of secondary rays for internal geometry cleaning.
+        random_seed (int): Seed for random number generation to ensure consistent results.
 
     Returns:
         int: The number of remaining vertices after processing.
@@ -312,7 +421,7 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
 
     # Clean internal geometry using ray casting
     print("Cleaning internal geometry...")
-    clean_internal_geometry(obj, ray_density, secondary_rays)
+    clean_internal_geometry(obj, ray_density, secondary_rays, random_seed)
 
     # Apply simplification modifiers
     print("Applying simplification modifiers...")
@@ -322,36 +431,7 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
     find_largest_component(obj)
     
     # Apply mesh decimation
-    print("Applying mesh decimation...")
-    initial_vertices = len(obj.data.vertices)
-    current_vertices = initial_vertices
-
-    if current_vertices > max_vertices:
-        while current_vertices > max_vertices:
-            modifier = obj.modifiers.new(name="Decimate", type='DECIMATE')
-            modifier.decimate_type = 'COLLAPSE'
-            modifier.use_symmetry = False
-            modifier.use_collapse_triangulate = True
-
-            # Apply decimation with a ratio of 0.5 if more than twice the target vertices
-            if current_vertices / max_vertices > 2:
-                modifier.ratio = 0.5
-            else:
-                modifier.ratio = max_vertices / current_vertices
-
-            bpy.context.view_layer.objects.active = obj
-            try:
-                bpy.ops.object.modifier_apply(modifier="Decimate")
-            except RuntimeError as e:
-                if "Modifiers cannot be applied to multi-user data" in str(e):
-                    print("Making mesh data single-user and retrying...")
-                    bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=False)
-                    bpy.ops.object.modifier_apply(modifier="Decimate")
-                else:
-                    raise
-
-            current_vertices = len(obj.data.vertices)
-            print(f"Current vertices after decimation: {current_vertices}")
+    remaining_vertices = decimate_mesh(obj, max_vertices)
     
     # Get mesh data
     mesh = obj.data
@@ -446,6 +526,10 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
     remaining_vertices = len(obj.data.vertices)
     print(f"Number of remaining vertices: {remaining_vertices}")
     
+    # After all processing steps and before exporting
+    hole_count = count_holes(obj)
+    print(f"Number of holes in the processed mesh: {hole_count}")
+
     # Determine the output directory
     if output_dir is None:
         output_dir = os.path.dirname(stl_path)
@@ -458,20 +542,27 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
     export_mesh_to_obj(obj, export_path)
     print("Mesh exported successfully.")
     
-    return remaining_vertices
+    return remaining_vertices, hole_count  # Return both vertex count and hole count
 
 def main():
     start_time = time.time()  # Start the timer
 
-    if len(sys.argv) < 3:
-        print("Usage: blender --background --python prepare_antscan_data_for_mesh_fitting.py -- <input_stl_path> <output_dir>")
-        sys.exit(1)
+    # Check if the script is run from Blender's text editor
+    if bpy.context.space_data is not None and bpy.context.space_data.type == 'TEXT_EDITOR':
+        # Running within Blender
+        stl_path = bpy.path.abspath("/home/fabi/dev/SMILify/custom_processing/antscan_data/Platythyrea_MG01_CASENT0840864-D4/Platythyrea_MG01_CASENT0840864-D4.stl")  # Update this path
+        output_dir = bpy.path.abspath("/home/fabi/dev/SMILify/custom_processing/antscan_processed")  # Update this path
+    else:
+        # Running as a standalone script
+        if len(sys.argv) < 3:
+            print("Usage: blender --background --python prepare_antscan_data_for_mesh_fitting.py -- <input_stl_path> <output_dir>")
+            sys.exit(1)
+        stl_path = sys.argv[-2]
+        output_dir = sys.argv[-1]
 
-    stl_path = sys.argv[-2]
-    output_dir = sys.argv[-1]
-
-    vertex_count = process_stl(stl_path, output_dir=output_dir, max_vertices=10000, ray_density=10000, secondary_rays=5000)
+    vertex_count, hole_count = process_stl(stl_path, output_dir=output_dir, max_vertices=10000, ray_density=1000, secondary_rays=500, random_seed=0)
     print(f"Processed STL file. Final vertex count: {vertex_count}")
+    print(f"Number of holes in the processed mesh: {hole_count}")
 
     end_time = time.time()  # Stop the timer
     processing_time = end_time - start_time
