@@ -9,7 +9,7 @@ import os
 import time
 import sys
 import random
-
+import json
 def ensure_addon_enabled(addon_name):
     """
     Ensures that the specified Blender addon is enabled.
@@ -24,9 +24,9 @@ def ensure_addon_enabled(addon_name):
         addon_utils.enable(addon_name, default_set=True)
         print(f"Enabled addon: {addon_name}")
 
-def apply_modifiers(obj, edge_split_angle=1.5708, weld_merge_threshold=None, dissolve_angle_limit=0.01):
+def apply_modifiers(obj, edge_split_angle=1.5708, weld_merge_threshold=None, dissolve_angle_limit=0.01, fill_holes_sides=0):
     """
-    Applies a series of modifiers to the given object to simplify and clean up the mesh.
+    Applies a series of modifiers and mesh operations to the given object to simplify and clean up the mesh.
 
     Args:
         obj (bpy.types.Object): The Blender object to modify.
@@ -34,6 +34,7 @@ def apply_modifiers(obj, edge_split_angle=1.5708, weld_merge_threshold=None, dis
         weld_merge_threshold (float): If explicitly provided, the distance threshold for the Weld modifier. 
                                       If None, weld_merge_threshold is calculated based on the object's dimensions.
         dissolve_angle_limit (float): The angle limit for the Limited Dissolve operation.
+        fill_holes_sides (int): The maximum number of sides a hole can have to be filled. 0 means no limit.
 
     Returns:
         None
@@ -70,10 +71,26 @@ def apply_modifiers(obj, edge_split_angle=1.5708, weld_merge_threshold=None, dis
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier="Weld")
 
-    # Apply Limited Dissolve in Edit Mode
+    # Switch to Edit Mode for mesh operations
     bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.dissolve_limited(angle_limit=dissolve_angle_limit)
+
+    # Create a BMesh
+    bm = bmesh.from_edit_mesh(obj.data)
+
+    # Fill Holes operation using bmesh.ops
+    bmesh.ops.holes_fill(bm, edges=bm.edges, sides=fill_holes_sides)
+
+    # Limited Dissolve operation
+    bmesh.ops.dissolve_limit(bm, angle_limit=dissolve_angle_limit, use_dissolve_boundaries=False, verts=bm.verts, edges=bm.edges)
+
+    # Update the mesh
+    bmesh.update_edit_mesh(obj.data)
+
+    # Switch back to Object Mode
     bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Free the BMesh
+    bm.free()
 
 def clean_internal_geometry(obj, ray_density=1000, secondary_rays=50, random_seed=0):
     """
@@ -310,30 +327,34 @@ def count_holes(obj):
     hole_count = 0
     visited_edges = set()
     
-    for edge in boundary_edges:
-        if edge not in visited_edges:
-            # Start of a new hole or boundary
-            hole_count += 1
-            current_edge = edge
-            loop_edges = set()
+    for start_edge in boundary_edges:
+        if start_edge not in visited_edges:
+            # Start of a new hole
+            current_edge = start_edge
+            is_hole = True
+            loop_edges = []
             
             while current_edge not in visited_edges:
                 visited_edges.add(current_edge)
-                loop_edges.add(current_edge)
+                loop_edges.append(current_edge)
                 
                 # Find the next edge in the boundary loop
                 next_vert = current_edge.verts[1] if current_edge.verts[0] in current_edge.link_faces[0].verts else current_edge.verts[0]
                 next_edges = [e for e in next_vert.link_edges if e in boundary_edges and e != current_edge]
                 
                 if not next_edges:
-                    # We've reached an open end
+                    # We've reached an open end, not a hole
+                    is_hole = False
                     break
                 
                 current_edge = next_edges[0]
                 
-                if current_edge in loop_edges:
+                if current_edge == start_edge:
                     # We've completed a loop
                     break
+            
+            if is_hole:
+                hole_count += 1
     
     bpy.ops.object.mode_set(mode='OBJECT')
     
@@ -425,7 +446,7 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
 
     # Apply simplification modifiers
     print("Applying simplification modifiers...")
-    apply_modifiers(obj)
+    apply_modifiers(obj, fill_holes_sides=0)  # 0 means fill all holes regardless of size
 
     # Reapply the largest component to remove floating artifacts
     find_largest_component(obj)
@@ -535,12 +556,32 @@ def process_stl(stl_path, output_dir=None, max_vertices=20000, ray_density=1000,
         output_dir = os.path.dirname(stl_path)
     os.makedirs(output_dir, exist_ok=True)
     
+    if output_dir is None:
+        output_dir = os.path.dirname(stl_path)
+    os.makedirs(output_dir, exist_ok=True)
+    
     original_file_name = os.path.splitext(os.path.basename(stl_path))[0]
     export_path = os.path.join(output_dir, f"{original_file_name}_processed.obj")
     
     print(f"Exporting the processed mesh to {export_path}...")
     export_mesh_to_obj(obj, export_path)
     print("Mesh exported successfully.")
+
+    # Update the corresponding JSON file with vertex and hole count
+    json_path = os.path.splitext(stl_path)[0] + '.json'
+    if os.path.exists(json_path):
+        print(f"Updating JSON file: {json_path}")
+        with open(json_path, 'r') as f:
+            json_data = json.load(f)
+        
+        json_data['processed_vertex_count'] = remaining_vertices
+        json_data['processed_hole_count'] = hole_count
+        
+        with open(json_path, 'w') as f:
+            json.dump(json_data, f, indent=4)
+        print("JSON file updated successfully.")
+    else:
+        print(f"Warning: Corresponding JSON file not found at {json_path}")
     
     return remaining_vertices, hole_count  # Return both vertex count and hole count
 
@@ -551,7 +592,7 @@ def main():
     if bpy.context.space_data is not None and bpy.context.space_data.type == 'TEXT_EDITOR':
         # Running within Blender
         stl_path = bpy.path.abspath("/home/fabi/dev/SMILify/custom_processing/antscan_data/Platythyrea_MG01_CASENT0840864-D4/Platythyrea_MG01_CASENT0840864-D4.stl")  # Update this path
-        output_dir = bpy.path.abspath("/home/fabi/dev/SMILify/custom_processing/antscan_processed")  # Update this path
+        output_dir = None  # if not provided, saves in the same directory as the input file
     else:
         # Running as a standalone script
         if len(sys.argv) < 3:
@@ -560,7 +601,7 @@ def main():
         stl_path = sys.argv[-2]
         output_dir = sys.argv[-1]
 
-    vertex_count, hole_count = process_stl(stl_path, output_dir=output_dir, max_vertices=10000, ray_density=1000, secondary_rays=500, random_seed=0)
+    vertex_count, hole_count = process_stl(stl_path, output_dir=output_dir, max_vertices=50000, ray_density=1000, secondary_rays=10000, random_seed=0)
     print(f"Processed STL file. Final vertex count: {vertex_count}")
     print(f"Number of holes in the processed mesh: {hole_count}")
 
