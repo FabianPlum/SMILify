@@ -32,6 +32,7 @@ LOCAL_TEST/
 #scraped data
 custom_processing/antscan_data/
 custom_processing/antscan_processed/
+custom_processing/antscan_stats/
 
 #pycharm dev
 .idea/
