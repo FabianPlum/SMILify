@@ -33,6 +33,7 @@ LOCAL_TEST/
 custom_processing/antscan_data/
 custom_processing/antscan_processed/
 custom_processing/antscan_stats/
+custom_processing/antscan_proofread/
 
 #pycharm dev
 .idea/
