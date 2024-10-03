@@ -104,6 +104,7 @@ class MODEL_LOADER_PT_Panel(Panel):
 
         layout.label(text=f"Current Model: {scene.current_model_name}")
         layout.label(text=f"Model {scene.current_model_index + 1} of {scene.total_models}")
+        layout.label(text=scene.model_status)
 
 class MODEL_LOADER_OT_LoadNextModel(Operator):
     """Operator to load the next model."""
@@ -153,7 +154,7 @@ def load_model(context, direction):
         set: {'FINISHED'} if successful, {'CANCELLED'} otherwise.
     """
     scene = context.scene
-    if not scene.input_folder:
+    if not scene.input_folder or not scene.output_folder:
         return {'CANCELLED'}
 
     model_files = [f for f in os.listdir(scene.input_folder) if f.lower().endswith('.obj')]
@@ -178,6 +179,13 @@ def load_model(context, direction):
 
     scene.current_model_name = model_files[scene.current_model_index]
     scene.total_models = len(model_files)
+
+    # Check if the model has already been proof-read
+    output_path = os.path.join(scene.output_folder, scene.current_model_name)
+    if os.path.exists(output_path):
+        scene.model_status = "This model has already been proof-read."
+    else:
+        scene.model_status = "This model has not been proof-read yet."
 
     return {'FINISHED'}
 
@@ -236,6 +244,8 @@ def register():
         bpy.types.Scene.current_model_index = IntProperty(default=0)
     if not hasattr(bpy.types.Scene, "total_models"):
         bpy.types.Scene.total_models = IntProperty(default=0)
+    if not hasattr(bpy.types.Scene, "model_status"):
+        bpy.types.Scene.model_status = StringProperty(default="")
 
     for cls in [MODEL_LOADER_PT_Panel, MODEL_LOADER_OT_LoadNextModel, MODEL_LOADER_OT_LoadPreviousModel, MODEL_LOADER_OT_ExportModel]:
         if not hasattr(bpy.types, cls.__name__):
@@ -248,6 +258,7 @@ def unregister():
     del bpy.types.Scene.current_model_name
     del bpy.types.Scene.current_model_index
     del bpy.types.Scene.total_models
+    del bpy.types.Scene.model_status
 
     bpy.utils.unregister_class(MODEL_LOADER_PT_Panel)
     bpy.utils.unregister_class(MODEL_LOADER_OT_LoadNextModel)
