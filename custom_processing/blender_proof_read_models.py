@@ -210,7 +210,7 @@ class MODEL_LOADER_OT_ExportModel(Operator):
         # Apply all transforms
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
-        output_path = os.path.join(scene.output_folder, f"{scene.current_model_name}_processed.obj")
+        output_path = os.path.join(scene.output_folder, f"{scene.current_model_name}")
         export_mesh_to_obj(obj, output_path)
         self.report({'INFO'}, f"Model exported to {output_path}")
 
