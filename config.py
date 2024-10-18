@@ -38,14 +38,14 @@ EPOCH_NAME = "st10_ep0"  # convention used for the final output file. Don't chan
 
 # SMAL
 SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
-SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
+#SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 
 # custom elements added:
 # SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
 SMAL_FILE = join("3D_model_prep", 'SMPL_fit.pkl')
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
-PLOT_RESULTS = False  # only applies to 3D fitting (fitter_3d/optimise.py)
+PLOT_RESULTS = True  # only applies to 3D fitting (fitter_3d/optimise.py)
 DEBUG = False  # use to get A LOT of "useful" messages
 
 # DATALOADER
