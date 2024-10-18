@@ -3,15 +3,18 @@ import argparse
 import yaml
 import os
 import warnings
+import sys
 
 # suppress warning relating to deprecated pytorch functions
 # Suppress the specific warning from PyTorch
 warnings.filterwarnings("ignore", message=".*torch.sparse.SparseTensor.*")
 
+# Add the parent directory to the Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
 
 # add correct paths
-import sys
-
 if os.getcwd().endswith('fitter_3d'):  # if starting in fitter_3d dir
 	os.chdir('../')
 	sys.path.append('fitter_3d')
