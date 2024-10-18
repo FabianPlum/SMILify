@@ -43,30 +43,26 @@ class SMAL3DFitter(nn.Module):
         self.batch_size = batch_size
         self.n_betas = config.N_BETAS
 
-        self.shape_family_list = np.array(shape_family)
-        with open(config.SMAL_DATA_FILE, 'rb') as f:
-            u = pkl._Unpickler(f)
-            u.encoding = 'latin1'
-            smal_data = u.load()
-
-            if config.DEBUG:
-                for key, value in smal_data.items():
-                    print(key)
-                    try:
-                        print(value.shape)
-                    except:
-                        pass
-                    print(value)
 
         with open(config.SMAL_FILE, 'rb') as f:
             u = pkl._Unpickler(f)
             u.encoding = 'latin1'
             dd = u.load()
+        
+        if config.ignore_hardcoded_body:
+            model_covs = dd['shape_cov']
+            self.mean_betas = torch.FloatTensor(dd['shape_mean_betas']).to(device)
 
-        # Overwirte N_POSE with the actual number of joints from the loaded SMAL File
-        config.N_POSE = dd["J"].shape[0] - 1
+        else:
+            with open(config.SMAL_DATA_FILE, 'rb') as f:
+                u = pkl._Unpickler(f)
+                u.encoding = 'latin1'
+                smal_data = u.load()
 
-        model_covs = np.array(smal_data['cluster_cov'])[[shape_family]][0]
+                self.shape_family_list = np.array(shape_family)
+
+                model_covs = np.array(smal_data['cluster_cov'])[[shape_family]][0]
+                self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(device)
 
         if config.DEBUG:
             print("MODEL COVS", model_covs)
@@ -75,8 +71,6 @@ class SMAL3DFitter(nn.Module):
         prec = np.linalg.cholesky(invcov)
 
         self.betas_prec = torch.FloatTensor(prec)[:config.N_BETAS, :config.N_BETAS].to(device)
-        self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
-            device)
 
         if config.DEBUG:
             print("MEAN BETAS", self.mean_betas)
