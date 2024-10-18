@@ -2,9 +2,6 @@ from global_utils import config
 import numpy as np
 import pickle as pkl
 
-# TODO -> read in learned shape priors from SMIL model.
-# This should be as simple as adding an extra option for a custom shape prior
-
 
 def load_shape_prior(shape_family, use_smal_shape_prior):
     if use_smal_shape_prior:
