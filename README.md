@@ -181,7 +181,7 @@ If you want to represent an animal quadruped category which isn't covered by the
 - Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.
 - The code is poorly documented. That needs to be fixed.
 - The code is poorly tested. That needs to be fixed.
-- Let's see how far we can get withh this in our limited time BUT I would love to re-write this whole thing as a Blender addon. But that's for another day. 
+- Let's see how far we can get with this in our limited time BUT I would love to re-write this whole thing as a Blender addon. But that's for another day. 
 
 ## Acknowledgements
 This repository owes a great deal to the following works and authors:
