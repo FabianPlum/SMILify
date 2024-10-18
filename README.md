@@ -177,7 +177,8 @@ If you want to represent an animal quadruped category which isn't covered by the
 - Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules.
 - If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable.
 - At the moment, the SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
-- The current implementation is very slow, and I believe this is largely due to the chumpy/numpy dependency mess. I believe the code would be much cleaner and more maintainable if it was rewritten in PyTorch, with numpy only being used for data loading.
+- Get rid of the numpy/chumpy dependency mess.
+- Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.
 - The code is poorly documented. That needs to be fixed.
 - The code is poorly tested. That needs to be fixed.
 - Let's see how far we can get withh this in our limited time BUT I would love to re-write this whole thing as a Blender addon. But that's for another day. 
