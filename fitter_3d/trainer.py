@@ -1,5 +1,10 @@
 """Introduces Stage class - representing a Stage of optimising a batch of SMBLD meshes to target meshes"""
 
+import torch
+import torch.nn as nn
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.loss import (
     chamfer_distance,
@@ -10,18 +15,15 @@ from pytorch3d.loss import (
 from pytorch3d.structures import Meshes
 
 from tqdm import tqdm
-import torch
 import matplotlib.pyplot as plt
-from fitter_3d.utils import plot_pointclouds, plot_meshes
 import numpy as np
 import os
-import config
 import pickle as pkl
 
+from fitter_3d.utils import plot_pointclouds, plot_meshes
+import config
 from smal_model.smal_torch import SMAL
 from smal_fitter.utils import eul_to_axis
-
-nn = torch.nn
 
 default_weights = dict(w_chamfer=1.0, w_edge=1.0, w_normal=0.01, w_laplacian=0.1)
 
@@ -31,6 +33,7 @@ default_lr_ratios = []
 
 def get_meshes(verts, faces, device='cuda'):
     """Returns Meshes object of all SMAL meshes."""
+    device = torch.device(device) if isinstance(device, str) else device
     meshes = Meshes(verts=verts, faces=faces).to(device)
     return meshes
 
@@ -115,7 +118,7 @@ class SMAL3DFitter(nn.Module):
         self.deform_verts = nn.Parameter(torch.zeros(batch_size, *self.smal_model.v_template.shape).to(device),
                                          requires_grad=True)
 
-    def forward(self):
+    def forward(self, dummy_input=None):
         verts, joints, Rs, v_shaped = self.smal_model(
             self.betas,
             torch.cat([
@@ -145,9 +148,7 @@ class SMALParamGroup:
         """
         :param lrs: dict of param_name : custom learning rate
         """
-
-        self.model = model
-
+        self.model = model.module if isinstance(model, (nn.DataParallel, nn.parallel.DistributedDataParallel)) else model
         self.group = group
         assert group in self.param_map, f"Group {group} not in list of available params: {list(self.param_map.keys())}"
 
@@ -192,7 +193,7 @@ class Stage:
         self.target_meshes = target_meshes
         self.mesh_names = mesh_names
         self.smal_3d_fitter = smal_3d_fitter
-        self.device = device
+        self.device = torch.device(f"cuda:{device}") if isinstance(device, int) else device
 
         self.loss_weights = default_weights.copy()
         if loss_weights is not None:
@@ -201,18 +202,23 @@ class Stage:
 
         self.losses_to_plot = []  # Store losses for review later
 
+        # Access the actual model if it's wrapped in DistributedDataParallel
+        self.smal_model = smal_3d_fitter.module if isinstance(smal_3d_fitter, DDP) else smal_3d_fitter
+
         if custom_lrs is not None:
             for attr in custom_lrs:
-                assert hasattr(smal_3d_fitter, attr), f"attr '{attr}' not in SMAL."
+                assert hasattr(self.smal_model, attr), f"attr '{attr}' not in SMAL."
 
         self.param_group = SMALParamGroup(smal_3d_fitter, scheme, custom_lrs)
 
         self.scheduler = None
 
         self.optimizer = torch.optim.Adam(self.param_group, lr=lr)
-        self.src_verts = smal_3d_fitter().detach()  # original verts, detach from autograd
-        self.faces = smal_3d_fitter.faces.detach()
-        self.src_mesh = get_meshes(self.src_verts, self.faces, device=device)
+        
+        # Initialize src_verts without calling the model
+        self.src_verts = self.smal_model.smal_model.v_template.unsqueeze(0).repeat(self.smal_model.batch_size, 1, 1)
+        self.faces = self.smal_model.faces.detach()
+        self.src_mesh = get_meshes(self.src_verts, self.faces, device=self.device)
         self.n_verts = self.src_verts.shape[1]
 
         self.consider_loss = lambda loss_name: self.loss_weights[
@@ -220,13 +226,16 @@ class Stage:
 
     def forward(self, src_mesh):
         loss = 0
+        n_valid = len([name for name in self.mesh_names if name != 'pad'])
+        mask = torch.ones(len(self.mesh_names), device=self.device)
+        mask[n_valid:] = 0
 
         # Sample from target meshes
         target_verts = sample_points_from_meshes(self.target_meshes, 3000)
 
         if self.consider_loss("chamfer"):
             loss_chamfer, _ = chamfer_distance(target_verts, src_mesh.verts_padded())
-            loss += self.loss_weights["w_chamfer"] * loss_chamfer
+            loss += self.loss_weights["w_chamfer"] * (loss_chamfer * mask).sum() / n_valid
 
         if self.consider_loss("edge"):
             loss_edge = mesh_edge_loss(src_mesh)  # and (b) the edge length of the predicted mesh
@@ -240,12 +249,20 @@ class Stage:
             loss_laplacian = mesh_laplacian_smoothing(src_mesh, method="uniform")  # mesh laplacian smoothing
             loss += self.loss_weights["w_laplacian"] * loss_laplacian
 
+        # Gather losses from all GPUs
+        if isinstance(self.smal_3d_fitter, DDP):
+            dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+            loss /= dist.get_world_size()
+
         return loss
 
     def step(self, epoch):
         """Runs step of Stage, calculating loss, and running the optimiser"""
 
-        new_src_verts = self.smal_3d_fitter()
+        self.optimizer.zero_grad()
+        # Pass a dummy input to the forward method
+        dummy_input = torch.zeros(1, device=self.device)
+        new_src_verts = self.smal_3d_fitter(dummy_input)
         offsets = new_src_verts - self.src_verts
         new_src_mesh = self.src_mesh.offset_verts(offsets.view(-1, 3))
 
@@ -258,8 +275,8 @@ class Stage:
         return loss
 
     def plot(self):
-
-        new_src_verts = self.smal_3d_fitter()
+        dummy_input = torch.zeros(1, device=self.device)
+        new_src_verts = self.smal_3d_fitter(dummy_input)
         offsets = new_src_verts - self.src_verts
         new_src_mesh = self.src_mesh.offset_verts(offsets.view(-1, 3))
 
@@ -289,10 +306,13 @@ class Stage:
         labels: optional list of size n_batch, to save as labels for all entries"""
 
         out = {}
+        smal_model = self.smal_3d_fitter.module if isinstance(self.smal_3d_fitter, (nn.DataParallel, nn.parallel.DistributedDataParallel)) else self.smal_3d_fitter
+        
         for param in ["global_rot", "joint_rot", "betas", "log_beta_scales", "trans", "deform_verts"]:
-            out[param] = getattr(self.smal_3d_fitter, param).cpu().detach().numpy()
+            out[param] = getattr(smal_model, param).cpu().detach().numpy()
 
-        v = self.smal_3d_fitter()
+        dummy_input = torch.zeros(1, device=self.device)
+        v = smal_model(dummy_input)
         out["verts"] = v.cpu().detach().numpy()
         out["faces"] = self.faces.cpu().detach().numpy()
         out["labels"] = labels
@@ -313,7 +333,10 @@ class StageManager:
     def run(self):
         for n, stage in enumerate(self.stages):
             stage.run(plot=config.PLOT_RESULTS)
-            stage.save_npz(labels=self.labels)
+            try:
+                stage.save_npz(labels=self.labels)
+            except Exception as e:
+                print(f"Error saving NPZ for stage {stage.name}: {str(e)}")
 
         self.plot_losses()
 
