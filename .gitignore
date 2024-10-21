@@ -34,6 +34,9 @@ custom_processing/antscan_data/
 custom_processing/antscan_processed/
 custom_processing/antscan_stats/
 custom_processing/antscan_proofread/
+custom_processing/antscan_proofread_castes/
+custom_processing/proof_read_WIP.blend
+custom_processing/proof_read_WIP.blend1
 
 #pycharm dev
 .idea/
