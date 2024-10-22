@@ -7,6 +7,13 @@ import yaml
 import os
 import warnings
 import sys
+import traceback
+from contextlib import contextmanager
+import logging
+import psutil
+import signal
+import time
+import gc
 
 # suppress warning relating to deprecated pytorch functions
 # Suppress the specific warning from PyTorch
@@ -53,97 +60,171 @@ parser.add_argument('--nits', type=int, default=100)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 num_gpus = torch.cuda.device_count()
 
-def setup(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def cleanup():
-    dist.destroy_process_group()
+@contextmanager
+def distributed_context(rank, world_size):
+    try:
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '12355'
+        dist.init_process_group("nccl", rank=rank, world_size=world_size)
+        yield
+    finally:
+        dist.destroy_process_group()
+
+def log_memory_usage(rank):
+    process = psutil.Process(os.getpid())
+    logging.info(f"Process {rank}: Memory usage: {process.memory_info().rss / 1024 / 1024:.2f} MB")
+
+def timeout_handler(signum, frame):
+    raise TimeoutError("Process timed out")
+
+@contextmanager
+def timeout(seconds):
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+
+def cleanup_cuda():
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
+    for obj in gc.get_objects():
+        if torch.is_tensor(obj):
+            obj.cpu()
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
 
 def main(rank, world_size, args):
-    setup(rank, world_size)
-    
-    # try to load yaml
-    yaml_loaded = False
-    if args.yaml_src is not None:
+    with distributed_context(rank, world_size):
         try:
-            with open(args.yaml_src) as infile:
-                yaml_cfg = yaml.load(infile, Loader=yaml.FullLoader)
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                f"No YAML file found at {args.yaml_src}. Make sure this is relative to the SMALify directory.")
+            logging.info(f"Process {rank}: Setup complete")
+            log_memory_usage(rank)
+            
+            # try to load yaml
+            yaml_loaded = False
+            if args.yaml_src is not None:
+                try:
+                    with open(args.yaml_src) as infile:
+                        yaml_cfg = yaml.load(infile, Loader=yaml.FullLoader)
+                except FileNotFoundError:
+                    raise FileNotFoundError(
+                        f"No YAML file found at {args.yaml_src}. Make sure this is relative to the SMALify directory.")
 
-        yaml_loaded = True
-        stage_options = yaml_cfg['stages']
+                yaml_loaded = True
+                stage_options = yaml_cfg['stages']
 
-        # overwrite any input args from yaml
-        for arg, val in yaml_cfg['args'].items():
-            setattr(args, arg, val)
+                # overwrite any input args from yaml
+                for arg, val in yaml_cfg['args'].items():
+                    setattr(args, arg, val)
 
-    all_mesh_names, all_target_meshes = load_meshes(mesh_dir=args.mesh_dir, frame_step=args.frame_step,
-                                                    device='cpu')  # Load on CPU first
+            all_mesh_names, all_target_meshes = load_meshes(mesh_dir=args.mesh_dir, frame_step=args.frame_step,
+                                                                device='cpu')  # Load on CPU first
 
-    # Ensure an even number of meshes by truncating if necessary
-    total_meshes = len(all_target_meshes)
-    if total_meshes % 2 != 0:
-        total_meshes -= 1
-        all_mesh_names = all_mesh_names[:total_meshes]
-        all_target_meshes = all_target_meshes[:total_meshes]
+            # Ensure an even number of meshes by truncating if necessary
+            total_meshes = len(all_target_meshes)
+            if total_meshes % 2 != 0:
+                total_meshes -= 1
+                all_mesh_names = all_mesh_names[:total_meshes]
+                all_target_meshes = all_target_meshes[:total_meshes]
 
-    # Calculate the number of meshes per GPU
-    meshes_per_gpu = total_meshes // world_size
-    start_idx = rank * meshes_per_gpu
-    end_idx = start_idx + meshes_per_gpu
+            # Calculate the number of meshes per GPU
+            meshes_per_gpu = total_meshes // world_size
+            start_idx = rank * meshes_per_gpu
+            end_idx = start_idx + meshes_per_gpu
 
-    # Distribute meshes to each GPU
-    mesh_names = all_mesh_names[start_idx:end_idx]
-    device = torch.device(f'cuda:{rank}')  # Create a proper torch.device object
-    target_meshes = all_target_meshes[start_idx:end_idx].to(device)
+            # Distribute meshes to each GPU
+            mesh_names = all_mesh_names[start_idx:end_idx]
+            device = torch.device(f'cuda:{rank}')  # Create a proper torch.device object
+            target_meshes = all_target_meshes[start_idx:end_idx].to(device)
 
-    n_batch = meshes_per_gpu
-    
-    print(f"GPU {rank}: Processing {len(mesh_names)} target meshes (indices {start_idx} to {end_idx-1})")
-    
-    # Synchronize all processes to ensure all print statements are executed before continuing
-    dist.barrier()
+            n_batch = meshes_per_gpu
+            
+            logging.info(f"GPU {rank}: Processing {len(mesh_names)} target meshes (indices {start_idx} to {end_idx-1})")
+            
+            # Synchronize all processes to ensure all print statements are executed before continuing
+            dist.barrier()
 
-    os.makedirs(args.results_dir, exist_ok=True)
-    manager = StageManager(out_dir=args.results_dir, labels=mesh_names)
+            os.makedirs(args.results_dir, exist_ok=True)
+            manager = StageManager(out_dir=args.results_dir, labels=mesh_names)
 
-    smal_model = SMAL3DFitter(batch_size=n_batch,
-                              device=device, shape_family=args.shape_family_id)
+            smal_model = SMAL3DFitter(batch_size=n_batch,
+                                      device=device, shape_family=args.shape_family_id)
 
-    # Move model to the correct device
-    smal_model = smal_model.to(device)
-    
-    # Wrap the model with DistributedDataParallel
-    smal_model = DDP(smal_model, device_ids=[rank])
+            # Move model to the correct device
+            smal_model = smal_model.to(device)
+            
+            # Wrap the model with DistributedDataParallel
+            smal_model = DDP(smal_model, device_ids=[rank])
 
-    stage_kwargs = dict(target_meshes=target_meshes, smal_3d_fitter=smal_model,
-                        out_dir=args.results_dir, device=device,
-                        mesh_names=mesh_names)
+            stage_kwargs = dict(target_meshes=target_meshes, smal_3d_fitter=smal_model,
+                                out_dir=args.results_dir, device=device,
+                                mesh_names=mesh_names)
 
-    # if provided, load stages from YAML
-    if yaml_loaded:
-        for stage_name, kwargs in stage_options.items():
-            stage = Stage(name=stage_name, **kwargs, **stage_kwargs)
-            manager.add_stage(stage)
+            # if provided, load stages from YAML
+            if yaml_loaded:
+                for stage_name, kwargs in stage_options.items():
+                    stage = Stage(name=stage_name, **kwargs, **stage_kwargs)
+                    manager.add_stage(stage)
 
-    # otherwise, load from arguments
-    else:
-        print("No YAML provided. Loading from system args. ")
-        stage = Stage(scheme=args.scheme, nits=args.nits, lr=args.lr,
-                      **stage_kwargs)
-        manager.add_stage(stage)
+            # otherwise, load from arguments
+            else:
+                logging.info("No YAML provided. Loading from system args. ")
+                stage = Stage(scheme=args.scheme, nits=args.nits, lr=args.lr,
+                              **stage_kwargs)
+                manager.add_stage(stage)
 
-    manager.run()
-    manager.plot_losses('losses')  # plot to results file
+            logging.info(f"Process {rank}: Model and data loaded")
+            log_memory_usage(rank)
 
-    cleanup()
+            manager.run()
+            manager.plot_losses('losses')  # plot to results file
+
+            logging.info(f"Process {rank}: Completed successfully")
+            log_memory_usage(rank)
+        except Exception as e:
+            logging.error(f"Process {rank}: Error occurred")
+            logging.error(f"Error message: {str(e)}")
+            logging.error("Traceback:")
+            traceback.print_exc()
+        finally:
+            # Explicit cleanup
+            cleanup_cuda()
+            logging.info(f"Process {rank}: Cleanup complete")
+            log_memory_usage(rank)
+
+def run_processes(world_size, args):
+    processes = []
+    for rank in range(world_size):
+        p = mp.Process(target=main, args=(rank, world_size, args))
+        p.start()
+        processes.append(p)
+
+    for p in processes:
+        try:
+            with timeout(300):  # 5 minutes timeout
+                p.join()
+        except TimeoutError:
+            logging.error(f"Process {p.pid} timed out, terminating...")
+            p.terminate()
+            p.join()
 
 if __name__ == "__main__":
-	args = parser.parse_args()
-	
-	world_size = torch.cuda.device_count()
-	mp.spawn(main, args=(world_size, args), nprocs=world_size, join=True)
+    args = parser.parse_args()
+    
+    # Uncomment the following line to use only one GPU
+    # world_size = 1
+    world_size = torch.cuda.device_count()
+    
+    try:
+        run_processes(world_size, args)
+    except Exception as e:
+        logging.error(f"Error in main process: {str(e)}")
+        traceback.print_exc()
+    finally:
+        # Ensure all CUDA operations are completed
+        cleanup_cuda()
+        logging.info("Main process: Final cleanup complete")

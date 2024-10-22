@@ -24,6 +24,7 @@ from fitter_3d.utils import plot_pointclouds, plot_meshes
 import config
 from smal_model.smal_torch import SMAL
 from smal_fitter.utils import eul_to_axis
+import traceback
 
 default_weights = dict(w_chamfer=1.0, w_edge=1.0, w_normal=0.01, w_laplacian=0.1)
 
@@ -258,21 +259,23 @@ class Stage:
 
     def step(self, epoch):
         """Runs step of Stage, calculating loss, and running the optimiser"""
+        try:
+            self.optimizer.zero_grad()
+            dummy_input = torch.zeros(1, device=self.device)
+            new_src_verts = self.smal_3d_fitter(dummy_input)
+            offsets = new_src_verts - self.src_verts
+            new_src_mesh = self.src_mesh.offset_verts(offsets.view(-1, 3))
 
-        self.optimizer.zero_grad()
-        # Pass a dummy input to the forward method
-        dummy_input = torch.zeros(1, device=self.device)
-        new_src_verts = self.smal_3d_fitter(dummy_input)
-        offsets = new_src_verts - self.src_verts
-        new_src_mesh = self.src_mesh.offset_verts(offsets.view(-1, 3))
+            loss = self.forward(new_src_mesh)
 
-        loss = self.forward(new_src_mesh)
+            loss.backward()
+            self.optimizer.step()
 
-        # Optimization step
-        loss.backward()
-        self.optimizer.step()
-
-        return loss
+            return loss
+        except Exception as e:
+            print(f"Error in Stage.step: {str(e)}")
+            traceback.print_exc()
+            raise
 
     def plot(self):
         dummy_input = torch.zeros(1, device=self.device)
@@ -287,19 +290,20 @@ class Stage:
 
     def run(self, plot=False):
         """Run the entire Stage"""
+        try:
+            with tqdm(np.arange(self.n_it)) as tqdm_iterator:
+                for i in tqdm_iterator:
+                    loss = self.step(i)
+                    self.losses_to_plot.append(loss)
+                    tqdm_iterator.set_description(
+                        f"STAGE = {self.name}, TOT_LOSS = {loss:.6f}")
 
-        with tqdm(np.arange(self.n_it)) as tqdm_iterator:
-            for i in tqdm_iterator:
-                self.optimizer.zero_grad()  # Initialise optimiser
-                loss = self.step(i)
-
-                self.losses_to_plot.append(loss)
-
-                tqdm_iterator.set_description(
-                    f"STAGE = {self.name}, TOT_LOSS = {loss:.6f}")  # Print the losses
-
-        if plot:
-            self.plot()
+            if plot:
+                self.plot()
+        except Exception as e:
+            print(f"Error in Stage.run: {str(e)}")
+            traceback.print_exc()
+            raise
 
     def save_npz(self, labels=None):
         """Given a directory, saves a .npz file of all params
@@ -317,7 +321,8 @@ class Stage:
         out["faces"] = self.faces.cpu().detach().numpy()
         out["labels"] = labels
 
-        out_title = f"{self.name}.npz"
+        rank = dist.get_rank()
+        out_title = f"{self.name}_batch{rank}.npz"
         np.savez(os.path.join(self.out_dir, out_title), **out)
 
 
@@ -361,3 +366,5 @@ class StageManager:
 
     def add_stage(self, stage):
         self.stages.append(stage)
+
+
