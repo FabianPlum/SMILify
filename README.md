@@ -47,9 +47,9 @@ For now, I'll focus on insects, hence **SMIL**.
    pip install matplotlib scipy chumpy opencv-python nibabel trimesh
    ```
    
-5. Test your installation by running mesh registration with custom models
+5. Test your installation
    ```
-   python -m fitter_3d.optimise --mesh_dir .\fitter_3d\ATTA_BOI\ --yaml_src fitter_3d/example_cfg.yaml
+   pytest tests/pipeline_tests.py -v -s
    ```
 
 In case you get an error back with chumpy complaining about legacy imports and not finding numpy.bool, simply update the
