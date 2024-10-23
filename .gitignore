@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Ensure no nested __pycache__ folders are tracked
+**/__pycache__/
+
 # C extensions
 *.so
 
