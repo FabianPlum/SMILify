@@ -50,7 +50,6 @@ For now, I'll focus on insects, hence **SMIL**.
 5. Test your installation
    ```
    pytest tests/pipeline_tests.py -v -s
-   
    ```
 
 In case you get an error back with chumpy complaining about legacy imports and not finding numpy.bool, simply update the
