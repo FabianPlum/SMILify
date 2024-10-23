@@ -20,7 +20,6 @@ from tqdm import trange
 
 import os, time, shutil
 import sys
-import config
 
 class ImageExporter():
     def __init__(self, output_dir, filenames):
@@ -58,6 +57,15 @@ class ImageExporter():
         mesh.export(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.ply".format(self.stage_id, self.epoch_name)))
 
 def main():
+    
+    parser = argparse.ArgumentParser(description='SMAL Fitter')
+    parser.add_argument('--test', action='store_true', help='Run in testing mode')
+    args = parser.parse_args()
+
+    if args.test:
+        from tests import test_config as config
+    else:
+        import config
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
 
