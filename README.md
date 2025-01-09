@@ -174,14 +174,14 @@ If you want to represent an animal quadruped category which isn't covered by the
 - To improve efficiency it is very likely that the number of iterations (again a setting in OPT_WEIGHTS) can be reduced for many sequences. I've err'd on the side of caution for this release by running many more iterations than probably needed.
 
 ## Code refactor TODOs 
-- Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules.
-- If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable.
-- At the moment, the SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
-- Get rid of the numpy/chumpy dependency mess.
-- Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.
-- The code is poorly documented. That needs to be fixed.
-- The code is poorly tested. That needs to be fixed.
-- Let's see how far we can get with this in our limited time BUT I would love to re-write this whole thing as a Blender addon. But that's for another day. 
+- [ ] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules.
+- [ ] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable.
+- [ ] At the moment, the SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
+- [X] Get rid of the numpy/chumpy dependency mess.
+- [ ] Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.
+- [ ] The code is poorly documented. That needs to be fixed.
+- [X] The code is poorly tested. That needs to be fixed. Write integration tests for main functionality.
+- [ ] Let's see how far we can get with this in our limited time BUT I would love to re-write this whole thing as a Blender addon. But that's for another day.
 
 ## Acknowledgements
 This repository owes a great deal to the following works and authors:
