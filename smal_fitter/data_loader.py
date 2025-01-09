@@ -1,7 +1,5 @@
 import sys
 
-from config import joint_names
-
 sys.path.append('../')
 
 import numpy as np
@@ -208,9 +206,9 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size,
     visibility = raw_joints[:, 2]
 
     # map joint names with correct ids regardless of order
-    new_joint_locs = np.zeros((len(config.dd["J_names"]), 2), int)
-    new_visibility = np.zeros((len(config.dd["J_names"])), int)
-    for o, orig_joint in enumerate(config.dd["J_names"]):
+    new_joint_locs = np.zeros((len(config.joint_names), 2), int)
+    new_visibility = np.zeros((len(config.joint_names)), int)
+    for o, orig_joint in enumerate(config.joint_names):
         for m, mapped_joints in enumerate(json_data["categories"][0]["keypoints"]):
             if orig_joint == mapped_joints:
                 if orig_joint in config.IGNORE_JOINTS:
@@ -221,7 +219,7 @@ def load_SMIL_sequence(SMIL_COCO, image_name, crop_size,
 
     if config.DEBUG:
         img_copy = cv2.convertScaleAbs(img_data.copy() * 255)
-        for k, (key_point, name) in enumerate(zip(new_joint_locs, joint_names)):
+        for k, (key_point, name) in enumerate(zip(new_joint_locs, config.joint_names)):
             print(k, key_point, name)
             if k in config.TORSO_JOINTS:
                 img_copy = cv2.circle(img_copy, (key_point[1], key_point[0]),
