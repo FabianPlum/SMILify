@@ -18,7 +18,10 @@ import config
 
 
 # There are chumpy variables so convert them to numpy.
+# correction -> there should no longer be chumpy variables and if they crop up, we should fix them
 def undo_chumpy(x):
+    if hasattr(x, 'r') and not isinstance(x, np.ndarray):
+        print("WARNING: chumpy variable: ", x)
     try:
         return x if isinstance(x, np.ndarray) else x.r
     except AttributeError:

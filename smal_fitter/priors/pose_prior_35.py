@@ -1,6 +1,5 @@
 import pickle as pkl
 import numpy as np
-from chumpy import Ch
 # from body.matlab import row
 import cv2
 # from psbody.mesh.colors import name_to_rgb
@@ -406,12 +405,6 @@ if __name__ == '__main__':
     if not exists(out_path):
         # print out_path
         print('Computing pose prior..')
-        # try:
-        #     pose_invcov = np.linalg.inv(np.cov(pose_samples[:, use_ind].T))
-        #     pic = Ch(np.linalg.cholesky(pose_invcov))
-        # except:
-            # print 'error in pose prior'
-        # This will always be true with walking data:
         if 'body_indept_limbstips' in out_path:
             # Compute the entire covariance matrix.
             pose_cov = np.cov(pose_samples.T) + 0.00001 * np.eye(pose_samples.shape[1])
@@ -424,24 +417,21 @@ if __name__ == '__main__':
                 pose_cov[iend:, istart:iend] = 0.
                 pose_cov[istart:iend, :istart] = 0.
                 pose_cov[istart:iend, iend:] = 0.
-            # import ipdb; ipdb.set_trace()
-            # import matplotlib.pyplot as plt
-            # plt.ion()
-            # plt.matshow(pose_cov)
+
             pose_invcov = np.linalg.inv(pose_cov)
             # Now get rid of the ignore joints:
             pose_invcov = pose_invcov[use_ind, :]
             pose_invcov = pose_invcov[:, use_ind]
-            pic = Ch(np.linalg.cholesky(pose_invcov))
+            pic = np.linalg.cholesky(pose_invcov)  # Remove Ch wrapper
         else:
             pose_invcov = np.linalg.inv(
                 np.cov(pose_samples[:, use_ind].T) + 0.00001 * np.eye(
                     pose_samples[:, use_ind].shape[1]))
-            pic = Ch(np.linalg.cholesky(pose_invcov))
+            pic = np.linalg.cholesky(pose_invcov)  # Remove Ch wrapper
 
         mean_pose = np.mean(pose_samples[:, use_ind], axis=0)
 
-        with open(out_path, 'w') as f:
+        with open(out_path, 'wb') as f:  # Note: changed 'w' to 'wb' for pickle
             dic = {'pic': pic, 'mean_pose': mean_pose}
             pkl.dump(dic, f)
     else:
