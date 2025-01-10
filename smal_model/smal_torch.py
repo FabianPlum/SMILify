@@ -16,9 +16,60 @@ from .smal_basics import align_smal_template_to_symmetry_axis  # , get_smal_temp
 import torch.nn as nn
 import config
 
+class CustomUnpickler(pkl.Unpickler):
+    """Custom unpickler that handles legacy SMAL model files containing chumpy arrays"""
+    def __init__(self, file, encoding='latin1'):
+        """Initialize with latin1 encoding to handle legacy pickle files"""
+        super().__init__(file, encoding=encoding)
+    
+    def find_class(self, module, name):
+        """Override class lookup to handle chumpy arrays"""
+        if module == "chumpy.ch" and name == "Ch":
+            return self.ChumpyWrapper
+        return super().find_class(module, name)
 
-# There are chumpy variables so convert them to numpy.
-# correction -> there should no longer be chumpy variables and if they crop up, we should fix them
+    class ChumpyWrapper:
+        """Wrapper class that mimics chumpy array behavior but stores only numpy arrays"""
+        def __init__(self, *args, **kwargs):
+            """Initialize with data from args or empty array"""
+            self.data = np.array(args[0]) if args else np.array([])
+
+        def __array__(self):
+            """Allow numpy array conversion via np.array(instance)"""
+            return self.data
+
+        def __setstate__(self, state):
+            """Handle unpickling of chumpy arrays in various formats"""
+            if isinstance(state, dict):
+                # Handle old chumpy format where data is stored in 'x' key
+                self.data = np.array(state.get('x', []))
+            else:
+                # Handle both tuple/list format and direct data format
+                self.data = np.array(state[0] if isinstance(state, (tuple, list)) else state)
+            return self
+
+        @property
+        def r(self):
+            """Mimic chumpy's .r property which returns the underlying data"""
+            return self.data
+
+def load_smal_model(file_path):
+    """Load a SMAL model file and convert any chumpy arrays to numpy arrays
+    
+    Args:
+        file_path: Path to the SMAL model pickle file
+        
+    Returns:
+        dict: Model data with all chumpy arrays converted to numpy arrays
+    """
+    with open(file_path, 'rb') as f:
+        data = CustomUnpickler(f).load()
+        # Convert any remaining ChumpyWrapper instances to numpy arrays
+        return {k: np.array(v) if isinstance(v, CustomUnpickler.ChumpyWrapper) else v 
+                for k, v in data.items()}
+
+# IF There are chumpy variables (in the legacy SMAL models) convert them to numpy.
+# With the custom unpickler, this should no longer be necessary.
 def undo_chumpy(x):
     if hasattr(x, 'r') and not isinstance(x, np.ndarray):
         print("WARNING: chumpy variable: ", x)
@@ -32,24 +83,18 @@ class SMAL(nn.Module):
     def __init__(self, device, shape_family_id=-1, dtype=torch.float):
         super(SMAL, self).__init__()
 
-        # -- Load SMPL params --
-        # with open(pkl_path, 'r') as f:
-        #     dd = pkl.load(f)
+        # Replace the existing loading code with:
+        dd = load_smal_model(config.SMAL_FILE)
 
-        with open(config.SMAL_FILE, 'rb') as f:
-            u = pkl._Unpickler(f)
-            u.encoding = 'latin1'
-            dd = u.load()
-
-            if config.DEBUG:
-                print(config.SMAL_FILE)
-                for key, value in dd.items():
-                    print(key)
-                    try:
-                        print(value.shape)
-                    except:
-                        pass
-                    print(value)
+        if config.DEBUG:
+            print(config.SMAL_FILE)
+            for key, value in dd.items():
+                print(key)
+                try:
+                    print(value.shape)
+                except:
+                    pass
+                print(value)
 
         self.f = dd['f']
 
@@ -84,9 +129,7 @@ class SMAL(nn.Module):
 
         if shape_family_id != -1:
             with open(config.SMAL_DATA_FILE, 'rb') as f:
-                u = pkl._Unpickler(f)
-                u.encoding = 'latin1'
-                data = u.load()
+                data = CustomUnpickler(f).load()
 
             betas = data['cluster_means'][shape_family_id]
             # TODO - THESE CLUSTER MEANS ARE NOT GOING TO BE USED IN OUR SMIL MODEL FOR NOW!

@@ -3,6 +3,7 @@ import numpy as np
 # from body.matlab import row
 import cv2
 # from psbody.mesh.colors import name_to_rgb
+from smal_model.smal_torch import CustomUnpickler
 
 
 
@@ -49,7 +50,7 @@ import torch
 class Prior(object):
     def __init__(self, prior_path, device):
         with open(prior_path, "rb") as f:
-            res = pkl.load(f, encoding='latin1')
+            res = CustomUnpickler(f).load()
             
         self.mean_ch = res['mean_pose']
         self.precs_ch = res['pic']

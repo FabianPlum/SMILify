@@ -44,33 +44,13 @@ For now, I'll focus on insects, hence **SMIL**.
 
 4. some more dependencies
    ```
-   pip install matplotlib scipy chumpy opencv-python nibabel trimesh
+   pip install matplotlib scipy opencv-python nibabel trimesh
    ```
    
 5. Test your installation
    ```
    pytest tests/pipeline_tests.py -v -s
    ```
-
-In case you get an error back with chumpy complaining about legacy imports and not finding numpy.bool, simply update the
-__init__.py file of **chumpy**:
-
-replace
-```
-from numpy import bool, int, float, ...
-```
-with
-```
-from numpy import bool_ as bool
-from numpy import int_ as int
-from numpy import complex_ as complex
-from numpy import unicode_ as unicode
-from numpy import str_ as str
-from numpy import float_ as float
-from numpy import object_ as object
-from numpy import inf as inf
-from numpy import nan as nan
-```
 
 
 ## Installation (all functionality)
@@ -178,6 +158,7 @@ If you want to represent an animal quadruped category which isn't covered by the
 - [ ] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable.
 - [ ] At the moment, the SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
 - [X] Get rid of the numpy/chumpy dependency mess.
+- [X] Allow importing legacy SMAL models with chumpy variables WITHOUT requiring chumpy to be installed through custom unpickler.
 - [ ] Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.
 - [ ] The code is poorly documented. That needs to be fixed.
 - [X] The code is poorly tested. That needs to be fixed. Write integration tests for main functionality.
