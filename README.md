@@ -166,7 +166,7 @@ If you want to represent an animal quadruped category which isn't covered by the
 
 ## Functionality / broader project TODOs
 - [ ] Allow to add user-defined priors for joint limits in the Blender addon.
-- [ ] Add support for user-defined pose priors in the Blender addon.
+- [ ] Add support for user-defined pose library in the Blender addon.
 - [ ] Correctly handle new pose priors.
 - [X] Finish cleaning antscan dataset and prepare models for fitting.
 - [ ] Create SMIL model from massive antscan dataset.
