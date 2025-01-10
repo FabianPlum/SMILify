@@ -162,7 +162,16 @@ If you want to represent an animal quadruped category which isn't covered by the
 - [ ] Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.
 - [ ] The code is poorly documented. That needs to be fixed.
 - [X] The code is poorly tested. That needs to be fixed. Write integration tests for main functionality.
-- [ ] Let's see how far we can get with this in our limited time BUT I would love to re-write this whole thing as a Blender addon. But that's for another day.
+- [ ] Let's see how far we can get with this in our limited time BUT I would love to re-write this whole thing as a Blender addon. But that's for another day (probably more of a "project wish" than related to refactoring).
+
+## Functionality / broader project TODOs
+- [ ] Allow to add user-defined priors for joint limits in the Blender addon.
+- [ ] Add support for user-defined pose priors in the Blender addon.
+- [ ] Correctly handle new pose priors.
+- [X] Finish cleaning antscan dataset and prepare models for fitting.
+- [ ] Create SMIL model from massive antscan dataset.
+- [ ] Add configurable mouse SMIL model.
+- [ ] Re-implement multi-GPU mesh registration cleanly.
 
 ## Acknowledgements
 This repository owes a great deal to the following works and authors:
