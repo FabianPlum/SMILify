@@ -25,10 +25,7 @@ UNITY_SHAPE_PRIOR = join(data_path, 'priors', 'unity_betas.npz')
 SHAPE_FAMILY = -1  # Choose from Cat (e.g. House Cat/Tiger/Lion), Canine (e.g. Dog/Wolf), Equine (e.g. Horse/Zebra), Bovine (e.g. Cow), Hippo
 # SEQUENCE_OR_IMAGE_NAME = "badja:rs_dog"
 # SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176.jpg"
-"""
-TODO This is just a test, and not functional yet. Uncomment the above examples to ensure
-the code is still working for non-novel cases
-"""
+
 SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_09_synth.jpg"
 IMAGE_RANGE = range(0, 1)  # Frames to process from sequence. Ignored for stanford extra
 WINDOW_SIZE = 10  # Changed number of frames processed in one go.
@@ -60,7 +57,7 @@ OPT_WEIGHTS = [
     [0.0, 500.0, 1000.0, 1000.0],  # Sil Reproj
     [0.0, 1.0, 1.0, 1.0],  # Betas
     [0.0, 1.0, 1.0, 1.0],  # Pose
-    [0.0, 100.0, 100.0, 100.0],  # Limits TODO!
+    [0.0, 100.0, 100.0, 100.0],  # Joint limits, suppressed in the original SMALify code!
     [0.0, 0.1, 0.1, 0.1],  # Splay
     [500.0, 100.0, 100.0, 100.0],  # Temporal
     [600, 400, 600, 600],  # Num iterations
@@ -201,3 +198,5 @@ else:  # use joint and plotting configuration of default dog model:
     N_POSE = 34  # not including global rotation
     # WARNING -> Now overwritten in trainer.py line 78
     N_BETAS = 20  # number of SMAL shape parameters to optimize over
+
+    joint_names = [f"joint_{i}" for i in range(N_POSE)]
