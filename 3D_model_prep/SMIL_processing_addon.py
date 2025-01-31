@@ -35,7 +35,7 @@ pip.main(['install', 'scikit-learn', 'matplotlib' '--target', (sys.exec_prefix) 
 # here, we need to run the following from the command line instead, as blender does not want to pip install things while running
 # so, go to the python executable that was shipped with blender and make sure the --target is correct
 
-./python3.11 -m pip install matplotlib scikit-learn --target /home/fabi/Downloads/blender-4.2.0-linux-x64/4.2/python/lib/python3.11/site-packages
+./python3.11 -m pip install matplotlib scikit-learn --target /home/USER/Downloads/blender-4.2.0-linux-x64/4.2/python/lib/python3.11/site-packages
 """
 
 
@@ -46,6 +46,46 @@ pkl_data = None
 SMIL-ify
 """
 
+# before we do anything else, let's add some code from smal_model/smal_torch.py so we can load the model
+# specifically old models that still use chumpy
+
+class CustomUnpickler(pickle.Unpickler):
+    """Custom unpickler that handles legacy SMAL model files containing chumpy arrays"""
+    def __init__(self, file, encoding='latin1'):
+        """Initialize with latin1 encoding to handle legacy pickle files"""
+        super().__init__(file, encoding=encoding)
+    
+    def find_class(self, module, name):
+        """Override class lookup to handle chumpy arrays"""
+        if module == "chumpy.ch" and name == "Ch":
+            return self.ChumpyWrapper
+        return super().find_class(module, name)
+
+    class ChumpyWrapper:
+        """Wrapper class that mimics chumpy array behavior but stores only numpy arrays"""
+        def __init__(self, *args, **kwargs):
+            """Initialize with data from args or empty array"""
+            self.data = np.array(args[0]) if args else np.array([])
+
+        def __array__(self):
+            """Allow numpy array conversion via np.array(instance)"""
+            return self.data
+
+        def __setstate__(self, state):
+            """Handle unpickling of chumpy arrays in various formats"""
+            if isinstance(state, dict):
+                # Handle old chumpy format where data is stored in 'x' key
+                self.data = np.array(state.get('x', []))
+            else:
+                # Handle both tuple/list format and direct data format
+                self.data = np.array(state[0] if isinstance(state, (tuple, list)) else state)
+            return self
+
+        @property
+        def r(self):
+            """Mimic chumpy's .r property which returns the underlying data"""
+            return self.data
+        
 
 # Decorators for type checking
 def ensure_mesh(func):
@@ -305,17 +345,19 @@ def load_pkl_file(filepath):
     try:
         with open(filepath, 'rb') as f:
             print("\nReading in contents of SMPL file...")
-            data = pickle.load(f, encoding='latin1')
+            data = CustomUnpickler(f).load()
+            data_de_chumpied = {k: np.array(v) if isinstance(v, CustomUnpickler.ChumpyWrapper) else v 
+                              for k, v in data.items()}
             print("\nContents of loaded SMPL file:")
-            for key in data:
+            for key in data_de_chumpied:
                 print(key)
                 try:
-                    if type(data[key]) is not str:
-                        print(data[key].shape)
+                    if type(data_de_chumpied[key]) is not str:
+                        print(data_de_chumpied[key].shape)
                 except:
-                    print(len(data[key]))
+                    print(len(data_de_chumpied[key]))
         print("Loaded .pkl file successfully.")
-        return data
+        return data_de_chumpied
     except Exception as e:
         print(f"Failed to load .pkl file: {e}")
         return None
@@ -370,6 +412,10 @@ def create_armature_and_weights(data, obj):
         return None
 
     joints = data["J"]
+    # the default SMAL / SMPL models don't have J_names, so let's generate them if they are absent
+    if "J_names" not in data:
+        data["J_names"] = [f"J_{i}" for i in range(joints.shape[0])]
+        print(data["J_names"])
     joint_names = data["J_names"]
     weights = data["weights"]
     kintree_table = data["kintree_table"]
@@ -388,6 +434,12 @@ def create_armature_and_weights(data, obj):
         bone.head = joints[child_idx]
         bone.tail = joints[child_idx] + np.array([0, 0, 0.1])
         bones.append(bone)
+        
+        # in some cases when the parent_idx has been stored as -1 this causes an integer overflow
+        # to avoid this leading to some weird errors, if the parent_idx is out of range, set it to -1 here.
+        if parent_idx > len(joint_names):
+            parent_idx = -1
+            
         if parent_idx != -1:
             bone.parent = armature.data.edit_bones[joint_names[parent_idx]]
 
@@ -809,6 +861,15 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                 obj = create_mesh_from_pkl(pkl_data)
                 if obj:
                     create_armature_and_weights(pkl_data, obj)
+                    if not smpl_tool.npz_filepath:
+                        self.report({'INFO'}, "No .npz file provided, skipping blendshape creation.")
+                        return {'FINISHED'}
+                        
+                    npz_filepath = bpy.path.abspath(smpl_tool.npz_filepath)
+                    if not os.path.exists(npz_filepath):
+                        self.report({'INFO'}, "Could not find .npz file, skipping blendshape creation.")
+                        return {'FINISHED'}
+                    
                     npz_data = load_npz_file(npz_filepath)
                     verts_data = npz_data['verts']
 
