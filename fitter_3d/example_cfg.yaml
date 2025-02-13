@@ -2,7 +2,9 @@
 
 stages:
   Stage_0_init: # Initialisation stage (see next stage for comments)
-    scheme: 'init'
+    # init_rot_lock locks the rotation of the body which can be useful of you know the mesh rotations are correct
+    # default scheme: 'init'
+    scheme: 'init_rot_lock' #default init 
     nits: 100 # number of iterations for this stage
     lr: 0.05 # Adam optimiser learning rate
 
