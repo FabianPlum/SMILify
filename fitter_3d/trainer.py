@@ -78,9 +78,20 @@ class SMAL3DFitter(nn.Module):
         self.betas = nn.Parameter(
             self.mean_betas.unsqueeze(0).repeat(batch_size, 1))
 
-        # so here, the scales (likely the kappa parameters) are just set to zero to initialise
-        self.log_beta_scales = torch.nn.Parameter(
-            torch.zeros(self.batch_size, 6).to(device), requires_grad=False)
+        # Load the kinematic tree from SMAL model data
+        with open(config.SMAL_FILE, 'rb') as f:
+            u = pkl._Unpickler(f)
+            u.encoding = 'latin1'
+            dd = u.load()
+            self.kintree_table = torch.tensor(dd['kintree_table']).to(device)
+        
+        # Get number of joints from kintree
+        self.n_joints = self.kintree_table.shape[1]
+        
+        # Initialize log_beta_scales with proper shape: batch_size x n_joints x 3
+        # Starting with ones means no scaling initially (since exp(0) = 1)
+        self.log_beta_scales = nn.Parameter(
+            torch.zeros(self.batch_size, self.n_joints, 3).to(device))
 
         global_rotation_np = eul_to_axis(np.array([0, 0, 0]))
         global_rotation = torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0).repeat(batch_size,
@@ -99,7 +110,7 @@ class SMAL3DFitter(nn.Module):
 
         # Can be used to prevent certain joints rotating.
         # Can be useful depending on sequence.
-        self.rotation_mask = torch.ones(config.N_POSE, 3).to(device)
+        self.rotation_mask = torch.ones(config.N_POSE, 3).to(device) # by default all joints are free to rotate
         # self.rotation_mask[25:32] = 0.0 # e.g. stop the tail moving
 
         # setup SMAL skinning & differentiable renderer
@@ -115,13 +126,38 @@ class SMAL3DFitter(nn.Module):
         self.deform_verts = nn.Parameter(torch.zeros(batch_size, *self.smal_model.v_template.shape).to(device),
                                          requires_grad=True)
 
+    def get_joint_scales(self):
+        """
+        Compute the final scale for each joint taking into account the kinematic chain.
+        A joint's scale is influenced by its own scale parameters and all its parents.
+        """
+        # Start with base scales from log_beta_scales
+        joint_scales = torch.exp(self.log_beta_scales)  # Convert from log space
+        
+        # For each joint
+        for joint_idx in range(self.n_joints):
+            parent_idx = self.kintree_table[0, joint_idx]
+            
+            # If this joint has a parent (parent_idx != joint_idx)
+            if parent_idx != joint_idx:
+                # Accumulate parent's scale
+                joint_scales[:, joint_idx] *= joint_scales[:, parent_idx]
+        
+        return joint_scales
+
     def forward(self):
+        # Get accumulated joint scales
+        joint_scales = self.get_joint_scales()
+        
+        # Reshape to match expected format: batch_size x num_joints x 3
+        betas_logscale = self.log_beta_scales.reshape(self.batch_size, -1, 3)
+        
         verts, joints, Rs, v_shaped = self.smal_model(
             self.betas,
             torch.cat([
                 self.global_rot.unsqueeze(1),
                 self.joint_rot], dim=1),
-            betas_logscale=self.log_beta_scales)
+            betas_logscale=betas_logscale)  # Pass properly shaped tensor
 
         verts = verts + self.trans.unsqueeze(1)
         joints = joints + self.trans.unsqueeze(1)
