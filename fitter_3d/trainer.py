@@ -135,6 +135,7 @@ class SMALParamGroup:
     """Object building on model.parameters, with modifications such as variable learning rate"""
     param_map = {
         "init": ["global_rot", "trans"],
+        "init_rot_lock": ["trans"],
         "default": ["global_rot", "joint_rot", "trans", "betas", "log_beta_scales"],
         "shape": ["global_rot", "trans", "betas", "log_beta_scales"],
         "pose": ["global_rot", "trans", "joint_rot", "betas"],
