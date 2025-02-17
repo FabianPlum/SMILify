@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import torch
 import numpy as np
+import config
 
 
 def batch_skew(vec, batch_size=None, opts=None):
@@ -105,6 +106,13 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
     # Initialize scaling factors as identity
     scaling_factors = torch.ones(N, parent.shape[0], 3).to(Rs.device)
     
+    # TODO: Remove this once we know why the old hardcoded scaling is not working
+    # I don't care why it was implemented like this before but I will remove the old stuff
+    # and just use the new scaling factor for all segments.
+    if betas_logscale.shape[1] == 6 or config.ALLOW_LIMB_SCALING == False:
+        betas_logscale = None
+        # not sure where this broke, but if left unchecked this causes the optimise_to_joints code to fail
+
     if betas_logscale is not None:
         # Convert from log space to regular scaling factors
         scaling_factors = torch.exp(betas_logscale)
