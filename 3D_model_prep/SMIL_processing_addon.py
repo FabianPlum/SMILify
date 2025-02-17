@@ -17,6 +17,7 @@ from mathutils import Vector
 from sklearn.decomposition import PCA
 from sklearn.covariance import EmpiricalCovariance
 import matplotlib.pyplot as plt
+import tempfile
 
 
 # TODO if you are very bored, implement package installation with subprocesses
@@ -377,6 +378,96 @@ def load_npz_file(filepath):
     except Exception as e:
         print(f"Failed to load .npz file: {e}")
         return None
+
+def apply_pose_correctives(obj, posedirs, base_vertices):
+    """
+    Apply pose-dependent corrective blend shapes based on current armature pose.
+    
+    Args:
+    - obj (bpy.types.Object): The mesh object to apply corrections to
+    - posedirs (numpy.ndarray): Array of shape (num_vertices, 3, num_joints * 9) containing pose-dependent deformations
+    - base_vertices (numpy.ndarray): Array of shape (num_vertices, 3) containing base vertex positions
+    """
+    # Find the armature
+    armature = obj.find_armature()
+    if not armature:
+        print("No armature found. Cannot apply pose corrections.")
+        return
+    
+    # Ensure we're in pose mode to read pose data
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode='POSE')
+    
+    # Get pose bones (excluding root)
+    pose_bones = armature.pose.bones[1:]  # Skip root bone
+    
+    # Store current vertex positions (these are the skinned positions without correctives)
+    if "base_skinned_positions" not in obj:
+        # Get current deformed vertex positions (from regular skinning)
+        world_matrix = np.array(obj.matrix_world)
+        world_matrix_inv = np.array(obj.matrix_world.inverted())
+        base_skinned_positions = np.array([np.array(obj.matrix_world @ v.co) for v in obj.data.vertices])
+        # Store these positions for future resets
+        obj["base_skinned_positions"] = base_skinned_positions.tobytes()
+        obj["world_matrix"] = world_matrix.tobytes()
+        obj["world_matrix_inv"] = world_matrix_inv.tobytes()
+    
+    # Prepare pose feature vector
+    pose_feature = []
+    for bone in pose_bones:
+        # Get bone's current rotation matrix in local space and convert to numpy
+        R = np.array(bone.matrix_basis.to_3x3())
+        # Compute difference from identity
+        R_diff = R - np.eye(3)
+        # Flatten and add to pose feature vector
+        pose_feature.extend(R_diff.flatten())
+    
+    pose_feature = np.array(pose_feature)
+    print(f"Generated pose feature vector of length: {len(pose_feature)}")
+    
+    # Reshape posedirs if needed
+    if len(posedirs.shape) == 3:
+        num_vertices, _, num_pose_basis = posedirs.shape
+        posedirs_reshaped = np.reshape(posedirs, [-1, num_pose_basis])
+    else:
+        posedirs_reshaped = posedirs
+    
+    print(f"Posedirs shape: {posedirs_reshaped.shape}")
+    print(f"Pose feature shape: {pose_feature.shape}")
+    
+    # Calculate vertex offsets
+    vertex_offsets = np.reshape(np.matmul(pose_feature, posedirs_reshaped.T), [-1, 3])
+    
+    # Switch to object mode to modify vertices
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.objects.active = obj
+    
+    # Restore base skinned positions
+    base_skinned_positions = np.frombuffer(obj["base_skinned_positions"]).reshape(-1, 3)
+    world_matrix = np.frombuffer(obj["world_matrix"]).reshape(4, 4)
+    world_matrix_inv = np.frombuffer(obj["world_matrix_inv"]).reshape(4, 4)
+    
+    # Apply offsets to vertices
+    for idx, offset in enumerate(vertex_offsets):
+        # Get the base skinned position
+        skinned_pos = base_skinned_positions[idx]
+        # Add corrective offset to the skinned position
+        final_pos = skinned_pos + offset
+        # Update vertex position (convert back to local space)
+        local_pos = world_matrix_inv @ np.append(final_pos, 1.0)
+        obj.data.vertices[idx].co = local_pos[:3]
+        
+        # Print debug info for first vertex
+        if idx == 0:
+            print(f"First vertex:")
+            print(f"  Base position: {base_vertices[idx]}")
+            print(f"  Base skinned position: {skinned_pos}")
+            print(f"  Pose offset: {offset}")
+            print(f"  Final position: {final_pos}")
+            print(f"  Local position: {local_pos[:3]}")
+    
+    obj.data.update()
+    print("Applied pose-dependent corrective blend shapes")
 
 
 def create_mesh_from_pkl(data):
@@ -839,28 +930,61 @@ class SMPL_PT_Panel(bpy.types.Panel):
 
         layout.operator("smpl.import_model", text="Import SMPL Model")
         layout.operator("smpl.export_model", text="Export SMPL Model")
+        
+        # Add section for pose correctives
+        layout.separator()
+        layout.label(text="Apply corrective blend shapes:")
+        # Add note about pose correctives availability
+        box = layout.box()
+        box.label(text="Note: Only available when pose correctives are provided via posedirs", icon='INFO')
+        layout.operator("smpl.apply_pose_correctives", text="Apply Pose Correctives")
 
+
+def store_smpl_data(context, data):
+    """Store SMPL data in a temporary file and save the path"""
+    obj = context.active_object
+    if obj:
+        # Create a temporary file to store the data
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, f"smpl_data_{obj.name}.pkl")
+        
+        # Save the data to the temporary file
+        with open(temp_path, 'wb') as f:
+            pickle.dump(data, f)
+        
+        # Store only the path in the object's custom properties
+        obj["smpl_data_path"] = temp_path
+        obj["has_smpl_data"] = True
+        context.scene.smpl_tool.has_smpl_data = True
+
+def get_smpl_data(context):
+    """Retrieve SMPL data from the temporary file"""
+    obj = context.active_object
+    if obj and "smpl_data_path" in obj:
+        temp_path = obj["smpl_data_path"]
+        if os.path.exists(temp_path):
+            with open(temp_path, 'rb') as f:
+                return pickle.load(f)
+    return None
 
 class SMPL_OT_ImportModel(bpy.types.Operator):
     bl_idname = "smpl.import_model"
     bl_label = "Import SMPL Model"
 
     def execute(self, context):
-        global pkl_data  # Declare global pkl_data
-
         scene = context.scene
         smpl_tool = scene.smpl_tool
 
         try:
-            # Ensure the file paths are absolute
             pkl_filepath = bpy.path.abspath(smpl_tool.pkl_filepath)
-            npz_filepath = bpy.path.abspath(smpl_tool.npz_filepath)
-
-            pkl_data = load_pkl_file(pkl_filepath)
-            if pkl_data:
-                obj = create_mesh_from_pkl(pkl_data)
+            data = load_pkl_file(pkl_filepath)
+            if data:
+                obj = create_mesh_from_pkl(data)
                 if obj:
-                    create_armature_and_weights(pkl_data, obj)
+                    # Store SMPL data in the object
+                    store_smpl_data(context, data)
+                    
+                    create_armature_and_weights(data, obj)
                     if not smpl_tool.npz_filepath:
                         self.report({'INFO'}, "No .npz file provided, skipping blendshape creation.")
                         return {'FINISHED'}
@@ -884,16 +1008,16 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                                                                            overwrite_mesh=True)
                                                                                
                     else:
-                        cov, mean_betas = create_blendshapes(npz_data, obj,)
+                        cov, mean_betas = create_blendshapes(npz_data, obj)
                         
-                    pkl_data["shape_cov"] = cov
-                    pkl_data["shape_mean_betas"] = mean_betas
+                    data["shape_cov"] = cov
+                    data["shape_mean_betas"] = mean_betas
 
                     if smpl_tool.symmetrise:
-                        make_symmetrical(obj, pkl_data)
+                        make_symmetrical(obj, data)
 
                     if smpl_tool.regress_joints:
-                        recalculate_joint_positions(obj, pkl_data)
+                        recalculate_joint_positions(obj, data)
 
                     if smpl_tool.clean_mesh:
                         cleanup_mesh(obj, center_tolerance=smpl_tool.merging_threshold)
@@ -990,12 +1114,56 @@ class SMPLProperties(bpy.types.PropertyGroup):
         description="Symmetrise the model",
         default=True
     )
+    
+    # Add properties to store SMPL data
+    has_smpl_data: bpy.props.BoolProperty(default=False)
+    v_template: bpy.props.FloatVectorProperty(size=3)  # This will store the shape
+    posedirs: bpy.props.FloatVectorProperty(size=3) # This will store the pose correctives
+    
+        
+class SMPL_OT_ApplyPoseCorrectivesOperator(bpy.types.Operator):
+    bl_idname = "smpl.apply_pose_correctives"
+    bl_label = "Apply Pose Correctives"
+    bl_description = "Apply pose-dependent corrective blend shapes based on current armature pose"
+    
+    @classmethod
+    def poll(cls, context):
+        # Only enable if we have an active mesh object with an armature
+        obj = context.active_object
+        if not (obj and obj.type == 'MESH' and obj.find_armature() and "has_smpl_data" in obj and "smpl_data_path" in obj):
+            return False
+            
+        # Check if posedirs exists and is not empty
+        data = get_smpl_data(context)
+        if not data or "posedirs" not in data:
+            return False
+            
+        # Check if posedirs is not empty (has actual data)
+        posedirs = data["posedirs"]
+        return isinstance(posedirs, np.ndarray) and posedirs.size > 0
+    
+    def execute(self, context):
+        obj = context.active_object
+        try:
+            # Get the original data
+            data = get_smpl_data(context)
+            if not data or "posedirs" not in data or "v_template" not in data:
+                self.report({'ERROR'}, "No SMPL data found. Please import a SMPL model first.")
+                return {'CANCELLED'}
+            
+            apply_pose_correctives(obj, data["posedirs"], data["v_template"])
+            self.report({'INFO'}, "Applied pose correctives successfully.")
+            return {'FINISHED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to apply pose correctives: {str(e)}")
+            return {'CANCELLED'}
 
 
 classes = (
     SMPL_PT_Panel,
     SMPL_OT_ImportModel,
     SMPL_OT_ExportModel,
+    SMPL_OT_ApplyPoseCorrectivesOperator,
     SMPLProperties,
 )
 
@@ -1007,6 +1175,16 @@ def register():
 
 
 def unregister():
+    # Clean up temporary files
+    for obj in bpy.data.objects:
+        if "smpl_data_path" in obj:
+            temp_path = obj["smpl_data_path"]
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
+    
     for cls in classes:
         bpy.utils.unregister_class(cls)
     del bpy.types.Scene.smpl_tool
