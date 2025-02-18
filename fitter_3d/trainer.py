@@ -176,6 +176,7 @@ class SMALParamGroup:
         "shape": ["global_rot", "trans", "betas", "log_beta_scales"],
         "pose": ["global_rot", "trans", "joint_rot", "betas", "log_beta_scales"],
         "deform": ["deform_verts"],
+        "all": ["global_rot", "trans", "joint_rot", "betas", "log_beta_scales", "deform_verts"]
     }  # map of param_type : all attributes in SMAL used in optim
 
     def __init__(self, model, group="smbld", lrs=None):
