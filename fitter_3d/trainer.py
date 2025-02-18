@@ -174,7 +174,7 @@ class SMALParamGroup:
         "init_rot_lock": ["trans"],
         "default": ["global_rot", "joint_rot", "trans", "betas", "log_beta_scales"],
         "shape": ["global_rot", "trans", "betas", "log_beta_scales"],
-        "pose": ["global_rot", "trans", "joint_rot", "betas"],
+        "pose": ["global_rot", "trans", "joint_rot", "betas", "log_beta_scales"],
         "deform": ["deform_verts"],
     }  # map of param_type : all attributes in SMAL used in optim
 
