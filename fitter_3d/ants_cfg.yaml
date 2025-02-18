@@ -4,26 +4,11 @@ stages:
   Stage_0_init: # Initialisation stage (see next stage for comments)
     # init_rot_lock locks the rotation of the body which can be useful if you know the root mesh rotations are correct
     # default scheme: 'init'
-    scheme: 'init_rot_lock' #default init 
+    scheme: 'init_rot_lock'
     nits: 100 # number of iterations for this stage
     lr: 0.05 # Adam optimiser learning rate
 
-  Stage_1_pose_coarse: # chosen name of stage
-    scheme: 'pose' # one of 'init', 'default', 'shape', 'pose', 'deform'. See README for explanation
-    nits: 400 # number of iterations for this stage
-    lr: 0.02 # Adam optimiser learning rate
-
-    loss_weights: # optional, any not provided will revert to default
-        w_chamfer: 1.
-        w_edge: 0.2
-        w_normal: 0.01
-        w_laplacian: 0.05
-
-    custom_lrs: # optional, used to provide different learning rates to certain parameters
-      betas: 0.005
-      log_beta_scales: 0.005
-
-  Stage_2_default: # chosen name of stage
+  Stage_1_default: # chosen name of stage
       scheme: 'default' # one of 'init', 'default', 'shape', 'pose', 'deform'. See README for explanation
       nits: 300 # number of iterations for this stage
       lr: 0.02 # Adam optimiser learning rate
@@ -37,7 +22,7 @@ stages:
       custom_lrs: # optional, used to provide different learning rates to certain parameters
         joint_rot: 0.002
 
-  Stage_3_deform_coarse:
+  Stage_2_deform_coarse:
     scheme: 'deform'
     nits: 1000
     lr: 0.002
@@ -48,7 +33,7 @@ stages:
       w_normal: 0.005
       w_laplacian: 0.01
 
-  Stage_4_deform_fine:
+  Stage_3_deform_fine:
     scheme: 'deform'
     nits: 1000
     lr: 0.0005
