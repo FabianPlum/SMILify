@@ -1,7 +1,7 @@
 bl_info = {
     "name": "SMIL Model Importer",
     "author": "Fabian Plum",
-    "version": (1, 0, 1),
+    "version": (1, 0, 2),
     "blender": (4, 2, 0),
     "location": "View3D > Tool Shelf",
     "description": "Import, configure, and export SMPL / SMIL models",
@@ -238,7 +238,19 @@ def find_nearest_neighbors(vertices, joint_locations, n):
 
 @ensure_mesh
 # @ensure_armature (careful, the mesh is the active object!)
-def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath):
+def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath=None):
+    """
+    Calculate or export the joint regressor matrix.
+    
+    Args:
+    - mesh_obj: The mesh object
+    - armature_obj: The armature object
+    - n: Number of nearest vertices to consider for each joint
+    - filepath: Optional path to save the regressor matrix. If None, only returns the matrix
+    
+    Returns:
+    - tuple: (filepath if provided else None, J_regressor matrix)
+    """
     vertices, _ = mesh_to_numpy(mesh_obj)
     joints = armature_obj.data.bones
     joint_locations = np.array([bone.head_local for bone in joints], dtype=np.float32)
@@ -246,8 +258,11 @@ def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath):
     J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
     for i in range(len(joints)):
         J_regressor[i, nearest_indices[i]] = nearest_weights[i]
-    np.save(filepath, J_regressor)
-    return filepath, J_regressor
+    
+    if filepath:
+        np.save(filepath, J_regressor)
+        return filepath, J_regressor
+    return None, J_regressor
 
 
 """
