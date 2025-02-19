@@ -18,6 +18,7 @@ from sklearn.decomposition import PCA
 from sklearn.covariance import EmpiricalCovariance
 import matplotlib.pyplot as plt
 import tempfile
+import csv
 
 
 # TODO if you are very bored, implement package installation with subprocesses
@@ -1135,7 +1136,6 @@ class SMPLProperties(bpy.types.PropertyGroup):
     v_template: bpy.props.FloatVectorProperty(size=3)  # This will store the shape
     posedirs: bpy.props.FloatVectorProperty(size=3) # This will store the pose correctives
     
-        
 class SMPL_OT_ApplyPoseCorrectivesOperator(bpy.types.Operator):
     bl_idname = "smpl.apply_pose_correctives"
     bl_label = "Apply Pose Correctives"
@@ -1174,11 +1174,88 @@ class SMPL_OT_ApplyPoseCorrectivesOperator(bpy.types.Operator):
             return {'CANCELLED'}
 
 
+def get_joint_distances(armature_obj):
+    """Calculate distances between all joint pairs in the armature."""
+    joints = armature_obj.data.bones
+    distances = []
+    
+    # Calculate distances between all joint pairs
+    for i, bone1 in enumerate(joints):
+        for j, bone2 in enumerate(joints[i+1:], i+1):
+            dist = (bone1.head_local - bone2.head_local).length
+            distances.append([bone1.name, bone2.name, dist])
+            
+    return distances
+
+def export_joint_distances(context, filepath):
+    """Export joint distances to a CSV file."""
+    armature = next((obj for obj in bpy.data.objects if obj.type == 'ARMATURE'), None)
+    if not armature:
+        return False, "No armature found"
+        
+    distances = get_joint_distances(armature)
+    
+    try:
+        with open(filepath, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['Joint1', 'Joint2', 'Distance'])
+            writer.writerows(distances)
+        return True, f"Distances exported to {filepath}"
+    except Exception as e:
+        return False, f"Failed to export distances: {str(e)}"
+
+# Add new operator classes
+
+class SMPL_OT_ExportJointDistances(bpy.types.Operator):
+    bl_idname = "smpl.export_joint_distances"
+    bl_label = "Export Joint Distances"
+    bl_description = "Export distances between all joints to a CSV file"
+    
+    @classmethod
+    def poll(cls, context):
+        return any(obj.type == 'ARMATURE' for obj in bpy.data.objects)
+    
+    def execute(self, context):
+        # Generate filename based on active mesh
+        mesh_obj = context.active_object
+        if mesh_obj and mesh_obj.type == 'MESH':
+            filename = f"{mesh_obj.name}_joint_distances.csv"
+        else:
+            filename = "joint_distances.csv"
+            
+        filepath = os.path.join(os.path.dirname(bpy.data.filepath), filename)
+        
+        success, message = export_joint_distances(context, filepath)
+        if success:
+            self.report({'INFO'}, message)
+            return {'FINISHED'}
+        else:
+            self.report({'ERROR'}, message)
+            return {'CANCELLED'}
+
+# Add new panel class
+
+class SMPL_PT_MorphometryPanel(bpy.types.Panel):
+    bl_label = "SMAL Morphometry"
+    bl_idname = "SMPL_PT_MorphometryPanel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'SMPL'
+    
+    def draw(self, context):
+        layout = self.layout
+        
+        # Add measurement creation buttons
+        layout.operator("smpl.export_joint_distances", text="Export Joint Distances")
+
+# Update the classes tuple to include new classes
 classes = (
     SMPL_PT_Panel,
+    SMPL_PT_MorphometryPanel,  # Add the new panel
     SMPL_OT_ImportModel,
     SMPL_OT_ExportModel,
     SMPL_OT_ApplyPoseCorrectivesOperator,
+    SMPL_OT_ExportJointDistances,  # Add the new operators
     SMPLProperties,
 )
 
