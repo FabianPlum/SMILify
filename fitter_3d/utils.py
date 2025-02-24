@@ -243,13 +243,14 @@ def save_animation(fig, func, n_frames, fmt="gif", fps=15, title="output", callb
     arap_utils.save_animation(fig, func, n_frames, fmt=fmt, fps=fps, title=title, callback=callback, **kwargs)
 
 
-def load_meshes(mesh_dir: str, sorting=lambda arr: arr, n_meshes=None, frame_step=1, device="cuda:0"):
-    """Given a dir of .obj files of Unity meshes, loads all and returns mesh names, and meshes as Mesh object.
+def load_meshes(mesh_dir=None, mesh_files=None, sorting=lambda arr: arr, n_meshes=None, frame_step=1, device="cuda:0"):
+    """Given a dir of .obj files or a list of .obj files, loads all and returns mesh names, and meshes as Mesh object.
 
-    :param mesh_dir: Location of directory of .obj files
-    :param sorting: Optional lambda function to sort listdir
+    :param mesh_dir: Location of directory of .obj files (mutually exclusive with mesh_files)
+    :param mesh_files: List of .obj file paths (mutually exclusive with mesh_dir)
+    :param sorting: Optional lambda function to sort listdir (only used with mesh_dir)
     :param n_meshes: Optional slice of first n_meshes in sorted dir
-    :param frame_step: For animations, optional step through sorted dir
+    :param frame_step: For animations, optional step through sorted dir (only used with mesh_dir)
     :param device: torch device
 
     :returns mesh_names: list of all names of mesh files loaded
@@ -260,17 +261,23 @@ def load_meshes(mesh_dir: str, sorting=lambda arr: arr, n_meshes=None, frame_ste
     mesh_names = []
     all_verts, all_faces_idx = [], []
 
-    file_list = [f for f in os.listdir(mesh_dir) if ".obj" in f]
-
-    obj_list = sorting(file_list)[::frame_step]  # get sorted list of obj files, applyinfg frame step
-    if n_meshes is not None: obj_list = obj_list[:n_meshes]
+    if mesh_dir is not None and mesh_files is not None:
+        raise ValueError("Cannot specify both mesh_dir and mesh_files")
+    elif mesh_dir is not None:
+        file_list = [f for f in os.listdir(mesh_dir) if ".obj" in f]
+        obj_list = sorting(file_list)[::frame_step]  # get sorted list of obj files, applying frame step
+        if n_meshes is not None:
+            obj_list = obj_list[:n_meshes]
+        obj_list = [os.path.join(mesh_dir, obj_file) for obj_file in obj_list]
+    elif mesh_files is not None:
+        obj_list = mesh_files
+    else:
+        raise ValueError("Must specify either mesh_dir or mesh_files")
 
     for obj_file in obj_list:
-        mesh_names.append(obj_file[:-4])  # Get name of mesh
-        target_obj = os.path.join(mesh_dir, obj_file)
-        verts, faces, aux = load_obj(target_obj, load_textures=False)  # Load mesh with no textures
-        faces_idx = faces.verts_idx.to \
-            (device)  # faces is an object which contains the following LongTensors: verts_idx, normals_idx and textures_idx
+        mesh_names.append(os.path.basename(obj_file)[:-4])  # Get name of mesh without .obj extension
+        verts, faces, aux = load_obj(obj_file, load_textures=False)  # Load mesh with no textures
+        faces_idx = faces.verts_idx.to(device)  # faces is an object which contains the following LongTensors: verts_idx, normals_idx and textures_idx
         verts = verts.to(device)  # verts is a FloatTensor of shape (V, 3) where V is the number of vertices in the mesh
 
         # Center and scale for normalisation purposes
