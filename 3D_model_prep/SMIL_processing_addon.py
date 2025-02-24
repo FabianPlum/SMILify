@@ -19,6 +19,7 @@ from sklearn.covariance import EmpiricalCovariance
 import matplotlib.pyplot as plt
 import tempfile
 import csv
+import bmesh
 
 
 # TODO if you are very bored, implement package installation with subprocesses
@@ -1274,8 +1275,81 @@ class SMPL_PT_MorphometryPanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         
-        # Add measurement creation buttons
-        layout.operator("smpl.export_joint_distances", text="Export Joint Distances")
+        # Add measurement export buttons
+        box = layout.box()
+        box.label(text="Export Measurements:")
+        box.operator("smpl.export_joint_distances", text="Joint Distances")
+        box.operator("smpl.export_mesh_measurements", text="Surface Area & Volume")
+
+def calculate_mesh_measurements(obj):
+    """Calculate surface area and volume of a mesh object using Blender's internal functions."""
+    # Ensure we're working with a triangulated mesh
+    bpy.context.view_layer.objects.active = obj
+    # Store current mode
+    current_mode = obj.mode
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.quads_convert_to_tris()
+    bpy.ops.object.mode_set(mode=current_mode)
+    
+    # Get mesh data
+    mesh = obj.data
+    
+    # Calculate surface area
+    surface_area = sum(p.area for p in mesh.polygons)
+    
+    # Calculate volume
+    # We need to ensure the mesh is manifold for accurate volume calculation
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    volume = bm.calc_volume()
+    bm.free()
+    
+    return abs(surface_area), abs(volume)
+
+def export_mesh_measurements(context, filepath):
+    """Export mesh surface area and volume measurements to a CSV file."""
+    obj = context.active_object
+    if not obj or obj.type != 'MESH':
+        return False, "No mesh object selected"
+    
+    try:
+        # Calculate measurements
+        surface_area, volume = calculate_mesh_measurements(obj)
+        
+        # Export to CSV
+        with open(filepath, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['Measurement', 'Value'])
+            writer.writerow(['Surface Area (Blender Units²)', surface_area])
+            writer.writerow(['Volume (Blender Units³)', volume])
+            
+        return True, f"Measurements exported to {filepath}"
+    except Exception as e:
+        return False, f"Failed to export measurements: {str(e)}"
+
+class SMPL_OT_ExportMeshMeasurements(bpy.types.Operator):
+    bl_idname = "smpl.export_mesh_measurements"
+    bl_label = "Export Mesh Measurements"
+    bl_description = "Export surface area and volume measurements to a CSV file"
+    
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+    
+    def execute(self, context):
+        # Generate filename based on active mesh
+        mesh_obj = context.active_object
+        filename = f"{mesh_obj.name}_measurements.csv"
+        filepath = os.path.join(os.path.dirname(bpy.data.filepath), filename)
+        
+        success, message = export_mesh_measurements(context, filepath)
+        if success:
+            self.report({'INFO'}, message)
+            return {'FINISHED'}
+        else:
+            self.report({'ERROR'}, message)
+            return {'CANCELLED'}
 
 # Update the classes tuple to include new classes
 classes = (
@@ -1285,6 +1359,7 @@ classes = (
     SMPL_OT_ExportModel,
     SMPL_OT_ApplyPoseCorrectivesOperator,
     SMPL_OT_ExportJointDistances,  # Add the new operators
+    SMPL_OT_ExportMeshMeasurements,  # Add the new operator
     SMPLProperties,
 )
 
