@@ -663,26 +663,45 @@ def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_me
     return cov_out, mean_betas
 
 
-def recalculate_joint_positions(obj, pkl_data):
+def recalculate_joint_positions(vertex_positions, J_regressor):
     """
-    Recalculate the positions of joints based on the mean shape and vertex weights.
+    Recalculate the positions of joints based on vertex positions and joint regressor weights.
 
     Args:
-    - obj (bpy.types.Object): The mesh object with the updated mean shape.
-    - pkl_data (dict): Dictionary containing the joint weights information from the .pkl file.
-    """
-    mean_shape = np.array([np.array(v.co) for v in obj.data.vertices])
-    weights = pkl_data["J_regressor"]
+    - vertex_positions (np.ndarray): Array of vertex positions (N x 3)
+    - J_regressor (np.ndarray): Joint regressor matrix (J x N) 
 
-    j, n = weights.shape
-    assert mean_shape.shape[0] == n, "Number of vertices in mean shape and weights must match."
+    Returns:
+    - joint_positions (np.ndarray): Updated joint positions (J x 3)
+    """
+
+    j, n = J_regressor.shape
+    assert vertex_positions.shape[0] == n, "Number of vertices in vertex positions and weights must match."
 
     # Initialize the joint positions array
     joint_positions = np.zeros((j, 3))
 
     # Calculate the position of each joint
     for i in range(j):
-        joint_positions[i] = np.sum(weights[i, :, None] * mean_shape, axis=0)
+        joint_positions[i] = np.sum(J_regressor[i, :, None] * vertex_positions, axis=0)
+
+    return joint_positions
+
+
+def apply_updated_joint_positions(obj, pkl_data):
+    """
+    Apply recalculated joint positions to the armature.
+
+    Args:
+    - obj (bpy.types.Object): The mesh object with the updated mean shape.
+    - pkl_data (dict): Dictionary containing the joint weights information from the .pkl file.
+    """
+    # Get current vertex positions
+    vertex_positions = np.array([np.array(v.co) for v in obj.data.vertices])
+    
+    # Calculate new joint positions
+    joint_positions = recalculate_joint_positions(vertex_positions=vertex_positions, 
+                                                  J_regressor=pkl_data["J_regressor"])
 
     # Update the armature with the new joint positions
     armature = bpy.data.objects.get("SMPL_Armature")
@@ -1036,7 +1055,7 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                         make_symmetrical(obj, data)
 
                     if smpl_tool.regress_joints:
-                        recalculate_joint_positions(obj, data)
+                        apply_updated_joint_positions(obj, data)
 
                     if smpl_tool.clean_mesh:
                         cleanup_mesh(obj, center_tolerance=smpl_tool.merging_threshold)
