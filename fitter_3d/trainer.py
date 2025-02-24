@@ -353,7 +353,8 @@ class StageManager:
             stage.run(plot=config.PLOT_RESULTS)
             stage.save_npz(labels=self.labels)
 
-        self.plot_losses()
+        # commented out for now, as we plot losses in the run method
+        #self.plot_losses()
 
     def plot_losses(self, out_src="losses"):
         """Plot combined losses for all stages."""
