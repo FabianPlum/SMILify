@@ -908,8 +908,8 @@ def export_smpl_model(obj, pkl_data, export_path):
     pkl_data["shapedirs"] = shapedirs
     print(shapedirs.shape)
 
-    # Write out the new pkl file to the same location as the input pkl file with the name SMPL_fit.pkl
-    output_path = os.path.join(os.path.dirname(export_path), "SMPL_fit.pkl")
+    # Write out the new pkl file to the same location as the input pkl file with the user-specified name
+    output_path = os.path.join(os.path.dirname(export_path), bpy.context.scene.smpl_tool.output_filename)
     try:
         with open(output_path, 'wb') as f:
             pickle.dump(pkl_data, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -945,6 +945,9 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "symmetrise")
 
         layout.operator("smpl.import_model", text="Import SMPL Model")
+        
+        # Add output filename field before export button
+        layout.prop(smpl_tool, "output_filename")
         layout.operator("smpl.export_model", text="Export SMPL Model")
         
         # Add section for pose correctives
@@ -1056,10 +1059,10 @@ class SMPL_OT_ExportModel(bpy.types.Operator):
     bl_label = "Export SMPL Model"
 
     def execute(self, context):
-        global pkl_data  # Declare global pkl_data
-
-        if pkl_data is None:
-            self.report({'ERROR'}, f"No SMPL model found: {e}")
+        # Get SMPL data from the active object
+        data = get_smpl_data(context)
+        if data is None:
+            self.report({'ERROR'}, "No SMPL model data found. Please import a SMPL model first.")
             return {'CANCELLED'}
 
         scene = context.scene
@@ -1071,12 +1074,12 @@ class SMPL_OT_ExportModel(bpy.types.Operator):
                 self.report({'ERROR'}, "No valid mesh object selected.")
                 return {'CANCELLED'}
 
-            export_smpl_model(obj, pkl_data, export_path=bpy.path.abspath(smpl_tool.pkl_filepath))
+            export_smpl_model(obj, data, export_path=bpy.path.abspath(smpl_tool.pkl_filepath))
 
             self.report({'INFO'}, "SMPL Model exported successfully.")
             return {'FINISHED'}
         except Exception as e:
-            self.report({'ERROR'}, f"Failed to export SMPL Model: {e}")
+            self.report({'ERROR'}, f"Failed to export SMPL Model: {str(e)}")
             return {'CANCELLED'}
 
 
@@ -1136,6 +1139,13 @@ class SMPLProperties(bpy.types.PropertyGroup):
     v_template: bpy.props.FloatVectorProperty(size=3)  # This will store the shape
     posedirs: bpy.props.FloatVectorProperty(size=3) # This will store the pose correctives
     
+    # Add to SMPLProperties class:
+    output_filename: bpy.props.StringProperty(
+        name="Output Filename",
+        description="Name of the output SMPL model file",
+        default="SMPL_fit.pkl"
+    )
+
 class SMPL_OT_ApplyPoseCorrectivesOperator(bpy.types.Operator):
     bl_idname = "smpl.apply_pose_correctives"
     bl_label = "Apply Pose Correctives"
