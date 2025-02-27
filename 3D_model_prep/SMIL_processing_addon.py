@@ -670,7 +670,7 @@ def recalculate_joint_positions(vertex_positions, J_regressor):
 
     Args:
     - vertex_positions (np.ndarray): Array of vertex positions (N x 3)
-    - J_regressor (np.ndarray): Joint regressor matrix (J x N) 
+    - J_regressor (np.ndarray): (normalised) joint regressor matrix (J x N) 
 
     Returns:
     - joint_positions (np.ndarray): Updated joint positions (J x 3)
@@ -715,6 +715,7 @@ def apply_updated_joint_positions(obj, pkl_data):
 
     for i, bone in enumerate(armature.data.edit_bones):
         bone.head = joint_positions[i]
+        # the bone tails all point upwards and bones are of equal length
         bone.tail = joint_positions[i] + [0, 0, 0.1]
 
     bpy.ops.object.mode_set(mode='OBJECT')
@@ -793,7 +794,9 @@ def make_symmetrical(obj, pkl_data, center_tolerance=0.005):
         assert len(left_inds) == len(right_inds)
         print(len(left_inds), len(right_inds), len(center_inds))
     except AssertionError:
-        print("WHOOPS")
+        print(f"Error enforcing symmetry: Unequal number of vertices on left ({len(left_inds)})", 
+              f"and right ({len(right_inds)}) sides. This may indicate an asymmetric mesh or",
+              f"incorrect symmetry axis.")
 
     symIdx = rebuild_symmetry_array(vertices_on_symmetry_axis=I,
                                     all_vertices=v, axis='y',
@@ -1217,19 +1220,85 @@ def get_joint_distances(armature_obj):
             
     return distances
 
+def get_joint_distances_from_positions(joint_positions, joint_names):
+    """Calculate distances between all joint pairs from joint positions."""
+    distances = []
+    
+    # Calculate distances between all joint pairs
+    for i, pos1 in enumerate(joint_positions):
+        for j, pos2 in enumerate(joint_positions[i+1:], i+1):
+            dist = np.linalg.norm(pos1 - pos2)
+            distances.append([joint_names[i], joint_names[j], dist])
+            
+    return distances
+
 def export_joint_distances(context, filepath):
-    """Export joint distances to a CSV file."""
+    """Export joint distances to a CSV file, including distances for each shape key."""
     armature = next((obj for obj in bpy.data.objects if obj.type == 'ARMATURE'), None)
     if not armature:
         return False, "No armature found"
+    
+    mesh_obj = context.active_object
+    if not mesh_obj or mesh_obj.type != 'MESH':
+        return False, "No mesh object selected"
+    
+    # Get joint names from armature
+    joint_names = [bone.name for bone in armature.data.bones]
+    
+    # Get base mesh distances
+    base_distances = get_joint_distances(armature)
+    
+    # Prepare data for CSV
+    all_data = [['Base'] + row for row in base_distances]
+    
+    # Recalculate J_regressor for current mesh state
+    # This ensures it works even if mesh topology has changed
+    _, J_regressor = export_J_regressor_to_npy(mesh_obj, armature, 20)
+    
+    # Get distances for each shape key
+    if mesh_obj.data.shape_keys and len(mesh_obj.data.shape_keys.key_blocks) > 1:
+        # Store original values
+        original_values = {}
+        for key in mesh_obj.data.shape_keys.key_blocks[1:]:  # Skip basis
+            original_values[key.name] = key.value
+            key.value = 0.0
         
-    distances = get_joint_distances(armature)
+        # Update mesh to ensure we start from basis
+        mesh_obj.data.update()
+        
+        # For each shape key
+        for key in mesh_obj.data.shape_keys.key_blocks[1:]:  # Skip basis
+            # Set this shape key to 1.0
+            key.value = 1.0
+            mesh_obj.data.update()
+            
+            # Get vertex positions with this shape key applied
+            vertex_positions = np.array([np.array(v.co) for v in mesh_obj.data.vertices])
+            
+            # Calculate joint positions using J_regressor
+            joint_positions = recalculate_joint_positions(vertex_positions, J_regressor)
+            
+            # Calculate distances between joints
+            key_distances = get_joint_distances_from_positions(joint_positions, joint_names)
+            
+            # Add to data with shape key name
+            for i, dist_data in enumerate(key_distances):
+                all_data.append([key.name] + dist_data)
+            
+            # Reset this shape key
+            key.value = 0.0
+            mesh_obj.data.update()
+        
+        # Restore original values
+        for key_name, value in original_values.items():
+            mesh_obj.data.shape_keys.key_blocks[key_name].value = value
+        mesh_obj.data.update()
     
     try:
         with open(filepath, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(['Joint1', 'Joint2', 'Distance'])
-            writer.writerows(distances)
+            writer.writerow(['Shape', 'Joint1', 'Joint2', 'Distance'])
+            writer.writerows(all_data)
         return True, f"Distances exported to {filepath}"
     except Exception as e:
         return False, f"Failed to export distances: {str(e)}"
@@ -1278,6 +1347,14 @@ class SMPL_PT_MorphometryPanel(bpy.types.Panel):
         # Add measurement export buttons
         box = layout.box()
         box.label(text="Export Measurements:")
+        
+        # Show shape key count if available
+        obj = context.active_object
+        if obj and obj.type == 'MESH' and obj.data.shape_keys:
+            shape_key_count = len(obj.data.shape_keys.key_blocks) - 1  # Exclude basis
+            if shape_key_count > 0:
+                box.label(text=f"Will include measurements for {shape_key_count} shape keys", icon='SHAPEKEY_DATA')
+        
         box.operator("smpl.export_joint_distances", text="Joint Distances")
         box.operator("smpl.export_mesh_measurements", text="Surface Area & Volume")
 
@@ -1308,21 +1385,58 @@ def calculate_mesh_measurements(obj):
     return abs(surface_area), abs(volume)
 
 def export_mesh_measurements(context, filepath):
-    """Export mesh surface area and volume measurements to a CSV file."""
+    """Export mesh surface area and volume measurements to a CSV file, including measurements for each shape key."""
     obj = context.active_object
     if not obj or obj.type != 'MESH':
         return False, "No mesh object selected"
     
     try:
-        # Calculate measurements
+        # Prepare data for CSV
+        all_data = []
+        
+        # Calculate base measurements
         surface_area, volume = calculate_mesh_measurements(obj)
+        all_data.append(['Base', 'Surface Area', surface_area])
+        all_data.append(['Base', 'Volume', volume])
+        
+        # Get measurements for each shape key
+        if obj.data.shape_keys and len(obj.data.shape_keys.key_blocks) > 1:
+            # Store original values
+            original_values = {}
+            for key in obj.data.shape_keys.key_blocks[1:]:  # Skip basis
+                original_values[key.name] = key.value
+                key.value = 0.0
+            
+            # Update mesh to ensure we start from basis
+            obj.data.update()
+            
+            # For each shape key
+            for key in obj.data.shape_keys.key_blocks[1:]:  # Skip basis
+                # Set this shape key to 1.0
+                key.value = 1.0
+                obj.data.update()
+                
+                # Calculate measurements
+                key_surface_area, key_volume = calculate_mesh_measurements(obj)
+                
+                # Add to data with shape key name
+                all_data.append([key.name, 'Surface Area', key_surface_area])
+                all_data.append([key.name, 'Volume', key_volume])
+                
+                # Reset this shape key
+                key.value = 0.0
+                obj.data.update()
+            
+            # Restore original values
+            for key_name, value in original_values.items():
+                obj.data.shape_keys.key_blocks[key_name].value = value
+            obj.data.update()
         
         # Export to CSV
         with open(filepath, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(['Measurement', 'Value'])
-            writer.writerow(['Surface Area (Blender Units²)', surface_area])
-            writer.writerow(['Volume (Blender Units³)', volume])
+            writer.writerow(['Shape', 'Measurement', 'Value'])
+            writer.writerows(all_data)
             
         return True, f"Measurements exported to {filepath}"
     except Exception as e:
