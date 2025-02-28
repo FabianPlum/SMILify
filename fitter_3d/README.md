@@ -5,6 +5,10 @@ This directory contains code for optimising the SMAL/SMBLD model to provided 3D 
 
 It optimises shape, pose, scale to allow for the production of new shape & pose priors based on the set of animal models provided.
 
+![alt text](/docs/ant_registered_meshes.gif)
+*Animation showing the registration of 3D ant models to an example template mesh, demonstrating the fitting results across different species. This is done with our [provided blender addon](/3D_model_prep/SMIL_processing_addon.py) and can produce shape keys for either registered meshes directly or shape principle components. The meshes registered in this example were provided by [tunosemi](https://sketchfab.com/tunosemi)*
+
+
 ## Input file format
 
 Currently, this only supports .obj files.
