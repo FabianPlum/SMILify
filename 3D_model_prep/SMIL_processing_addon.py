@@ -662,9 +662,6 @@ def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_me
         shape_key.slider_min = min_range
         shape_key.slider_max = max_range
 
-    # Sort shape keys alphabetically
-    sort_shape_keys(obj)
-
     print(f"Created {num_components} PCA blendshapes with custom min and max ranges based on standard deviations.")
 
     return cov_out, mean_betas
