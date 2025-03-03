@@ -592,6 +592,9 @@ def create_blendshapes(data, obj):
         for vert_index, vert in enumerate(deform):
             shape_key.data[vert_index].co = vert
     
+    # Sort shape keys alphabetically
+    sort_shape_keys(obj)
+    
     # Here, as the individual blendshapes are entirely independent of each other,
     # the covariance matrix is simply a [n, n] identity matrix     
     num_shapes = deform_verts.shape[0]   
@@ -658,6 +661,9 @@ def apply_pca_and_create_blendshapes(scans, obj, num_components=10, overwrite_me
         # Set min and max range for the shape key
         shape_key.slider_min = min_range
         shape_key.slider_max = max_range
+
+    # Sort shape keys alphabetically
+    sort_shape_keys(obj)
 
     print(f"Created {num_components} PCA blendshapes with custom min and max ranges based on standard deviations.")
 
@@ -1484,6 +1490,45 @@ class SMPL_OT_ExportMeshMeasurements(bpy.types.Operator):
         else:
             self.report({'ERROR'}, message)
             return {'CANCELLED'}
+
+def sort_shape_keys(obj):
+    """
+    Sort all shape keys alphabetically (except for the Basis shape key which stays first).
+    
+    Args:
+    - obj (bpy.types.Object): The mesh object with shape keys to sort
+    """
+    if not obj.data.shape_keys or len(obj.data.shape_keys.key_blocks) <= 2:
+        # No need to sort if there are 0, 1, or 2 shape keys (basis + 1)
+        return
+    
+    # Get shape key names (excluding Basis)
+    shape_keys = obj.data.shape_keys.key_blocks
+    names = [key.name for key in shape_keys[1:]]
+    
+    # Sort the names
+    sorted_names = sorted(names)
+    
+    # Rearrange shape keys using the proper Blender API
+    for i, name in enumerate(sorted_names, 1):
+        # Get current index of this shape key
+        current_idx = shape_keys.find(name)
+        # Move to the correct position (i) using the proper API
+        if current_idx != i:
+            # We need to use the shape_key_move operator
+            bpy.context.view_layer.objects.active = obj
+            obj.active_shape_key_index = current_idx
+            # Move the shape key up or down until it's in the right position
+            if current_idx < i:
+                # Need to move down
+                for _ in range(i - current_idx):
+                    bpy.ops.object.shape_key_move(type='DOWN')
+            else:
+                # Need to move up
+                for _ in range(current_idx - i):
+                    bpy.ops.object.shape_key_move(type='UP')
+    
+    print(f"Sorted {len(sorted_names)} shape keys alphabetically")
 
 # Update the classes tuple to include new classes
 classes = (
