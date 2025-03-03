@@ -270,7 +270,7 @@ def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath=None):
 """
 This is currently not supported.
 The posedir created here captures the mesh shape at every frame
-This is however not hwo the posedir is used in the original implementaiton and thus disabled for now.
+This is however not how the posedir is used in the original implementaiton and thus disabled for now.
 """
 
 
@@ -1360,14 +1360,7 @@ class SMPL_PT_MorphometryPanel(bpy.types.Panel):
 
 def calculate_mesh_measurements(obj):
     """Calculate surface area and volume of a mesh object using Blender's internal functions."""
-    # Ensure we're working with a triangulated mesh
     bpy.context.view_layer.objects.active = obj
-    # Store current mode
-    current_mode = obj.mode
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.mesh.quads_convert_to_tris()
-    bpy.ops.object.mode_set(mode=current_mode)
     
     # Get mesh data
     mesh = obj.data
@@ -1409,28 +1402,55 @@ def export_mesh_measurements(context, filepath):
             
             # Update mesh to ensure we start from basis
             obj.data.update()
+            context.view_layer.update()  # Force a full update
+            
+            # Create a temporary object for measurements
+            temp_mesh = bpy.data.meshes.new("TempMeasurementMesh")
+            temp_obj = bpy.data.objects.new("TempMeasurementObj", temp_mesh)
+            context.collection.objects.link(temp_obj)
             
             # For each shape key
             for key in obj.data.shape_keys.key_blocks[1:]:  # Skip basis
+                # Reset all shape keys to 0 first
+                for k in obj.data.shape_keys.key_blocks[1:]:
+                    k.value = 0.0
+                
                 # Set this shape key to 1.0
                 key.value = 1.0
-                obj.data.update()
                 
-                # Calculate measurements
-                key_surface_area, key_volume = calculate_mesh_measurements(obj)
+                # Force a complete update of the mesh
+                obj.data.update()
+                context.view_layer.update()
+                
+                # Get the evaluated object
+                depsgraph = context.evaluated_depsgraph_get()
+                eval_obj = obj.evaluated_get(depsgraph)
+                
+                # Copy the evaluated mesh to our temporary mesh
+                temp_mesh.clear_geometry()
+                temp_mesh.from_pydata(
+                    [v.co[:] for v in eval_obj.data.vertices],
+                    [],
+                    [p.vertices[:] for p in eval_obj.data.polygons]
+                )
+                temp_mesh.update()
+                
+                # Calculate measurements on the temporary object
+                key_surface_area, key_volume = calculate_mesh_measurements(temp_obj)
                 
                 # Add to data with shape key name
                 all_data.append([key.name, 'Surface Area', key_surface_area])
                 all_data.append([key.name, 'Volume', key_volume])
-                
-                # Reset this shape key
-                key.value = 0.0
-                obj.data.update()
+            
+            # Remove temporary object
+            bpy.data.objects.remove(temp_obj)
+            bpy.data.meshes.remove(temp_mesh)
             
             # Restore original values
             for key_name, value in original_values.items():
                 obj.data.shape_keys.key_blocks[key_name].value = value
             obj.data.update()
+            context.view_layer.update()
         
         # Export to CSV
         with open(filepath, 'w', newline='') as csvfile:
