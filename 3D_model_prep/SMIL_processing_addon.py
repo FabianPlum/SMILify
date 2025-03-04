@@ -290,73 +290,7 @@ def export_posedirs(mesh_obj, start_frame, stop_frame, filepath):
     return filepath, posedirs
 
 
-# Export all model elements as a dict following the SMPL convention, contained in a .pkl file
-def export_smpl_model(start_frame=0, stop_frame=1):
-    smpl_dict = {
-        "f": [],
-        "J_regressor": [],
-        "kintree_table": [],
-        "J": [],
-        "bs_style": "lbs",
-        "weights": [],
-        "posedirs": [],
-        "v_template": [],
-        "shapedirs": [],
-        "bs_type": "lrotmin",
-        "sym_verts": []
-    }
 
-    obj = bpy.context.active_object
-    if not obj or obj.type != 'MESH':
-        print("No valid mesh object selected for testing.")
-        return
-
-    print("Selected mesh object:", obj.name)
-    triangulate_mesh(obj)
-
-    vertices_npy_path = bpy.path.abspath('//test_vertices.npy')
-    faces_npy_path = bpy.path.abspath('//test_faces.npy')
-    vertex_groups_npy_path = bpy.path.abspath('//test_vertex_groups.npy')
-    joint_locations_npy_path = bpy.path.abspath('//test_joint_locations.npy')
-    joint_hierarchy_npy_path = bpy.path.abspath('//test_joint_hierarchy.npy')
-    j_regressor_npy_path = bpy.path.abspath('//test_joint_regressor.npy')
-    y_axis_vertices_npy_path = bpy.path.abspath('//test_y_axis_vertices.npy')
-    posedirs_npy_path = bpy.path.abspath('//test_posedirs.npy')
-
-    smpl_file_path = bpy.path.abspath('//smpl_ATTA.pkl')
-
-    smpl_dict["v_template"] = export_vertices_to_npy(obj, vertices_npy_path)[1]
-    smpl_dict["f"] = export_faces_to_npy(obj, faces_npy_path)[1]
-    smpl_dict["weights"] = export_vertex_groups_to_npy(obj, vertex_groups_npy_path)[1]
-    smpl_dict["sym_verts"] = export_y_axis_vertices_to_npy(obj, y_axis_vertices_npy_path)[1]
-
-    num_verts = smpl_dict["v_template"].shape[0]
-    num_joints = smpl_dict["weights"].shape[1]
-
-    print("Vertices: ", num_verts)
-    print("Joints: ", num_joints)
-
-    smpl_dict["shapedirs"] = np.zeros((num_verts, 3))
-
-    smpl_dict["posedirs"] = np.empty(0)  # leave empty if there are no pose blend shapes
-
-    print(smpl_dict["posedirs"].shape)
-
-    armature_obj = next((obj for obj in bpy.data.objects if obj.type == 'ARMATURE'), None)
-    if not armature_obj:
-        print("No armature object found.")
-        return
-
-    print("Found armature object:", armature_obj.name)
-
-    smpl_dict["kintree_table"] = export_joint_hierarchy_to_npy(armature_obj, joint_hierarchy_npy_path)[1]
-    smpl_dict["J"], smpl_dict["J_names"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1:]
-    smpl_dict["J_regressor"] = export_J_regressor_to_npy(obj, armature_obj, 20, j_regressor_npy_path)[1]
-
-    with open(smpl_file_path, "wb") as f:
-        pickle.dump(smpl_dict, f)
-
-    print(f"SMPL model exported successfully to {smpl_file_path}")
 
 
 def load_pkl_file(filepath):
@@ -1171,6 +1105,23 @@ class SMPLProperties(bpy.types.PropertyGroup):
         description="Name of the output SMPL model file",
         default="SMPL_fit.pkl"
     )
+    
+    # Add properties for reference measurements CSV
+    reference_csv_filepath: bpy.props.StringProperty(
+        name="Reference CSV Filepath",
+        description="Path to the CSV file containing reference measurements",
+        default="",
+        subtype='FILE_PATH'
+    )
+    
+    reference_joint_pair: bpy.props.StringProperty(
+        name="Reference Joint Pair",
+        description="Joint pair used for reference measurements (read from CSV)",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    
+    has_reference_data: bpy.props.BoolProperty(default=False)
 
 class SMPL_OT_ApplyPoseCorrectivesOperator(bpy.types.Operator):
     bl_idname = "smpl.apply_pose_correctives"
@@ -1248,59 +1199,156 @@ def export_joint_distances(context, filepath):
     # Get joint names from armature
     joint_names = [bone.name for bone in armature.data.bones]
     
-    # Get base mesh distances
-    base_distances = get_joint_distances(armature)
-    
-    # Prepare data for CSV
-    all_data = [['Base'] + row for row in base_distances]
-    
     # Recalculate J_regressor for current mesh state
     # This ensures it works even if mesh topology has changed
     _, J_regressor = export_J_regressor_to_npy(mesh_obj, armature, 20)
     
+    # Check if reference measurements are available
+    smpl_tool = context.scene.smpl_tool
+    reference_measurements = {}
+    reference_joint_pair = []
+    
+    if smpl_tool.has_reference_data:
+        reference_measurements = get_reference_measurements(context)
+        
+        # Parse joint pair from reference_joint_pair
+        joint_pair = smpl_tool.reference_joint_pair
+        
+        # Try to extract joint names from the joint pair string
+        # Format is typically "joint1 to joint2 [unit]"
+        if "to" in joint_pair:
+            parts = joint_pair.split("to")
+            if len(parts) >= 2:
+                joint1 = parts[0].strip()
+                joint2 = parts[1].split("[")[0].strip()
+                reference_joint_pair = [joint1, joint2]
+                
+        # Verify reference joints exist in the armature
+        if len(reference_joint_pair) == 2:
+            for joint in reference_joint_pair:
+                if joint not in joint_names:
+                    print(f"Warning: Reference joint '{joint}' not found in armature")
+                    reference_joint_pair = []
+    
+    # Prepare data for CSV
+    all_data = []
+    
+    # Add header row with scaling info if reference data is available
+    if reference_joint_pair and reference_measurements:
+        all_data.append(['Shape', 'Joint1', 'Joint2', 'Distance', 'Scaling Factor', 'Scaled Distance in mm'])
+    else:
+        all_data.append(['Shape', 'Joint1', 'Joint2', 'Distance'])
+    
+    # Get base mesh distances using depsgraph evaluation
+    depsgraph = context.evaluated_depsgraph_get()
+    
+    # Store original shape key values
+    original_values = {}
+    if mesh_obj.data.shape_keys:
+        for key in mesh_obj.data.shape_keys.key_blocks:
+            original_values[key.name] = key.value
+            key.value = 0.0  # Reset all to 0
+    
+    # Update mesh to ensure we start from basis
+    mesh_obj.data.update()
+    
+    # Get evaluated mesh for base shape
+    eval_obj = mesh_obj.evaluated_get(depsgraph)
+    
+    # Get vertex positions from evaluated mesh
+    vertex_positions = np.array([np.array(v.co) for v in eval_obj.data.vertices])
+    
+    # Calculate joint positions using J_regressor
+    joint_positions = recalculate_joint_positions(vertex_positions, J_regressor)
+    
+    # Calculate distances between all joint pairs
+    base_distances = []
+    for i, pos1 in enumerate(joint_positions):
+        for j, pos2 in enumerate(joint_positions[i+1:], i+1):
+            dist = np.linalg.norm(pos1 - pos2)
+            base_distances.append([joint_names[i], joint_names[j], dist])
+    
+    # Add base mesh distances
+    for row in base_distances:
+        if reference_joint_pair and reference_measurements:
+            # scaling factor is not applicable to base mesh
+            scaling_factor = "N/A"
+            scaled_distance = "N/A"
+            all_data.append(['Base'] + row + [scaling_factor, scaled_distance])
+        else:
+            all_data.append(['Base'] + row)
+    
     # Get distances for each shape key
     if mesh_obj.data.shape_keys and len(mesh_obj.data.shape_keys.key_blocks) > 1:
-        # Store original values
-        original_values = {}
-        for key in mesh_obj.data.shape_keys.key_blocks[1:]:  # Skip basis
-            original_values[key.name] = key.value
-            key.value = 0.0
-        
-        # Update mesh to ensure we start from basis
-        mesh_obj.data.update()
-        
         # For each shape key
         for key in mesh_obj.data.shape_keys.key_blocks[1:]:  # Skip basis
+            # Reset all shape keys to 0 first
+            for k in mesh_obj.data.shape_keys.key_blocks:
+                k.value = 0.0
+            
             # Set this shape key to 1.0
             key.value = 1.0
-            mesh_obj.data.update()
             
-            # Get vertex positions with this shape key applied
-            vertex_positions = np.array([np.array(v.co) for v in mesh_obj.data.vertices])
+            # Force a complete update of the mesh
+            mesh_obj.data.update()
+            context.view_layer.update()
+            
+            # Get the evaluated object with this shape key applied
+            depsgraph.update()
+            eval_obj = mesh_obj.evaluated_get(depsgraph)
+            
+            # Get vertex positions from evaluated mesh
+            vertex_positions = np.array([np.array(v.co) for v in eval_obj.data.vertices])
             
             # Calculate joint positions using J_regressor
             joint_positions = recalculate_joint_positions(vertex_positions, J_regressor)
             
             # Calculate distances between joints
-            key_distances = get_joint_distances_from_positions(joint_positions, joint_names)
+            key_distances = []
+            for i, pos1 in enumerate(joint_positions):
+                for j, pos2 in enumerate(joint_positions[i+1:], i+1):
+                    dist = np.linalg.norm(pos1 - pos2)
+                    key_distances.append([joint_names[i], joint_names[j], dist])
             
-            # Add to data with shape key name
-            for i, dist_data in enumerate(key_distances):
-                all_data.append([key.name] + dist_data)
+            # Calculate scaling factor if reference data is available
+            scaling_factor = 1.0
+            # Clean the key name as it may contain file endings
+            key_name = key.name.split(".")[0]
             
-            # Reset this shape key
-            key.value = 0.0
-            mesh_obj.data.update()
+            if reference_joint_pair and reference_measurements and key_name in reference_measurements:
+                # Find the distance between reference joints for this shape key
+                ref_joint_idx1 = joint_names.index(reference_joint_pair[0]) if reference_joint_pair[0] in joint_names else -1
+                ref_joint_idx2 = joint_names.index(reference_joint_pair[1]) if reference_joint_pair[1] in joint_names else -1
+                
+                if ref_joint_idx1 >= 0 and ref_joint_idx2 >= 0:
+                    # Calculate the current distance between reference joints
+                    current_dist = np.linalg.norm(joint_positions[ref_joint_idx1] - joint_positions[ref_joint_idx2])
+                    
+                    # Get the reference distance
+                    reference_dist = reference_measurements.get(key_name, 0.0)
+                    
+                    if current_dist > 0 and reference_dist > 0:
+                        # Calculate scaling factor
+                        scaling_factor = reference_dist / current_dist
+                        print(f"Shape key {key.name}: Scaling factor = {scaling_factor} (Reference: {reference_dist}, Current: {current_dist})")
+            
+            # Add to data with shape key name and apply scaling if needed
+            for dist_data in key_distances:
+                if reference_joint_pair and reference_measurements:
+                    scaled_distance = dist_data[2] * scaling_factor
+                    all_data.append([key.name] + dist_data + [scaling_factor, scaled_distance])
+                else:
+                    all_data.append([key.name] + dist_data)
         
         # Restore original values
         for key_name, value in original_values.items():
-            mesh_obj.data.shape_keys.key_blocks[key_name].value = value
+            if key_name in mesh_obj.data.shape_keys.key_blocks:
+                mesh_obj.data.shape_keys.key_blocks[key_name].value = value
         mesh_obj.data.update()
     
     try:
         with open(filepath, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(['Shape', 'Joint1', 'Joint2', 'Distance'])
             writer.writerows(all_data)
         return True, f"Distances exported to {filepath}"
     except Exception as e:
@@ -1346,6 +1394,24 @@ class SMPL_PT_MorphometryPanel(bpy.types.Panel):
     
     def draw(self, context):
         layout = self.layout
+        smpl_tool = context.scene.smpl_tool
+        
+        # Reference measurements section
+        box = layout.box()
+        box.label(text="Reference Measurements:")
+        box.prop(smpl_tool, "reference_csv_filepath")
+        box.operator("smpl.load_reference_measurements", text="Load Reference CSV")
+        
+        # Display loaded reference info
+        if smpl_tool.has_reference_data:
+            info_box = box.box()
+            info_box.label(text="Loaded Reference Data:", icon='INFO')
+            info_box.label(text=f"Joint Pair: {smpl_tool.reference_joint_pair}")
+            
+            # Get number of measurements
+            measurements = get_reference_measurements(context)
+            if measurements:
+                info_box.label(text=f"Number of Shapes: {len(measurements)}")
         
         # Add measurement export buttons
         box = layout.box()
@@ -1386,14 +1452,54 @@ def export_mesh_measurements(context, filepath):
     if not obj or obj.type != 'MESH':
         return False, "No mesh object selected"
     
+    # Check if reference measurements are available
+    smpl_tool = context.scene.smpl_tool
+    reference_measurements = {}
+    reference_joint_pair = []
+    
+    if smpl_tool.has_reference_data:
+        reference_measurements = get_reference_measurements(context)
+        
+        # Parse joint pair from reference_joint_pair
+        joint_pair = smpl_tool.reference_joint_pair
+        
+        # Try to extract joint names from the joint pair string
+        if "to" in joint_pair:
+            parts = joint_pair.split("to")
+            if len(parts) >= 2:
+                joint1 = parts[0].strip()
+                joint2 = parts[1].split("[")[0].strip()
+                reference_joint_pair = [joint1, joint2]
+                
+        # Verify reference joints exist in the armature
+        armature = next((obj for obj in bpy.data.objects if obj.type == 'ARMATURE'), None)
+        if armature and len(reference_joint_pair) == 2:
+            joint_names = [bone.name for bone in armature.data.bones]
+            for joint in reference_joint_pair:
+                if joint not in joint_names:
+                    print(f"Warning: Reference joint '{joint}' not found in armature")
+                    reference_joint_pair = []
+    
     try:
         # Prepare data for CSV
         all_data = []
         
+        # Add header row with scaling info if reference data is available
+        if reference_joint_pair and reference_measurements:
+            all_data.append(['Shape', 'Measurement', 'Value', 'Scaling Factor', 'Scaled Value'])
+        else:
+            all_data.append(['Shape', 'Measurement', 'Value'])
+        
         # Calculate base measurements
         surface_area, volume = calculate_mesh_measurements(obj)
-        all_data.append(['Base', 'Surface Area', surface_area])
-        all_data.append(['Base', 'Volume', volume])
+        
+        # Base measurements are not scaled
+        if reference_joint_pair and reference_measurements:
+            all_data.append(['Base', 'Surface Area', surface_area, 'N/A', 'N/A'])
+            all_data.append(['Base', 'Volume', volume, 'N/A', 'N/A'])
+        else:
+            all_data.append(['Base', 'Surface Area', surface_area])
+            all_data.append(['Base', 'Volume', volume])
         
         # Get measurements for each shape key
         if obj.data.shape_keys and len(obj.data.shape_keys.key_blocks) > 1:
@@ -1411,6 +1517,42 @@ def export_mesh_measurements(context, filepath):
             temp_mesh = bpy.data.meshes.new("TempMeasurementMesh")
             temp_obj = bpy.data.objects.new("TempMeasurementObj", temp_mesh)
             context.collection.objects.link(temp_obj)
+            
+            # If we have reference measurements, we need to calculate joint distances
+            joint_distances = {}
+            if reference_joint_pair and reference_measurements and armature:
+                # Recalculate J_regressor for current mesh state
+                _, J_regressor = export_J_regressor_to_npy(obj, armature, 20)
+                joint_names = [bone.name for bone in armature.data.bones]
+                
+                # Get indices of reference joints
+                ref_joint_idx1 = joint_names.index(reference_joint_pair[0]) if reference_joint_pair[0] in joint_names else -1
+                ref_joint_idx2 = joint_names.index(reference_joint_pair[1]) if reference_joint_pair[1] in joint_names else -1
+                
+                if ref_joint_idx1 >= 0 and ref_joint_idx2 >= 0:
+                    # For each shape key, calculate the joint distance
+                    for key in obj.data.shape_keys.key_blocks[1:]:  # Skip basis
+                        # Reset all shape keys to 0 first
+                        for k in obj.data.shape_keys.key_blocks[1:]:
+                            k.value = 0.0
+                        
+                        # Set this shape key to 1.0
+                        key.value = 1.0
+                        obj.data.update()
+                        
+                        # Get vertex positions with this shape key applied
+                        vertex_positions = np.array([np.array(v.co) for v in obj.data.vertices])
+                        
+                        # Calculate joint positions using J_regressor
+                        joint_positions = recalculate_joint_positions(vertex_positions, J_regressor)
+                        
+                        # Calculate distance between reference joints
+                        current_dist = np.linalg.norm(joint_positions[ref_joint_idx1] - joint_positions[ref_joint_idx2])
+                        joint_distances[key.name] = current_dist
+                        
+                        # Reset this shape key
+                        key.value = 0.0
+                        obj.data.update()
             
             # For each shape key
             for key in obj.data.shape_keys.key_blocks[1:]:  # Skip basis
@@ -1441,9 +1583,43 @@ def export_mesh_measurements(context, filepath):
                 # Calculate measurements on the temporary object
                 key_surface_area, key_volume = calculate_mesh_measurements(temp_obj)
                 
-                # Add to data with shape key name
-                all_data.append([key.name, 'Surface Area', key_surface_area])
-                all_data.append([key.name, 'Volume', key_volume])
+                # Calculate scaling factor if reference data is available
+                scaling_factor = 1.0
+                # Clean the key name as it may contain file endings
+                key_name = key.name.split(".")[0]
+                
+                if (reference_joint_pair and reference_measurements and 
+                    key_name in reference_measurements and 
+                    key.name in joint_distances):
+                    
+                    # Get the reference distance
+                    reference_dist = reference_measurements.get(key_name, 0.0)
+                    current_dist = joint_distances[key.name]
+                    
+                    if current_dist > 0 and reference_dist > 0:
+                        # Calculate linear scaling factor
+                        scaling_factor = reference_dist / current_dist
+                        print(f"Shape key {key.name}: Scaling factor = {scaling_factor}")
+                        
+                        # Scale surface area (s²) and volume (s³)
+                        scaled_surface_area = key_surface_area * (scaling_factor ** 2)
+                        scaled_volume = key_volume * (scaling_factor ** 3)
+                        
+                        # Add to data with shape key name and scaled values
+                        all_data.append([key.name, 'Surface Area', key_surface_area, scaling_factor, scaled_surface_area])
+                        all_data.append([key.name, 'Volume', key_volume, scaling_factor, scaled_volume])
+                    else:
+                        # Add unscaled values if we can't calculate scaling
+                        all_data.append([key.name, 'Surface Area', key_surface_area, 'N/A', 'N/A'])
+                        all_data.append([key.name, 'Volume', key_volume, 'N/A', 'N/A'])
+                else:
+                    # Add to data without scaling
+                    if reference_joint_pair and reference_measurements:
+                        all_data.append([key.name, 'Surface Area', key_surface_area, 'N/A', 'N/A'])
+                        all_data.append([key.name, 'Volume', key_volume, 'N/A', 'N/A'])
+                    else:
+                        all_data.append([key.name, 'Surface Area', key_surface_area])
+                        all_data.append([key.name, 'Volume', key_volume])
             
             # Remove temporary object
             bpy.data.objects.remove(temp_obj)
@@ -1458,7 +1634,6 @@ def export_mesh_measurements(context, filepath):
         # Export to CSV
         with open(filepath, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(['Shape', 'Measurement', 'Value'])
             writer.writerows(all_data)
             
         return True, f"Measurements exported to {filepath}"
@@ -1527,15 +1702,101 @@ def sort_shape_keys(obj):
     
     print(f"Sorted {len(sorted_names)} shape keys alphabetically")
 
+def load_reference_measurements(filepath):
+    """
+    Load reference measurements from a CSV file.
+    
+    Args:
+        filepath (str): Path to the CSV file
+        
+    Returns:
+        tuple: (joint_pair, measurements_dict) where joint_pair is a string describing the measured joints
+               and measurements_dict is a dictionary mapping shape names to measurement values
+    """
+    try:
+        measurements = {}
+        joint_pair = ""
+        
+        with open(filepath, 'r') as csvfile:
+            reader = csv.reader(csvfile)
+            header = next(reader)
+            
+            # Extract joint pair from header
+            if len(header) >= 2:
+                # expecting the joint pair to be in the format "Joint1 to Joint2"
+                joint_pair = header[1]
+            
+            # Read measurements
+            for row in reader:
+                if len(row) >= 2:
+                    shape_name = row[0]
+                    try:
+                        measurement = float(row[1])
+                        measurements[shape_name] = measurement
+                    except ValueError:
+                        print(f"Warning: Could not convert measurement for {shape_name} to float")
+        
+        return joint_pair, measurements
+    except Exception as e:
+        print(f"Error loading reference measurements: {e}")
+        return "", {}
+
+def get_reference_measurements(context):
+    """Get the reference measurements from the temporary file"""
+    if "reference_measurements_path" in context.scene:
+        temp_path = context.scene["reference_measurements_path"]
+        if os.path.exists(temp_path):
+            with open(temp_path, 'rb') as f:
+                return pickle.load(f)
+    return {}
+
+# Move the operator class definitions before the classes tuple
+
+class SMPL_OT_LoadReferenceMeasurements(bpy.types.Operator):
+    bl_idname = "smpl.load_reference_measurements"
+    bl_label = "Load Reference Measurements"
+    bl_description = "Load reference measurements from a CSV file"
+    
+    def execute(self, context):
+        scene = context.scene
+        smpl_tool = scene.smpl_tool
+        
+        filepath = bpy.path.abspath(smpl_tool.reference_csv_filepath)
+        if not os.path.exists(filepath):
+            self.report({'ERROR'}, f"File not found: {filepath}")
+            return {'CANCELLED'}
+        
+        joint_pair, measurements = load_reference_measurements(filepath)
+        
+        if not measurements:
+            self.report({'ERROR'}, "Failed to load measurements or file is empty")
+            return {'CANCELLED'}
+        
+        # Store the data in scene properties
+        smpl_tool.reference_joint_pair = joint_pair
+        smpl_tool.has_reference_data = True
+        
+        # Store measurements in a temporary file
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, "reference_measurements.pkl")
+        with open(temp_path, 'wb') as f:
+            pickle.dump(measurements, f)
+        
+        context.scene["reference_measurements_path"] = temp_path
+        
+        self.report({'INFO'}, f"Loaded {len(measurements)} reference measurements for {joint_pair}")
+        return {'FINISHED'}
+
 # Update the classes tuple to include new classes
 classes = (
     SMPL_PT_Panel,
-    SMPL_PT_MorphometryPanel,  # Add the new panel
+    SMPL_PT_MorphometryPanel,
     SMPL_OT_ImportModel,
     SMPL_OT_ExportModel,
     SMPL_OT_ApplyPoseCorrectivesOperator,
-    SMPL_OT_ExportJointDistances,  # Add the new operators
-    SMPL_OT_ExportMeshMeasurements,  # Add the new operator
+    SMPL_OT_ExportJointDistances,
+    SMPL_OT_ExportMeshMeasurements,
+    SMPL_OT_LoadReferenceMeasurements,
     SMPLProperties,
 )
 
@@ -1556,6 +1817,15 @@ def unregister():
                     os.remove(temp_path)
                 except:
                     pass
+    
+    # Clean up reference measurements file
+    if hasattr(bpy.context.scene, "reference_measurements_path"):
+        temp_path = bpy.context.scene.reference_measurements_path
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
     
     for cls in classes:
         bpy.utils.unregister_class(cls)
