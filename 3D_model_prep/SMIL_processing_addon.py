@@ -152,19 +152,35 @@ def export_mesh_to_obj(obj, filepath):
 
 
 @ensure_mesh
-def export_vertex_groups_to_npy(obj, filepath):
+def export_vertex_groups_to_npy(obj, filepath, clean_weights=False):
     """
     Exports the vertex group weights of an object to a .npy file.
     
     Parameters:
     obj (bpy.types.Object): The object containing the vertex groups.
     filepath (str): The path to the .npy file where the weights will be saved.
+    clean_weights (bool): If True, clean and normalize vertex weights before exporting.
     
     Returns:
     tuple: The filepath and the weights array.
     """
     # Ensure we're working on the correct object
     bpy.context.view_layer.objects.active = obj
+
+    # Clean and normalize weights if requested
+    if clean_weights:
+        # Switch to edit mode
+        bpy.ops.object.mode_set(mode='EDIT')
+        # Select all vertices
+        bpy.ops.mesh.select_all(action='SELECT')
+        # Clean weights
+        bpy.ops.object.vertex_group_clean(group_select_mode='ALL', limit=0.001)
+        # Normalize weights to sum to 1.0
+        bpy.ops.object.vertex_group_normalize_all(lock_active=False)
+        # Limit total number of weights per vertex
+        bpy.ops.object.vertex_group_limit_total(group_select_mode='ALL', limit=1)
+        # Return to object mode
+        bpy.ops.object.mode_set(mode='OBJECT')
 
     # Get the mesh and armature
     mesh = obj.data
@@ -817,7 +833,7 @@ def cleanup_mesh(obj, center_tolerance=0.005):
     bpy.ops.object.mode_set(mode='OBJECT')
 
 
-def export_smpl_model(obj, pkl_data, export_path):
+def export_smpl_model(obj, export_path, pkl_data=None):
     """
     Export the updated model as a new SMPL file with the blendshapes stored in the model's shapedirs.
 
@@ -826,25 +842,51 @@ def export_smpl_model(obj, pkl_data, export_path):
     - pkl_data (dict): Dictionary containing the original SMPL data.
     - export_path (str): The file path where the new SMPL file will be saved.
     """
+
+    if pkl_data is None:
+        # create a new pkl data dictionary when new models are exported
+        pkl_data = {
+        "f": [],
+        "J_regressor": [],
+        "kintree_table": [],
+        "J": [],
+        "bs_style": "lbs",
+        "weights": [],
+        "posedirs": np.empty(0), # ignore for now as we currently don't have corrective blendshapes in our models
+        "v_template": [],
+        "shapedirs": [],
+        "bs_type": "lrotmin",
+        "sym_verts": []
+        }
+
+        # new models most likely have weight paiting / assignment issues that need to be resolved
+        # if your model looks weirdly spiky when loading into fitter_3d/optimise.py, more likely
+        # than not, your weight painting is the culprit.
+        # first, run "clean", than run "limit total" to one vertex group
+        clean_weights = True
+    else:
+        clean_weights = False
+
     # Update "v_template" with the newly computed vertex locations of the mesh
     updated_vertices = np.array([np.array(v.co) for v in obj.data.vertices])
-    print(pkl_data["v_template"].shape, updated_vertices.shape)
     pkl_data["v_template"] = updated_vertices
+    print(pkl_data["v_template"].shape)
 
     # update all changed elements due to topoly changes
 
-    vertices_npy_path = bpy.path.abspath('//test_vertices.npy')
     faces_npy_path = bpy.path.abspath('//test_faces.npy')
     vertex_groups_npy_path = bpy.path.abspath('//test_vertex_groups.npy')
     joint_locations_npy_path = bpy.path.abspath('//test_joint_locations.npy')
     j_regressor_npy_path = bpy.path.abspath('//test_joint_regressor.npy')
     y_axis_vertices_npy_path = bpy.path.abspath('//test_y_axis_vertices.npy')
+    joint_hierarchy_npy_path = bpy.path.abspath('//test_joint_hierarchy.npy')
 
     pkl_data["f"] = export_faces_to_npy(obj, faces_npy_path)[1]
-    print(pkl_data["weights"].shape)
-    pkl_data["weights"] = export_vertex_groups_to_npy(obj, vertex_groups_npy_path)[1]
+    print(pkl_data["f"].shape)
+    pkl_data["weights"] = export_vertex_groups_to_npy(obj, vertex_groups_npy_path, clean_weights=clean_weights)[1]
     print(pkl_data["weights"].shape)
     pkl_data["sym_verts"] = export_y_axis_vertices_to_npy(obj, y_axis_vertices_npy_path)[1]
+    print(pkl_data["sym_verts"].shape)
 
     armature_obj = next((obj for obj in bpy.data.objects if obj.type == 'ARMATURE'), None)
     if not armature_obj:
@@ -853,17 +895,21 @@ def export_smpl_model(obj, pkl_data, export_path):
 
     print("Found armature object:", armature_obj.name)
 
+    pkl_data["kintree_table"] = export_joint_hierarchy_to_npy(armature_obj, joint_hierarchy_npy_path)[1]
     pkl_data["J"], pkl_data["J_names"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1:]
     pkl_data["J_regressor"] = export_J_regressor_to_npy(obj, armature_obj, 20, j_regressor_npy_path)[1]
 
     # Update "shapedirs" with the content of the blendshapes
-    num_blendshapes = len(obj.data.shape_keys.key_blocks) - 1  # Exclude the "Basis" shape key
     num_vertices = len(updated_vertices)
-    shapedirs = np.zeros((num_vertices, 3, num_blendshapes))  # add 1 for one base blendshape
-
-    for i, shape_key in enumerate(obj.data.shape_keys.key_blocks[1:], start=0):  # Exclude the "Basis" shape key
-        for j, vert in enumerate(shape_key.data):
-            shapedirs[j, :, i] = np.array(vert.co) - updated_vertices[j]
+    try:
+        num_blendshapes = len(obj.data.shape_keys.key_blocks) - 1  # Exclude the "Basis" shape key
+        shapedirs = np.zeros((num_vertices, 3, num_blendshapes))  # add 1 for one base blendshape
+        for i, shape_key in enumerate(obj.data.shape_keys.key_blocks[1:], start=0):  # Exclude the "Basis" shape key
+            for j, vert in enumerate(shape_key.data):
+                shapedirs[j, :, i] = np.array(vert.co) - updated_vertices[j]
+    except AttributeError:
+        print("No blendshapes found.")
+        shapedirs = np.zeros((num_vertices, 3))
 
     pkl_data["shapedirs"] = shapedirs
     print(shapedirs.shape)
@@ -1022,8 +1068,7 @@ class SMPL_OT_ExportModel(bpy.types.Operator):
         # Get SMPL data from the active object
         data = get_smpl_data(context)
         if data is None:
-            self.report({'ERROR'}, "No SMPL model data found. Please import a SMPL model first.")
-            return {'CANCELLED'}
+            self.report({'INFO'}, "No SMPL model data found. Attempting to export selected mesh as a new SMPL model.")
 
         scene = context.scene
         smpl_tool = scene.smpl_tool
@@ -1034,7 +1079,7 @@ class SMPL_OT_ExportModel(bpy.types.Operator):
                 self.report({'ERROR'}, "No valid mesh object selected.")
                 return {'CANCELLED'}
 
-            export_smpl_model(obj, data, export_path=bpy.path.abspath(smpl_tool.pkl_filepath))
+            export_smpl_model(obj, pkl_data=data, export_path=bpy.path.abspath(smpl_tool.pkl_filepath))
 
             self.report({'INFO'}, "SMPL Model exported successfully.")
             return {'FINISHED'}
@@ -1344,7 +1389,7 @@ def export_joint_distances(context, filepath):
         for key_name, value in original_values.items():
             if key_name in mesh_obj.data.shape_keys.key_blocks:
                 mesh_obj.data.shape_keys.key_blocks[key_name].value = value
-        mesh_obj.data.update()
+            mesh_obj.data.update()
     
     try:
         with open(filepath, 'w', newline='') as csvfile:
