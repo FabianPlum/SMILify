@@ -50,8 +50,13 @@ class SMAL3DFitter(nn.Module):
             dd = u.load()
         
         if config.ignore_hardcoded_body:
-            model_covs = dd['shape_cov']
-            self.mean_betas = torch.FloatTensor(dd['shape_mean_betas']).to(device)
+            try:
+                model_covs = dd['shape_cov']
+                self.mean_betas = torch.FloatTensor(dd['shape_mean_betas']).to(device)
+            except:
+                print("No shape_cov or shape_mean_betas found in SMAL_FILE")
+                self.mean_betas = torch.zeros(config.N_BETAS).to(device)
+                model_covs = np.zeros([config.N_BETAS, config.N_BETAS])
 
         else:
             with open(config.SMAL_DATA_FILE, 'rb') as f:
