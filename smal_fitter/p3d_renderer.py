@@ -4,12 +4,14 @@ import torch.nn.functional as F
 from scipy.io import loadmat
 import numpy as np
 import config
+import cv2
 
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import (
     OpenGLPerspectiveCameras, look_at_view_transform, look_at_rotation,
     RasterizationSettings, MeshRenderer, MeshRasterizer, BlendParams,
-    PointLights, HardPhongShader, SoftSilhouetteShader, Materials, Textures
+    PointLights, HardPhongShader, SoftSilhouetteShader, Materials, Textures,
+    FoVPerspectiveCameras
 )
 from pytorch3d.io import load_objs_as_meshes
 from utils import perspective_proj_withz
@@ -24,7 +26,8 @@ class Renderer(torch.nn.Module):
 
         # Initialize with default camera parameters
         R, T = look_at_view_transform(2.7, 0, 0, device=device)
-        self.cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T, fov=60)
+        #self.cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T, fov=60)
+        self.cameras = FoVPerspectiveCameras(R=R, T=T, device=device, fov=60)
         print("Camera field of view:", str(self.cameras.fov.item()), "degrees")
         self.mesh_color = torch.FloatTensor(config.MESH_COLOR).to(device)[None, None, :] / 255.0
 
