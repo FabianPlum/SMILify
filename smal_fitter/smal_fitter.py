@@ -111,10 +111,16 @@ class SMALFitter(nn.Module):
         else:
             if config.ignore_hardcoded_body:
                 print("Using shape prior learned from 3D scanned models")
-                model_covs = config.dd["shape_cov"]
-                self.mean_betas = torch.FloatTensor(config.dd["shape_mean_betas"])[:config.N_BETAS].to(
-                    device)
-                self.pose_prior = Prior(device)
+                try:
+                    model_covs = config.dd["shape_cov"]
+                    self.mean_betas = torch.FloatTensor(config.dd["shape_mean_betas"])[:config.N_BETAS].to(
+                        device)
+                    self.pose_prior = Prior(device)
+                except KeyError:
+                    print("WARNING: model_covs or shapedirs not found in config.dd")
+                    model_covs = np.eye(1)
+                    self.mean_betas = torch.FloatTensor([1.0]).to(device)
+                    self.pose_prior = Prior(device)
             else:
                 with open(config.SMAL_DATA_FILE, 'rb') as f:
                     u = pkl._Unpickler(f)
@@ -309,7 +315,7 @@ class SMALFitter(nn.Module):
         self.betas = torch.nn.Parameter(torch.from_numpy(np.mean(beta_list, axis=0)).float().to(self.device))
         self.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.mean(scale_list, axis=0)).float().to(self.device))
 
-    def generate_visualization(self, image_exporter):
+    def generate_visualization(self, image_exporter, apply_UE_transform=False):
         rot_matrix = torch.from_numpy(R.from_euler('y', 180.0, degrees=True).as_matrix()).float().to(self.device)
         for j in range(0, self.num_images, self.batch_size):
             batch_range = list(range(j, min(self.num_images, j + self.batch_size)))
@@ -335,8 +341,14 @@ class SMALFitter(nn.Module):
                         batch_params['joint_rotations']], dim=1),
                     betas_logscale=batch_params['log_betascale'])
 
-                verts = verts + batch_params['trans'].unsqueeze(1)
-                joints = joints + batch_params['trans'].unsqueeze(1)
+                if apply_UE_transform:
+                    # TODO: INCLUDE MODEL SCALE HERE, 20 is just a placeholder!!!
+                    # needed to align the model at the root joint and scale it to the replicAnt model size
+                    verts = (verts - joints[:, 0, :]) * 20 + batch_params['trans'].unsqueeze(1)
+                    joints = (joints - joints[:, 0, :]) * 20 + batch_params['trans'].unsqueeze(1)
+                else:
+                    verts = verts + batch_params['trans'].unsqueeze(1)
+                    joints = joints + batch_params['trans'].unsqueeze(1)
 
                 canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
 
@@ -353,7 +365,7 @@ class SMALFitter(nn.Module):
                     (rot_matrix @ joints_mean.unsqueeze(-1)).squeeze(-1),
                     self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1), render_texture=True)
 
-                overlay_image = (rendered_images * 0.8) + (rgb_imgs * 0.2)
+                overlay_image = (rendered_images * 0.5) + (rgb_imgs * 0.5)
 
                 target_vis = SMALJointDrawer.draw_joints(rgb_imgs, target_joints, visible=target_visibility)
                 rendered_images_vis = SMALJointDrawer.draw_joints(rendered_images, rendered_joints,
