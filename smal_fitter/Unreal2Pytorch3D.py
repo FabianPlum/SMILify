@@ -6,6 +6,7 @@ import torch
 import os
 import imageio
 import sys
+from scipy.spatial.transform import Rotation
 
 sys.path.append(os.path.dirname(sys.path[0]))
 from smal_fitter import SMALFitter
@@ -106,7 +107,7 @@ def parse_camera_intrinsics(batch_data_file, iteration_data_file):
     
     return cx, cy, fx, fy
 
-def return_placeholder_data(input_image=None, num_joints=55):
+def return_placeholder_data(input_image=None, num_joints=55, pose_data=None):
     image_size = (512, 512)
     # pass a placeholder to the SMALFitter class as we are not actually going to provide any normal input data
     if input_image is not None:
@@ -125,8 +126,16 @@ def return_placeholder_data(input_image=None, num_joints=55):
         rgb = torch.zeros((1, 3, image_size[0], image_size[1]))
         filenames = ["PLACEHOLDER"]
     sil = torch.zeros((1, 1, image_size[0], image_size[1]))
-    joints = torch.zeros((1, num_joints, 2))
-    visibility = torch.zeros((1, num_joints))
+    if pose_data is None:
+        joints = torch.zeros((1, num_joints, 2))
+        visibility = torch.zeros((1, num_joints))
+    else:
+        # NOTE: This does not actually display the ground truth points directtly.
+        # Setting the visibility of the joints to 1 simply means, that the joints of the posed model are displayed.
+        display_points_2D = [[-pose_data[key]["2DPos"]["x"],
+                              pose_data[key]["2DPos"]["y"]] for key in pose_data.keys()]
+        joints = torch.tensor(np.array(display_points_2D).reshape(1, num_joints, 2), dtype=torch.float32)
+        visibility = torch.ones((1, num_joints))
 
     return (rgb, sil, joints, visibility), filenames
 
@@ -349,7 +358,7 @@ if __name__ == '__main__':
     STEP 1 - LOAD replicAnt generated SMIL data
     """
     # Read the JSON file
-    json_file_path = "data/replicAnt_trials/TEST_ANGLES/TEST_ANGLES_00.json"
+    json_file_path = "data/replicAnt_trials/TEST_ANGLES_QUAT/TEST_ANGLES_QUAT_09.json"
     plot_tests = False
     
     batch_data_file_path = json_file_path.replace(json_file_path.split("/")[-1], "_BatchData_" + json_file_path.split("/")[-2] + ".json")
@@ -421,10 +430,41 @@ if __name__ == '__main__':
     for key in pose_data:
         joint_names.append(key)
 
+        # QUATERNIONS ALL THE WAY. This is the last fucking thing to get to work
+        # get euler from quats
+        # then use same rotation correction for z as below
+
+        rot = Rotation.from_quat([pose_data[key]["quaternion"]["x"],
+                            pose_data[key]["quaternion"]["y"],
+                            pose_data[key]["quaternion"]["z"],
+                            pose_data[key]["quaternion"]["w"]],
+                            scalar_first=False)
+
+        rot_eul = rot.as_euler('zyx', degrees=False)
+
+        
+        # Z is actually Z here (so YAW)
+        # Y is PITCH
+        # X is ROLL
+
+        # ignore root bone:
+        if key != "b_t":    
+            theta, vector = eulerangles.euler2angle_axis(z=0,#-rot_eul[0],
+                                                         y=0,#-rot_eul[1],
+                                                         x=0)#-rot_eul[2])
+        else:
+            # no rotation for root bone, that's handled in the global rotation
+            theta, vector = eulerangles.euler2angle_axis(z=0,
+                                                        y=0,
+                                                        x=0)
+
+        """
         # NOTE: Experimental, verify [  ]
-        theta, vector = eulerangles.euler2angle_axis(z=np.radians(pose_data[key]["eulerAngles"]["z"]),
-                                                     y=np.radians(pose_data[key]["eulerAngles"]["y"]),
-                                                     x=np.radians(-pose_data[key]["eulerAngles"]["x"]))
+        theta, vector = eulerangles.euler2angle_axis(z=np.radians(0),#-pose_data[key]["eulerAngles"]["z"]),#-pose_data[key]["eulerAngles"]["x"]),
+                                                     y=np.radians(0),#-pose_data[key]["eulerAngles"]["y"]),
+                                                     x=np.radians(0))#pose_data[key]["eulerAngles"]["x"]))
+        """
+        
         rodrigues_angle = vector * theta
 
 
@@ -446,9 +486,11 @@ if __name__ == '__main__':
     print("Shape Betas:", shape_betas.shape)
     print("Pose Data:", np_joint_angles_mapped.shape)
 
+    # setting pose data to None supresses displaing joint locations in the rendered image
     data_json, filenames = return_placeholder_data(
         input_image=input_image,
-        num_joints=len(np_joint_angles_mapped))  # in the shape of the default convention returned by the dataloaders
+        num_joints=len(np_joint_angles_mapped),
+        pose_data=None)#pose_data)  # in the shape of the default convention returned by the dataloaders
 
 
     if not config.ignore_hardcoded_body:
@@ -469,6 +511,9 @@ if __name__ == '__main__':
     # model parameters
     model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
 
+    # set model joint rotations
+    model.joint_rotations = torch.nn.Parameter(
+        torch.Tensor(np_joint_angles_mapped[1:]).reshape((1, np_joint_angles_mapped[1:].shape[0], 3)).to(device))
 
     # Load obj file
     mesh = load_objs_as_meshes([obj_filename], device=device)
@@ -563,27 +608,35 @@ if __name__ == '__main__':
     # render the spheres with same settings
     sphere_images = renderer(sphere_meshes, lights=lights, materials=materials, cameras=cameras)
     
-    # combine the renders by using alpha blending
-    images = torch.where(sphere_images[..., 3:] > 0, sphere_images[..., :3], mesh_images[..., :3])
-    
-    plt.figure(figsize=(10, 10))
+    if plot_tests:
+        # combine the renders by using alpha blending
+        images = torch.where(sphere_images[..., 3:] > 0, sphere_images[..., :3], mesh_images[..., :3])
+        
+        plt.figure(figsize=(10, 10))
 
-    # Read input image
-    display_img = cv2.imread(input_image)
-    # set image as background and superimpose render on top
-    display_img = cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
-    
-    # Get render as numpy array and create mask
-    render = images[0, ..., :3].cpu().numpy()
-    mask = ~np.all(render == 1.0, axis=-1)
-    mask = np.expand_dims(mask, axis=-1)
-    
-    # Blend render with input image using mask
-    blended = np.where(mask, render, display_img/255.0)
-    
-    plt.imshow(blended)
-    plt.axis("off");
-    plt.show()
+        # Read input image
+        display_img = cv2.imread(input_image)
+        # Convert to RGB
+        display_img = cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
+        
+        # Get render dimensions
+        render_height, render_width = images[0].shape[:2]
+        
+        # Resize input image to match render dimensions
+        display_img = cv2.resize(display_img, (render_width, render_height))
+        
+        # Get render as numpy array and create mask
+        render = images[0, ..., :3].cpu().numpy()
+        mask = ~np.all(render == 1.0, axis=-1)
+        mask = np.expand_dims(mask, axis=-1)
+        
+        # Blend render with input image using mask
+        blended = np.where(mask, render, display_img/255.0)
+        
+        plt.imshow(blended)
+        plt.axis("off");
+        plt.show()
+
 
     """
     STEP 4 - Set up pytorch3d scene with the SMIL model
@@ -594,21 +647,39 @@ if __name__ == '__main__':
     model.renderer.cameras.R = torch.nn.Parameter(torch.Tensor(R).to(device))
     model.renderer.cameras.T = torch.nn.Parameter(torch.Tensor(T).to(device))
 
+    rot = Rotation.from_quat([pose_data["b_t"]["globalRotation"]["x"],
+                              pose_data["b_t"]["globalRotation"]["y"],
+                              pose_data["b_t"]["globalRotation"]["z"],
+                              pose_data["b_t"]["globalRotation"]["w"]],
+                              scalar_first=False)
     
-    """
+    rot_eul = rot.as_euler('zyx', degrees=False)
+
     
-    theta, vector = eulerangles.euler2angle_axis(z=np.radians(pose_data["b_t"]["globalRotation"]["yaw"]),# -np.pi / 2,
-                                                 y=np.radians(pose_data["b_t"]["globalRotation"]["pitch"]),
-                                                 x=np.radians(-pose_data["b_t"]["globalRotation"]["roll"]))# -np.pi / 2)
+    # Z is actually Z here (so YAW)
+    # Y is PITCH
+    # X is ROLL
+
+    
+    theta, vector = eulerangles.euler2angle_axis(z=-np.pi/2 - rot_eul[0],
+                                                 y=-rot_eul[1],
+                                                 x=rot_eul[2])
+    
     global_rotation_np = vector * theta
+
+    print("global_rotation_np:", global_rotation_np)
 
     #global_rotation_np = eul_to_axis(np.array([-np.pi / 2, 0, -np.pi / 2])) # used when fitting registered mesh to image data
     #global_rotation_np = eul_to_axis(np.array([0, 0, 0])) # used when registering template mesh to target mesh(es)
+
     global_rotation = torch.nn.Parameter(
         torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0))
 
+    print("model.global_rotation", model.global_rotation)
+    
     model.global_rotation = global_rotation
-    """
+    
+    print("model.global_rotation", model.global_rotation)
 
     
     model.trans = torch.nn.Parameter(torch.Tensor(np.array([model_loc])).to(device))
