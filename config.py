@@ -110,7 +110,7 @@ if ignore_hardcoded_body:
         N_BETAS = dd["shapedirs"].shape[2]  # number of SMAL shape parameters to optimize over
         if DEBUG:
             print("INFO: Found custom betas:", N_BETAS)
-    except IndexError:
+    except IndexError or KeyError:
         # if no learned betas / shapedirs are provided default to 20
         N_BETAS = 20
         if DEBUG:
