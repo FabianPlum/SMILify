@@ -27,20 +27,16 @@ class ImageExporter():
         self.stage_id = 0
         self.epoch_name = 0
 
-    def generate_output_folders(self, root_directory, filename_batch, overwrite=True):
-        if overwrite:
-            if os.path.exists(root_directory):
-                shutil.rmtree(root_directory)
-            os.makedirs(root_directory)
-        else:
-            if not os.path.exists(root_directory):
-                os.mkdir(root_directory)
+    def generate_output_folders(self, root_directory, filename_batch):
+        if not os.path.exists(root_directory):
+            os.mkdir(root_directory)
 
         output_dirs = []
         for filename in filename_batch:
             filename_path = os.path.join(root_directory, os.path.splitext(filename)[0])
             output_dirs.append(filename_path)
-            os.mkdir(filename_path)
+            if not os.path.exists(filename_path):
+                os.mkdir(filename_path)
 
         return output_dirs
 
