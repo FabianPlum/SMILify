@@ -358,7 +358,7 @@ if __name__ == '__main__':
     STEP 1 - LOAD replicAnt generated SMIL data
     """
     # Read the JSON file
-    json_file_path = "data/replicAnt_trials/TEST_ANGLES_QUAT/TEST_ANGLES_QUAT_09.json"
+    json_file_path = "data/replicAnt_trials/TEST_ANGLES_QUAT_NEW_SMIL/TEST_ANGLES_QUAT_NEW_SMIL_00.json"
     plot_tests = False
     
     batch_data_file_path = json_file_path.replace(json_file_path.split("/")[-1], "_BatchData_" + json_file_path.split("/")[-2] + ".json")
@@ -442,16 +442,11 @@ if __name__ == '__main__':
 
         rot_eul = rot.as_euler('zyx', degrees=False)
 
-        
-        # Z is actually Z here (so YAW)
-        # Y is PITCH
-        # X is ROLL
-
         # ignore root bone:
         if key != "b_t":    
-            theta, vector = eulerangles.euler2angle_axis(z=0,#-rot_eul[0],
-                                                         y=0,#-rot_eul[1],
-                                                         x=0)#-rot_eul[2])
+            theta, vector = eulerangles.euler2angle_axis(z=-rot_eul[0],
+                                                 y=rot_eul[1],
+                                                 x=-rot_eul[2])
         else:
             # no rotation for root bone, that's handled in the global rotation
             theta, vector = eulerangles.euler2angle_axis(z=0,
@@ -661,7 +656,7 @@ if __name__ == '__main__':
     # X is ROLL
 
     
-    theta, vector = eulerangles.euler2angle_axis(z=-np.pi/2 - rot_eul[0],
+    theta, vector = eulerangles.euler2angle_axis(z=-rot_eul[0] + np.pi,
                                                  y=-rot_eul[1],
                                                  x=rot_eul[2])
     
