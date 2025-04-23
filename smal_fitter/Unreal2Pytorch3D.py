@@ -358,8 +358,8 @@ if __name__ == '__main__':
     STEP 1 - LOAD replicAnt generated SMIL data
     """
     # Read the JSON file
-    json_file_path = "data/replicAnt_trials/TEST_ANGLES_QUAT_NEW_SMIL/TEST_ANGLES_QUAT_NEW_SMIL_01.json"
-    plot_tests = True
+    json_file_path = "data/replicAnt_trials/replicAnt-x-SMIL-demo/replicAnt-x-SMIL-demo_00.json"
+    plot_tests = False
     
     batch_data_file_path = json_file_path.replace(json_file_path.split("/")[-1], "_BatchData_" + json_file_path.split("/")[-2] + ".json")
     input_image = json_file_path.split(".")[0] + ".JPG"
@@ -649,18 +649,10 @@ if __name__ == '__main__':
     
     global_rotation_np = vector * theta
 
-    print("global_rotation_np:", global_rotation_np)
-
     global_rotation = torch.nn.Parameter(
         torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0))
-
-    print("model.global_rotation", model.global_rotation)
     
-    model.global_rotation = global_rotation
-    
-    print("model.global_rotation", model.global_rotation)
-
-    
+    model.global_rotation = global_rotation 
     model.trans = torch.nn.Parameter(torch.Tensor(np.array([model_loc])).to(device))
 
     """
