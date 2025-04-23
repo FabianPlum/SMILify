@@ -358,8 +358,8 @@ if __name__ == '__main__':
     STEP 1 - LOAD replicAnt generated SMIL data
     """
     # Read the JSON file
-    json_file_path = "data/replicAnt_trials/TEST_ANGLES_QUAT_NEW_SMIL/TEST_ANGLES_QUAT_NEW_SMIL_00.json"
-    plot_tests = False
+    json_file_path = "data/replicAnt_trials/TEST_ANGLES_QUAT_NEW_SMIL/TEST_ANGLES_QUAT_NEW_SMIL_01.json"
+    plot_tests = True
     
     batch_data_file_path = json_file_path.replace(json_file_path.split("/")[-1], "_BatchData_" + json_file_path.split("/")[-2] + ".json")
     input_image = json_file_path.split(".")[0] + ".JPG"
@@ -452,13 +452,6 @@ if __name__ == '__main__':
             theta, vector = eulerangles.euler2angle_axis(z=0,
                                                         y=0,
                                                         x=0)
-
-        """
-        # NOTE: Experimental, verify [  ]
-        theta, vector = eulerangles.euler2angle_axis(z=np.radians(0),#-pose_data[key]["eulerAngles"]["z"]),#-pose_data[key]["eulerAngles"]["x"]),
-                                                     y=np.radians(0),#-pose_data[key]["eulerAngles"]["y"]),
-                                                     x=np.radians(0))#pose_data[key]["eulerAngles"]["x"]))
-        """
         
         rodrigues_angle = vector * theta
 
@@ -598,14 +591,10 @@ if __name__ == '__main__':
     mesh.scale_verts_(20.0)
     mesh.offset_verts_(torch.tensor([model_loc[0], model_loc[1], model_loc[2]], device=device))
 
-    # render the mesh, passing in keyword arguments for the modified components
-    mesh_images = renderer(mesh, lights=lights, materials=materials, cameras=cameras)
-    # render the spheres with same settings
+    # render the spheres
     sphere_images = renderer(sphere_meshes, lights=lights, materials=materials, cameras=cameras)
     
     if plot_tests:
-        # combine the renders by using alpha blending
-        images = torch.where(sphere_images[..., 3:] > 0, sphere_images[..., :3], mesh_images[..., :3])
         
         plt.figure(figsize=(10, 10))
 
@@ -615,13 +604,13 @@ if __name__ == '__main__':
         display_img = cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
         
         # Get render dimensions
-        render_height, render_width = images[0].shape[:2]
+        render_height, render_width = sphere_images[0].shape[:2]
         
         # Resize input image to match render dimensions
         display_img = cv2.resize(display_img, (render_width, render_height))
         
         # Get render as numpy array and create mask
-        render = images[0, ..., :3].cpu().numpy()
+        render = sphere_images[0, ..., :3].cpu().numpy()
         mask = ~np.all(render == 1.0, axis=-1)
         mask = np.expand_dims(mask, axis=-1)
         
@@ -649,13 +638,11 @@ if __name__ == '__main__':
                               scalar_first=False)
     
     rot_eul = rot.as_euler('zyx', degrees=False)
-
     
     # Z is actually Z here (so YAW)
     # Y is PITCH
     # X is ROLL
 
-    
     theta, vector = eulerangles.euler2angle_axis(z=-rot_eul[0] + np.pi,
                                                  y=-rot_eul[1],
                                                  x=rot_eul[2])
@@ -663,9 +650,6 @@ if __name__ == '__main__':
     global_rotation_np = vector * theta
 
     print("global_rotation_np:", global_rotation_np)
-
-    #global_rotation_np = eul_to_axis(np.array([-np.pi / 2, 0, -np.pi / 2])) # used when fitting registered mesh to image data
-    #global_rotation_np = eul_to_axis(np.array([0, 0, 0])) # used when registering template mesh to target mesh(es)
 
     global_rotation = torch.nn.Parameter(
         torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0))

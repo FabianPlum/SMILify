@@ -342,10 +342,10 @@ class SMALFitter(nn.Module):
                     betas_logscale=batch_params['log_betascale'])
 
                 if apply_UE_transform:
-                    # TODO: INCLUDE MODEL SCALE HERE, 20 is just a placeholder!!!
+                    # in UE5 the model is scaled up by 10 (double check model size in your replicant project, if modified)
                     # needed to align the model at the root joint and scale it to the replicAnt model size
-                    verts = (verts - joints[:, 0, :]) * 20 + batch_params['trans'].unsqueeze(1)
-                    joints = (joints - joints[:, 0, :]) * 20 + batch_params['trans'].unsqueeze(1)
+                    verts = (verts - joints[:, 0, :]) * 10 + batch_params['trans'].unsqueeze(1)
+                    joints = (joints - joints[:, 0, :]) * 10 + batch_params['trans'].unsqueeze(1)
                 else:
                     verts = verts + batch_params['trans'].unsqueeze(1)
                     joints = joints + batch_params['trans'].unsqueeze(1)
