@@ -22,6 +22,9 @@ output/
 # unless specifically added, ignore videos
 *.mp4
 
+# ignore partial SMPL file contens
+*.npy
+
 
 # All models
 fitter_3d/ALL_ANTS/
