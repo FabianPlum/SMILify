@@ -503,16 +503,6 @@ if __name__ == '__main__':
     model.joint_rotations = torch.nn.Parameter(
         torch.Tensor(np_joint_angles_mapped[1:]).reshape((1, np_joint_angles_mapped[1:].shape[0], 3)).to(device))
 
-    # Load obj file
-    mesh = load_objs_as_meshes([obj_filename], device=device)
-    
-    if debug:
-        plt.figure(figsize=(7,7))
-        texture_image=mesh.textures.maps_padded()
-        plt.imshow(texture_image.squeeze().cpu().numpy())
-        plt.axis("off");
-        plt.show()
-
     # Convert to PyTorch tensors and extract R, T components
     # Mirror the rotation matrix for x-axis
     mirror_matrix = np.array([[-1, 0, 0],
@@ -586,10 +576,6 @@ if __name__ == '__main__':
     model_loc = np.array([-pose_data["b_t"]["3DPos"]["x"],
                         pose_data["b_t"]["3DPos"]["y"],
                         pose_data["b_t"]["3DPos"]["z"]], dtype=np.float32)
-
-    # update the location of the mesh
-    mesh.scale_verts_(20.0)
-    mesh.offset_verts_(torch.tensor([model_loc[0], model_loc[1], model_loc[2]], device=device))
 
     # render the spheres
     sphere_images = renderer(sphere_meshes, lights=lights, materials=materials, cameras=cameras)
