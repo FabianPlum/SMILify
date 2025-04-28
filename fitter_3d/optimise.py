@@ -51,6 +51,9 @@ parser.add_argument('--scheme', type=str, default='default',
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--nits', type=int, default=100)
 
+#optionally plot normals
+parser.add_argument('--plot_normals', type=bool, default=False)
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def clear_cuda_memory():
@@ -153,7 +156,8 @@ def main(args):
 
 			stage_kwargs = dict(target_meshes=batch_target_meshes, smal_3d_fitter=smal_model,
 								out_dir=args.results_dir, device=device,
-								mesh_names=batch_mesh_names)
+								mesh_names=batch_mesh_names,
+								plot_normals=args.plot_normals)
 
 			# if provided, load stages from YAML
 			if yaml_loaded:

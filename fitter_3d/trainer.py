@@ -220,7 +220,7 @@ class Stage:
     def __init__(self, nits: int, scheme: str, smal_3d_fitter: SMAL3DFitter, target_meshes: Meshes, mesh_names=[],
                  name="optimise",
                  loss_weights=None, lr=1e-3, out_dir="static_fits_output",
-                 custom_lrs=None, device='cuda'):
+                 custom_lrs=None, device='cuda', plot_normals=False):
         """
         nits = integer, number of iterations in stage
         parameters = list of items over which to be optimised
@@ -236,7 +236,7 @@ class Stage:
         self.mesh_names = mesh_names
         self.smal_3d_fitter = smal_3d_fitter
         self.device = device
-
+        self.plot_normals = plot_normals
         self.loss_weights = default_weights.copy()
         if loss_weights is not None:
             for k, v in loss_weights.items():
@@ -309,7 +309,8 @@ class Stage:
         figtitle = f"{self.name}, its = {self.n_it}"
         plot_meshes(self.target_meshes, new_src_mesh, self.mesh_names, title=self.name,
                     figtitle=figtitle,
-                    out_dir=os.path.join(self.out_dir, "meshes"))
+                    out_dir=os.path.join(self.out_dir, "meshes"),
+                    plot_normals=self.plot_normals)
 
     def run(self, plot=False):
         """Run the entire Stage"""
@@ -347,11 +348,12 @@ class Stage:
 class StageManager:
     """Container for multiple stages of optimisation"""
 
-    def __init__(self, out_dir="static_fits_output", labels=None):
+    def __init__(self, out_dir="static_fits_output", labels=None, plot_normals=False):
         """Labels: optional list of size n_batch with labels for each mesh"""
         self.stages = []
         self.out_dir = out_dir
         self.labels = labels
+        self.plot_normals = plot_normals
 
     def run(self):
         for n, stage in enumerate(self.stages):
