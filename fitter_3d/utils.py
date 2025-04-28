@@ -354,9 +354,133 @@ def load_meshes(mesh_dir=None, mesh_files=None, sorting=lambda arr: arr, n_meshe
     return mesh_names, target_meshes
 
 
+def compute_thinness_scores(mesh: Meshes, n_neighbors=50, max_faces_per_batch=5000):
+    """
+    Compute a 'thinness' score for each face in the mesh.
+    
+    The thinness score is based on the variation of normal directions in the neighborhood
+    of each face. High variation indicates thin or high-curvature regions.
+    
+    Args:
+        mesh: PyTorch3D Meshes object
+        n_neighbors: Number of neighbors to consider for each face
+        max_faces_per_batch: Maximum number of faces to process at once to avoid OOM errors
+        
+    Returns:
+        scores: Tensor of shape [batch_size, num_faces] with thinness scores
+    """
+    # Get face normals
+    face_normals = mesh.faces_normals_padded()  # [batch_size, num_faces, 3]
+    
+    batch_size = face_normals.shape[0]
+    scores = []
+    
+    for b in range(batch_size):
+        # Get face centers for distance calculation
+        verts = mesh.verts_padded()[b]
+        faces = mesh.faces_padded()[b]
+        face_verts_idx = faces
+        face_verts = torch.index_select(verts, 0, face_verts_idx.reshape(-1)).reshape(-1, 3, 3)
+        face_centers = face_verts.mean(dim=1)  # [num_faces, 3]
+        
+        # Get normals of the current batch
+        normals = face_normals[b]  # [num_faces, 3]
+        
+        # Normalize normals to ensure dot products are in [-1, 1]
+        normals = torch.nn.functional.normalize(normals, dim=1)
+        
+        # Process in batches to avoid OOM
+        num_faces = face_centers.shape[0]
+        face_variations = []
+        
+        # If we have a small number of faces, process all at once
+        if num_faces <= max_faces_per_batch:
+            # Compute pairwise distances between face centers
+            face_dists = torch.cdist(face_centers, face_centers)
+            
+            # Set diagonal to inf to exclude self
+            face_dists.fill_diagonal_(float('inf'))
+            
+            # Get top-k nearest neighbors for all faces at once
+            k = min(n_neighbors, num_faces-1)
+            _, nn_idx = torch.topk(face_dists, k, dim=1, largest=False)
+            
+            # Gather neighbor normals for all faces - [num_faces, n_neighbors, 3]
+            neighbor_normals = normals[nn_idx]
+            
+            # Reshape current face normals for broadcasting - [num_faces, 1, 3]
+            normals_expanded = normals.unsqueeze(1)
+            
+            # Compute dot products between each face normal and its neighbors - [num_faces, n_neighbors]
+            dot_products = torch.sum(neighbor_normals * normals_expanded, dim=2)
+            
+            # Clamp to avoid numerical issues with acos
+            dot_products = torch.clamp(dot_products, -0.999, 0.999)
+            
+            # Convert to angles - [num_faces, n_neighbors]
+            angles = torch.acos(dot_products)
+            
+            # Compute variation (standard deviation) for each face - [num_faces]
+            variation = torch.std(angles, dim=1)
+            face_variations.append(variation)
+        else:
+            # Process in batches
+            for i in range(0, num_faces, max_faces_per_batch):
+                end_idx = min(i + max_faces_per_batch, num_faces)
+                batch_centers = face_centers[i:end_idx]
+                batch_normals = normals[i:end_idx]
+                
+                # For each face in the batch, find its nearest neighbors
+                batch_variations = []
+                
+                for j in range(batch_centers.shape[0]):
+                    # Compute distances from this face to all other faces
+                    dists = torch.norm(face_centers - batch_centers[j:j+1], dim=1)
+                    
+                    # Set distance to self to infinity
+                    dists[i+j] = float('inf')
+                    
+                    # Get indices of k nearest neighbors
+                    k = min(n_neighbors, num_faces-1)
+                    _, nn_indices = torch.topk(dists, k, largest=False)
+                    
+                    # Get normals of neighbors
+                    nn_normals = normals[nn_indices]
+                    
+                    # Compute dot products with neighbors
+                    dot_products = torch.sum(nn_normals * batch_normals[j:j+1], dim=1)
+                    
+                    # Clamp to avoid numerical issues
+                    dot_products = torch.clamp(dot_products, -0.999, 0.999)
+                    
+                    # Convert to angles
+                    angles = torch.acos(dot_products)
+                    
+                    # Compute variation
+                    variation = torch.std(angles)
+                    batch_variations.append(variation)
+                
+                # Combine batch variations
+                face_variations.append(torch.stack(batch_variations))
+        
+        # Combine all variations
+        variation = torch.cat(face_variations)
+        
+        # Normalize to [0, 1] range for easier visualization
+        if variation.max() > variation.min():
+            normalized_variation = (variation - variation.min()) / (variation.max() - variation.min())
+        else:
+            normalized_variation = torch.zeros_like(variation)
+            
+        scores.append(normalized_variation)
+    
+    return torch.stack(scores)
+
+
 def plot_mesh_normals_high_res(mesh: Meshes, output_path, title="Surface Normals", 
                               num_samples=1000, normal_length=0.05, normal_color="red",
-                              mesh_color="blue", mesh_alpha=0.3, figsize=(10, 10), dpi=300):
+                              mesh_color="blue", mesh_alpha=0.3, figsize=(10, 10), dpi=300,
+                              color_by_thinness=True, n_neighbors_thinness=50):
     """
     Create a high-resolution plot of mesh surface normals.
     
@@ -375,9 +499,8 @@ def plot_mesh_normals_high_res(mesh: Meshes, output_path, title="Surface Normals
         mesh_alpha (float): Transparency of the mesh (0.0 to 1.0)
         figsize (tuple): Figure size (width, height) in inches
         dpi (int): DPI for the output image
-    
-    Returns:
-        None: The function saves the plot to the specified output path
+        color_by_thinness (bool): Whether to color normals by thinness (red=thin, green=thick)
+        n_neighbors_thinness (int): Number of neighbors to consider for thinness calculation
     """
     # Create figure and 3D axis
     fig = plt.figure(figsize=figsize)
@@ -416,6 +539,31 @@ def plot_mesh_normals_high_res(mesh: Meshes, output_path, title="Surface Normals
         # Sample a subset of normals
         indices = np.random.choice(num_faces, num_samples, replace=False)
     
+    # Compute thinness scores if needed
+    if color_by_thinness:
+        thinness_scores = compute_thinness_scores(mesh, n_neighbors=n_neighbors_thinness)
+        thinness_np = thinness_scores[0].detach().cpu().numpy()  # Use first batch
+        
+        # Create a colormap from green (0) to red (1)
+        # For the sampled indices
+        sampled_thinness = thinness_np[indices]
+        
+        # Create colors array: [r, g, b] where r increases and g decreases with thinness
+        colors = np.zeros((len(indices), 3))
+        colors[:, 0] = sampled_thinness  # Red channel increases with thinness
+        colors[:, 1] = 1 - sampled_thinness  # Green channel decreases with thinness
+        
+        # Create a custom colormap for the legend
+        cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+            "thinness_cmap", [(0, 'green'), (1, 'red')])
+        
+        # Create a ScalarMappable for the colorbar
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(0, 1))
+        sm.set_array([])
+    else:
+        # Use a single color for all normals
+        colors = normal_color
+    
     # Plot the normals
     X, Y, Z = centers_np[indices, 0], centers_np[indices, 1], centers_np[indices, 2]
     U, V, W = normals_np[indices, 0], normals_np[indices, 1], normals_np[indices, 2]
@@ -425,10 +573,21 @@ def plot_mesh_normals_high_res(mesh: Meshes, output_path, title="Surface Normals
     V = V * normal_length
     W = W * normal_length
     
-    ax.quiver(X, Y, Z, U, V, W, color=normal_color, length=normal_length, normalize=True)
+    # Plot the quivers with colors
+    quiver = ax.quiver(X, Y, Z, U, V, W, colors=colors, length=normal_length, normalize=True)
     
-    # Add a labeled artist for the normals to include in the legend
-    ax.plot([], [], color=normal_color, label=f"Normals ({len(indices)} of {num_faces})")
+    # Add a colorbar if coloring by thinness
+    if color_by_thinness:
+        cbar = fig.colorbar(sm, ax=ax, label='Thinness Score')
+        cbar.set_ticks([0, 0.5, 1])
+        cbar.set_ticklabels(['Thick', 'Medium', 'Thin'])
+        
+        # Add a labeled artist for the normals to include in the legend
+        ax.plot([], [], color='red', label=f"Thin Regions")
+        ax.plot([], [], color='green', label=f"Thick Regions")
+    else:
+        # Add a labeled artist for the normals to include in the legend
+        ax.plot([], [], color=normal_color, label=f"Normals ({len(indices)} of {num_faces})")
     
     # Set title and adjust view
     ax.set_title(title)
@@ -446,8 +605,9 @@ def plot_mesh_normals_high_res(mesh: Meshes, output_path, title="Surface Normals
     plt.close(fig)
 
 
-def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Normal Comparison", 
-                                num_samples=1000, normal_length=0.05, figsize=(20, 9), dpi=300):
+def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Surface Normals Comparison", 
+                               num_samples=500, normal_length=0.05, figsize=(15, 5), dpi=300,
+                               color_by_thinness=True, n_neighbors_thinness=30):
     """
     Create a high-resolution comparison plot of surface normals for target and source meshes.
     
@@ -461,7 +621,7 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Norm
     
     Args:
         target_mesh (Meshes): Target PyTorch3D Meshes object
-        src_mesh (Meshes): Source PyTorch3D Meshes object (typically the fitted model)
+        src_mesh (Meshes): Source PyTorch3D Meshes object
         output_path (str): Path where the output image will be saved
         title (str): Title for the overall plot
         num_samples (int): Number of face normals to randomly sample and plot.
@@ -469,10 +629,12 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Norm
         normal_length (float): Length scaling factor for the normal vectors
         figsize (tuple): Figure size (width, height) in inches
         dpi (int): DPI for the output image
-    
-    Returns:
-        None: The function saves the plot to the specified output path
+        color_by_thinness (bool): Whether to color normals by thinness
+        n_neighbors_thinness (int): Number of neighbors to consider for thinness calculation
     """
+    # Reduce the number of neighbors for thinness calculation to save memory
+    n_neighbors_thinness = min(n_neighbors_thinness, 30)
+    
     # Create figure and 3D axes
     fig = plt.figure(figsize=figsize)
     ax1 = fig.add_subplot(131, projection="3d")
@@ -494,10 +656,24 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Norm
     target_color = "green"
     src_color = "blue"
     
+    # Compute thinness scores if needed (with reduced sample size)
+    if color_by_thinness:
+        # Use a smaller sample for visualization
+        target_thinness = compute_thinness_scores(target_mesh, n_neighbors=n_neighbors_thinness, max_faces_per_batch=200)
+        src_thinness = compute_thinness_scores(src_mesh, n_neighbors=n_neighbors_thinness, max_faces_per_batch=200)
+        
+        # Create a colormap from green (0) to red (1)
+        cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+            "thinness_cmap", [(0, 'green'), (1, 'red')])
+        
+        # Create a ScalarMappable for the colorbar
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(0, 1))
+        sm.set_array([])
+    
     # Process each mesh for individual plots
-    for ax, mesh, color, label in [
-        (ax1, target_mesh, target_color, "Target"), 
-        (ax2, src_mesh, src_color, "SMAL")
+    for ax, mesh, color, label, thinness_scores in [
+        (ax1, target_mesh, target_color, "Target", target_thinness if color_by_thinness else None), 
+        (ax2, src_mesh, src_color, "SMAL", src_thinness if color_by_thinness else None)
     ]:
         # Plot the mesh with transparency
         plot_mesh(ax, mesh, colour=color, alpha=0.3, equalize=True, label=label)
@@ -527,6 +703,18 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Norm
             # Sample a subset of normals
             indices = np.random.choice(num_faces, num_samples, replace=False)
         
+        # Prepare colors based on thinness if needed
+        if color_by_thinness:
+            thinness_np = thinness_scores[0].detach().cpu().numpy()
+            sampled_thinness = thinness_np[indices]
+            
+            # Create colors array: [r, g, b] where r increases and g decreases with thinness
+            colors = np.zeros((len(indices), 3))
+            colors[:, 0] = sampled_thinness  # Red channel increases with thinness
+            colors[:, 1] = 1 - sampled_thinness  # Green channel decreases with thinness
+        else:
+            colors = "red"  # Default color if not coloring by thinness
+        
         # Plot the normals
         X, Y, Z = centers_np[indices, 0], centers_np[indices, 1], centers_np[indices, 2]
         U, V, W = normals_np[indices, 0], normals_np[indices, 1], normals_np[indices, 2]
@@ -536,11 +724,22 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Norm
         V = V * normal_length
         W = W * normal_length
         
-        ax.quiver(X, Y, Z, U, V, W, color="red", length=normal_length, normalize=True)
+        ax.quiver(X, Y, Z, U, V, W, colors=colors, length=normal_length, normalize=True)
         
         # Add legend
-        ax.plot([], [], color="red", label=f"Normals ({len(indices)} of {num_faces})")
+        if color_by_thinness:
+            ax.plot([], [], color='red', label=f"Thin Regions")
+            ax.plot([], [], color='green', label=f"Thick Regions")
+        else:
+            ax.plot([], [], color="red", label=f"Normals ({len(indices)} of {num_faces})")
+        
         ax.legend(loc='upper right')
+    
+    # Add a colorbar if coloring by thinness (only need one for the figure)
+    if color_by_thinness:
+        cbar = fig.colorbar(sm, ax=[ax1, ax2, ax3], label='Thinness Score', shrink=0.6)
+        cbar.set_ticks([0, 0.5, 1])
+        cbar.set_ticklabels(['Thick', 'Medium', 'Thin'])
     
     # Plot both meshes in the third subplot with colored normals
     # First, plot both meshes with transparency
@@ -552,9 +751,9 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Norm
     src_faces = src_mesh.faces_padded()[0].shape[0]
     
     # Process each mesh for the overlaid plot
-    for mesh, color, label, num_faces in [
-        (target_mesh, target_color, "Target Normals", target_faces), 
-        (src_mesh, src_color, "SMAL Normals", src_faces)
+    for mesh, color, label, num_faces, thinness_scores in [
+        (target_mesh, target_color, "Target", target_faces, target_thinness if color_by_thinness else None), 
+        (src_mesh, src_color, "SMAL", src_faces, src_thinness if color_by_thinness else None)
     ]:
         # Get mesh data
         verts = mesh.verts_padded()
@@ -581,7 +780,25 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Norm
             sample_size = min(num_faces, num_samples // 2)
             indices = np.random.choice(num_faces, sample_size, replace=False)
         
-        # Plot the normals with the mesh's color
+        # Prepare colors based on thinness if needed
+        if color_by_thinness:
+            thinness_np = thinness_scores[0].detach().cpu().numpy()
+            sampled_thinness = thinness_np[indices]
+            
+            # Create colors array: [r, g, b] where r increases and g decreases with thinness
+            colors = np.zeros((len(indices), 3))
+            colors[:, 0] = sampled_thinness  # Red channel increases with thinness
+            colors[:, 1] = 1 - sampled_thinness  # Green channel decreases with thinness
+            
+            # Add a slight tint based on the mesh color to differentiate target from source
+            if color == target_color:  # Target mesh (green)
+                colors[:, 2] = 0.3  # Add some blue to make it distinguishable
+            else:  # Source mesh (blue)
+                colors[:, 2] = 0.7  # Add more blue to make it distinguishable
+        else:
+            colors = color
+        
+        # Plot the normals
         X, Y, Z = centers_np[indices, 0], centers_np[indices, 1], centers_np[indices, 2]
         U, V, W = normals_np[indices, 0], normals_np[indices, 1], normals_np[indices, 2]
         
@@ -590,10 +807,18 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Norm
         V = V * normal_length
         W = W * normal_length
         
-        ax3.quiver(X, Y, Z, U, V, W, color=color, length=normal_length, normalize=True)
+        ax3.quiver(X, Y, Z, U, V, W, colors=colors, length=normal_length, normalize=True)
         
-        # Add a labeled artist for the normals
-        ax3.plot([], [], color=color, label=f"{label} ({len(indices)} of {num_faces})")
+        # Add legend entries
+        if color_by_thinness:
+            if color == target_color:
+                ax3.plot([], [], color=[1, 0, 0.3], label=f"Target Thin")
+                ax3.plot([], [], color=[0, 1, 0.3], label=f"Target Thick")
+            else:
+                ax3.plot([], [], color=[1, 0, 0.7], label=f"SMAL Thin")
+                ax3.plot([], [], color=[0, 1, 0.7], label=f"SMAL Thick")
+        else:
+            ax3.plot([], [], color=color, label=f"{label} Normals ({len(indices)} of {num_faces})")
     
     # Add legend to the third subplot
     ax3.legend(loc='upper right')
