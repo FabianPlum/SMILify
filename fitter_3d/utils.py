@@ -122,8 +122,21 @@ def plot_set_of_meshes(args):
 
 
 def plot_meshes(target_meshes, src_meshes, mesh_names=[], title="", figtitle="",
-                out_dir="static_fits_output/pointclouds", max_workers=None):
-    """Plot and save figures of point clouds using multiprocessing"""
+                out_dir="static_fits_output/pointclouds", max_workers=None, 
+                plot_normals=False, normals_samples=1000):
+    """Plot and save figures of point clouds using multiprocessing
+    
+    Args:
+        target_meshes: List of target PyTorch3D Meshes objects
+        src_meshes: List of source PyTorch3D Meshes objects
+        mesh_names: Optional list of names for each mesh
+        title: Title for the plots
+        figtitle: Super title for the plots
+        out_dir: Directory to save the output images
+        max_workers: Maximum number of worker processes for multiprocessing
+        plot_normals: Whether to also generate normal plots
+        normals_samples: Number of normal vectors to sample for normal plots
+    """
     if max_workers is None:
         max_workers = cpu_count()
 
@@ -138,6 +151,46 @@ def plot_meshes(target_meshes, src_meshes, mesh_names=[], title="", figtitle="",
 
     with Pool(processes=max_workers) as pool:
         pool.map(plot_set_of_meshes, args_list)
+    
+    # Generate normal plots if requested
+    if plot_normals:
+        # Create normals output directory
+        normals_dir = os.path.join(out_dir, "normals")
+        try_mkdir(normals_dir)
+        
+        # Generate normal plots for each mesh pair
+        for n in range(len(target_meshes)):
+            name = n if not mesh_names else mesh_names[n]
+            
+            # Generate comparison plot
+            comparison_path = os.path.join(normals_dir, f"{name} - {title} - comparison.png")
+            plot_mesh_normals_comparison(
+                target_meshes[n], 
+                src_meshes[n],
+                output_path=comparison_path,
+                title=f"{figtitle} - {name} - {title}",
+                num_samples=normals_samples
+            )
+            
+            # Generate individual normal plots
+            target_path = os.path.join(normals_dir, f"{name} - {title} - target_normals.png")
+            src_path = os.path.join(normals_dir, f"{name} - {title} - src_normals.png")
+            
+            plot_mesh_normals_high_res(
+                target_meshes[n],
+                output_path=target_path,
+                title=f"Target Normals - {name}",
+                num_samples=normals_samples,
+                mesh_color="green"
+            )
+            
+            plot_mesh_normals_high_res(
+                src_meshes[n],
+                output_path=src_path,
+                title=f"Source Normals - {name}",
+                num_samples=normals_samples,
+                mesh_color="blue"
+            )
 
 
 def plot_pointcloud(ax, mesh, label="", colour="blue",
@@ -299,3 +352,260 @@ def load_meshes(mesh_dir=None, mesh_files=None, sorting=lambda arr: arr, n_meshe
     target_meshes = Meshes(verts=all_verts, faces=all_faces_idx)  # All loaded target meshes together
 
     return mesh_names, target_meshes
+
+
+def plot_mesh_normals_high_res(mesh: Meshes, output_path, title="Surface Normals", 
+                              num_samples=1000, normal_length=0.05, normal_color="red",
+                              mesh_color="blue", mesh_alpha=0.3, figsize=(10, 10), dpi=300):
+    """
+    Create a high-resolution plot of mesh surface normals.
+    
+    This function visualizes a mesh with its surface normals as arrows originating from
+    the face centers. It's useful for analyzing the orientation and quality of mesh surfaces.
+    
+    Args:
+        mesh (Meshes): PyTorch3D Meshes object to visualize
+        output_path (str): Path where the output image will be saved
+        title (str): Title for the plot
+        num_samples (int): Number of face normals to randomly sample and plot.
+                           If -1 or greater than the number of faces, all normals will be plotted
+        normal_length (float): Length scaling factor for the normal vectors
+        normal_color (str): Color of the normal vectors
+        mesh_color (str): Color of the mesh
+        mesh_alpha (float): Transparency of the mesh (0.0 to 1.0)
+        figsize (tuple): Figure size (width, height) in inches
+        dpi (int): DPI for the output image
+    
+    Returns:
+        None: The function saves the plot to the specified output path
+    """
+    # Create figure and 3D axis
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_subplot(111, projection="3d")
+    
+    # Set axis labels
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
+    
+    # Plot the mesh with transparency
+    plot_mesh(ax, mesh, colour=mesh_color, alpha=mesh_alpha, equalize=True, label="Mesh")
+    
+    # Get mesh data
+    verts = mesh.verts_padded()
+    faces = mesh.faces_padded()
+    
+    # Calculate face normals
+    mesh_normals = mesh.faces_normals_padded()  # [batch_size, num_faces, 3]
+    
+    # Calculate face centers manually
+    face_verts_idx = faces[0]  # Use first batch
+    face_verts = torch.index_select(verts[0], 0, face_verts_idx.reshape(-1)).reshape(-1, 3, 3)
+    face_centers = face_verts.mean(dim=1)  # [num_faces, 3]
+    
+    # Convert to numpy for matplotlib
+    centers_np = face_centers.detach().cpu().numpy()
+    normals_np = mesh_normals[0].detach().cpu().numpy()  # Use first batch
+    
+    # Sample normals or use all
+    num_faces = centers_np.shape[0]
+    if num_samples == -1 or num_samples >= num_faces:
+        # Use all normals
+        indices = np.arange(num_faces)
+    else:
+        # Sample a subset of normals
+        indices = np.random.choice(num_faces, num_samples, replace=False)
+    
+    # Plot the normals
+    X, Y, Z = centers_np[indices, 0], centers_np[indices, 1], centers_np[indices, 2]
+    U, V, W = normals_np[indices, 0], normals_np[indices, 1], normals_np[indices, 2]
+    
+    # Scale the normals
+    U = U * normal_length
+    V = V * normal_length
+    W = W * normal_length
+    
+    ax.quiver(X, Y, Z, U, V, W, color=normal_color, length=normal_length, normalize=True)
+    
+    # Add a labeled artist for the normals to include in the legend
+    ax.plot([], [], color=normal_color, label=f"Normals ({len(indices)} of {num_faces})")
+    
+    # Set title and adjust view
+    ax.set_title(title)
+    
+    # Add legend with the labeled artists
+    ax.legend(loc='upper right')
+    
+    # Ensure directory exists
+    out_dir = os.path.dirname(output_path)
+    try_mkdir(out_dir)
+    
+    # Save high-resolution figure
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=dpi)
+    plt.close(fig)
+
+
+def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Normal Comparison", 
+                                num_samples=1000, normal_length=0.05, figsize=(20, 9), dpi=300):
+    """
+    Create a high-resolution comparison plot of surface normals for target and source meshes.
+    
+    This function creates a three-panel visualization:
+    1. Left panel: Target mesh with its normals (in red)
+    2. Middle panel: Source mesh with its normals (in red)
+    3. Right panel: Both meshes overlaid with their respective normals colored to match the mesh
+    
+    This visualization is particularly useful for comparing the quality of mesh fitting
+    by examining how well the normals of the source mesh align with those of the target.
+    
+    Args:
+        target_mesh (Meshes): Target PyTorch3D Meshes object
+        src_mesh (Meshes): Source PyTorch3D Meshes object (typically the fitted model)
+        output_path (str): Path where the output image will be saved
+        title (str): Title for the overall plot
+        num_samples (int): Number of face normals to randomly sample and plot.
+                           If -1 or greater than the number of faces, all normals will be plotted
+        normal_length (float): Length scaling factor for the normal vectors
+        figsize (tuple): Figure size (width, height) in inches
+        dpi (int): DPI for the output image
+    
+    Returns:
+        None: The function saves the plot to the specified output path
+    """
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=figsize)
+    ax1 = fig.add_subplot(131, projection="3d")
+    ax2 = fig.add_subplot(132, projection="3d")
+    ax3 = fig.add_subplot(133, projection="3d")
+    
+    # Set axis labels
+    for ax in [ax1, ax2, ax3]:
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_zlabel('z')
+    
+    # Set subplot titles
+    ax1.set_title("Target Mesh Normals")
+    ax2.set_title("Source Mesh Normals")
+    ax3.set_title("Overlaid Mesh Normals")
+    
+    # Define mesh colors
+    target_color = "green"
+    src_color = "blue"
+    
+    # Process each mesh for individual plots
+    for ax, mesh, color, label in [
+        (ax1, target_mesh, target_color, "Target"), 
+        (ax2, src_mesh, src_color, "SMAL")
+    ]:
+        # Plot the mesh with transparency
+        plot_mesh(ax, mesh, colour=color, alpha=0.3, equalize=True, label=label)
+        
+        # Get mesh data
+        verts = mesh.verts_padded()
+        faces = mesh.faces_padded()
+        
+        # Calculate face normals
+        mesh_normals = mesh.faces_normals_padded()
+        
+        # Calculate face centers manually
+        face_verts_idx = faces[0]  # Use first batch
+        face_verts = torch.index_select(verts[0], 0, face_verts_idx.reshape(-1)).reshape(-1, 3, 3)
+        face_centers = face_verts.mean(dim=1)
+        
+        # Convert to numpy for matplotlib
+        centers_np = face_centers.detach().cpu().numpy()
+        normals_np = mesh_normals[0].detach().cpu().numpy()
+        
+        # Sample normals or use all
+        num_faces = centers_np.shape[0]
+        if num_samples == -1 or num_samples >= num_faces:
+            # Use all normals
+            indices = np.arange(num_faces)
+        else:
+            # Sample a subset of normals
+            indices = np.random.choice(num_faces, num_samples, replace=False)
+        
+        # Plot the normals
+        X, Y, Z = centers_np[indices, 0], centers_np[indices, 1], centers_np[indices, 2]
+        U, V, W = normals_np[indices, 0], normals_np[indices, 1], normals_np[indices, 2]
+        
+        # Scale the normals
+        U = U * normal_length
+        V = V * normal_length
+        W = W * normal_length
+        
+        ax.quiver(X, Y, Z, U, V, W, color="red", length=normal_length, normalize=True)
+        
+        # Add legend
+        ax.plot([], [], color="red", label=f"Normals ({len(indices)} of {num_faces})")
+        ax.legend(loc='upper right')
+    
+    # Plot both meshes in the third subplot with colored normals
+    # First, plot both meshes with transparency
+    plot_mesh(ax3, target_mesh, colour=target_color, alpha=0.2, equalize=True, label="Target")
+    plot_mesh(ax3, src_mesh, colour=src_color, alpha=0.2, equalize=True, label="SMAL")
+    
+    # Get face counts for both meshes
+    target_faces = target_mesh.faces_padded()[0].shape[0]
+    src_faces = src_mesh.faces_padded()[0].shape[0]
+    
+    # Process each mesh for the overlaid plot
+    for mesh, color, label, num_faces in [
+        (target_mesh, target_color, "Target Normals", target_faces), 
+        (src_mesh, src_color, "SMAL Normals", src_faces)
+    ]:
+        # Get mesh data
+        verts = mesh.verts_padded()
+        faces = mesh.faces_padded()
+        
+        # Calculate face normals
+        mesh_normals = mesh.faces_normals_padded()
+        
+        # Calculate face centers manually
+        face_verts_idx = faces[0]  # Use first batch
+        face_verts = torch.index_select(verts[0], 0, face_verts_idx.reshape(-1)).reshape(-1, 3, 3)
+        face_centers = face_verts.mean(dim=1)
+        
+        # Convert to numpy for matplotlib
+        centers_np = face_centers.detach().cpu().numpy()
+        normals_np = mesh_normals[0].detach().cpu().numpy()
+        
+        # Sample normals or use all
+        if num_samples == -1:
+            # Use all normals
+            indices = np.arange(num_faces)
+        else:
+            # Sample a subset of normals, half for each mesh in the overlay
+            sample_size = min(num_faces, num_samples // 2)
+            indices = np.random.choice(num_faces, sample_size, replace=False)
+        
+        # Plot the normals with the mesh's color
+        X, Y, Z = centers_np[indices, 0], centers_np[indices, 1], centers_np[indices, 2]
+        U, V, W = normals_np[indices, 0], normals_np[indices, 1], normals_np[indices, 2]
+        
+        # Scale the normals
+        U = U * normal_length
+        V = V * normal_length
+        W = W * normal_length
+        
+        ax3.quiver(X, Y, Z, U, V, W, color=color, length=normal_length, normalize=True)
+        
+        # Add a labeled artist for the normals
+        ax3.plot([], [], color=color, label=f"{label} ({len(indices)} of {num_faces})")
+    
+    # Add legend to the third subplot
+    ax3.legend(loc='upper right')
+    
+    # Set main title
+    fig.suptitle(title, fontsize=16)
+    
+    # Ensure directory exists
+    out_dir = os.path.dirname(output_path)
+    try_mkdir(out_dir)
+    
+    # Save high-resolution figure
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=dpi)
+    plt.close(fig)
