@@ -16,6 +16,7 @@ __pycache__/
 Fitter_RESULTS/
 fit3d_results
 output/
+3D_model_prep/morph_anim
 
 # unless specifically added, ignore videos
 *.mp4
