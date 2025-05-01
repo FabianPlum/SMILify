@@ -14,7 +14,9 @@ from SDF_tests import (
     smooth_distances,
     visualize_sdf,
     try_mkdir,
-    PerformanceMonitor
+    PerformanceMonitor,
+    assign_vertex_sdf,
+    visualize_vertex_sdf
 )
 
 def process_mesh_folder(
@@ -87,21 +89,41 @@ def process_mesh_folder(
             smoothed_diameters = smooth_distances(sample_points, diameters, k=k_smoothing)
             monitor.end('smoothing')
             
-            # Save visualization
+            # Assign SDF values to all vertices
+            print("Assigning SDF values to vertices...")
+            monitor.start('vertex_sdf')
+            vertex_sdf = assign_vertex_sdf(verts, sample_points, smoothed_diameters, k=10)
+            monitor.end('vertex_sdf')
+            
+            # Save visualization for sampled points
             plot_path = os.path.join(plots_dir, f"{mesh_name}_sdf.png")
-            print("Generating visualization...")
+            print("Generating visualization for sampled points...")
             monitor.start('visualization')
             visualize_sdf(mesh, sample_points, smoothed_diameters, plot_path,
                          title=f"Spatial Diameter Function - {mesh_name}")
             monitor.end('visualization')
             
+            # Save visualization for vertices
+            vertex_plot_path = os.path.join(plots_dir, f"{mesh_name}_vertex_sdf.png")
+            print("Generating visualization for vertices...")
+            monitor.start('vertex_visualization')
+            visualize_vertex_sdf(mesh, vertex_sdf, vertex_plot_path,
+                               title=f"Vertex SDF - {mesh_name}")
+            monitor.end('vertex_visualization')
+            
             # Store results
             results[mesh_name] = {
                 'sample_points': sample_points.cpu(),
                 'smoothed_diameters': smoothed_diameters.cpu(),
+                'vertex_sdf': vertex_sdf.cpu(),
+                'verts': verts.cpu(),
+                'faces': faces.cpu(),
                 'mesh_file': mesh_file,
                 'num_vertices': len(verts),
-                'num_faces': len(faces)
+                'num_faces': len(faces),
+                'num_samples': num_samples,
+                'num_rays': num_rays,
+                'k_smoothing': k_smoothing
             }
             
             # Save individual results

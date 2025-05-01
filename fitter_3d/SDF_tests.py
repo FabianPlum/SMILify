@@ -325,7 +325,7 @@ def compute_sdf(mesh: Meshes, num_samples: int = 1000, num_rays: int = 30):
     diameters = torch.zeros(num_samples, device=device)
     
     # Process in batches to avoid OOM for large meshes
-    batch_size = 10000  # Adjust based on available GPU memory
+    batch_size = 1000  # Adjust based on available GPU memory
     num_batches = (num_samples + batch_size - 1) // batch_size
     
     print(f"\nProcessing {num_samples} faces in {num_batches} batches of size {batch_size}...")
@@ -741,6 +741,94 @@ def debug_single_vertex(mesh: Meshes, num_rays: int = 30, output_dir: str = "sdf
         print(f"Max angle: {angles_degrees.max().item():.2f}°")
         print(f"Mean angle: {angles_degrees.mean().item():.2f}°")
 
+def assign_vertex_sdf(verts: torch.Tensor, sample_points: torch.Tensor, smoothed_diameters: torch.Tensor, k: int = 10) -> torch.Tensor:
+    """
+    Assign SDF values to each vertex based on k nearest sampled points.
+    
+    Args:
+        verts (torch.Tensor): [V, 3] mesh vertices
+        sample_points (torch.Tensor): [N, 3] sampled points
+        smoothed_diameters (torch.Tensor): [N] SDF values for sampled points
+        k (int): Number of nearest neighbors to consider
+        
+    Returns:
+        vertex_sdf (torch.Tensor): [V] SDF values for each vertex
+    """
+    # Convert to numpy for KDTree
+    verts_np = verts.cpu().numpy()
+    sample_points_np = sample_points.cpu().numpy()
+    diameters_np = smoothed_diameters.cpu().numpy()
+    
+    # Build KD-tree for sampled points
+    tree = cKDTree(sample_points_np)
+    
+    # Find k nearest neighbors for each vertex
+    distances, indices = tree.query(verts_np, k=k)
+    
+    # Compute weighted average of SDF values
+    # Use inverse distance weighting
+    weights = 1.0 / (distances + 1e-6)  # Add small epsilon to avoid division by zero
+    weights = weights / weights.sum(axis=1, keepdims=True)  # Normalize weights
+    
+    # Get SDF values of neighbors and compute weighted average
+    neighbor_sdf = diameters_np[indices]
+    vertex_sdf = (neighbor_sdf * weights).sum(axis=1)
+    
+    # Normalize to [0, 1] range
+    min_sdf = vertex_sdf.min()
+    max_sdf = vertex_sdf.max()
+    if max_sdf > min_sdf:
+        vertex_sdf = (vertex_sdf - min_sdf) / (max_sdf - min_sdf)
+    else:
+        vertex_sdf = np.zeros_like(vertex_sdf)
+    
+    return torch.from_numpy(vertex_sdf).to(verts.device)
+
+def visualize_vertex_sdf(mesh: Meshes, vertex_sdf: torch.Tensor, output_path: str, title: str = "Vertex SDF"):
+    """
+    Visualize the mesh with vertices colored by their SDF values.
+    
+    Args:
+        mesh (Meshes): PyTorch3D mesh object
+        vertex_sdf (torch.Tensor): [V] SDF values for each vertex
+        output_path (str): Path to save the visualization
+        title (str): Plot title
+    """
+    # Create figure
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Get mesh data
+    verts = mesh.verts_padded()[0]  # [V, 3]
+    faces = mesh.faces_padded()[0]  # [F, 3]
+    
+    # Convert to numpy for plotting
+    verts_np = verts.cpu().numpy()
+    faces_np = faces.cpu().numpy()
+    sdf_np = vertex_sdf.cpu().numpy()
+    
+    # Create scatter plot with custom colormap
+    scatter = ax.scatter(verts_np[:, 0], verts_np[:, 1], verts_np[:, 2],
+                        c=sdf_np, cmap='RdYlGn_r', s=50)
+    
+    # Add colorbar
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('Normalized SDF Value')
+    
+    # Set title and labels
+    ax.set_title(title)
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # Save figure
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
 def process_obj_file(obj_path: str = None, output_dir: str = "sdf_output", num_samples: int = 1000, num_rays: int = 30,
                     debug_mode: bool = False, seed: int = 0):
     """
@@ -804,14 +892,49 @@ def process_obj_file(obj_path: str = None, output_dir: str = "sdf_output", num_s
     print("\nSmoothing distances...")
     smoothed_diameters = smooth_distances(sample_points, diameters, k=50)
     
-    # Create output filename
+    # Create output filename for sampled points visualization
     output_path = os.path.join(output_dir, f"{basename}_sdf.png")
     
-    # Visualize results
-    print("\nGenerating visualization...")
+    # Visualize results for sampled points
+    print("\nGenerating visualization for sampled points...")
     visualize_sdf(mesh, sample_points, smoothed_diameters, output_path,
                  title=f"Spatial Diameter Function - {basename}")
-    print(f"Visualization saved to {output_path}")
+    print(f"Sampled points visualization saved to {output_path}")
+    
+    # Assign SDF values to all vertices
+    print("\nAssigning SDF values to all vertices...")
+    vertex_sdf = assign_vertex_sdf(verts, sample_points, smoothed_diameters, k=10)
+    
+    # Create output filename for vertex visualization
+    vertex_output_path = os.path.join(output_dir, f"{basename}_vertex_sdf.png")
+    
+    # Visualize results for vertices
+    print("\nGenerating visualization for vertices...")
+    visualize_vertex_sdf(mesh, vertex_sdf, vertex_output_path,
+                        title=f"Vertex SDF - {basename}")
+    print(f"Vertex visualization saved to {vertex_output_path}")
+    
+    # Save results to file
+    results = {
+        'sample_points': sample_points.cpu(),
+        'smoothed_diameters': smoothed_diameters.cpu(),
+        'vertex_sdf': vertex_sdf.cpu(),
+        'verts': verts.cpu(),
+        'faces': faces.cpu(),
+        'num_samples': num_samples,
+        'num_rays': num_rays,
+        'seed': seed
+    }
+    
+    # Create data directory if it doesn't exist
+    data_dir = os.path.join(output_dir, "data")
+    os.makedirs(data_dir, exist_ok=True)
+    
+    # Save results
+    results_path = os.path.join(data_dir, f"{basename}_sdf_results.pkl")
+    with open(results_path, 'wb') as f:
+        pkl.dump(results, f)
+    print(f"\nResults saved to {results_path}")
 
 if __name__ == "__main__":
     import argparse
