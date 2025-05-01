@@ -356,7 +356,7 @@ def compute_sdf(mesh: Meshes, num_samples: int = 1000, num_rays: int = 30):
             
             # Process rays until we find enough valid intersections or try all rays
             for direction in point_directions:
-                if found_valid and len(valid_distances) >= 5:  # Early termination if we have enough valid samples
+                if found_valid and len(valid_distances) >= max(int(num_samples/2), 1):  # Early termination if we have enough valid samples
                     break
                     
                 intersections, distances = compute_ray_mesh_intersections_vectorized(
