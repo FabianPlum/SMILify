@@ -12,6 +12,7 @@ import time
 import psutil
 import GPUtil
 from collections import defaultdict
+import pickle as pkl
 
 # Add the parent directory to the Python path to find config module
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -740,13 +741,13 @@ def debug_single_vertex(mesh: Meshes, num_rays: int = 30, output_dir: str = "sdf
         print(f"Max angle: {angles_degrees.max().item():.2f}°")
         print(f"Mean angle: {angles_degrees.mean().item():.2f}°")
 
-def process_obj_file(obj_path: str, output_dir: str, num_samples: int = 1000, num_rays: int = 30,
+def process_obj_file(obj_path: str = None, output_dir: str = "sdf_output", num_samples: int = 1000, num_rays: int = 30,
                     debug_mode: bool = False, seed: int = 0):
     """
-    Process a single OBJ file and compute its SDF visualization.
+    Process a single OBJ file or SMAL model and compute its SDF visualization.
     
     Args:
-        obj_path (str): Path to the input OBJ file
+        obj_path (str, optional): Path to the input OBJ file. If None, uses SMAL_FILE from config.py
         output_dir (str): Directory to save the visualization
         num_samples (int): Number of points to sample on the mesh. If -1, samples all faces.
         num_rays (int): Number of rays to cast per point
@@ -762,8 +763,26 @@ def process_obj_file(obj_path: str, output_dir: str, num_samples: int = 1000, nu
     print(f"Using device: {device}")
     
     print("Loading mesh...")
-    verts, faces, _ = load_obj(obj_path)
-    faces = faces.verts_idx
+    if obj_path is None:
+        # Use SMAL_FILE from config
+        from config import SMAL_FILE
+        print(f"Using SMAL model from: {SMAL_FILE}")
+        
+        # Load SMAL model
+        with open(SMAL_FILE, 'rb') as f:
+            u = pkl._Unpickler(f)
+            u.encoding = 'latin1'
+            smal_data = u.load()
+            
+        # Get vertices and faces from SMAL model
+        verts = torch.FloatTensor(smal_data['v_template']).to(device)
+        faces = torch.LongTensor(smal_data['f']).to(device)
+        basename = "SMAL_model"
+    else:
+        # Load OBJ file
+        verts, faces, _ = load_obj(obj_path)
+        faces = faces.verts_idx
+        basename = os.path.splitext(os.path.basename(obj_path))[0]
     
     # Move to device
     verts = verts.to(device)
@@ -786,7 +805,6 @@ def process_obj_file(obj_path: str, output_dir: str, num_samples: int = 1000, nu
     smoothed_diameters = smooth_distances(sample_points, diameters, k=50)
     
     # Create output filename
-    basename = os.path.splitext(os.path.basename(obj_path))[0]
     output_path = os.path.join(output_dir, f"{basename}_sdf.png")
     
     # Visualize results
@@ -799,7 +817,8 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Compute and visualize Spatial Diameter Function for a 3D mesh")
-    parser.add_argument("obj_path", type=str, help="Path to the input OBJ file")
+    parser.add_argument("--obj_path", type=str, default=None,
+                       help="Path to the input OBJ file. If not provided, uses SMAL_FILE from config.py")
     parser.add_argument("--output_dir", type=str, default="sdf_output",
                        help="Directory to save the visualization")
     parser.add_argument("--num_samples", type=int, default=1000,
