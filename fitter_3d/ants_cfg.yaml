@@ -32,7 +32,6 @@ stages:
       w_edge: 0.8
       w_normal: 0.005
       w_laplacian: 0.01
-      w_thin_regions: 0.001
 
   Stage_3_deform_fine:
     scheme: 'deform'
@@ -44,7 +43,6 @@ stages:
       w_edge: 0.2
       w_normal: 0.002
       w_laplacian: 0.001 # enforce smoothness less, which reduces shrinkage.
-      w_thin_regions: 0.001 # thin regions should be aligned by now, so we penalise their alignment less here.
 
 # Custom arguments. These will *overwrite* any command line arguments passed into the script
 args:
