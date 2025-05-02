@@ -12,7 +12,7 @@ from pytorch3d.structures import Meshes
 from tqdm import tqdm
 import torch
 import matplotlib.pyplot as plt
-from fitter_3d.utils import plot_pointclouds, plot_meshes, compute_thinness_scores
+from fitter_3d.utils import plot_pointclouds, plot_meshes
 import numpy as np
 import os
 import config
@@ -26,9 +26,7 @@ nn = torch.nn
 default_weights = dict(w_chamfer=1.0, 
                        w_edge=1.0, 
                        w_normal=0.01, 
-                       w_laplacian=0.1,
-                       w_thin_regions=0.5)
-
+                       w_laplacian=0.1)
 # Want to vary learning ratios between parameters,
 default_lr_ratios = []
 
@@ -293,17 +291,6 @@ class Stage:
         if self.consider_loss("laplacian"):
             loss_laplacian = mesh_laplacian_smoothing(src_mesh, method="uniform")  # mesh laplacian smoothing
             loss += self.loss_weights["w_laplacian"] * loss_laplacian
-        
-        if self.consider_loss("thin_regions") and hasattr(self, 'target_meshes'):
-            # Only compute if we have actual meshes, not just sampled points
-            loss_thin_regions = thin_region_alignment_loss(
-                src_mesh,
-                self.target_meshes,
-                n_neighbors=200, # TODO: make this a parameter
-                weight_power=self.thin_region_weight_power,
-                sample_size=self.sample_size
-            )
-            loss += self.loss_weights["w_thin_regions"] * loss_thin_regions
 
         return loss
 
@@ -407,110 +394,3 @@ class StageManager:
     def add_stage(self, stage):
         self.stages.append(stage)
 
-
-def thin_region_alignment_loss(src_mesh, tgt_mesh, n_neighbors=50, weight_power=2.0, sample_size=1000):
-    """
-    Custom loss function that focuses on aligning thin regions between template and target meshes.
-    
-    This loss identifies thin regions in both meshes (areas with high normal variation) and
-    applies a higher weight to these regions during the fitting process.
-    
-    Args:
-        src_mesh: Source mesh (template)
-        tgt_mesh: Target mesh
-        n_neighbors: Number of neighbors to consider for thinness calculation
-        weight_power: Power to raise the thinness weights to (higher values increase contrast)
-        sample_size: Number of random vertices to sample for loss computation
-        
-    Returns:
-        Weighted alignment loss focusing on thin regions
-    """
-    # Get vertices for both meshes
-    src_verts = src_mesh.verts_padded()  # B x V x 3
-    tgt_verts = tgt_mesh.verts_padded()  # B x V' x 3
-    
-    batch_size = src_verts.shape[0]
-    total_loss = 0.0
-    
-    for b in range(batch_size):
-        # For each mesh in the batch
-        sv = src_verts[b]  # V x 3
-        tv = tgt_verts[b]  # V' x 3
-        
-        # Randomly sample vertices if there are more than sample_size
-        num_verts = sv.shape[0]
-        if num_verts > sample_size:
-            # Generate random indices without replacement
-            indices = torch.randperm(num_verts, device=sv.device)[:sample_size]
-            sv_sampled = sv[indices]
-            
-            # Get vertex normals for sampled vertices
-            src_normals = src_mesh.verts_normals_padded()[b][indices]  # sample_size x 3
-        else:
-            # Use all vertices if fewer than sample_size
-            sv_sampled = sv
-            indices = torch.arange(num_verts, device=sv.device)
-            src_normals = src_mesh.verts_normals_padded()[b]  # V x 3
-        
-        # Compute pairwise distances between sampled source and all target vertices
-        dists = torch.cdist(sv_sampled, tv)  # sample_size x V'
-        
-        # For each sampled source vertex, find the closest target vertex
-        min_dists, nn_idx = torch.min(dists, dim=1)  # sample_size
-        
-        # Normalize normals
-        src_normals = torch.nn.functional.normalize(src_normals, dim=1)
-        
-        # Compute pairwise distances between sampled vertex normals
-        normal_dists = torch.cdist(src_normals, src_normals)  # sample_size x sample_size
-        
-        # Set diagonal to inf to exclude self
-        normal_dists.fill_diagonal_(float('inf'))
-        
-        # Get top-k nearest neighbors for all sampled vertices
-        k = min(n_neighbors, normal_dists.shape[1]-1)
-        _, nn_normal_idx = torch.topk(normal_dists, k, dim=1, largest=False)
-        
-        # Gather neighbor normals
-        neighbor_normals = src_normals[nn_normal_idx]  # sample_size x k x 3
-        
-        # Compute dot products between each normal and its neighbors
-        src_normals_expanded = src_normals.unsqueeze(1)  # sample_size x 1 x 3
-        dot_products = torch.sum(neighbor_normals * src_normals_expanded, dim=2)  # sample_size x k
-        
-        # Clamp to avoid numerical issues
-        dot_products = torch.clamp(dot_products, -0.999, 0.999)
-        
-        # Convert to angles
-        angles = torch.acos(dot_products)  # sample_size x k
-        
-        # Compute variation (standard deviation) for each vertex
-        variation = torch.std(angles, dim=1)  # sample_size
-        
-        # Use variation as thinness score - higher variation means thinner region
-        thinness = variation
-        
-        # Normalize to [0, 1] range
-        if thinness.max() > thinness.min():
-            thinness = (thinness - thinness.min()) / (thinness.max() - thinness.min())
-        else:
-            thinness = torch.zeros_like(thinness)
-        
-        # Raise thinness scores to a power to increase contrast
-        weights = torch.pow(thinness, weight_power) + 1e-6
-        
-        # Normalize weights to sum to 1
-        weights = weights / (weights.sum() + 1e-8)
-        
-        # Compute weighted distance loss
-        weighted_dists = weights * min_dists
-        loss = weighted_dists.sum()
-        
-        # Check for NaN
-        if torch.isnan(loss):
-            print("Warning: NaN detected in thin_region_alignment_loss. Using zero instead.")
-            loss = torch.tensor(0.0, device=loss.device)
-        
-        total_loss += loss
-    
-    return total_loss / batch_size
