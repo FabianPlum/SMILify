@@ -20,7 +20,7 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
-from utils import try_mkdir, plot_mesh
+from utils import try_mkdir, plot_mesh, equal_3d_axes
 
 class PerformanceMonitor:
     def __init__(self):
@@ -821,6 +821,10 @@ def visualize_vertex_sdf(mesh: Meshes, vertex_sdf: torch.Tensor, output_path: st
     ax.set_ylabel('Y')
     ax.set_zlabel('Z')
     
+    # Equalize axes to preserve aspect ratio
+    X, Y, Z = verts_np[:, 0], verts_np[:, 1], verts_np[:, 2]
+    equal_3d_axes(ax, X, Y, Z, zoom=1.0)
+    
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
@@ -865,7 +869,7 @@ def process_obj_file(obj_path: str = None, output_dir: str = "sdf_output", num_s
         # Get vertices and faces from SMAL model
         verts = torch.FloatTensor(smal_data['v_template']).to(device)
         faces = torch.LongTensor(smal_data['f']).to(device)
-        basename = "SMAL_model"
+        basename = os.path.splitext(os.path.basename(SMAL_FILE))[0]
     else:
         # Load OBJ file
         verts, faces, _ = load_obj(obj_path)
@@ -931,7 +935,7 @@ def process_obj_file(obj_path: str = None, output_dir: str = "sdf_output", num_s
     os.makedirs(data_dir, exist_ok=True)
     
     # Save results
-    results_path = os.path.join(data_dir, f"{basename}_sdf_results.pkl")
+    results_path = os.path.join(data_dir, f"{basename}_sdf.pkl")
     with open(results_path, 'wb') as f:
         pkl.dump(results, f)
     print(f"\nResults saved to {results_path}")
