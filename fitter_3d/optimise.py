@@ -8,6 +8,7 @@ import numpy as np
 from math import ceil
 import gc
 import glob
+import pickle
 
 # suppress warning relating to deprecated pytorch functions
 # Suppress the specific warning from PyTorch
@@ -54,6 +55,12 @@ parser.add_argument('--nits', type=int, default=100)
 #optionally plot normals
 parser.add_argument('--plot_normals', type=bool, default=False)
 
+# SDF arguments
+parser.add_argument('--use_sdf', action='store_true',
+                    help="Use pre-computed SDF values for mesh registration")
+parser.add_argument('--sdf_dir', type=str, default='sdf_batch_output/data',
+                    help="Directory containing pre-computed SDF values")
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def clear_cuda_memory():
@@ -96,6 +103,65 @@ def combine_stage_results(results_dir, stage_names, n_batches):
 				batch_path = os.path.join(results_dir, f"{stage_name}_batch_{batch_idx}.npz")
 				if os.path.exists(batch_path):
 					os.remove(batch_path)
+
+def load_sdf_values(mesh_name: str, sdf_dir: str, device: str) -> torch.Tensor:
+	"""
+    Load pre-computed SDF values for a mesh.
+    
+    Args:
+        mesh_name (str): Name of the mesh (without extension)
+        sdf_dir (str): Directory containing SDF data files
+        device (str): Device to load tensors to
+        
+    Returns:
+        torch.Tensor: SDF values for the mesh vertices, or None if not found
+    """
+
+	sdf_path = os.path.join(sdf_dir, f"{mesh_name}_sdf_results.pkl")
+	if not os.path.exists(sdf_path):
+		# try without extension
+		mesh_name = mesh_name.split('.')[0]
+		sdf_path = os.path.join(sdf_dir, f"{mesh_name}_sdf_results.pkl")
+		if not os.path.exists(sdf_path):
+			return None
+		
+	try:
+		with open(sdf_path, 'rb') as f:
+			data = pickle.load(f)
+			if 'vertex_sdf' in data:
+				return data['vertex_sdf'].to(device)
+	except Exception as e:
+		print(f"Error loading SDF values for {mesh_name}: {str(e)}")
+
+	return None
+
+def check_and_load_sdf_values(mesh_names: list, sdf_dir: str, device: str) -> list:
+    """
+    Check and load SDF values for a list of meshes.
+    
+    Args:
+        mesh_names (list): List of mesh names (without extension)
+        sdf_dir (str): Directory containing SDF data files
+        device (str): Device to load tensors to
+        
+    Returns:
+        list: List of SDF value tensors (None for meshes without SDF)
+    """
+    sdf_values = []
+    missing_sdf = []
+    
+    for mesh_name in mesh_names:
+        sdf = load_sdf_values(mesh_name, sdf_dir, device)
+        sdf_values.append(sdf)
+        if sdf is None:
+            missing_sdf.append(mesh_name)
+    
+    if missing_sdf:
+        print(f"\nWarning: SDF values not found for {len(missing_sdf)} meshes:")
+        for name in missing_sdf:
+            print(f"  - {name}")
+    
+    return sdf_values
 
 def get_mesh_files(mesh_dir, frame_step=1):
 	"""Get list of mesh files from directory."""
@@ -140,12 +206,18 @@ def main(args):
 			start_idx = batch_idx * batch_size
 			end_idx = min((batch_idx + 1) * batch_size, n_total)
 			
-			# Get batch file names and load meshes for this batch only
+			# Get batch file names
 			batch_files = mesh_files[start_idx:end_idx]
 			batch_mesh_names = [os.path.basename(f) for f in batch_files]
 			
 			# Load meshes for just this batch
 			_, batch_target_meshes = load_meshes(mesh_files=batch_files, device=device)
+			
+			# Load SDF values if enabled
+			batch_sdf_values = None
+			if args.use_sdf:
+				print("\nChecking for pre-computed SDF values...")
+				batch_sdf_values = check_and_load_sdf_values(batch_mesh_names, args.sdf_dir, device)
 			
 			n_batch = len(batch_target_meshes)
 			os.makedirs(args.results_dir, exist_ok=True)
@@ -158,6 +230,10 @@ def main(args):
 								out_dir=args.results_dir, device=device,
 								mesh_names=batch_mesh_names,
 								plot_normals=args.plot_normals)
+			
+			# Add SDF values to stage kwargs if available
+			if args.use_sdf and batch_sdf_values is not None:
+				stage_kwargs['sdf_values'] = batch_sdf_values
 
 			# if provided, load stages from YAML
 			if yaml_loaded:

@@ -223,7 +223,7 @@ class Stage:
                  name="optimise",
                  loss_weights=None, lr=1e-3, out_dir="static_fits_output",
                  custom_lrs=None, device='cuda', plot_normals=False,
-                 thin_region_weight_power=2.0, sample_size=1000):
+                 sample_size=1000, sdf_values=None):
         """
         nits = integer, number of iterations in stage
         parameters = list of items over which to be optimised
@@ -244,12 +244,12 @@ class Stage:
         if loss_weights is not None:
             for k, v in loss_weights.items():
                 self.loss_weights[k] = v
-
-        # Parameters for thin region alignment
-        self.thin_region_weight_power = thin_region_weight_power
         
         # Parameter for vertex sampling
         self.sample_size = sample_size
+
+        # Store SDF values if provided
+        self.sdf_values = sdf_values
 
         self.losses_to_plot = []  # Store losses for review later
 
