@@ -1,6 +1,7 @@
 import os
 import torch
 from multiprocessing import Pool, cpu_count, set_start_method
+from typing import Union
 
 import numpy as np
 import matplotlib
@@ -834,3 +835,93 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Surf
     plt.tight_layout()
     plt.savefig(output_path, dpi=dpi)
     plt.close(fig)
+
+
+def SDF_distance(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    x_sdf: torch.Tensor,
+    y_sdf: torch.Tensor,
+    k: int,
+    batch_reduction: Union[str, None] = "mean",
+    point_reduction: Union[str, None] = "mean",
+    norm: int = 2,
+    single_directional: bool = False,
+):
+    """
+    Spatial Diameter Function (SDF) distance between two pointclouds x and y.
+
+    Args:
+        x: FloatTensor of shape (N, P1, 3) representing a batch of point clouds
+           from the source mesh vertices with at most P1 points in each batch element,
+           batch size N and 3 feature dimensions.
+        y: FloatTensor of shape (N, P2, 3) representing a batch of point clouds
+           from the target mesh vertices with at most P2 points in each batch element,
+           batch size N and 3 feature dimensions.
+        x_sdf: FloatTensor of shape (N, P1) containing the normalized spatial diameter
+               values for each vertex in x.
+        y_sdf: FloatTensor of shape (N, P2) containing the normalized spatial diameter
+               values for each vertex in y.
+        k: Number of nearest neighbors to consider when sampling the local SDF field.
+        batch_reduction: Reduction operation to apply for the loss across the
+            batch, can be one of ["mean", "sum"] or None.
+        point_reduction: Reduction operation to apply for the loss across the
+            points, can be one of ["mean", "sum"] or None.
+        norm: int indicates the norm used for the distance. Supports 1 for L1 and 2 for L2 (euclidean).
+        single_directional: If False (default), loss comes from both directions.
+            If True, loss is only computed from x to y.
+
+    Returns:
+        Tensor giving the reduced SDF distance between the pointclouds in x and y.
+        If point_reduction is None, returns a 2-element tuple of Tensors containing
+        forward and backward loss terms shaped (N, P1) and (N, P2) (if single_directional
+        is False) or a Tensor containing loss terms shaped (N, P1) (if single_directional
+        is True).
+    """
+    # Validate inputs
+    if not ((norm == 1) or (norm == 2)):
+        raise ValueError("Support for 1 or 2 norm.")
+    
+    if x.ndim != 3 or y.ndim != 3:
+        raise ValueError("Expected x and y to be of shape (N, P, 3)")
+    
+    if x_sdf.ndim != 2 or y_sdf.ndim != 2:
+        raise ValueError("Expected x_sdf and y_sdf to be of shape (N, P)")
+    
+    if x.shape[0] != y.shape[0]:
+        raise ValueError("Batch sizes must be equal")
+    
+    if x.shape[0] != x_sdf.shape[0] or y.shape[0] != y_sdf.shape[0]:
+        raise ValueError("Batch sizes must match between points and SDF values")
+    
+    if x.shape[1] != x_sdf.shape[1] or y.shape[1] != y_sdf.shape[1]:
+        raise ValueError("Number of points must match number of SDF values")
+    
+    if k < 1:
+        raise ValueError("k must be at least 1")
+    
+    # Validate reduction inputs
+    _validate_chamfer_reduction_inputs(batch_reduction, point_reduction)
+    
+    # Get batch size and number of points
+    N, P1, D = x.shape
+    P2 = y.shape[1]
+    
+    # Create lengths tensors (assuming all points are valid)
+    x_lengths = torch.full((N,), P1, dtype=torch.int64, device=x.device)
+    y_lengths = torch.full((N,), P2, dtype=torch.int64, device=y.device)
+    
+    # Find k nearest neighbors
+    x_nn = knn_points(x, y, lengths1=x_lengths, lengths2=y_lengths, norm=norm, K=k)
+    
+    # The function will be completed with the actual SDF distance computation
+    # once you provide the specific loss computation details
+    
+    # For now, return dummy values matching the expected structure
+    if single_directional:
+        return torch.zeros((N, P1), device=x.device)
+    else:
+        return (
+            torch.zeros((N, P1), device=x.device),
+            torch.zeros((N, P2), device=y.device)
+        )
