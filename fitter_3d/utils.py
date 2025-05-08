@@ -2,6 +2,7 @@ import os
 import torch
 from multiprocessing import Pool, cpu_count, set_start_method
 from typing import Union
+from pytorch3d.ops.knn import knn_points
 
 import numpy as np
 import matplotlib
@@ -899,9 +900,6 @@ def SDF_distance(
     
     if k < 1:
         raise ValueError("k must be at least 1")
-    
-    # Validate reduction inputs
-    _validate_chamfer_reduction_inputs(batch_reduction, point_reduction)
     
     # Get batch size and number of points
     N, P1, D = x.shape
