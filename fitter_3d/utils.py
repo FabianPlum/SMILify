@@ -843,6 +843,78 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Surf
     plt.close(fig)
 
 
+def _SDF_distance_single_direction(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    x_sdf: torch.Tensor,
+    y_sdf: torch.Tensor,
+    x_lengths: torch.Tensor,
+    y_lengths: torch.Tensor,
+    k: int,
+    batch_reduction: Union[str, None],
+    point_reduction: Union[str, None],
+    norm: int,
+):
+    """
+    Compute the SDF distance in a single direction (x to y).
+
+    Args:
+        x: FloatTensor of shape (N, P1, 3)
+        y: FloatTensor of shape (N, P2, 3)
+        x_sdf: FloatTensor of shape (N, P1)
+        y_sdf: FloatTensor of shape (N, P2)
+        x_lengths: LongTensor of shape (N,) giving the number of points in each cloud in x
+        y_lengths: LongTensor of shape (N,) giving the number of points in each cloud in y
+        k: Number of nearest neighbors to consider
+        batch_reduction: Reduction operation to apply for the loss across the batch
+        point_reduction: Reduction operation to apply for the loss across the points
+        norm: int indicates the norm used for the distance
+
+    Returns:
+        Tensor giving the reduced SDF distance between the pointclouds in x and y
+    """
+    N, P1, D = x.shape
+    
+    # Find k nearest neighbors
+    x_nn = knn_points(x, y, lengths1=x_lengths, lengths2=y_lengths, norm=norm, K=k)
+    
+    # Get the indices of k nearest neighbors for each point in x
+    nn_idx = x_nn.idx  # Shape: (N, P1, k)
+    
+    # Get the distances to k nearest neighbors
+    nn_dists = x_nn.dists  # Shape: (N, P1, k)
+    
+    # Expand x_sdf for broadcasting
+    x_sdf_expanded = x_sdf.unsqueeze(-1)  # Shape: (N, P1, 1)
+    
+    # Gather y_sdf values for the k nearest neighbors
+    y_sdf_nn = torch.gather(y_sdf, 1, nn_idx.reshape(N, -1)).reshape(N, P1, k)  # Shape: (N, P1, k)
+    
+    # Compute absolute differences between SDF values
+    sdf_diffs = torch.abs(x_sdf_expanded - y_sdf_nn)  # Shape: (N, P1, k)
+    
+    # Find the index of the neighbor with minimum SDF difference
+    min_sdf_diff_idx = torch.argmin(sdf_diffs, dim=-1)  # Shape: (N, P1)
+    
+    # Get the corresponding distances
+    sdf_dist = torch.gather(nn_dists, 2, min_sdf_diff_idx.unsqueeze(-1)).squeeze(-1)  # Shape: (N, P1)
+    
+    # Apply point reduction if specified
+    if point_reduction is not None:
+        sdf_dist = sdf_dist.sum(1)  # (N,)
+        if point_reduction == "mean":
+            x_lengths_clamped = x_lengths.clamp(min=1)
+            sdf_dist /= x_lengths_clamped
+            
+        if batch_reduction is not None:
+            # batch_reduction == "sum"
+            sdf_dist = sdf_dist.sum()
+            if batch_reduction == "mean":
+                sdf_dist /= max(N, 1)
+    
+    return sdf_dist
+
+
 def SDF_distance(
     x: torch.Tensor,
     y: torch.Tensor,
@@ -914,20 +986,25 @@ def SDF_distance(
     x_lengths = torch.full((N,), P1, dtype=torch.int64, device=x.device)
     y_lengths = torch.full((N,), P2, dtype=torch.int64, device=y.device)
     
-    # Find k nearest neighbors
-    x_nn = knn_points(x, y, lengths1=x_lengths, lengths2=y_lengths, norm=norm, K=k)
+    # Compute forward direction
+    sdf_dist = _SDF_distance_single_direction(
+        x, y, x_sdf, y_sdf, x_lengths, y_lengths, k,
+        batch_reduction, point_reduction, norm
+    )
     
-    # The function will be completed with the actual SDF distance computation
-    # once you provide the specific loss computation details
-    
-    # For now, return dummy values matching the expected structure
     if single_directional:
-        return torch.zeros((N, P1), device=x.device)
-    else:
-        return (
-            torch.zeros((N, P1), device=x.device),
-            torch.zeros((N, P2), device=y.device)
-        )
+        return sdf_dist
+    
+    # Compute reverse direction
+    sdf_dist_rev = _SDF_distance_single_direction(
+        y, x, y_sdf, x_sdf, y_lengths, x_lengths, k,
+        batch_reduction, point_reduction, norm
+    )
+    
+    if point_reduction is not None:
+        return sdf_dist + sdf_dist_rev
+    
+    return sdf_dist, sdf_dist_rev
 
 
 def sample_points_from_meshes_and_SDF(
