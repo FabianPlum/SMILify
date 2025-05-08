@@ -223,7 +223,7 @@ class Stage:
                  name="optimise",
                  loss_weights=None, lr=1e-3, out_dir="static_fits_output",
                  custom_lrs=None, device='cuda', plot_normals=False,
-                 sample_size=1000, sdf_values=None):
+                 sample_size=1000, sdf_values=None, source_sdf_values=None):
         """
         nits = integer, number of iterations in stage
         parameters = list of items over which to be optimised
@@ -250,6 +250,7 @@ class Stage:
 
         # Store SDF values if provided
         self.sdf_values = sdf_values
+        self.source_sdf_values = source_sdf_values
 
         self.losses_to_plot = []  # Store losses for review later
 

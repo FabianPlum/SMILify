@@ -117,11 +117,11 @@ def load_sdf_values(mesh_name: str, sdf_dir: str, device: str) -> torch.Tensor:
         torch.Tensor: SDF values for the mesh vertices, or None if not found
     """
 
-	sdf_path = os.path.join(sdf_dir, f"{mesh_name}_sdf_results.pkl")
+	sdf_path = os.path.join(sdf_dir, f"{mesh_name}_sdf.pkl")
 	if not os.path.exists(sdf_path):
 		# try without extension
 		mesh_name = mesh_name.split('.')[0]
-		sdf_path = os.path.join(sdf_dir, f"{mesh_name}_sdf_results.pkl")
+		sdf_path = os.path.join(sdf_dir, f"{mesh_name}_sdf.pkl")
 		if not os.path.exists(sdf_path):
 			return None
 		
@@ -189,6 +189,35 @@ def main(args):
 		for arg, val in yaml_cfg['args'].items():
 			setattr(args, arg, val)
 
+	# Check for source model SDF if use_sdf is enabled
+	source_sdf_values = None
+	if args.use_sdf:
+		# Get source model name from config
+		source_model_name = os.path.splitext(os.path.basename(config.SMAL_FILE))[0]
+		source_sdf_path = os.path.join("sdf_output/data", f"{source_model_name}_sdf.pkl")
+		
+		if not os.path.exists(source_sdf_path):
+			raise FileNotFoundError(
+				f"SDF file for source model not found at {source_sdf_path}. "
+				"Please compute SDF values for the source model first using SDF_tests.py."
+			)
+			exit()
+			
+		print(f"\nFound source model SDF file: {source_sdf_path}")
+		
+		# Load source model SDF values
+		try:
+			with open(source_sdf_path, 'rb') as f:
+				data = pickle.load(f)
+				if 'vertex_sdf' in data:
+					source_sdf_values = data['vertex_sdf'].to(device)
+					print("Successfully loaded source model SDF values")
+				else:
+					raise KeyError("vertex_sdf not found in SDF data file")
+		except Exception as e:
+			raise RuntimeError(f"Error loading source model SDF values: {str(e)}")
+			exit()
+
 	# Get list of mesh files
 	mesh_files = get_mesh_files(args.mesh_dir, args.frame_step)
 	n_total = len(mesh_files)
@@ -232,8 +261,11 @@ def main(args):
 								plot_normals=args.plot_normals)
 			
 			# Add SDF values to stage kwargs if available
-			if args.use_sdf and batch_sdf_values is not None:
-				stage_kwargs['sdf_values'] = batch_sdf_values
+			if args.use_sdf:
+				if batch_sdf_values is not None:
+					stage_kwargs['sdf_values'] = batch_sdf_values
+				if source_sdf_values is not None:
+					stage_kwargs['source_sdf_values'] = source_sdf_values
 
 			# if provided, load stages from YAML
 			if yaml_loaded:
