@@ -946,7 +946,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compute and visualize Spatial Diameter Function for a 3D mesh")
     parser.add_argument("--obj_path", type=str, default=None,
                        help="Path to the input OBJ file. If not provided, uses SMAL_FILE from config.py")
-    parser.add_argument("--output_dir", type=str, default="sdf_output",
+    parser.add_argument("--output_dir", type=str, default="sdf_batch_output",
                        help="Directory to save the visualization")
     parser.add_argument("--num_samples", type=int, default=1000,
                        help="Number of points to sample on the mesh. If -1, samples all faces.")
