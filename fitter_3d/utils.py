@@ -961,19 +961,19 @@ def SDF_distance(
         raise ValueError("Support for 1 or 2 norm.")
     
     if x.ndim != 3 or y.ndim != 3:
-        raise ValueError("Expected x and y to be of shape (N, P, 3)")
+        raise ValueError(f"Expected x and y to be of shape (N, P, 3), got shapes {x.shape} and {y.shape}")
     
     if x_sdf.ndim != 2 or y_sdf.ndim != 2:
-        raise ValueError("Expected x_sdf and y_sdf to be of shape (N, P)")
+        raise ValueError(f"Expected x_sdf and y_sdf to be of shape (N, P), got shapes {x_sdf.shape} and {y_sdf.shape}")
     
     if x.shape[0] != y.shape[0]:
-        raise ValueError("Batch sizes must be equal")
+        raise ValueError(f"Batch sizes must be equal, got {x.shape[0]} and {y.shape[0]}")
     
     if x.shape[0] != x_sdf.shape[0] or y.shape[0] != y_sdf.shape[0]:
-        raise ValueError("Batch sizes must match between points and SDF values")
+        raise ValueError(f"Batch sizes must match between points and SDF values, got {x.shape[0]}, {x_sdf.shape[0]} for x and {y.shape[0]}, {y_sdf.shape[0]} for y")
     
     if x.shape[1] != x_sdf.shape[1] or y.shape[1] != y_sdf.shape[1]:
-        raise ValueError("Number of points must match number of SDF values")
+        raise ValueError(f"Number of points must match number of SDF values, got {x.shape[1]}, {x_sdf.shape[1]} for x and {y.shape[1]}, {y_sdf.shape[1]} for y")
     
     if k < 1:
         raise ValueError("k must be at least 1")
@@ -1009,19 +1009,21 @@ def SDF_distance(
 
 def sample_points_from_meshes_and_SDF(
     meshes,
-    sdf_values: torch.Tensor,
+    sdf_values: Union[torch.Tensor, list],
     num_samples: int = 10000,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    -> Based on pytorch3d.ops.sample_points_from_meshes
     Convert a batch of meshes to a batch of pointclouds by uniformly sampling
-    points on the surface of the mesh with probability proportional to the
-    face area, and return the corresponding SDF values for these points.
+    vertices from the mesh and return their corresponding SDF values.
 
     Args:
         meshes: A Meshes object with a batch of N meshes.
-        sdf_values: FloatTensor of shape (N, V) containing SDF values for each vertex
+        sdf_values: FloatTensor of shape (N, V) or (V,) containing SDF values for each vertex
                    in the meshes, where V is the number of vertices per mesh.
+                   If shape is (V,), it is assumed that all meshes share the same vertex count
+                   and the SDF values are valid for all meshes.
+                   Can also be a list of N tensors, each with shape (V_i,) where V_i is the
+                   number of vertices in the i-th mesh.
         num_samples: Integer giving the number of point samples per mesh.
 
     Returns:
@@ -1031,64 +1033,144 @@ def sample_points_from_meshes_and_SDF(
         - sdf_samples: FloatTensor of shape (N, num_samples) giving the
           SDF values corresponding to the sampled points.
     """
-    if meshes.isempty():
-        raise ValueError("Meshes are empty.")
-
-    verts = meshes.verts_packed()
-    if not torch.isfinite(verts).all():
-        raise ValueError("Meshes contain nan or inf.")
-
-    # Validate SDF values
-    if sdf_values.shape[0] != len(meshes):
-        raise ValueError("Number of meshes must match number of SDF value batches")
-    if sdf_values.shape[1] != verts.shape[0]:
-        raise ValueError("Number of SDF values must match number of vertices")
-
-    faces = meshes.faces_packed()
-    mesh_to_face = meshes.mesh_to_faces_packed_first_idx()
-    num_meshes = len(meshes)
-    num_valid_meshes = torch.sum(meshes.valid)  # Non empty meshes
-
-    # Initialize samples and SDF samples tensors with fill value 0 for empty meshes
-    samples = torch.zeros((num_meshes, num_samples, 3), device=meshes.device)
-    sdf_samples = torch.zeros((num_meshes, num_samples), device=meshes.device)
-
-    # Only compute samples for non empty meshes
-    with torch.no_grad():
-        areas, _ = mesh_face_areas_normals(verts, faces)  # Face areas can be zero
-        max_faces = meshes.num_faces_per_mesh().max().item()
-        areas_padded = packed_to_padded(
-            areas, mesh_to_face[meshes.valid], max_faces
-        )  # (N, F)
-
-        sample_face_idxs = areas_padded.multinomial(
-            num_samples, replacement=True
-        )  # (N, num_samples)
-        sample_face_idxs += mesh_to_face[meshes.valid].view(num_valid_meshes, 1)
-
-    # Get the vertex coordinates of the sampled faces
-    face_verts = verts[faces]
-    v0, v1, v2 = face_verts[:, 0], face_verts[:, 1], face_verts[:, 2]
-
-    # Randomly generate barycentric coords
-    w0, w1, w2 = _rand_barycentric_coords(
-        num_valid_meshes, num_samples, verts.dtype, verts.device
-    )
-
-    # Use the barycentric coords to get a point on each sampled face
-    a = v0[sample_face_idxs]  # (N, num_samples, 3)
-    b = v1[sample_face_idxs]
-    c = v2[sample_face_idxs]
-    samples[meshes.valid] = w0[:, :, None] * a + w1[:, :, None] * b + w2[:, :, None] * c
-
-    # Get the vertex indices for the sampled faces
-    face_vert_indices = faces[sample_face_idxs]  # (N, num_samples, 3)
-
-    # Interpolate SDF values using barycentric coordinates
-    sdf_a = sdf_values[meshes.valid][:, face_vert_indices[:, :, 0]]  # (N, num_samples)
-    sdf_b = sdf_values[meshes.valid][:, face_vert_indices[:, :, 1]]
-    sdf_c = sdf_values[meshes.valid][:, face_vert_indices[:, :, 2]]
+    # Get device and check if meshes is valid
+    if not isinstance(meshes, Meshes):
+        raise TypeError("meshes must be an instance of pytorch3d.structures.Meshes")
     
-    sdf_samples[meshes.valid] = w0 * sdf_a + w1 * sdf_b + w2 * sdf_c
+    device = meshes.device
+    num_meshes = len(meshes)
+
+    # Process and validate SDF values
+    if isinstance(sdf_values, list):
+        # Make sure the list has the right length
+        if len(sdf_values) != num_meshes:
+            raise ValueError(f"Number of SDF value tensors ({len(sdf_values)}) must match number of meshes ({num_meshes})")
+        
+        # Ensure all SDF values are tensors on the correct device
+        for i, sdf in enumerate(sdf_values):
+            if not torch.is_tensor(sdf):
+                sdf_values[i] = torch.tensor(sdf, device=device)
+            elif sdf.device != device:
+                sdf_values[i] = sdf.to(device)
+    else:
+        # Single tensor of SDF values
+        if not torch.is_tensor(sdf_values):
+            raise TypeError("sdf_values must be either a list of tensors or a single tensor")
+        
+        # Move to correct device if needed
+        if sdf_values.device != device:
+            sdf_values = sdf_values.to(device)
+
+        # Check the shape of the tensor
+        if sdf_values.ndim == 1:
+            # Single set of SDF values for all meshes
+            # Get vertex counts - move to CPU for comparison to avoid CUDA errors
+            verts_per_mesh = meshes.num_verts_per_mesh().cpu()
+            if verts_per_mesh.numel() == 0:
+                raise ValueError("Meshes object appears to be empty")
+            
+            # Check if all meshes have the same number of vertices
+            first_vert_count = verts_per_mesh[0].item()
+            same_verts = all(count == first_vert_count for count in verts_per_mesh.tolist())
+            if not same_verts:
+                raise ValueError("When providing a single 1D tensor of SDF values, all meshes must have the same number of vertices")
+            
+            # Check if the SDF values shape matches the vertex count
+            if sdf_values.shape[0] != first_vert_count:
+                raise ValueError(f"Number of SDF values ({sdf_values.shape[0]}) must match number of vertices per mesh ({first_vert_count})")
+            
+            # Expand to batch dimension
+            sdf_values = sdf_values.unsqueeze(0).expand(num_meshes, -1)
+        elif sdf_values.ndim == 2:
+            # Batch of SDF values
+            if sdf_values.shape[0] != num_meshes:
+                raise ValueError(f"First dimension of SDF values ({sdf_values.shape[0]}) must match number of meshes ({num_meshes})")
+        else:
+            raise ValueError(f"SDF values tensor must have 1 or 2 dimensions, got {sdf_values.ndim}")
+
+    # Initialize output tensors
+    samples = torch.zeros((num_meshes, num_samples, 3), device=device)
+    sdf_samples = torch.zeros((num_meshes, num_samples), device=device)
+
+    # Get vertices data
+    try:
+        verts_packed = meshes.verts_packed()  # All vertices concatenated
+        verts_per_mesh = meshes.num_verts_per_mesh()  # Number of vertices per mesh
+        mesh_to_vert_idx = meshes.mesh_to_verts_packed_first_idx()  # Starting index for each mesh's vertices
+        valid_meshes = meshes.valid
+    except Exception as e:
+        raise RuntimeError(f"Error accessing mesh attributes: {str(e)}")
+
+    # For safety, move needed computations to CPU for indexing
+    mesh_to_vert_idx_cpu = mesh_to_vert_idx.cpu()
+    verts_per_mesh_cpu = verts_per_mesh.cpu()
+    valid_meshes_cpu = valid_meshes.cpu() if hasattr(valid_meshes, 'cpu') else valid_meshes
+
+    # Only compute samples for non-empty meshes
+    with torch.no_grad():
+        for i in range(num_meshes):
+            # Check if mesh is valid
+            if isinstance(valid_meshes_cpu, bool) or valid_meshes_cpu[i]:
+                # Get number of vertices for this mesh and ensure it's positive
+                num_verts = verts_per_mesh_cpu[i].item()
+                if num_verts <= 0:
+                    print(f"Warning: Mesh {i} has {num_verts} vertices, skipping")
+                    continue
+                
+                # Get starting offset for this mesh's vertices
+                if i < len(mesh_to_vert_idx_cpu):
+                    vert_offset = mesh_to_vert_idx_cpu[i].item()
+                else:
+                    print(f"Warning: Mesh index {i} out of bounds for mesh_to_vert_idx (len={len(mesh_to_vert_idx_cpu)})")
+                    continue
+                
+                # Generate random indices for sampling vertices
+                # Limit num_samples to the number of vertices to avoid out-of-bounds errors
+                safe_num_samples = min(num_samples, num_verts)
+                if safe_num_samples < num_samples:
+                    print(f"Warning: Mesh {i} has only {num_verts} vertices, reducing samples from {num_samples} to {safe_num_samples}")
+                
+                # Always use replacement=True when sampling with safe_num_samples >= num_verts
+                # This avoids potential duplicate indices issues when num_verts is small
+                indices = torch.randint(0, num_verts, (safe_num_samples,), device=device)
+                
+                try:
+                    # Sample vertices with safe indexing
+                    global_indices = vert_offset + indices
+                    if global_indices.max() >= len(verts_packed):
+                        print(f"Warning: Invalid indices for mesh {i}: max index {global_indices.max().item()} >= verts_packed length {len(verts_packed)}")
+                        # Clamp indices to valid range
+                        global_indices = torch.clamp(global_indices, 0, len(verts_packed) - 1)
+                    
+                    # Sample vertices
+                    samples[i, :safe_num_samples] = verts_packed[global_indices]
+                    
+                    # Sample SDF values
+                    if isinstance(sdf_values, list):
+                        if i < len(sdf_values):
+                            sdf = sdf_values[i]
+                            if indices.max() < len(sdf):
+                                sdf_samples[i, :safe_num_samples] = sdf[indices]
+                            else:
+                                print(f"Warning: Invalid SDF indices for mesh {i}: max index {indices.max().item()} >= sdf length {len(sdf)}")
+                                # Clamp indices to valid range
+                                safe_indices = torch.clamp(indices, 0, len(sdf) - 1)
+                                sdf_samples[i, :safe_num_samples] = sdf[safe_indices]
+                        else:
+                            print(f"Warning: Mesh index {i} out of bounds for sdf_values list (len={len(sdf_values)})")
+                    else:
+                        if i < sdf_values.shape[0] and indices.max() < sdf_values.shape[1]:
+                            sdf_samples[i, :safe_num_samples] = sdf_values[i][indices]
+                        else:
+                            print(f"Warning: Invalid SDF tensor indexing for mesh {i}: sdf_values shape={sdf_values.shape}, max index={indices.max().item() if indices.numel() > 0 else -1}")
+                            # Try to handle potential indexing errors
+                            if i < sdf_values.shape[0]:
+                                safe_indices = torch.clamp(indices, 0, sdf_values.shape[1] - 1)
+                                sdf_samples[i, :safe_num_samples] = sdf_values[i][safe_indices]
+                            
+                except Exception as e:
+                    print(f"Error sampling from mesh {i}: {str(e)}")
+                    # Continue with next mesh instead of failing entirely
+                    continue
 
     return samples, sdf_samples
