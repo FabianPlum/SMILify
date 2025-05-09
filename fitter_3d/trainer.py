@@ -12,7 +12,7 @@ from pytorch3d.structures import Meshes
 from tqdm import tqdm
 import torch
 import matplotlib.pyplot as plt
-from fitter_3d.utils import plot_pointclouds, plot_meshes
+from fitter_3d.utils import plot_pointclouds, plot_meshes, SDF_distance, sample_points_from_meshes_and_SDF
 import numpy as np
 import os
 import config
@@ -26,7 +26,8 @@ nn = torch.nn
 default_weights = dict(w_chamfer=1.0, 
                        w_edge=1.0, 
                        w_normal=0.01, 
-                       w_laplacian=0.1)
+                       w_laplacian=0.1,
+                       w_sdf=0.5)  # Added SDF distance weight
 # Want to vary learning ratios between parameters,
 default_lr_ratios = []
 
@@ -292,6 +293,26 @@ class Stage:
         if self.consider_loss("laplacian"):
             loss_laplacian = mesh_laplacian_smoothing(src_mesh, method="uniform")  # mesh laplacian smoothing
             loss += self.loss_weights["w_laplacian"] * loss_laplacian
+
+        # Add SDF distance loss if SDF values are provided
+        if self.consider_loss("sdf") and self.sdf_values is not None and self.source_sdf_values is not None:
+            # Sample points from source mesh for SDF calculation
+            src_verts, src_sdf = sample_points_from_meshes_and_SDF(src_mesh, self.source_sdf_values, 3000)
+            target_verts, target_sdf = sample_points_from_meshes_and_SDF(self.target_meshes, self.sdf_values, 3000)
+            
+            # Calculate SDF distance
+            loss_sdf = SDF_distance(
+                src_verts,  # source points
+                target_verts,  # target points
+                src_sdf,  # source SDF values
+                target_sdf,  # target SDF values
+                k=10,  # number of nearest neighbors
+                batch_reduction="mean",
+                point_reduction="mean",
+                norm=2,
+                single_directional=False
+            )
+            loss += self.loss_weights["w_sdf"] * loss_sdf
 
         return loss
 
