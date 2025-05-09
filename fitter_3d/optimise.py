@@ -120,7 +120,7 @@ def load_sdf_values(mesh_name: str, sdf_dir: str, device: str) -> torch.Tensor:
 	sdf_path = os.path.join(sdf_dir, f"{mesh_name}_sdf.pkl")
 	if not os.path.exists(sdf_path):
 		# try without extension
-		mesh_name = mesh_name.split('.')[0]
+		mesh_name = mesh_name[:-4]
 		sdf_path = os.path.join(sdf_dir, f"{mesh_name}_sdf.pkl")
 		if not os.path.exists(sdf_path):
 			return None
@@ -194,7 +194,7 @@ def main(args):
 	if args.use_sdf:
 		# Get source model name from config
 		source_model_name = os.path.splitext(os.path.basename(config.SMAL_FILE))[0]
-		source_sdf_path = os.path.join("sdf_output/data", f"{source_model_name}_sdf.pkl")
+		source_sdf_path = os.path.join(args.sdf_dir, f"{source_model_name}_sdf.pkl")
 		
 		if not os.path.exists(source_sdf_path):
 			raise FileNotFoundError(
