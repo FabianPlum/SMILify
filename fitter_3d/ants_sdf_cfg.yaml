@@ -8,7 +8,27 @@ stages:
     nits: 100 # number of iterations for this stage
     lr: 0.05 # Adam optimiser learning rate
 
-  Stage_1_default: # chosen name of stage
+    loss_weights: # optional, any not provided will revert to default
+            w_chamfer: 0.5
+            w_sdf: 2.
+
+  Stage_1A_default: # chosen name of stage
+    scheme: 'default' # one of 'init', 'default', 'shape', 'pose', 'deform'. See README for explanation
+    nits: 500 # number of iterations for this stage
+    lr: 0.01 # Adam optimiser learning rate
+
+    loss_weights: # optional, any not provided will revert to default
+          w_chamfer: 1.0
+          w_edge: 0.8
+          w_normal: 0.02
+          w_laplacian: 0.01
+          w_sdf: 5.0
+
+    custom_lrs: # optional, used to provide different learning rates to certain parameters
+      joint_rot: 0.002
+      log_beta_scales: 0.005
+
+  Stage_1B_default: # chosen name of stage
       scheme: 'default' # one of 'init', 'default', 'shape', 'pose', 'deform'. See README for explanation
       nits: 500 # number of iterations for this stage
       lr: 0.01 # Adam optimiser learning rate
@@ -18,11 +38,10 @@ stages:
           w_edge: 0.8
           w_normal: 0.02
           w_laplacian: 0.01
-          w_sdf: 2.
+          w_sdf: 0.5
 
       custom_lrs: # optional, used to provide different learning rates to certain parameters
         joint_rot: 0.002
-        log_beta_scales: 0.005
 
   Stage_2_deform_coarse:
     scheme: 'deform'
@@ -48,5 +67,6 @@ stages:
 
 # Custom arguments. These will *overwrite* any command line arguments passed into the script
 args:
-  results_dir: fit3d_results
+  results_dir: fit3d_sdf_results
   shape_family_id: -1
+  use_sdf: True
