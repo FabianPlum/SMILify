@@ -889,17 +889,17 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train SMIL PointNet model')
     parser.add_argument('--batch-size', type=int, default=32, 
                        help='Batch size for training (default: 32)')
-    parser.add_argument('--epochs', type=int, default=500,
+    parser.add_argument('--epochs', type=int, default=10,
                        help='Number of epochs to train (default: 50)')
     parser.add_argument('--num-workers', type=int, default=0,
                        help='Number of worker processes for DataLoader (default: 4, 0 for no multiprocessing)')
-    parser.add_argument('--seed', type=int, default=0,
+    parser.add_argument('--seed', type=int, default=13,
                        help='Random seed (default: 0)')
-    parser.add_argument('--train-samples', type=int, default=100,
+    parser.add_argument('--train-samples', type=int, default=10000,
                        help='Number of training samples (default: 1000)')
-    parser.add_argument('--val-samples', type=int, default=100,
+    parser.add_argument('--val-samples', type=int, default=1000,
                        help='Number of validation samples (default: 100)')
-    parser.add_argument('--test-samples', type=int, default=100,
+    parser.add_argument('--test-samples', type=int, default=1000,
                        help='Number of test samples (default: 100)')
     parser.add_argument('--num-points', type=int, default=3000,
                        help='Number of points in each point cloud (default: 3000)')
