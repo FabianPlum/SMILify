@@ -77,7 +77,6 @@ def generate_random_parameters(smal_fitter, seed=None):
     
     # Optional: Generate random translation
     random_trans = 0.2 * torch.randn(batch_size, 3, device=device)
-    print(f"Random translation: {random_trans}")
     smal_fitter.trans.data = random_trans
     
     # Optional: Generate random log_beta_scales for joint scaling
@@ -86,7 +85,6 @@ def generate_random_parameters(smal_fitter, seed=None):
         random_scales = 0.2 * torch.randn(batch_size, smal_fitter.n_joints, 3, device=device)
         smal_fitter.log_beta_scales.data = random_scales
     
-    print("Random parameters generated successfully")
     return smal_fitter
 
 
