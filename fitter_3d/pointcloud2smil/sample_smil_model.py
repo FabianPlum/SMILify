@@ -61,7 +61,7 @@ def generate_random_parameters(smal_fitter, seed=None):
     
     # Generate random shape parameters (betas)
     # Sample from a normal distribution around the mean betas with a variance of 1
-    random_betas = smal_fitter.mean_betas.unsqueeze(0) + 1 * torch.randn(batch_size, smal_fitter.n_betas, device=device)
+    random_betas = smal_fitter.mean_betas.unsqueeze(0) + 1.0 * torch.randn(batch_size, smal_fitter.n_betas, device=device)
     smal_fitter.betas.data = random_betas
     
     # Generate random joint rotations (in axis-angle representation)
@@ -72,23 +72,54 @@ def generate_random_parameters(smal_fitter, seed=None):
     
     # Generate random global rotation (in axis-angle representation)
     # This controls the overall orientation of the model
-    random_global_rot = 0.2 * torch.randn(batch_size, 3, device=device)
+    random_global_rot = 0.1 * torch.randn(batch_size, 3, device=device)
     smal_fitter.global_rot.data = random_global_rot
     
     # Optional: Generate random translation
-    random_trans = 0.2 * torch.randn(batch_size, 3, device=device)
+    random_trans = 0.1 * torch.randn(batch_size, 3, device=device)
     smal_fitter.trans.data = random_trans
     
     # Optional: Generate random log_beta_scales for joint scaling
     if config.ALLOW_LIMB_SCALING:
-        # Smaller variance for scaling to avoid extreme deformations
-        random_scales = 0.2 * torch.randn(batch_size, smal_fitter.n_joints, 3, device=device)
+        # Generate random scales for all joints except root (index 0)
+        random_scales = torch.zeros(batch_size, smal_fitter.n_joints, 3, device=device)
+        random_scales[:, 1:] = 0.2 * torch.randn(batch_size, smal_fitter.n_joints - 1, 3, device=device)
         smal_fitter.log_beta_scales.data = random_scales
-    
+
     return smal_fitter
 
 
-def sample_and_plot_model(smal_fitter, output_dir="sample_output", num_points=5000):
+def export_mesh_to_obj(verts, faces, filepath):
+    """
+    Export mesh vertices and faces to an OBJ file.
+    
+    Args:
+        verts: Tensor of shape (V, 3) containing vertex positions
+        faces: Tensor of shape (B, F, 3) containing face indices for batch size B
+        filepath: Path where to save the OBJ file
+    """
+    # Convert tensors to numpy arrays
+    verts_np = verts.cpu().numpy()
+    # Take the first batch of faces since we're only exporting one mesh
+    faces_np = faces[0].cpu().numpy()
+    
+    with open(filepath, 'w') as file:
+        # Write vertices
+        for vert in verts_np:
+            file.write(f"v {vert[0]} {vert[1]} {vert[2]}\n")
+        
+        # Write faces (add 1 to indices since OBJ files are 1-indexed)
+        for face in faces_np:
+            # Ensure we have 3 vertices per face
+            if len(face) == 3:
+                file.write(f"f {face[0] + 1} {face[1] + 1} {face[2] + 1}\n")
+            else:
+                print(f"Warning: Skipping face with {len(face)} vertices (expected 3)")
+    
+    print(f"Mesh exported to {filepath} with {len(verts_np)} vertices and {len(faces_np)} faces")
+
+
+def sample_and_plot_model(smal_fitter, output_dir="sample_output", num_points=5000, export_obj=True):
     """
     Sample points from the model and create a visualization.
     
@@ -96,6 +127,7 @@ def sample_and_plot_model(smal_fitter, output_dir="sample_output", num_points=50
         smal_fitter: SMAL3DFitter object with parameters set
         output_dir: Directory to save the output files
         num_points: Number of points to sample from the mesh surface
+        export_obj: Whether to export the mesh as an OBJ file
     """
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
@@ -106,6 +138,12 @@ def sample_and_plot_model(smal_fitter, output_dir="sample_output", num_points=50
     
     # Get faces from the model
     faces = smal_fitter.faces
+    
+    # Export mesh as OBJ if requested
+    if export_obj:
+        obj_path = os.path.join(output_dir, "smil_mesh.obj")
+        # Export the first mesh in the batch (since we're only generating one at a time)
+        export_mesh_to_obj(verts[0], faces, obj_path)
     
     # Create a Meshes object for visualization
     meshes = Meshes(verts=verts, faces=faces).to(smal_fitter.device)
@@ -212,11 +250,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Sample SMIL model with random parameters')
     parser.add_argument('--batch-size', type=int, default=1, help='Batch size (number of models)')
     parser.add_argument('--output-dir', type=str, default='sample_output', help='Output directory')
-    parser.add_argument('--seed', type=int, default=0, help='Random seed')
+    parser.add_argument('--seed', type=int, default=123, help='Random seed')
     parser.add_argument('--num-points', type=int, default=5000, help='Number of points to sample')
     parser.add_argument('--cpu', action='store_true', help='Force CPU usage even if CUDA is available')
     parser.add_argument('--shape-family', type=int, default=None, 
                         help='Shape family ID (overrides config.SHAPE_FAMILY if provided)')
+    parser.add_argument('--no-obj-export', action='store_true', help='Disable OBJ file export')
     return parser.parse_args()
 
 
@@ -243,7 +282,8 @@ def main():
         smal_fitter = generate_random_parameters(smal_fitter, seed=args.seed)
         
         # Sample points and plot the model
-        sample_and_plot_model(smal_fitter, output_dir=args.output_dir, num_points=args.num_points)
+        sample_and_plot_model(smal_fitter, output_dir=args.output_dir, num_points=args.num_points, 
+                            export_obj=not args.no_obj_export)
         
         print("Process completed successfully!")
         
