@@ -278,7 +278,8 @@ class SMILDataset(Dataset):
     
     Generates random SMIL configurations and their corresponding point clouds.
     """
-    def __init__(self, num_samples=1000, num_points=5000, device='cuda', shape_family=-1, seed=None, param_stats=None):
+    def __init__(self, num_samples=1000, num_points=5000, device='cuda', shape_family=-1, seed=None, param_stats=None, normalize=True,
+                 noise_std=0.01, dropout_prob=0.1, augment=True):
         """
         Initialize the dataset.
         
@@ -288,12 +289,21 @@ class SMILDataset(Dataset):
             device: Device to use for computation
             shape_family: Shape family ID to use for the SMIL model
             seed: Random seed for reproducibility
+            param_stats: Optional parameter statistics for normalization
+            normalize: Whether to normalize parameters (default: True)
+            noise_std: Standard deviation of Gaussian noise to add (default: 0.01)
+            dropout_prob: Probability of dropping points (default: 0.1)
+            augment: Whether to apply augmentation during training (default: True)
         """
         self.num_samples = num_samples
         self.num_points = num_points
         self.device = device
         self.shape_family = shape_family
         self.param_stats = param_stats
+        self.normalize = normalize
+        self.noise_std = noise_std
+        self.dropout_prob = dropout_prob
+        self.augment = augment
         
         # Set random seed if provided
         if seed is not None:
@@ -349,10 +359,27 @@ class SMILDataset(Dataset):
             keys = ['global_rot', 'joint_rot', 'betas', 'trans', 'log_beta_scales']
             self.param_stats = compute_param_stats(self.parameters, keys)
         
-        # Normalize all parameters
-        for params in self.parameters:
-            normed = normalize_params(params, self.param_stats)
-            self.normalized_parameters.append(normed)
+        # Normalize all parameters if requested
+        if self.normalize:
+            for params in self.parameters:
+                normed = normalize_params(params, self.param_stats)
+                self.normalized_parameters.append(normed)
+        else:
+            # If not normalizing, just copy the parameters
+            for params in self.parameters:
+                self.normalized_parameters.append(params)
+
+    def add_gaussian_noise(self, point_cloud):
+        """Add Gaussian noise to the point cloud."""
+        noise = torch.randn_like(point_cloud) * self.noise_std
+        return point_cloud + noise
+
+    def random_point_dropout(self, point_cloud):
+        """Randomly drop points from the point cloud."""
+        if self.dropout_prob > 0:
+            mask = torch.rand(point_cloud.shape[0], device=point_cloud.device) > self.dropout_prob
+            return point_cloud[mask]
+        return point_cloud
     
     def __len__(self):
         return self.num_samples
@@ -367,12 +394,29 @@ class SMILDataset(Dataset):
         Returns:
             Tuple of (point_cloud, parameters)
         """
-        point_cloud = self.point_clouds[idx]
-        normed_params = self.normalized_parameters[idx]
+        point_cloud = self.point_clouds[idx].clone()
+        params = self.normalized_parameters[idx]
+        
+        # Apply augmentation if enabled
+        if self.augment:
+            # Add Gaussian noise
+            point_cloud = self.add_gaussian_noise(point_cloud)
+            
+            # Random point dropout
+            point_cloud = self.random_point_dropout(point_cloud)
+            
+            # If points were dropped, resample to maintain fixed size
+            if point_cloud.shape[0] < self.num_points:
+                # Randomly duplicate points to maintain size
+                indices = torch.randint(0, point_cloud.shape[0], (self.num_points - point_cloud.shape[0],))
+                point_cloud = torch.cat([point_cloud, point_cloud[indices]], dim=0)
+            elif point_cloud.shape[0] > self.num_points:
+                # Randomly select points to maintain size
+                indices = torch.randperm(point_cloud.shape[0])[:self.num_points]
+                point_cloud = point_cloud[indices]
         
         # Detach all parameter tensors
-        detached_params = {key: value.detach() for key, value in normed_params.items()}
-        
+        detached_params = {key: value.detach() for key, value in params.items()}
         return point_cloud, detached_params
 
 
@@ -794,7 +838,7 @@ def plot_training_history(history, save_dir='plots'):
 def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5):
     """
     Visualize model predictions by comparing the predicted and ground truth SMIL models.
-    
+    Denormalizes parameters before applying to the SMIL fitter.
     Args:
         model: Trained SMILPointNet model
         test_loader: DataLoader for test data
@@ -803,23 +847,30 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
         num_samples: Number of samples to visualize
     """
     model.eval()
-    
+
+    # Get param_stats and normalization flag from the test_loader's dataset
+    param_stats = test_loader.dataset.param_stats
+    normalize = getattr(test_loader.dataset, 'normalize', True)
+
     with torch.no_grad():
         # Get a batch from the test loader
         point_clouds, true_params = next(iter(test_loader))
-        
         # Only use the specified number of samples
         point_clouds = point_clouds[:num_samples].to(device)
-        
         # Forward pass
         pred_params = model(point_clouds)
-        
+        # Denormalize predicted and true parameters only if normalization was enabled
+        if normalize:
+            for key in pred_params:
+                if key in param_stats:
+                    pred_params[key] = denormalize_params({key: pred_params[key]}, param_stats)[key]
+            for key in true_params:
+                if key in param_stats:
+                    true_params[key] = denormalize_params({key: true_params[key]}, param_stats)[key]
         # Visualize each sample
         for i in range(num_samples):
             # Create a figure with two subplots side by side
             fig = plt.figure(figsize=(12, 6))
-            
-            # Ground truth mesh
             ax1 = fig.add_subplot(121, projection='3d')
             ax1.set_title('Ground Truth SMIL Model')
             
@@ -882,6 +933,57 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
             plt.close()
 
 
+def print_model_stats(model, input_size=(1, 3000, 3)):
+    """
+    Print model architecture and computational statistics.
+    
+    Args:
+        model: The PyTorch model
+        input_size: Tuple of (batch_size, num_points, num_features)
+    """
+    print("\n" + "="*50)
+    print("Model Architecture and Statistics")
+    print("="*50)
+    
+    # Print model summary
+    print("\nModel Architecture:")
+    print(model)
+    
+    # Count parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    print("\nParameter Statistics:")
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
+    print(f"Non-trainable parameters: {total_params - trainable_params:,}")
+    
+    # Print parameter distribution by layer
+    print("\nParameter Distribution by Layer:")
+    for name, param in model.named_parameters():
+        print(f"{name}: {param.numel():,} parameters")
+    
+    # Print input/output shapes
+    print("\nInput/Output Shapes:")
+    print(f"Input shape: {input_size}")
+    
+    # Create a sample input on the same device as the model
+    device = next(model.parameters()).device
+    sample_input = torch.randn(input_size, device=device)
+    
+    # Get output shape
+    model.eval()  # Set model to evaluation mode
+    with torch.no_grad():
+        output = model(sample_input)
+    model.train()  # Set model back to training mode
+    
+    print("\nOutput shapes:")
+    for key, value in output.items():
+        print(f"{key}: {value.shape}")
+    
+    print("\n" + "="*50 + "\n")
+
+
 # ----------------------- MAIN FUNCTION ----------------------- #
 
 def parse_args():
@@ -889,24 +991,34 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train SMIL PointNet model')
     parser.add_argument('--batch-size', type=int, default=32, 
                        help='Batch size for training (default: 32)')
-    parser.add_argument('--epochs', type=int, default=10,
-                       help='Number of epochs to train (default: 50)')
+    parser.add_argument('--epochs', type=int, default=500,
+                       help='Number of epochs to train (default: 100)')
     parser.add_argument('--num-workers', type=int, default=0,
                        help='Number of worker processes for DataLoader (default: 4, 0 for no multiprocessing)')
-    parser.add_argument('--seed', type=int, default=13,
+    parser.add_argument('--seed', type=int, default=0,
                        help='Random seed (default: 0)')
-    parser.add_argument('--train-samples', type=int, default=10000,
+    parser.add_argument('--train-samples', type=int, default=10,
                        help='Number of training samples (default: 1000)')
-    parser.add_argument('--val-samples', type=int, default=1000,
+    parser.add_argument('--val-samples', type=int, default=100,
                        help='Number of validation samples (default: 100)')
-    parser.add_argument('--test-samples', type=int, default=1000,
+    parser.add_argument('--test-samples', type=int, default=10,
                        help='Number of test samples (default: 100)')
     parser.add_argument('--num-points', type=int, default=3000,
                        help='Number of points in each point cloud (default: 3000)')
-    parser.add_argument('--vis-interval', type=int, default=5,
+    parser.add_argument('--vis-interval', type=int, default=50,
                        help='Visualization interval in epochs (default: 5)')
     parser.add_argument('--no-multiprocessing', action='store_true',
                        help='Disable multiprocessing in DataLoader (equivalent to --num-workers=0)')
+    parser.add_argument('--no-normalization', action='store_true',
+                       help='Disable parameter normalization (default: False, i.e., normalization is enabled)')
+    parser.add_argument('--device', type=str, default=None,
+                       help="Device to use for training (e.g., 'cpu', 'cuda', 'cuda:0'). Default: 'cuda' if available, else 'cpu'.")
+    parser.add_argument('--noise-std', type=float, default=0.05,
+                       help='Standard deviation of Gaussian noise for point cloud augmentation (default: 0.01)')
+    parser.add_argument('--dropout-prob', type=float, default=0.1,
+                       help='Probability of dropping points during augmentation (default: 0.1)')
+    parser.add_argument('--no-augment', action='store_true',
+                       help='Disable point cloud augmentation (default: False, i.e., augmentation is enabled)')
     return parser.parse_args()
 
 def main():
@@ -917,7 +1029,10 @@ def main():
     args = parse_args()
     
     # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if args.device is not None:
+        device = torch.device(args.device)
+    else:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
     # Set random seed for reproducibility
@@ -938,13 +1053,29 @@ def main():
     num_workers = 0 if args.no_multiprocessing else args.num_workers
     print(f"Using {num_workers} worker processes for DataLoader")
     
+    # Normalization flag
+    normalize = not args.no_normalization
+    print(f"Parameter normalization: {'enabled' if normalize else 'disabled'}")
+    
+    # Augmentation parameters
+    noise_std = args.noise_std
+    dropout_prob = args.dropout_prob
+    augment = not args.no_augment
+    print(f"Point cloud augmentation: {'enabled' if augment else 'disabled'}")
+    if augment:
+        print(f"  - Gaussian noise std: {noise_std}")
+        print(f"  - Point dropout probability: {dropout_prob}")
+    
     # Create datasets
     train_dataset = SMILDataset(num_samples=num_train_samples, num_points=num_points, 
-                                device=device, seed=seed)
+                                device=device, seed=seed, normalize=normalize,
+                                noise_std=noise_std, dropout_prob=dropout_prob, augment=augment)
     val_dataset = SMILDataset(num_samples=num_val_samples, num_points=num_points, 
-                              device=device, seed=seed+1)
+                              device=device, seed=seed+1, normalize=normalize,
+                              noise_std=noise_std, dropout_prob=dropout_prob, augment=False)  # No augmentation for validation
     test_dataset = SMILDataset(num_samples=num_test_samples, num_points=num_points, 
-                               device=device, seed=seed+2)
+                               device=device, seed=seed+2, normalize=normalize,
+                               noise_std=noise_std, dropout_prob=dropout_prob, augment=False)  # No augmentation for testing
     
     # Get model configuration
     n_betas = train_dataset.n_betas
@@ -964,17 +1095,20 @@ def main():
     if config.ALLOW_LIMB_SCALING:
         model.set_joint_scales_size(n_joints)
     
+    # Print model architecture and statistics
+    print_model_stats(model, input_size=(1, num_points, 3))
+    
     # Define loss weights
     loss_weights = {
-        'global_rot': 0.1,
-        'joint_rot': 0.5,
-        'betas': 1,
-        'trans': 0.1,
-        'log_beta_scales': 0.5 if config.ALLOW_LIMB_SCALING else 0.0
+        'global_rot': 0.001,
+        'joint_rot': 0.05,
+        'betas': 0.2,
+        'trans': 0.001,
+        'log_beta_scales': 0.1 if config.ALLOW_LIMB_SCALING else 0.0
     }
     
     # Set chamfer loss weight
-    chamfer_weight = 10.0  # Adjust this weight as needed
+    chamfer_weight = 1.0  # Adjust this weight as needed
     
     # Train the model
     trained_model, history = train_model(model, train_loader, val_loader, num_epochs=num_epochs, 
@@ -986,7 +1120,8 @@ def main():
     
     # Evaluate the model
     smal_fitter = load_smil_model(batch_size=1, device=device)
-    visualize_predictions(trained_model, test_loader, device, smal_fitter)
+    # ATTENTION: THIS RUNS ON THE TRAINING DATASET FOR DEBUGGING PURPOSES
+    visualize_predictions(trained_model, train_loader, device, smal_fitter)
     
     print("Training and evaluation completed.")
 
