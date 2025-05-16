@@ -304,11 +304,7 @@ class SMILDataset(Dataset):
         self.noise_std = noise_std
         self.dropout_prob = dropout_prob
         self.augment = augment
-        
-        # Set random seed if provided
-        if seed is not None:
-            torch.manual_seed(seed)
-            np.random.seed(seed)
+        self.seed = seed
         
         # Load the SMIL model
         self.smal_fitter = load_smil_model(batch_size=1, device=device)
@@ -323,10 +319,21 @@ class SMILDataset(Dataset):
         self.parameters = []
         self.normalized_parameters = []
         
-        print(f"Generating {num_samples} random SMIL configurations and point clouds...")
-        for i in tqdm(range(num_samples)):
+        print(f"Generating {self.num_samples} random SMIL configurations and point clouds...")
+        self.generate_dataset()
+
+    def generate_dataset(self, regenerate=False):
+        # Set random seed if provided
+        if self.seed is not None:
+            if regenerate:
+                print("Regenerating dataset...")
+                self.seed += 3 # so the seed is never the same as for the training or validation set
+            torch.manual_seed(self.seed)
+            np.random.seed(self.seed)
+
+        for i in tqdm(range(self.num_samples)):
             # Generate random parameters
-            generate_random_parameters(self.smal_fitter, seed=seed + i if seed is not None else None)
+            generate_random_parameters(self.smal_fitter, seed=self.seed + i if self.seed is not None else None)
             
             # Forward pass to get vertices
             with torch.no_grad():
@@ -339,7 +346,7 @@ class SMILDataset(Dataset):
             mesh = Meshes(verts=verts, faces=faces)
             
             # Sample points from the mesh surface
-            point_cloud = sample_points_from_meshes(mesh, num_samples=num_points)
+            point_cloud = sample_points_from_meshes(mesh, num_samples=self.num_points)
             
             # Store the point cloud (explicitly detach)
             self.point_clouds.append(point_cloud[0].cpu().detach())
@@ -584,7 +591,7 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
 
 def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device='cuda', 
                 weights=None, chamfer_weight=0.1, checkpoint_dir='checkpoints', 
-                vis_interval=5, log_interval=10):
+                vis_interval=5, log_interval=10, regenerate_training_every_epoch=False):
     """
     Train the SMIL PointNet model.
     
@@ -600,7 +607,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
         checkpoint_dir: Directory to save model checkpoints
         vis_interval: Interval (in epochs) for visualizing validation results
         log_interval: Interval for logging training progress
-        
+        regenerate_training_every_epoch: Whether to regenerate training data every epoch
     Returns:
         Trained model and training history
     """
@@ -642,6 +649,9 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
         train_loss = 0.0
         param_losses = {key: 0.0 for key in weights.keys()}
         chamfer_losses = 0.0
+
+        if regenerate_training_every_epoch and epoch > 0:
+            train_loader.dataset.generate_dataset(regenerate=True)
         
         # Training
         for i, (point_clouds, param_dicts) in enumerate(train_loader):
@@ -991,21 +1001,21 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train SMIL PointNet model')
     parser.add_argument('--batch-size', type=int, default=32, 
                        help='Batch size for training (default: 32)')
-    parser.add_argument('--epochs', type=int, default=500,
+    parser.add_argument('--epochs', type=int, default=200,
                        help='Number of epochs to train (default: 100)')
     parser.add_argument('--num-workers', type=int, default=0,
                        help='Number of worker processes for DataLoader (default: 4, 0 for no multiprocessing)')
     parser.add_argument('--seed', type=int, default=0,
                        help='Random seed (default: 0)')
-    parser.add_argument('--train-samples', type=int, default=10,
+    parser.add_argument('--train-samples', type=int, default=100,
                        help='Number of training samples (default: 1000)')
     parser.add_argument('--val-samples', type=int, default=100,
                        help='Number of validation samples (default: 100)')
-    parser.add_argument('--test-samples', type=int, default=10,
+    parser.add_argument('--test-samples', type=int, default=100,
                        help='Number of test samples (default: 100)')
     parser.add_argument('--num-points', type=int, default=3000,
                        help='Number of points in each point cloud (default: 3000)')
-    parser.add_argument('--vis-interval', type=int, default=50,
+    parser.add_argument('--vis-interval', type=int, default=1,
                        help='Visualization interval in epochs (default: 5)')
     parser.add_argument('--no-multiprocessing', action='store_true',
                        help='Disable multiprocessing in DataLoader (equivalent to --num-workers=0)')
@@ -1013,12 +1023,14 @@ def parse_args():
                        help='Disable parameter normalization (default: False, i.e., normalization is enabled)')
     parser.add_argument('--device', type=str, default=None,
                        help="Device to use for training (e.g., 'cpu', 'cuda', 'cuda:0'). Default: 'cuda' if available, else 'cpu'.")
-    parser.add_argument('--noise-std', type=float, default=0.05,
+    parser.add_argument('--noise-std', type=float, default=0.001,
                        help='Standard deviation of Gaussian noise for point cloud augmentation (default: 0.01)')
-    parser.add_argument('--dropout-prob', type=float, default=0.1,
+    parser.add_argument('--dropout-prob', type=float, default=0.05,
                        help='Probability of dropping points during augmentation (default: 0.1)')
     parser.add_argument('--no-augment', action='store_true',
                        help='Disable point cloud augmentation (default: False, i.e., augmentation is enabled)')
+    parser.add_argument('--regenerate_training_every_epoch', action='store_true',
+                       help='Regenerate training data every epoch (default: False)')
     return parser.parse_args()
 
 def main():
@@ -1100,10 +1112,10 @@ def main():
     
     # Define loss weights
     loss_weights = {
-        'global_rot': 0.001,
+        'global_rot': 0.0001,
         'joint_rot': 0.05,
-        'betas': 0.2,
-        'trans': 0.001,
+        'betas': 0.1,
+        'trans': 0.0001,
         'log_beta_scales': 0.1 if config.ALLOW_LIMB_SCALING else 0.0
     }
     
@@ -1113,7 +1125,8 @@ def main():
     # Train the model
     trained_model, history = train_model(model, train_loader, val_loader, num_epochs=num_epochs, 
                                           lr=0.001, device=device, weights=loss_weights,
-                                          chamfer_weight=chamfer_weight, vis_interval=vis_interval)
+                                          chamfer_weight=chamfer_weight, vis_interval=vis_interval,
+                                          regenerate_training_every_epoch=args.regenerate_training_every_epoch)
     
     # Plot training history
     plot_training_history(history)
