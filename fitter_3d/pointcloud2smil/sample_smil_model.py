@@ -70,13 +70,13 @@ def generate_random_parameters(smal_fitter, seed=None):
     random_joint_rot = 0.3 * torch.randn(batch_size, config.N_POSE, 3, device=device)
     smal_fitter.joint_rot.data = random_joint_rot
     
-    # Generate random global rotation (in axis-angle representation)
-    # This controls the overall orientation of the model
-    random_global_rot = 0.1 * torch.randn(batch_size, 3, device=device)
+    # Set global rotation to zero (as the root joint can rotate and this would make the rotation ambiguous)
+    # alternatively set the root rotation to 0,0,0 and we use global rotation relative to the scene camera
+    random_global_rot = torch.zeros(batch_size, 3, device=device)
     smal_fitter.global_rot.data = random_global_rot
     
     # Optional: Generate random translation
-    random_trans = 0.0 * torch.randn(batch_size, 3, device=device)
+    random_trans = 0.01 * torch.randn(batch_size, 3, device=device)
     smal_fitter.trans.data = random_trans
     
     # Optional: Generate random log_beta_scales for joint scaling

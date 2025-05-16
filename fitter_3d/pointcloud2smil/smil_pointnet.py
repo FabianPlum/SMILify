@@ -286,7 +286,7 @@ class SMILDataset(Dataset):
         Args:
             num_samples: Number of samples in the dataset
             num_points: Number of points to sample from each mesh
-            device: Device to use for computation
+            device: Device to use for computation (primarily for the main process, workers will use CPU for generation)
             shape_family: Shape family ID to use for the SMIL model
             seed: Random seed for reproducibility
             param_stats: Optional parameter statistics for normalization
@@ -297,7 +297,7 @@ class SMILDataset(Dataset):
         """
         self.num_samples = num_samples
         self.num_points = num_points
-        self.device = device
+        self.device = device # Stored, but smal_fitter for generation will be on CPU
         self.shape_family = shape_family
         self.param_stats = param_stats
         self.normalize = normalize
@@ -306,8 +306,8 @@ class SMILDataset(Dataset):
         self.augment = augment
         self.seed = seed
         
-        # Load the SMIL model
-        self.smal_fitter = load_smil_model(batch_size=1, device=device)
+        # Load the SMIL model on CPU for data generation to avoid issues with DataLoader workers
+        self.smal_fitter = load_smil_model(batch_size=1, device='cpu')
         
         # Store model configuration for later use
         self.n_betas = self.smal_fitter.n_betas
@@ -436,7 +436,7 @@ def compute_chamfer_loss(smal_fitter, params, input_pointclouds, num_points=3000
     
     Args:
         smal_fitter: SMAL3DFitter object
-        params: Dictionary of predicted parameters
+        params: Dictionary of predicted parameters (from SMILPointNet)
         input_pointclouds: Input point clouds tensor of shape (batch_size, num_points, 3)
         num_points: Number of points to sample from generated meshes
         device: Device to use for computation
@@ -446,51 +446,59 @@ def compute_chamfer_loss(smal_fitter, params, input_pointclouds, num_points=3000
     """
     batch_size = input_pointclouds.shape[0]
     
-    # Store the original parameters to restore later
-    original_params = {}
-    for key in params:
-        if hasattr(smal_fitter, key):
-            original_params[key] = getattr(smal_fitter, key).clone()
+    predicted_pointclouds_list = []
     
-    # Create container for sampled point clouds from predicted parameters
-    predicted_pointclouds = []
-    
-    # Process each item in the batch individually to save memory
     for i in range(batch_size):
-        # Apply predicted parameters to SMAL fitter
-        for key in params:
-            if hasattr(smal_fitter, key):
-                param_tensor = getattr(smal_fitter, key)
-                # Set the first item in the batch to the current prediction
-                # Since SMAL fitter only needs to generate one mesh at a time
-                param_tensor.data[0] = params[key][i].to(device)
+        current_betas = params['betas'][i].unsqueeze(0).to(device)
+        current_global_rot = params['global_rot'][i].unsqueeze(0).to(device)
+        current_joint_rot = params['joint_rot'][i].unsqueeze(0).to(device)
+        current_trans = params['trans'][i].unsqueeze(0).to(device)
         
-        # Forward pass to get vertices
-        with torch.no_grad():
-            verts = smal_fitter()
+        current_log_beta_scales = None
+        if 'log_beta_scales' in params and params['log_beta_scales'] is not None and params['log_beta_scales'].nelement() > 0:
+            if smal_fitter.n_joints == params['log_beta_scales'].shape[1]:
+                 current_log_beta_scales = params['log_beta_scales'][i].unsqueeze(0).to(device)
+            else:
+                print(f"Warning: Mismatch in n_joints for log_beta_scales. Predicted: {params['log_beta_scales'].shape[1]}, Fitter: {smal_fitter.n_joints}. Using fitter's internal scales for sample {i}.")
+
+        current_deform_verts = None
+
+        verts = smal_fitter.forward(
+            betas=current_betas,
+            global_rot=current_global_rot,
+            joint_rot=current_joint_rot,
+            trans=current_trans,
+            log_beta_scales=current_log_beta_scales,
+            deform_verts=current_deform_verts
+        )
+
+        if torch.isnan(verts).any() or torch.isinf(verts).any():
+            print(f"Error: NaNs or Infs detected in 'verts' from smal_fitter.forward for sample {i}.")
+            print(f"  Verts shape: {verts.shape}, nans: {torch.isnan(verts).sum().item()}, infs: {torch.isinf(verts).sum().item()}")
+            # Optionally print parameters that led to this
+            print("  Parameters leading to NaN/Inf verts:")
+            for p_name, p_val in [("betas", current_betas), ("global_rot", current_global_rot), 
+                                  ("joint_rot", current_joint_rot), ("trans", current_trans),
+                                  ("log_beta_scales", current_log_beta_scales if current_log_beta_scales is not None else "None (using fitter default)")]:
+                if isinstance(p_val, torch.Tensor):
+                    print(f"    {p_name}: shape={p_val.shape}, "
+                          f"min={p_val.min().item():.4f}, max={p_val.max().item():.4f}, "
+                          f"mean={p_val.mean().item():.4f}, nans={torch.isnan(p_val).sum().item()}")
+                else:
+                    print(f"    {p_name}: {p_val}")
+            raise ValueError("Meshes would contain nan or inf due to smal_fitter output.")
         
-        # Get faces from the model
         faces = smal_fitter.faces
         
-        # Create a mesh object
         mesh = Meshes(verts=verts, faces=faces)
         
-        # Sample points from the mesh surface
-        sampled_points = sample_points_from_meshes(mesh, num_samples=num_points)
+        sampled_points_batch = sample_points_from_meshes(mesh, num_samples=num_points)
         
-        # Add to list of predicted point clouds
-        predicted_pointclouds.append(sampled_points[0])
+        predicted_pointclouds_list.append(sampled_points_batch[0])
     
-    # Stack all predicted point clouds into a batch
-    predicted_pointclouds = torch.stack(predicted_pointclouds)
+    predicted_pointclouds = torch.stack(predicted_pointclouds_list)
     
-    # Compute chamfer distance between predicted and input point clouds
     chamfer_loss, _ = chamfer_distance(predicted_pointclouds, input_pointclouds)
-    
-    # Restore original parameters
-    for key, value in original_params.items():
-        param_tensor = getattr(smal_fitter, key)
-        param_tensor.data.copy_(value)
     
     return chamfer_loss
 
@@ -523,14 +531,25 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
         pred_params = model(point_cloud)
         
         # Apply predicted parameters to SMAL fitter to generate mesh
-        for key in pred_params:
-            if hasattr(smal_fitter, key):
-                param_tensor = getattr(smal_fitter, key)
-                param_tensor.data[0] = pred_params[key][0].to(device)
+        # We need to prepare parameters for smal_fitter.forward
+        viz_betas = pred_params['betas'][0].unsqueeze(0).to(device)
+        viz_global_rot = pred_params['global_rot'][0].unsqueeze(0).to(device)
+        viz_joint_rot = pred_params['joint_rot'][0].unsqueeze(0).to(device)
+        viz_trans = pred_params['trans'][0].unsqueeze(0).to(device)
         
-        # Forward pass to get vertices
-        with torch.no_grad():
-            verts = smal_fitter()
+        viz_log_beta_scales = None
+        if 'log_beta_scales' in pred_params and pred_params['log_beta_scales'] is not None:
+            if smal_fitter.n_joints == pred_params['log_beta_scales'].shape[1]:
+                viz_log_beta_scales = pred_params['log_beta_scales'][0].unsqueeze(0).to(device)
+
+        # No torch.no_grad() here for visualization, but it's okay as it's not part of training backward pass
+        verts = smal_fitter.forward(
+            betas=viz_betas,
+            global_rot=viz_global_rot,
+            joint_rot=viz_joint_rot,
+            trans=viz_trans,
+            log_beta_scales=viz_log_beta_scales
+        ) # deform_verts will use internal
         
         # Get faces from the model
         faces = smal_fitter.faces
@@ -591,7 +610,8 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
 
 def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device='cuda', 
                 weights=None, chamfer_weight=0.1, checkpoint_dir='checkpoints', 
-                vis_interval=5, log_interval=10, regenerate_training_every_epoch=False):
+                vis_interval=5, log_interval=10, regenerate_training_every=-1,
+                gradient_clip_val=1.0):
     """
     Train the SMIL PointNet model.
     
@@ -608,6 +628,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
         vis_interval: Interval (in epochs) for visualizing validation results
         log_interval: Interval for logging training progress
         regenerate_training_every_epoch: Whether to regenerate training data every epoch
+        gradient_clip_val: Value for gradient clipping.
     Returns:
         Trained model and training history
     """
@@ -650,7 +671,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
         param_losses = {key: 0.0 for key in weights.keys()}
         chamfer_losses = 0.0
 
-        if regenerate_training_every_epoch and epoch > 0:
+        if regenerate_training_every > 0 and epoch > 0 and epoch % regenerate_training_every == 0:
             train_loader.dataset.generate_dataset(regenerate=True)
         
         # Training
@@ -686,6 +707,11 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
             
             # Backward pass and optimization
             loss.backward()
+            
+            # Gradient Clipping
+            if gradient_clip_val > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_val)
+            
             optimizer.step()
             
             train_loss += loss.item()
@@ -885,13 +911,23 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
             ax1.set_title('Ground Truth SMIL Model')
             
             # Apply true parameters to SMAL fitter
-            for key in true_params:
-                param_tensor = getattr(smal_fitter, key)
-                param_tensor.data[0] = true_params[key][i].to(device)
-            
-            # Forward pass to get vertices
-            with torch.no_grad():
-                true_verts = smal_fitter()
+            true_betas_i = true_params['betas'][i].unsqueeze(0).to(device)
+            true_global_rot_i = true_params['global_rot'][i].unsqueeze(0).to(device)
+            true_joint_rot_i = true_params['joint_rot'][i].unsqueeze(0).to(device)
+            true_trans_i = true_params['trans'][i].unsqueeze(0).to(device)
+            true_log_beta_scales_i = None
+            if 'log_beta_scales' in true_params and true_params['log_beta_scales'] is not None:
+                 if smal_fitter.n_joints == true_params['log_beta_scales'].shape[1]:
+                    true_log_beta_scales_i = true_params['log_beta_scales'][i].unsqueeze(0).to(device)
+
+            with torch.no_grad(): # Keep no_grad for visualization/evaluation if not training
+                true_verts = smal_fitter.forward(
+                    betas=true_betas_i,
+                    global_rot=true_global_rot_i,
+                    joint_rot=true_joint_rot_i,
+                    trans=true_trans_i,
+                    log_beta_scales=true_log_beta_scales_i
+                )
             
             # Get faces from the model
             faces = smal_fitter.faces
@@ -909,19 +945,23 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
             ax2.set_title('Predicted SMIL Model')
             
             # Apply predicted parameters to SMAL fitter
-            for key in pred_params:
-                param_tensor = getattr(smal_fitter, key)
-                if key == 'log_beta_scales' and model.include_scales:
-                    # Make sure dimensions match
-                    pred_shape = pred_params[key][i].shape
-                    if pred_shape[0] != param_tensor.shape[1]:
-                        # Skip if dimensions don't match
-                        continue
-                param_tensor.data[0] = pred_params[key][i].to(device)
+            pred_betas_i = pred_params['betas'][i].unsqueeze(0).to(device)
+            pred_global_rot_i = pred_params['global_rot'][i].unsqueeze(0).to(device)
+            pred_joint_rot_i = pred_params['joint_rot'][i].unsqueeze(0).to(device)
+            pred_trans_i = pred_params['trans'][i].unsqueeze(0).to(device)
+            pred_log_beta_scales_i = None
+            if 'log_beta_scales' in pred_params and pred_params['log_beta_scales'] is not None:
+                 if smal_fitter.n_joints == pred_params['log_beta_scales'].shape[1]:
+                    pred_log_beta_scales_i = pred_params['log_beta_scales'][i].unsqueeze(0).to(device)
             
-            # Forward pass to get vertices
-            with torch.no_grad():
-                pred_verts = smal_fitter()
+            with torch.no_grad(): # Keep no_grad for visualization/evaluation if not training
+                pred_verts = smal_fitter.forward(
+                    betas=pred_betas_i,
+                    global_rot=pred_global_rot_i,
+                    joint_rot=pred_joint_rot_i,
+                    trans=pred_trans_i,
+                    log_beta_scales=pred_log_beta_scales_i
+                )
             
             # Create a mesh object
             pred_mesh = Meshes(verts=pred_verts, faces=faces)
@@ -1007,7 +1047,7 @@ def parse_args():
                        help='Number of worker processes for DataLoader (default: 4, 0 for no multiprocessing)')
     parser.add_argument('--seed', type=int, default=0,
                        help='Random seed (default: 0)')
-    parser.add_argument('--train-samples', type=int, default=100,
+    parser.add_argument('--train-samples', type=int, default=1000,
                        help='Number of training samples (default: 1000)')
     parser.add_argument('--val-samples', type=int, default=100,
                        help='Number of validation samples (default: 100)')
@@ -1015,8 +1055,8 @@ def parse_args():
                        help='Number of test samples (default: 100)')
     parser.add_argument('--num-points', type=int, default=3000,
                        help='Number of points in each point cloud (default: 3000)')
-    parser.add_argument('--vis-interval', type=int, default=1,
-                       help='Visualization interval in epochs (default: 5)')
+    parser.add_argument('--vis-interval', type=int, default=10,
+                       help='Visualization interval in epochs (default: 10)')
     parser.add_argument('--no-multiprocessing', action='store_true',
                        help='Disable multiprocessing in DataLoader (equivalent to --num-workers=0)')
     parser.add_argument('--no-normalization', action='store_true',
@@ -1029,8 +1069,8 @@ def parse_args():
                        help='Probability of dropping points during augmentation (default: 0.1)')
     parser.add_argument('--no-augment', action='store_true',
                        help='Disable point cloud augmentation (default: False, i.e., augmentation is enabled)')
-    parser.add_argument('--regenerate_training_every_epoch', action='store_true',
-                       help='Regenerate training data every epoch (default: False)')
+    parser.add_argument('--regenerate_training_every', type=int, default=-1,
+                       help='Regenerate training data every N epochs (default: -1, i.e., never)')
     return parser.parse_args()
 
 def main():
@@ -1124,9 +1164,10 @@ def main():
     
     # Train the model
     trained_model, history = train_model(model, train_loader, val_loader, num_epochs=num_epochs, 
-                                          lr=0.001, device=device, weights=loss_weights,
+                                          lr=0.0001, device=device, weights=loss_weights,
                                           chamfer_weight=chamfer_weight, vis_interval=vis_interval,
-                                          regenerate_training_every_epoch=args.regenerate_training_every_epoch)
+                                          regenerate_training_every=args.regenerate_training_every,
+                                          gradient_clip_val=1.0)
     
     # Plot training history
     plot_training_history(history)
