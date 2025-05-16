@@ -76,7 +76,7 @@ def generate_random_parameters(smal_fitter, seed=None):
     smal_fitter.global_rot.data = random_global_rot
     
     # Optional: Generate random translation
-    random_trans = 0.1 * torch.randn(batch_size, 3, device=device)
+    random_trans = 0.0 * torch.randn(batch_size, 3, device=device)
     smal_fitter.trans.data = random_trans
     
     # Optional: Generate random log_beta_scales for joint scaling
