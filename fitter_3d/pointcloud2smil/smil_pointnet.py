@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 from pytorch3d.loss import chamfer_distance
 import argparse
 import pickle
+from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, rotation_6d_to_matrix, matrix_to_rotation_6d
 
 # Add the parent directory to the path to import modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -89,6 +90,63 @@ def denormalize_params(normed_params, stats):
         else:
             denormed[key] = normed_params[key]
     return denormed
+
+
+# ----------------------- ROTATION CONVERSION UTILS ----------------------- #
+
+def robust_axis_angle_to_matrix(axis_angle):
+    """
+    Converts axis-angle representation to a 3x3 rotation matrix.
+    Handles potential NaNs for zero-angle rotations if using pytorch3d's matrix_to_axis_angle back and forth.
+    Args:
+        axis_angle: Tensor of shape (..., 3)
+    Returns:
+        Tensor of shape (..., 3, 3)
+    """
+    return axis_angle_to_matrix(axis_angle)
+
+def robust_matrix_to_axis_angle(matrix):
+    """
+    Converts a 3x3 rotation matrix to axis-angle representation.
+    Handles potential issues with ill-defined gradients for identity matrices by adding a small epsilon.
+    Args:
+        matrix: Tensor of shape (..., 3, 3)
+    Returns:
+        Tensor of shape (..., 3)
+    """
+    # Ensure the matrix is on the correct device and dtype for eye
+    identity = torch.eye(3, device=matrix.device, dtype=matrix.dtype).unsqueeze(0).expand_as(matrix)
+    # Check if matrix is close to identity
+    # If matrix is identity, axis_angle is (0,0,0). matrix_to_axis_angle might produce NaNs or unstable gradients.
+    # A common way to handle this is to return a zero vector for identity matrices.
+    # However, for simplicity and to rely on pytorch3d's handling, we'll use it directly.
+    # Users should be aware of potential issues if many rotations are identities.
+    return matrix_to_axis_angle(matrix)
+
+def axis_angle_to_rotation_6d(axis_angle):
+    """
+    Converts axis-angle representation to 6D rotation representation.
+    The 6D representation consists of the first two columns of the rotation matrix.
+    Args:
+        axis_angle: Tensor of shape (..., 3)
+    Returns:
+        Tensor of shape (..., 6)
+    """
+    rotation_matrix = robust_axis_angle_to_matrix(axis_angle)
+    # matrix_to_rotation_6d from PyTorch3D directly performs this.
+    return matrix_to_rotation_6d(rotation_matrix)
+
+def rotation_6d_to_axis_angle(rotation_6d):
+    """
+    Converts 6D rotation representation back to axis-angle.
+    Args:
+        rotation_6d: Tensor of shape (..., 6)
+    Returns:
+        Tensor of shape (..., 3)
+    """
+    # rotation_6d_to_matrix from PyTorch3D handles the Gram-Schmidt process.
+    rotation_matrix = rotation_6d_to_matrix(rotation_6d)
+    return robust_matrix_to_axis_angle(rotation_matrix)
 
 
 # ----------------------- POINTNET MODEL IMPLEMENTATION ----------------------- #
@@ -173,12 +231,12 @@ class SMILPointNet(nn.Module):
         
         # Calculate total output size
         # - Global rotation (3)
-        # - Joint rotations (n_pose * 3)
+        # - Joint rotations (n_pose * 6)
         # - Shape parameters (n_betas)
         # - Translation (3)
         # - Joint scales (optional, different for each model)
         n_scales = 0  # Will be set later if include_scales=True
-        self.output_size = 3 + n_pose * 3 + n_betas + 3 + n_scales
+        self.output_size = 3 + n_pose * 6 + n_betas + 3 + n_scales
         
         self.fc1 = nn.Linear(1024, 512)
         self.fc2 = nn.Linear(512, 256)
@@ -199,7 +257,7 @@ class SMILPointNet(nn.Module):
         """
         if self.include_scales:
             n_scales = n_joints * 3  # 3 scale parameters per joint
-            self.output_size = 3 + self.n_pose * 3 + self.n_betas + 3 + n_scales
+            self.output_size = 3 + self.n_pose * 6 + self.n_betas + 3 + n_scales
             
             # Recreate the final layer with the right output size
             self.fc3 = nn.Linear(256, self.output_size).to(self.fc1.weight.device)
@@ -245,10 +303,10 @@ class SMILPointNet(nn.Module):
         # Global rotation (axis-angle, 3 values)
         params['global_rot'] = x[:, :3]
         
-        # Joint rotations (n_pose * 3 values)
+        # Joint rotations (n_pose * 6 values for 6D representation)
         joint_rot_start = 3
-        joint_rot_end = joint_rot_start + self.n_pose * 3
-        params['joint_rot'] = x[:, joint_rot_start:joint_rot_end].reshape(batch_size, self.n_pose, 3)
+        joint_rot_end = joint_rot_start + self.n_pose * 6
+        params['joint_rot'] = x[:, joint_rot_start:joint_rot_end].reshape(batch_size, self.n_pose, 6)
         
         # Shape parameters (n_betas values)
         betas_start = joint_rot_end
@@ -360,9 +418,12 @@ class SMILDataset(Dataset):
             self.point_clouds.append(point_cloud[0].cpu().detach())
             
             # Store the parameters (explicitly detach each tensor)
+            joint_rot_aa = self.smal_fitter.joint_rot[0].cpu().detach() # Axis-Angle Shape: (N_POSE, 3)
+            joint_rot_6d = axis_angle_to_rotation_6d(joint_rot_aa) # 6D rot matrix Shape: (N_POSE, 6)
+            
             params = {
                 'global_rot': self.smal_fitter.global_rot[0].cpu().detach(),
-                'joint_rot': self.smal_fitter.joint_rot[0].cpu().detach(),
+                'joint_rot': joint_rot_6d,
                 'betas': self.smal_fitter.betas[0].cpu().detach(),
                 'trans': self.smal_fitter.trans[0].cpu().detach(),
                 'log_beta_scales': self.smal_fitter.log_beta_scales[0].cpu().detach(),
@@ -463,7 +524,9 @@ def compute_mesh_and_joint_losses(smal_fitter, params, input_pointclouds, gt_joi
     for i in range(batch_size):
         current_betas = params['betas'][i].unsqueeze(0).to(device)
         current_global_rot = params['global_rot'][i].unsqueeze(0).to(device)
-        current_joint_rot = params['joint_rot'][i].unsqueeze(0).to(device)
+        # current_joint_rot is 6D, convert to axis-angle for smal_fitter
+        current_joint_rot_6d = params['joint_rot'][i].unsqueeze(0).to(device)
+        current_joint_rot_aa = rotation_6d_to_axis_angle(current_joint_rot_6d)
         current_trans = params['trans'][i].unsqueeze(0).to(device)
         
         current_log_beta_scales = None
@@ -479,7 +542,7 @@ def compute_mesh_and_joint_losses(smal_fitter, params, input_pointclouds, gt_joi
         verts, joints_single_sample = smal_fitter.forward( # New unpacking for 2 return values
             betas=current_betas,
             global_rot=current_global_rot,
-            joint_rot=current_joint_rot,
+            joint_rot=current_joint_rot_aa, # Use axis-angle representation
             trans=current_trans,
             log_beta_scales=current_log_beta_scales,
             deform_verts=current_deform_verts,
@@ -494,7 +557,7 @@ def compute_mesh_and_joint_losses(smal_fitter, params, input_pointclouds, gt_joi
             # Optionally print parameters that led to this
             print("  Parameters leading to NaN/Inf verts:")
             for p_name, p_val in [("betas", current_betas), ("global_rot", current_global_rot), 
-                                  ("joint_rot", current_joint_rot), ("trans", current_trans),
+                                  ("joint_rot", current_joint_rot_aa), ("trans", current_trans),
                                   ("log_beta_scales", current_log_beta_scales if current_log_beta_scales is not None else "None (using fitter default)")]:
                 if isinstance(p_val, torch.Tensor):
                     print(f"    {p_name}: shape={p_val.shape}, "
@@ -583,7 +646,9 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
         # Apply predicted parameters to SMAL fitter to generate mesh AND JOINTS
         viz_betas = denorm_pred_params['betas'][0].unsqueeze(0).to(device)
         viz_global_rot = denorm_pred_params['global_rot'][0].unsqueeze(0).to(device)
-        viz_joint_rot = denorm_pred_params['joint_rot'][0].unsqueeze(0).to(device)
+        # viz_joint_rot is 6D, convert to axis-angle for smal_fitter
+        viz_joint_rot_6d = denorm_pred_params['joint_rot'][0].unsqueeze(0).to(device)
+        viz_joint_rot_aa = rotation_6d_to_axis_angle(viz_joint_rot_6d)
         viz_trans = denorm_pred_params['trans'][0].unsqueeze(0).to(device)
         
         viz_log_beta_scales = None
@@ -596,7 +661,7 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
         verts, pred_joints = smal_fitter.forward( # New unpacking for 2 return values
             betas=viz_betas,
             global_rot=viz_global_rot,
-            joint_rot=viz_joint_rot,
+            joint_rot=viz_joint_rot_aa, # Use axis-angle representation
             trans=viz_trans,
             log_beta_scales=viz_log_beta_scales,
             return_joints=True # Explicitly request joints
@@ -1042,7 +1107,9 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
             # Apply true parameters to SMAL fitter
             true_betas_i = true_params['betas'][i].unsqueeze(0).to(device)
             true_global_rot_i = true_params['global_rot'][i].unsqueeze(0).to(device)
-            true_joint_rot_i = true_params['joint_rot'][i].unsqueeze(0).to(device)
+            # true_joint_rot_i is 6D from dataset, convert to axis-angle for smal_fitter
+            true_joint_rot_6d_i = true_params['joint_rot'][i].unsqueeze(0).to(device)
+            true_joint_rot_aa_i = rotation_6d_to_axis_angle(true_joint_rot_6d_i)
             true_trans_i = true_params['trans'][i].unsqueeze(0).to(device)
             true_log_beta_scales_i = None
             if 'log_beta_scales' in true_params and true_params['log_beta_scales'] is not None:
@@ -1053,7 +1120,7 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
                 true_verts = smal_fitter.forward(
                     betas=true_betas_i,
                     global_rot=true_global_rot_i,
-                    joint_rot=true_joint_rot_i,
+                    joint_rot=true_joint_rot_aa_i, # Use axis-angle
                     trans=true_trans_i,
                     log_beta_scales=true_log_beta_scales_i
                 )
@@ -1076,7 +1143,9 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
             # Apply predicted parameters to SMAL fitter
             pred_betas_i = pred_params['betas'][i].unsqueeze(0).to(device)
             pred_global_rot_i = pred_params['global_rot'][i].unsqueeze(0).to(device)
-            pred_joint_rot_i = pred_params['joint_rot'][i].unsqueeze(0).to(device)
+            # pred_joint_rot_i is 6D from model, convert to axis-angle for smal_fitter
+            pred_joint_rot_6d_i = pred_params['joint_rot'][i].unsqueeze(0).to(device)
+            pred_joint_rot_aa_i = rotation_6d_to_axis_angle(pred_joint_rot_6d_i)
             pred_trans_i = pred_params['trans'][i].unsqueeze(0).to(device)
             pred_log_beta_scales_i = None
             if 'log_beta_scales' in pred_params and pred_params['log_beta_scales'] is not None:
@@ -1087,7 +1156,7 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
                 pred_verts = smal_fitter.forward(
                     betas=pred_betas_i,
                     global_rot=pred_global_rot_i,
-                    joint_rot=pred_joint_rot_i,
+                    joint_rot=pred_joint_rot_aa_i, # Use axis-angle
                     trans=pred_trans_i,
                     log_beta_scales=pred_log_beta_scales_i
                 )
