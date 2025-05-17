@@ -1177,9 +1177,9 @@ def parse_args():
                        help='Random seed (default: 0)')
     parser.add_argument('--train-samples', type=int, default=1000,
                        help='Number of training samples (default: 1000)')
-    parser.add_argument('--val-samples', type=int, default=10,
+    parser.add_argument('--val-samples', type=int, default=100,
                        help='Number of validation samples (default: 100)')
-    parser.add_argument('--test-samples', type=int, default=10,
+    parser.add_argument('--test-samples', type=int, default=100,
                        help='Number of test samples (default: 100)')
     parser.add_argument('--num-points', type=int, default=3000,
                        help='Number of points in each point cloud (default: 3000)')
