@@ -19,6 +19,7 @@ output/
 3D_model_prep/morph_anim/
 3D_model_prep/measurements/
 sdf_batch_output/
+sample_output/
 
 # unless specifically added, ignore videos
 *.mp4
