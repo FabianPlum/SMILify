@@ -134,7 +134,7 @@ def sample_and_plot_model(smal_fitter, output_dir="sample_output", num_points=50
     
     # Forward pass through the SMAL model to get vertices
     with torch.no_grad():
-        verts = smal_fitter()
+        verts, joints = smal_fitter.forward(return_joints=True)
     
     # Get faces from the model
     faces = smal_fitter.faces
@@ -175,7 +175,16 @@ def sample_and_plot_model(smal_fitter, output_dir="sample_output", num_points=50
     
     # Get points for visualization
     points = point_clouds[0].cpu().numpy()
-    
+    # Get joints for visualization (joints is Batch x NumJoints x 3)
+    joints_np = joints[0].cpu().numpy()
+    num_joints = joints_np.shape[0]
+
+    # Generate unique colors for each joint
+    # Using a perceptually uniform colormap like 'viridis' or 'plasma'
+    # colors = plt.cm.get_cmap('viridis', num_joints) # For older matplotlib
+    colormap = plt.cm.get_cmap('plasma') # Or 'viridis', 'cividis', etc.
+    colors = [colormap(i) for i in np.linspace(0, 1, num_joints)]
+
     # Plot the point cloud
     ax.scatter(
         points[:, 0], 
@@ -186,9 +195,21 @@ def sample_and_plot_model(smal_fitter, output_dir="sample_output", num_points=50
         alpha=0.5
     )
     
+    # Plot the joints with unique colors
+    for i in range(num_joints):
+        ax.scatter(
+            joints_np[i, 0], 
+            joints_np[i, 1], 
+            joints_np[i, 2], 
+            color=colors[i],  # Unique color for each joint
+            s=100,  # Larger size for joints
+            edgecolors='black', # Add edge color for better visibility
+            label=f'Joint {i}' if num_joints < 10 else None # Avoid too many labels
+        )
+    
     # Set equal aspect ratio
     ax.set_box_aspect([1, 1, 1])
-    ax.set_title("Sampled Point Cloud")
+    ax.set_title("Sampled Point Cloud and Joints")
     
     # Save the figure
     pointcloud_path = os.path.join(output_dir, "pointcloud.png")
