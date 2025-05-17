@@ -160,7 +160,7 @@ class SMAL3DFitter(nn.Module):
         return joint_scales
 
     def forward(self, betas=None, global_rot=None, joint_rot=None, trans=None, 
-                log_beta_scales=None, deform_verts=None):
+                log_beta_scales=None, deform_verts=None, return_joints=False):
         """
         Forward pass for the SMAL model.
         Can accept optional parameters to override the internal nn.Parameter attributes.
@@ -172,9 +172,11 @@ class SMAL3DFitter(nn.Module):
             trans (optional): Global translation, tensor of shape (batch_size, 3).
             log_beta_scales (optional): Logarithm of joint scales, tensor of shape (batch_size, n_joints, 3).
             deform_verts (optional): Vertex offsets, tensor of shape (batch_size, n_template_verts, 3).
+            return_joints (bool): Whether to return joints.
 
         Returns:
             verts: Predicted vertices, tensor of shape (batch_size, n_verts, 3).
+            joints: Predicted joints, tensor of shape (batch_size, n_joints, 3), if return_joints is True.
         """
         
         # Determine which parameters to use (passed argument or self.attribute)
@@ -214,7 +216,10 @@ class SMAL3DFitter(nn.Module):
 
         verts = verts + _deform_verts # _deform_verts is (bs, n_template_verts, 3)
 
-        return verts
+        if return_joints:
+            return verts, joints
+        else:
+            return verts
 
 
 class SMALParamGroup:
