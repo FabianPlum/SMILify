@@ -337,7 +337,15 @@ class SMILDataset(Dataset):
             
             # Forward pass to get vertices
             with torch.no_grad():
-                verts = self.smal_fitter()
+                verts, joints = self.smal_fitter.forward(
+                    betas=self.smal_fitter.betas,
+                    global_rot=self.smal_fitter.global_rot,
+                    joint_rot=self.smal_fitter.joint_rot,
+                    trans=self.smal_fitter.trans,
+                    log_beta_scales=self.smal_fitter.log_beta_scales,
+                    deform_verts=self.smal_fitter.deform_verts,
+                    return_joints=True # Explicitly request joints
+                )
             
             # Get faces from the model
             faces = self.smal_fitter.faces
@@ -357,13 +365,14 @@ class SMILDataset(Dataset):
                 'joint_rot': self.smal_fitter.joint_rot[0].cpu().detach(),
                 'betas': self.smal_fitter.betas[0].cpu().detach(),
                 'trans': self.smal_fitter.trans[0].cpu().detach(),
-                'log_beta_scales': self.smal_fitter.log_beta_scales[0].cpu().detach()
+                'log_beta_scales': self.smal_fitter.log_beta_scales[0].cpu().detach(),
+                'joints': joints[0].cpu().detach()
             }
             self.parameters.append(params)
         
         # Compute stats if not provided
         if self.param_stats is None:
-            keys = ['global_rot', 'joint_rot', 'betas', 'trans', 'log_beta_scales']
+            keys = ['global_rot', 'joint_rot', 'betas', 'trans', 'log_beta_scales', 'joints']
             self.param_stats = compute_param_stats(self.parameters, keys)
         
         # Normalize all parameters if requested
@@ -429,24 +438,27 @@ class SMILDataset(Dataset):
 
 # ----------------------- TRAINING CODE ----------------------- #
 
-def compute_chamfer_loss(smal_fitter, params, input_pointclouds, num_points=3000, device='cuda'):
+def compute_mesh_and_joint_losses(smal_fitter, params, input_pointclouds, gt_joints, num_points=3000, device='cuda'):
     """
     Compute chamfer distance between input point clouds and point clouds generated 
-    from predicted SMIL parameters.
+    from predicted SMIL parameters, as well as computing joint location loss.
     
     Args:
         smal_fitter: SMAL3DFitter object
         params: Dictionary of predicted parameters (from SMILPointNet)
         input_pointclouds: Input point clouds tensor of shape (batch_size, num_points, 3)
+        gt_joints: Ground truth joint locations tensor of shape (batch_size, num_joints, 3)
         num_points: Number of points to sample from generated meshes
         device: Device to use for computation
         
     Returns:
-        Chamfer distance loss
+        chamfer_loss: Scalar tensor
+        joint_loc_loss: Scalar tensor
     """
     batch_size = input_pointclouds.shape[0]
     
     predicted_pointclouds_list = []
+    predicted_joints_list = []
     
     for i in range(batch_size):
         current_betas = params['betas'][i].unsqueeze(0).to(device)
@@ -463,14 +475,18 @@ def compute_chamfer_loss(smal_fitter, params, input_pointclouds, num_points=3000
 
         current_deform_verts = None
 
-        verts = smal_fitter.forward(
+        # SMAL3DFitter.forward now returns verts and joints when return_joints=True
+        verts, joints_single_sample = smal_fitter.forward( # New unpacking for 2 return values
             betas=current_betas,
             global_rot=current_global_rot,
             joint_rot=current_joint_rot,
             trans=current_trans,
             log_beta_scales=current_log_beta_scales,
-            deform_verts=current_deform_verts
+            deform_verts=current_deform_verts,
+            return_joints=True # Explicitly request joints
         )
+        # smal_fitter is batch_size=1, so joints_single_sample is (1, N_JOINTS, 3)
+        predicted_joints_list.append(joints_single_sample[0])
 
         if torch.isnan(verts).any() or torch.isinf(verts).any():
             print(f"Error: NaNs or Infs detected in 'verts' from smal_fitter.forward for sample {i}.")
@@ -497,10 +513,15 @@ def compute_chamfer_loss(smal_fitter, params, input_pointclouds, num_points=3000
         predicted_pointclouds_list.append(sampled_points_batch[0])
     
     predicted_pointclouds = torch.stack(predicted_pointclouds_list)
+    predicted_joints_batch = torch.stack(predicted_joints_list) # Stack collected joints
     
+    # Compute Chamfer distance loss
     chamfer_loss, _ = chamfer_distance(predicted_pointclouds, input_pointclouds)
     
-    return chamfer_loss
+    # Compute Joint location loss
+    joint_loc_loss = F.mse_loss(predicted_joints_batch, gt_joints)
+
+    return chamfer_loss, joint_loc_loss # Return both losses
 
 
 def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_dir='plots/epoch_vis', num_points=3000):
@@ -520,6 +541,10 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
     
     model.eval()
     
+    # Get param_stats and normalization flag from the val_loader's dataset for denormalization
+    param_stats = val_loader.dataset.param_stats
+    normalize_flag = getattr(val_loader.dataset, 'normalize', True)
+
     with torch.no_grad():
         # Get the first batch from validation loader
         point_clouds, param_dicts = next(iter(val_loader))
@@ -530,26 +555,52 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
         # Forward pass to get predicted parameters
         pred_params = model(point_cloud)
         
-        # Apply predicted parameters to SMAL fitter to generate mesh
-        # We need to prepare parameters for smal_fitter.forward
-        viz_betas = pred_params['betas'][0].unsqueeze(0).to(device)
-        viz_global_rot = pred_params['global_rot'][0].unsqueeze(0).to(device)
-        viz_joint_rot = pred_params['joint_rot'][0].unsqueeze(0).to(device)
-        viz_trans = pred_params['trans'][0].unsqueeze(0).to(device)
+        # Denormalize predicted parameters if normalization was used
+        if normalize_flag:
+            denorm_pred_params = {key: pred_params[key].clone() for key in pred_params}
+            for key in denorm_pred_params:
+                if key in param_stats:
+                    denorm_pred_params[key] = denormalize_params({key: denorm_pred_params[key]}, param_stats)[key]
+        else:
+            denorm_pred_params = pred_params
+
+        # Get ground truth parameters for the first sample and denormalize if needed
+        true_params_sample = {key: val[0].unsqueeze(0) for key, val in param_dicts.items()}
+        if normalize_flag:
+            denorm_true_params_sample = {key: true_params_sample[key].clone() for key in true_params_sample}
+            for key in denorm_true_params_sample:
+                if key in param_stats:
+                    # Ensure tensors are on the correct device for denormalization if stats are on CPU
+                    device_for_denorm = denorm_true_params_sample[key].device
+                    stats_device = param_stats[key]['mean'].device
+                    denorm_true_params_sample[key] = denormalize_params(
+                        {key: denorm_true_params_sample[key].to(stats_device)}, 
+                        param_stats
+                    )[key].to(device_for_denorm)
+        else:
+            denorm_true_params_sample = true_params_sample
+
+        # Apply predicted parameters to SMAL fitter to generate mesh AND JOINTS
+        viz_betas = denorm_pred_params['betas'][0].unsqueeze(0).to(device)
+        viz_global_rot = denorm_pred_params['global_rot'][0].unsqueeze(0).to(device)
+        viz_joint_rot = denorm_pred_params['joint_rot'][0].unsqueeze(0).to(device)
+        viz_trans = denorm_pred_params['trans'][0].unsqueeze(0).to(device)
         
         viz_log_beta_scales = None
-        if 'log_beta_scales' in pred_params and pred_params['log_beta_scales'] is not None:
-            if smal_fitter.n_joints == pred_params['log_beta_scales'].shape[1]:
-                viz_log_beta_scales = pred_params['log_beta_scales'][0].unsqueeze(0).to(device)
+        if 'log_beta_scales' in denorm_pred_params and denorm_pred_params['log_beta_scales'] is not None:
+            if smal_fitter.n_joints == denorm_pred_params['log_beta_scales'].shape[1]:
+                viz_log_beta_scales = denorm_pred_params['log_beta_scales'][0].unsqueeze(0).to(device)
 
         # No torch.no_grad() here for visualization, but it's okay as it's not part of training backward pass
-        verts = smal_fitter.forward(
+        # smal_fitter.forward returns verts, joints, Rs, v_shaped -> now verts, joints when return_joints=True
+        verts, pred_joints = smal_fitter.forward( # New unpacking for 2 return values
             betas=viz_betas,
             global_rot=viz_global_rot,
             joint_rot=viz_joint_rot,
             trans=viz_trans,
-            log_beta_scales=viz_log_beta_scales
-        ) # deform_verts will use internal
+            log_beta_scales=viz_log_beta_scales,
+            return_joints=True # Explicitly request joints
+        )
         
         # Get faces from the model
         faces = smal_fitter.faces
@@ -563,6 +614,11 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
         if isinstance(pred_point_cloud, tuple):
             pred_point_cloud = pred_point_cloud[0]  # Handle case where normals are returned
         
+        # Get ground truth joints for visualization (already denormalized if needed)
+        # Ensure it's on the correct device and squeezed if batch dim was 1
+        gt_joints = denorm_true_params_sample['joints'].squeeze(0).cpu().numpy()
+        pred_joints_np = pred_joints[0].cpu().numpy() # pred_joints is (1, num_joints, 3)
+
         # Convert to numpy for plotting
         target_points = point_cloud[0].cpu().numpy()
         pred_points = pred_point_cloud[0].cpu().numpy()
@@ -575,20 +631,33 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
         ax1.scatter(target_points[:, 0], target_points[:, 1], target_points[:, 2], 
                    c='blue', marker='.', s=1, alpha=0.7)
         ax1.set_title('Target Point Cloud')
+        # Plot ground truth joints on target point cloud plot
+        ax1.scatter(gt_joints[:, 0], gt_joints[:, 1], gt_joints[:, 2],
+                    c='cyan', marker='o', s=50, edgecolors='k', label='GT Joints')
+        ax1.legend()
         
         # 2. Predicted point cloud
         ax2 = fig.add_subplot(132, projection='3d')
         ax2.scatter(pred_points[:, 0], pred_points[:, 1], pred_points[:, 2], 
                    c='red', marker='.', s=1, alpha=0.7)
         ax2.set_title('Predicted Point Cloud')
+        # Plot predicted joints on predicted point cloud plot
+        ax2.scatter(pred_joints_np[:, 0], pred_joints_np[:, 1], pred_joints_np[:, 2],
+                    c='magenta', marker='o', s=50, edgecolors='k', label='Pred Joints')
+        ax2.legend()
         
         # 3. Overlay of both point clouds
         ax3 = fig.add_subplot(133, projection='3d')
         ax3.scatter(target_points[:, 0], target_points[:, 1], target_points[:, 2], 
-                   c='blue', marker='.', s=1, alpha=0.5, label='Target')
+                   c='blue', marker='.', s=1, alpha=0.5, label='Target PC')
         ax3.scatter(pred_points[:, 0], pred_points[:, 1], pred_points[:, 2], 
-                   c='red', marker='.', s=1, alpha=0.5, label='Predicted')
-        ax3.set_title('Overlay of Point Clouds')
+                   c='red', marker='.', s=1, alpha=0.5, label='Predicted PC')
+        # Plot both GT and predicted joints on the overlay
+        ax3.scatter(gt_joints[:, 0], gt_joints[:, 1], gt_joints[:, 2],
+                    c='cyan', marker='o', s=50, edgecolors='k', label='GT Joints')
+        ax3.scatter(pred_joints_np[:, 0], pred_joints_np[:, 1], pred_joints_np[:, 2],
+                    c='magenta', marker='X', s=50, edgecolors='k', label='Pred Joints') # Use 'X' for predicted here for distinction
+        ax3.set_title('Overlay of Point Clouds and Joints')
         ax3.legend()
         
         # Set view parameters for all subplots to be the same
@@ -642,8 +711,12 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
             'joint_rot': 1.0,
             'betas': 1.0,
             'trans': 1.0,
-            'log_beta_scales': 1.0
+            'log_beta_scales': 1.0,
+            'joints': 1.0
         }
+    # Ensure 'joints' key exists in weights if not None, for consistent param_losses initialization
+    elif 'joints' not in weights:
+        weights['joints'] = 1.0
     
     # Create a SMAL3DFitter for computing chamfer loss
     smal_fitter = load_smil_model(batch_size=1, device=device)
@@ -658,8 +731,10 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
     history = {
         'train_loss': [],
         'val_loss': [],
-        'param_losses': {key: [] for key in weights.keys()},
-        'chamfer_loss': []
+        'param_losses': {key: [] for key in weights.keys()}, # This will now include 'joints' if it's in weights.
+        'chamfer_loss': [],
+        'train_joint_loc_loss': [], # For unweighted average joint location loss during training
+        'val_joint_loc_loss': []   # For unweighted average joint location loss during validation
     }
     
     # Training loop
@@ -668,8 +743,10 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
     for epoch in range(num_epochs):
         model.train()
         train_loss = 0.0
-        param_losses = {key: 0.0 for key in weights.keys()}
+        param_losses = {key: 0.0 for key in weights.keys()} # Initializes all keys from weights, including 'joints'
         chamfer_losses = 0.0
+        # joint_location_losses accumulator is for the unweighted sum over the epoch, to be averaged.
+        current_epoch_train_joint_loc_loss_sum = 0.0
 
         if regenerate_training_every > 0 and epoch > 0 and epoch % regenerate_training_every == 0:
             train_loader.dataset.generate_dataset(regenerate=True)
@@ -689,21 +766,39 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
             # Compute MSE loss for each parameter group
             mse_loss = 0.0
             for key in weights.keys():
+                if key == 'joints': 
+                    continue # Skip 'joints' key here, handled separately
                 if key in pred_params and key in param_tensors:
                     param_loss = F.mse_loss(pred_params[key], param_tensors[key])
                     weighted_loss = weights[key] * param_loss
                     mse_loss += weighted_loss
                     param_losses[key] += weighted_loss.item()
             
-            # Compute chamfer distance loss between predicted and input point clouds
-            if chamfer_weight > 0:
-                cd_loss = compute_chamfer_loss(smal_fitter, pred_params, point_clouds, device=device)
-                chamfer_losses += cd_loss.item()
+            loss = mse_loss # Initial loss is MSE part
+
+            # Compute chamfer distance loss and joint location loss
+            cd_loss = torch.tensor(0.0, device=device) # Initialize cd_loss
+            joint_loc_loss = torch.tensor(0.0, device=device) # Initialize joint_loc_loss
+
+            if chamfer_weight > 0 or weights.get('joints', 0.0) > 0:
+                # compute_mesh_and_joint_losses now returns cd_loss and joint_loc_loss
+                current_cd_loss, current_joint_loc_loss = compute_mesh_and_joint_losses(
+                    smal_fitter, pred_params, point_clouds, param_tensors['joints'], device=device
+                )
                 
-                # Combine losses
-                loss = mse_loss + chamfer_weight * cd_loss
-            else:
-                loss = mse_loss
+                if chamfer_weight > 0:
+                    cd_loss = current_cd_loss
+                    chamfer_losses += cd_loss.item()
+                    loss += chamfer_weight * cd_loss
+                
+                if weights.get('joints', 0.0) > 0:
+                    joint_loc_loss = current_joint_loc_loss
+                    # param_losses['joints'] accumulates the WEIGHTED loss component for 'joints'
+                    param_losses['joints'] += (weights['joints'] * joint_loc_loss).item()
+                    # current_epoch_train_joint_loc_loss_sum accumulates the UNWEIGHTED loss for averaging
+                    current_epoch_train_joint_loc_loss_sum += joint_loc_loss.item()
+
+                    loss += weights['joints'] * joint_loc_loss
             
             # Backward pass and optimization
             loss.backward()
@@ -718,13 +813,12 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
             
             # Log progress
             if (i + 1) % log_interval == 0:
+                log_msg = f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(train_loader)}], Total Loss: {loss.item():.4f}, SMIL Param MSE Loss: {mse_loss.item():.4f}'
                 if chamfer_weight > 0:
-                    print(f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(train_loader)}], '
-                          f'MSE Loss: {mse_loss.item():.4f}, Chamfer Loss: {cd_loss.item():.4f}, '
-                          f'Total Loss: {loss.item():.4f}')
-                else:
-                    print(f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(train_loader)}], '
-                          f'Loss: {loss.item():.4f}')
+                    log_msg += f', Chamfer Loss: {cd_loss.item():.4f}'
+                if weights.get('joints', 0.0) > 0:
+                    log_msg += f', JointLoc Loss: {joint_loc_loss.item():.4f}'
+                print(log_msg)
         
         # Average loss for the epoch
         train_loss /= len(train_loader)
@@ -732,11 +826,18 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
             param_losses[key] /= len(train_loader)
         if chamfer_weight > 0:
             chamfer_losses /= len(train_loader)
-        
+        if weights.get('joints', 0.0) > 0:
+            # joint_location_losses /= len(train_loader) # This was averaging the last batch's loss.
+            # Instead, average the sum accumulated over the epoch:
+            avg_epoch_train_joint_loc_loss = current_epoch_train_joint_loc_loss_sum / len(train_loader)
+            history['train_joint_loc_loss'].append(avg_epoch_train_joint_loc_loss)
+
         # Validation
         model.eval()
         val_loss = 0.0
         val_chamfer_loss = 0.0
+        # val_joint_loc_loss_epoch accumulator is for the unweighted sum over the validation epoch
+        current_epoch_val_joint_loc_loss_sum = 0.0
         
         with torch.no_grad():
             for point_clouds, param_dicts in val_loader:
@@ -748,47 +849,60 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
                 pred_params = model(point_clouds)
                 
                 # Compute MSE loss
-                mse_loss = 0.0
+                mse_loss_val = 0.0
                 for key in weights.keys():
+                    if key == 'joints': continue # Skip 'joints' key here, handled separately
                     if key in pred_params and key in param_tensors:
                         param_loss = F.mse_loss(pred_params[key], param_tensors[key])
-                        mse_loss += weights[key] * param_loss
+                        mse_loss_val += weights[key] * param_loss
                 
-                # Compute chamfer distance loss
+                current_val_total_loss = mse_loss_val
+
+                cd_loss_val, joint_loc_loss_val = compute_mesh_and_joint_losses(
+                    smal_fitter, pred_params, point_clouds, param_tensors['joints'], device=device
+                )
                 if chamfer_weight > 0:
-                    cd_loss = compute_chamfer_loss(smal_fitter, pred_params, point_clouds, device=device)
-                    val_chamfer_loss += cd_loss.item()
-                    
-                    # Combine losses
-                    loss = mse_loss + chamfer_weight * cd_loss
-                else:
-                    loss = mse_loss
+                    cd_loss_val = cd_loss_val
+                    val_chamfer_loss += cd_loss_val.item()
+                    current_val_total_loss += chamfer_weight * cd_loss_val
+
+                if weights.get('joints', 0.0) > 0:
+                    joint_loc_loss_val = joint_loc_loss_val
+                    # current_epoch_val_joint_loc_loss_sum accumulates UNWEIGHTED loss
+                    current_epoch_val_joint_loc_loss_sum += joint_loc_loss_val.item()
+                    current_val_total_loss += weights['joints'] * joint_loc_loss_val
                 
-                val_loss += loss.item()
+                val_loss += current_val_total_loss.item()
         
         # Average validation loss
         val_loss /= len(val_loader)
         if chamfer_weight > 0:
             val_chamfer_loss /= len(val_loader)
-        
+        if weights.get('joints', 0.0) > 0:
+            # val_joint_loc_loss_epoch /= len(val_loader)
+            # Instead, average the sum accumulated over the epoch:
+            avg_epoch_val_joint_loc_loss = current_epoch_val_joint_loc_loss_sum / len(val_loader)
+            history['val_joint_loc_loss'].append(avg_epoch_val_joint_loc_loss)
+
         # Update scheduler
         scheduler.step(val_loss)
         
         # Update training history
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
-        for key in param_losses:
+        for key in param_losses: # param_losses now includes 'joints' if active
             history['param_losses'][key].append(param_losses[key])
         if chamfer_weight > 0:
             history['chamfer_loss'].append(chamfer_losses)
-        
+
         # Print progress
+        print_msg = f'Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}'
         if chamfer_weight > 0:
-            print(f'Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, '
-                  f'Train Chamfer Loss: {chamfer_losses:.4f}, Val Loss: {val_loss:.4f}, '
-                  f'Val Chamfer Loss: {val_chamfer_loss:.4f}')
-        else:
-            print(f'Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
+            print_msg += f', Train Chamfer: {chamfer_losses:.4f}, Val Chamfer: {val_chamfer_loss:.4f}'
+        if weights.get('joints', 0.0) > 0:
+            # Use the correctly averaged values from history for printing
+            print_msg += f', Train JointLoc: {history["train_joint_loc_loss"][-1]:.4f}, Val JointLoc: {history["val_joint_loc_loss"][-1]:.4f}'
+        print(print_msg)
         
         # Visualize validation results at specified intervals
         if (epoch + 1) % vis_interval == 0 or epoch == 0 or epoch == num_epochs - 1:
@@ -867,6 +981,20 @@ def plot_training_history(history, save_dir='plots'):
         plt.grid(True)
         plt.savefig(os.path.join(save_dir, 'chamfer_loss.png'))
         plt.close()
+
+    # Plot joint location loss if available
+    if history.get('train_joint_loc_loss') and history.get('val_joint_loc_loss'): # Check if keys exist and have data
+        plt.figure(figsize=(10, 6))
+        plt.plot(history['train_joint_loc_loss'], label='Train Joint Location Loss')
+        if history.get('val_joint_loc_loss'): # Plot val if available
+             plt.plot(history['val_joint_loc_loss'], label='Validation Joint Location Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Joint Location Loss (Unweighted)')
+        plt.legend()
+    plt.grid(True)
+    plt.savefig(os.path.join(save_dir, 'joint_location_loss.png'))
+    plt.close()
 
 
 # ----------------------- MODEL EVALUATION AND VISUALIZATION ----------------------- #
@@ -1049,9 +1177,9 @@ def parse_args():
                        help='Random seed (default: 0)')
     parser.add_argument('--train-samples', type=int, default=1000,
                        help='Number of training samples (default: 1000)')
-    parser.add_argument('--val-samples', type=int, default=100,
+    parser.add_argument('--val-samples', type=int, default=10,
                        help='Number of validation samples (default: 100)')
-    parser.add_argument('--test-samples', type=int, default=100,
+    parser.add_argument('--test-samples', type=int, default=10,
                        help='Number of test samples (default: 100)')
     parser.add_argument('--num-points', type=int, default=3000,
                        help='Number of points in each point cloud (default: 3000)')
@@ -1063,7 +1191,7 @@ def parse_args():
                        help='Disable parameter normalization (default: False, i.e., normalization is enabled)')
     parser.add_argument('--device', type=str, default=None,
                        help="Device to use for training (e.g., 'cpu', 'cuda', 'cuda:0'). Default: 'cuda' if available, else 'cpu'.")
-    parser.add_argument('--noise-std', type=float, default=0.001,
+    parser.add_argument('--noise-std', type=float, default=0.01,
                        help='Standard deviation of Gaussian noise for point cloud augmentation (default: 0.01)')
     parser.add_argument('--dropout-prob', type=float, default=0.05,
                        help='Probability of dropping points during augmentation (default: 0.1)')
@@ -1156,15 +1284,16 @@ def main():
         'joint_rot': 0.5,
         'betas': 0.5,
         'trans': 0.0001,
-        'log_beta_scales': 0.1 if config.ALLOW_LIMB_SCALING else 0.0
+        'log_beta_scales': 0.1 if config.ALLOW_LIMB_SCALING else 0.0,
+        'joints': 1.0
     }
     
     # Set chamfer loss weight
-    chamfer_weight = 1.0  # Adjust this weight as needed
+    chamfer_weight = 1.0
     
     # Train the model
     trained_model, history = train_model(model, train_loader, val_loader, num_epochs=num_epochs, 
-                                          lr=0.0001, device=device, weights=loss_weights,
+                                          lr=0.001, device=device, weights=loss_weights,
                                           chamfer_weight=chamfer_weight, vis_interval=vis_interval,
                                           regenerate_training_every=args.regenerate_training_every,
                                           gradient_clip_val=1.0)
