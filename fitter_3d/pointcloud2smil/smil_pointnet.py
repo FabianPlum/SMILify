@@ -725,7 +725,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
     optimizer = optim.Adam(model.parameters(), lr=lr)
     
     # Initialize scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
     
     # Initialize training history
     history = {
@@ -775,6 +775,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
                     param_losses[key] += weighted_loss.item()
             
             loss = mse_loss # Initial loss is MSE part
+            SMIL_mse_loss = mse_loss.clone().detach()  # Store SMIL parameterMSE loss separately
 
             # Compute chamfer distance loss and joint location loss
             cd_loss = torch.tensor(0.0, device=device) # Initialize cd_loss
@@ -813,7 +814,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
             
             # Log progress
             if (i + 1) % log_interval == 0:
-                log_msg = f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(train_loader)}], Total Loss: {loss.item():.4f}, SMIL Param MSE Loss: {mse_loss.item():.4f}'
+                log_msg = f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(train_loader)}], Total Loss: {loss.item():.4f}, SMIL Param MSE Loss: {SMIL_mse_loss.item():.4f}'
                 if chamfer_weight > 0:
                     log_msg += f', Chamfer Loss: {cd_loss.item():.4f}'
                 if weights.get('joints', 0.0) > 0:
