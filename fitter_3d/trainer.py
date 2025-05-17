@@ -134,43 +134,85 @@ class SMAL3DFitter(nn.Module):
         self.deform_verts = nn.Parameter(torch.zeros(batch_size, *self.smal_model.v_template.shape).to(device),
                                          requires_grad=True)
 
-    def get_joint_scales(self):
+    def get_joint_scales(self, log_beta_scales_arg=None):
         """
         Compute the final scale for each joint taking into account the kinematic chain.
         A joint's scale is influenced by its own scale parameters and all its parents.
+        
+        Args:
+            log_beta_scales_arg (optional): Tensor of shape (batch_size, n_joints, 3) 
+                                            to use instead of self.log_beta_scales.
         """
+        current_log_beta_scales = log_beta_scales_arg if log_beta_scales_arg is not None else self.log_beta_scales
         # Start with base scales from log_beta_scales
-        joint_scales = torch.exp(self.log_beta_scales)  # Convert from log space
+        joint_scales = torch.exp(current_log_beta_scales)  # Convert from log space
         
         # For each joint
         for joint_idx in range(self.n_joints):
             parent_idx = self.kintree_table[0, joint_idx]
             
             # If this joint has a parent (parent_idx != joint_idx)
-            if parent_idx != joint_idx:
+            # and the parent_idx is valid (within bounds of joint_scales)
+            if parent_idx != joint_idx and parent_idx < joint_scales.shape[1]:
                 # Accumulate parent's scale
-                joint_scales[:, joint_idx] *= joint_scales[:, parent_idx]
+                joint_scales[:, joint_idx] = joint_scales[:, joint_idx] * joint_scales[:, parent_idx]
         
         return joint_scales
 
-    def forward(self):
-        # Get accumulated joint scales
-        joint_scales = self.get_joint_scales()
+    def forward(self, betas=None, global_rot=None, joint_rot=None, trans=None, 
+                log_beta_scales=None, deform_verts=None):
+        """
+        Forward pass for the SMAL model.
+        Can accept optional parameters to override the internal nn.Parameter attributes.
+
+        Args:
+            betas (optional): Shape parameters, tensor of shape (batch_size, N_BETAS).
+            global_rot (optional): Global rotation in axis-angle, tensor of shape (batch_size, 3).
+            joint_rot (optional): Joint rotations in axis-angle, tensor of shape (batch_size, N_POSE, 3).
+            trans (optional): Global translation, tensor of shape (batch_size, 3).
+            log_beta_scales (optional): Logarithm of joint scales, tensor of shape (batch_size, n_joints, 3).
+            deform_verts (optional): Vertex offsets, tensor of shape (batch_size, n_template_verts, 3).
+
+        Returns:
+            verts: Predicted vertices, tensor of shape (batch_size, n_verts, 3).
+        """
         
-        # Reshape to match expected format: batch_size x num_joints x 3
-        betas_logscale = self.log_beta_scales.reshape(self.batch_size, -1, 3)
+        # Determine which parameters to use (passed argument or self.attribute)
+        _betas = betas if betas is not None else self.betas
+        _global_rot = global_rot if global_rot is not None else self.global_rot
+        _joint_rot = joint_rot if joint_rot is not None else self.joint_rot
+        _trans = trans if trans is not None else self.trans
+        # Use provided log_beta_scales if available, otherwise use the internal one.
+        # This will be passed to get_joint_scales and directly to smal_model if needed.
+        _log_beta_scales_to_use = log_beta_scales if log_beta_scales is not None else self.log_beta_scales
+        _deform_verts = deform_verts if deform_verts is not None else self.deform_verts
+
+        # The original get_joint_scales uses self.log_beta_scales.
+        # We don't need joint_scales for the smal_model call directly,
+        # as smal_model itself handles the betas_logscale.
+        # The get_joint_scales method itself is not directly used in the smal_model call here,
+        # but it's good practice to make it consistent if it were to be used externally
+        # or if smal_model's interface changes.
+        # For the current self.smal_model call, we pass _log_beta_scales_to_use directly.
         
+        # The SMAL model expects betas_logscale to be of shape (batch_size, n_joints, 3).
+        # self.log_beta_scales is already initialized with this shape.
+        # If log_beta_scales is passed as an argument, it should also conform to this shape.
+        # The reshape operation in the original code was:
+        # `betas_logscale = self.log_beta_scales.reshape(self.batch_size, -1, 3)`
+        # This is effectively a no-op if self.log_beta_scales is already (bs, n_joints, 3).
+
         verts, joints, Rs, v_shaped = self.smal_model(
-            self.betas,
+            _betas,
             torch.cat([
-                self.global_rot.unsqueeze(1),
-                self.joint_rot], dim=1),
-            betas_logscale=betas_logscale)  # Pass properly shaped tensor
+                _global_rot.unsqueeze(1), # _global_rot is (bs, 3) -> (bs, 1, 3)
+                _joint_rot], dim=1),      # _joint_rot is (bs, N_POSE, 3)
+            betas_logscale=_log_beta_scales_to_use)  # Pass the determined log_beta_scales
 
-        verts = verts + self.trans.unsqueeze(1)
-        joints = joints + self.trans.unsqueeze(1)
+        verts = verts + _trans.unsqueeze(1) # _trans is (bs, 3) -> (bs, 1, 3)
+        joints = joints + _trans.unsqueeze(1)
 
-        verts += self.deform_verts
+        verts = verts + _deform_verts # _deform_verts is (bs, n_template_verts, 3)
 
         return verts
 
@@ -329,11 +371,11 @@ class Stage:
                 target_verts,  # target points
                 src_sdf,  # source SDF values
                 target_sdf,  # target SDF values
-                k=10,  # number of nearest neighbors
+                k=50,  # number of nearest neighbors
                 batch_reduction="mean",
                 point_reduction="mean",
                 norm=2,
-                single_directional=True,
+                single_directional=False,
                 visualize=visualize_now,
                 output_dir=vis_dir,
                 title=f"{self.name}_iteration{iteration}",
