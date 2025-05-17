@@ -20,6 +20,7 @@ output/
 3D_model_prep/measurements/
 sdf_batch_output/
 sample_output/
+plots/
 
 # unless specifically added, ignore videos
 *.mp4
