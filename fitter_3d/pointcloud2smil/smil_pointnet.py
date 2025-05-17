@@ -1153,8 +1153,8 @@ def main():
     # Define loss weights
     loss_weights = {
         'global_rot': 0.0001,
-        'joint_rot': 0.05,
-        'betas': 0.1,
+        'joint_rot': 0.5,
+        'betas': 0.5,
         'trans': 0.0001,
         'log_beta_scales': 0.1 if config.ALLOW_LIMB_SCALING else 0.0
     }
