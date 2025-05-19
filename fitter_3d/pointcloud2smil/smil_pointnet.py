@@ -8,6 +8,8 @@ The model is trained on randomly sampled SMIL configurations and their resulting
 References:
 - PointNet: https://arxiv.org/pdf/1612.00593
 - PointNet implementation: https://github.com/fxia22/pointnet.pytorch
+- PointNet++: https://arxiv.org/pdf/1706.02413
+- PointNet++ implementation: https://github.com/yanx27/Pointnet_Pointnet2_pytorch
 """
 
 import os
@@ -34,7 +36,7 @@ import config
 from fitter_3d.pointcloud2smil.sample_smil_model import load_smil_model, generate_random_parameters
 
 # Import PointNet++ utilities
-from fitter_3d.pointcloud2smil.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import PointNetSetAbstractionMsg, PointNetSetAbstraction
+from fitter_3d.pointcloud2smil.pointnet2_utils import PointNetSetAbstractionMsg, PointNetSetAbstraction
 
 
 
