@@ -19,20 +19,23 @@ import torch.optim as optim
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
-import matplotlib.pyplot as plt
-from pytorch3d.loss import chamfer_distance
 import argparse
-import pickle
+import matplotlib.pyplot as plt
+
+from pytorch3d.loss import chamfer_distance
+from pytorch3d.ops import sample_points_from_meshes
+from pytorch3d.structures import Meshes
 from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, rotation_6d_to_matrix, matrix_to_rotation_6d
 
 # Add the parent directory to the path to import modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import config
-from fitter_3d.trainer import SMAL3DFitter
 from fitter_3d.pointcloud2smil.sample_smil_model import load_smil_model, generate_random_parameters
-from pytorch3d.ops import sample_points_from_meshes
-from pytorch3d.structures import Meshes
+
+# Import PointNet++ utilities
+from fitter_3d.pointcloud2smil.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import PointNetSetAbstractionMsg, PointNetSetAbstraction
+
 
 
 # ----------------------- PARAMETER NORMALIZATION UTILS ----------------------- #
@@ -260,7 +263,7 @@ class SMILPointNet(nn.Module):
             self.output_size = 3 + self.n_pose * 6 + self.n_betas + 3 + n_scales
             
             # Recreate the final layer with the right output size
-            self.fc3 = nn.Linear(256, self.output_size).to(self.fc1.weight.device)
+            self.fc3 = nn.Linear(256, self.output_size).to(self.fc2.weight.device)
 
     def forward(self, x):
         """
@@ -325,6 +328,140 @@ class SMILPointNet(nn.Module):
             n_joints = n_scales // 3
             params['log_beta_scales'] = x[:, scales_start:].reshape(batch_size, n_joints, 3)
         
+        return params
+
+
+class SMILPointNet2(nn.Module):
+    """
+    PointNet++ based architecture for SMIL parameter estimation.
+    
+    This network takes a 3D point cloud as input and outputs the SMIL parameters
+    (joint rotations, shape parameters, and other relevant parameters).
+    It uses a PointNet++ (MSG) backbone for feature extraction.
+    """
+    def __init__(self, num_points=5000, n_betas=20, n_pose=34, include_scales=True):
+        """
+        Initialize the SMILPointNet2 model.
+        
+        Args:
+            num_points: Number of points in the input point cloud (not directly used by PointNet++ backbone, but kept for consistency)
+            n_betas: Number of shape parameters in the SMIL model
+            n_pose: Number of pose parameters in the SMIL model (excluding global rotation)
+            include_scales: Whether to predict joint scales
+        """
+        super(SMILPointNet2, self).__init__()
+        
+        self.n_betas = n_betas
+        self.n_pose = n_pose
+        self.include_scales = include_scales
+
+        # PointNet++ (MSG) backbone
+        # Assuming input point cloud has 3 channels (x, y, z) and no other features (e.g., normals)
+        # in_channel for sa1 is 0 because we pass None for the 'points' (features) tensor,
+        # and PointNetSetAbstraction will use the 3 xyz coordinates.
+        self.sa1 = PointNetSetAbstractionMsg(512, [0.1, 0.2, 0.4], [16, 32, 128], 0, [[32, 32, 64], [64, 64, 128], [64, 96, 128]])
+        # Output of sa1 has 64+128+128 = 320 channels
+        self.sa2 = PointNetSetAbstractionMsg(128, [0.2, 0.4, 0.8], [32, 64, 128], 320, [[64, 64, 128], [128, 128, 256], [128, 128, 256]])
+        # Output of sa2 has 128+256+256 = 640 channels
+        self.sa3 = PointNetSetAbstraction(None, None, None, 640 + 3, [256, 512, 1024], True)
+        # Output of sa3 is a global feature of 1024 channels
+        
+        # Regression head for SMIL parameters (same as SMILPointNet)
+        n_scales = 0 # Will be set later if include_scales=True
+        self.output_size = 3 + n_pose * 6 + n_betas + 3 + n_scales # global_rot(3) + joint_rot_6d(n_pose*6) + betas(n_betas) + trans(3)
+        
+        self.fc1 = nn.Linear(1024, 512)
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, self.output_size) # Placeholder, will be updated by set_joint_scales_size if needed
+        
+        self.bn1_reg = nn.BatchNorm1d(512) # Renamed to avoid conflict if TNet bn names were similar
+        self.bn2_reg = nn.BatchNorm1d(256)
+        
+        self.dropout = nn.Dropout(p=0.3)
+
+    def set_joint_scales_size(self, n_joints):
+        """
+        Set the number of joint scales parameters based on the SMIL model.
+        This must be called before using the model if include_scales=True.
+        
+        Args:
+            n_joints: Number of joints in the SMIL model
+        """
+        if self.include_scales:
+            n_scales = n_joints * 3  # 3 scale parameters per joint
+            # global_rot(3) + joint_rot_6d(n_pose*6) + betas(n_betas) + trans(3) + scales(n_scales)
+            self.output_size = 3 + self.n_pose * 6 + self.n_betas + 3 + n_scales
+            
+            # Recreate the final layer with the right output size
+            self.fc3 = nn.Linear(256, self.output_size).to(self.fc2.weight.device)
+
+    def forward(self, x):
+        """
+        Forward pass of the network.
+        
+        Args:
+            x: Input point cloud of shape (batch_size, num_points, 3)
+            
+        Returns:
+            SMIL parameters as a dictionary with keys:
+                'global_rot', 'joint_rot', 'betas', 'trans', 'log_beta_scales' (if include_scales=True)
+        """
+        batch_size = x.size()[0]
+        
+        # Transpose to (batch_size, 3, num_points) for PointNet++ layers
+        xyz = x.transpose(2, 1)
+        norm = None # Assuming no input normals for SMIL data
+
+        # PointNet++ backbone
+        l1_xyz, l1_points = self.sa1(xyz, norm)
+        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
+        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points) # l3_points is (batch_size, 1024, 1)
+        
+        # Global feature vector
+        feat = l3_points.view(batch_size, 1024)
+        
+        # Fully connected layers for regression
+        feat = F.relu(self.bn1_reg(self.fc1(feat)))
+        feat = F.relu(self.bn2_reg(self.fc2(feat)))
+        feat = self.dropout(feat)
+        output_params = self.fc3(feat)
+        
+        # Parse the output into different parameter groups
+        params = {}
+        
+        # Global rotation (axis-angle, 3 values)
+        params['global_rot'] = output_params[:, :3]
+        
+        # Joint rotations (n_pose * 6 values for 6D representation)
+        joint_rot_start = 3
+        joint_rot_end = joint_rot_start + self.n_pose * 6
+        params['joint_rot'] = output_params[:, joint_rot_start:joint_rot_end].reshape(batch_size, self.n_pose, 6)
+        
+        # Shape parameters (n_betas values)
+        betas_start = joint_rot_end
+        betas_end = betas_start + self.n_betas
+        params['betas'] = output_params[:, betas_start:betas_end]
+        
+        # Translation (3 values)
+        trans_start = betas_end
+        trans_end = trans_start + 3
+        params['trans'] = output_params[:, trans_start:trans_end]
+        
+        # Joint scales (optional, n_joints * 3 values)
+        if self.include_scales:
+            scales_start = trans_end
+            # Calculate n_scales based on remaining output size
+            # This assumes set_joint_scales_size has been called to set self.output_size correctly
+            current_n_scales = self.output_size - scales_start 
+            if current_n_scales > 0 : # Ensure there are scale parameters
+                n_joints = current_n_scales // 3
+                if n_joints > 0 : # Ensure n_joints is valid
+                    params['log_beta_scales'] = output_params[:, scales_start:].reshape(batch_size, n_joints, 3)
+                else: # Handle case where scales are expected but n_joints is 0 (should not happen if configured correctly)
+                    params['log_beta_scales'] = torch.empty(batch_size, 0, 3, device=output_params.device)
+            else: # Handle case where scales are included but output_size doesn't account for them
+                 params['log_beta_scales'] = torch.empty(batch_size, 0, 3, device=output_params.device)
+
         return params
 
 
@@ -671,7 +808,6 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
         faces = smal_fitter.faces
         
         # Create a mesh object
-        from pytorch3d.structures import Meshes
         pred_mesh = Meshes(verts=verts, faces=faces)
         
         # Sample points from the predicted mesh
@@ -787,8 +923,12 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
     smal_fitter = load_smil_model(batch_size=1, device=device)
     
     # Initialize optimizer
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    
+    optimizer = optim.Adam(model.parameters(), 
+                           lr=lr,
+                           betas=(0.9, 0.999),
+                           eps=1e-08,
+                           weight_decay=1e-4)
+
     # Initialize scheduler
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
     
@@ -1249,10 +1389,8 @@ def parse_args():
                        help='Number of training samples (default: 1000)')
     parser.add_argument('--val-samples', type=int, default=100,
                        help='Number of validation samples (default: 100)')
-    parser.add_argument('--test-samples', type=int, default=100,
-                       help='Number of test samples (default: 100)')
-    parser.add_argument('--num-points', type=int, default=3000,
-                       help='Number of points in each point cloud (default: 3000)')
+    parser.add_argument('--num-points', type=int, default=2048,
+                       help='Number of points in each point cloud (default: 2048)')
     parser.add_argument('--vis-interval', type=int, default=10,
                        help='Visualization interval in epochs (default: 10)')
     parser.add_argument('--no-multiprocessing', action='store_true',
@@ -1293,7 +1431,6 @@ def main():
     # Parameters from command-line arguments
     num_train_samples = args.train_samples
     num_val_samples = args.val_samples
-    num_test_samples = args.test_samples
     num_points = args.num_points
     batch_size = args.batch_size
     num_epochs = args.epochs
@@ -1323,10 +1460,7 @@ def main():
     val_dataset = SMILDataset(num_samples=num_val_samples, num_points=num_points, 
                               device=device, seed=seed+1, normalize=normalize,
                               noise_std=noise_std, dropout_prob=dropout_prob, augment=False)  # No augmentation for validation
-    test_dataset = SMILDataset(num_samples=num_test_samples, num_points=num_points, 
-                               device=device, seed=seed+2, normalize=normalize,
-                               noise_std=noise_std, dropout_prob=dropout_prob, augment=False)  # No augmentation for testing
-    
+
     # Get model configuration
     n_betas = train_dataset.n_betas
     n_pose = train_dataset.n_pose
@@ -1335,11 +1469,17 @@ def main():
     # Create data loaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=num_workers)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
     
     # Create model
-    model = SMILPointNet(num_points=num_points, n_betas=n_betas, n_pose=n_pose, 
-                        include_scales=config.ALLOW_LIMB_SCALING).to(device)
+    # Choose one of the models below:
+    
+    # Original SMILPointNet (PointNet-based)
+    # model = SMILPointNet(num_points=num_points, n_betas=n_betas, n_pose=n_pose, 
+    #                     include_scales=config.ALLOW_LIMB_SCALING).to(device)
+    
+    # New SMILPointNet2 (PointNet++ based)
+    model = SMILPointNet2(num_points=num_points, n_betas=n_betas, n_pose=n_pose, 
+                         include_scales=config.ALLOW_LIMB_SCALING).to(device)
     
     # Set joint scales size if using scales
     if config.ALLOW_LIMB_SCALING:
@@ -1350,12 +1490,12 @@ def main():
     
     # Define loss weights
     loss_weights = {
-        'global_rot': 0.0001,
-        'joint_rot': 0.5,
-        'betas': 0.5,
-        'trans': 0.0001,
+        'global_rot': 0.001,
+        'joint_rot': 0.2,
+        'betas': 0.2,
+        'trans': 0.001,
         'log_beta_scales': 0.1 if config.ALLOW_LIMB_SCALING else 0.0,
-        'joints': 1.0
+        'joints': 0.5
     }
     
     # Set chamfer loss weight
