@@ -61,13 +61,13 @@ def generate_random_parameters(smal_fitter, seed=None):
     
     # Generate random shape parameters (betas)
     # Sample from a normal distribution around the mean betas with a variance of 1
-    random_betas = smal_fitter.mean_betas.unsqueeze(0) + 2.0 * torch.randn(batch_size, smal_fitter.n_betas, device=device)
+    random_betas = smal_fitter.mean_betas.unsqueeze(0) + 1.0 * torch.randn(batch_size, smal_fitter.n_betas, device=device)
     smal_fitter.betas.data = random_betas
     
     # Generate random joint rotations (in axis-angle representation)
     # Keep rotation small to avoid extreme poses
     # Each joint has 3 rotation parameters (axis-angle)
-    random_joint_rot = 0.3 * torch.randn(batch_size, config.N_POSE, 3, device=device)
+    random_joint_rot = 0.2 * torch.randn(batch_size, config.N_POSE, 3, device=device)
     smal_fitter.joint_rot.data = random_joint_rot
     
     # Set global rotation to zero (as the root joint can rotate and this would make the rotation ambiguous)
@@ -83,7 +83,7 @@ def generate_random_parameters(smal_fitter, seed=None):
     if config.ALLOW_LIMB_SCALING:
         # Generate random scales for all joints except root (index 0)
         random_scales = torch.zeros(batch_size, smal_fitter.n_joints, 3, device=device)
-        random_scales[:, 1:] = 0.2 * torch.randn(batch_size, smal_fitter.n_joints - 1, 3, device=device)
+        random_scales[:, 1:] = 0.1 * torch.randn(batch_size, smal_fitter.n_joints - 1, 3, device=device)
         smal_fitter.log_beta_scales.data = random_scales
 
     return smal_fitter
