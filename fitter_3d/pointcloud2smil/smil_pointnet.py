@@ -205,7 +205,7 @@ class SMILPointNet(nn.Module):
     This network takes a 3D point cloud as input and outputs the SMIL parameters
     (joint rotations, shape parameters, and other relevant parameters).
     """
-    def __init__(self, num_points=5000, n_betas=20, n_pose=34, include_scales=True):
+    def __init__(self, num_points=5000, n_betas=20, n_pose=34, include_scales=True, rotation_representation='6d'):
         """
         Initialize the SMILPointNet model.
         
@@ -214,6 +214,7 @@ class SMILPointNet(nn.Module):
             n_betas: Number of shape parameters in the SMIL model
             n_pose: Number of pose parameters in the SMIL model (excluding global rotation)
             include_scales: Whether to predict joint scales
+            rotation_representation: '6d' or 'axis_angle' for joint rotations
         """
         super(SMILPointNet, self).__init__()
         
@@ -221,6 +222,7 @@ class SMILPointNet(nn.Module):
         self.n_betas = n_betas
         self.n_pose = n_pose
         self.include_scales = include_scales
+        self.rotation_representation = rotation_representation
         
         # Feature extraction network
         self.stn = TNet(k=3)  # Spatial transformer network for input point cloud
@@ -232,20 +234,26 @@ class SMILPointNet(nn.Module):
         self.bn2 = nn.BatchNorm1d(128)
         self.bn3 = nn.BatchNorm1d(1024)
         
-        # Regression head for SMIL parameters
-        
         # Calculate total output size
-        # - Global rotation (3)
-        # - Joint rotations (n_pose * 6)
+        # - Global rotation (3 for axis-angle, 6 for 6D)
+        # - Joint rotations (n_pose * 6 for 6D, n_pose * 3 for axis_angle)
         # - Shape parameters (n_betas)
         # - Translation (3)
         # - Joint scales (optional, different for each model)
         n_scales = 0  # Will be set later if include_scales=True
-        self.output_size = 3 + n_pose * 6 + n_betas + 3 + n_scales
+        
+        if self.rotation_representation == '6d':
+            self.global_rot_dim = 6
+            self.joint_rot_dim = self.n_pose * 6
+        else:  # axis_angle
+            self.global_rot_dim = 3
+            self.joint_rot_dim = self.n_pose * 3
+            
+        self.output_size = self.global_rot_dim + self.joint_rot_dim + n_betas + 3 + n_scales
         
         self.fc1 = nn.Linear(1024, 512)
         self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, self.output_size)
+        self.fc3 = nn.Linear(256, self.output_size) # Initialize fc3
         
         self.bn4 = nn.BatchNorm1d(512)
         self.bn5 = nn.BatchNorm1d(256)
@@ -262,7 +270,7 @@ class SMILPointNet(nn.Module):
         """
         if self.include_scales:
             n_scales = n_joints * 3  # 3 scale parameters per joint
-            self.output_size = 3 + self.n_pose * 6 + self.n_betas + 3 + n_scales
+            self.output_size = self.global_rot_dim + self.joint_rot_dim + self.n_betas + 3 + n_scales
             
             # Recreate the final layer with the right output size
             self.fc3 = nn.Linear(256, self.output_size).to(self.fc2.weight.device)
@@ -305,13 +313,17 @@ class SMILPointNet(nn.Module):
         # Parse the output into different parameter groups
         params = {}
         
-        # Global rotation (axis-angle, 3 values)
-        params['global_rot'] = x[:, :3]
+        # Global rotation (axis-angle or 6D)
+        params['global_rot'] = x[:, :self.global_rot_dim]
         
-        # Joint rotations (n_pose * 6 values for 6D representation)
-        joint_rot_start = 3
-        joint_rot_end = joint_rot_start + self.n_pose * 6
-        params['joint_rot'] = x[:, joint_rot_start:joint_rot_end].reshape(batch_size, self.n_pose, 6)
+        # Joint rotations (n_pose * 6 values for 6D representation or n_pose * 3 for axis_angle)
+        joint_rot_start = self.global_rot_dim
+        if self.rotation_representation == '6d':
+            joint_rot_end = joint_rot_start + self.n_pose * 6
+            params['joint_rot'] = x[:, joint_rot_start:joint_rot_end].reshape(batch_size, self.n_pose, 6)
+        else: # axis_angle
+            joint_rot_end = joint_rot_start + self.n_pose * 3
+            params['joint_rot'] = x[:, joint_rot_start:joint_rot_end].reshape(batch_size, self.n_pose, 3)
         
         # Shape parameters (n_betas values)
         betas_start = joint_rot_end
@@ -341,7 +353,7 @@ class SMILPointNet2(nn.Module):
     (joint rotations, shape parameters, and other relevant parameters).
     It uses a PointNet++ (MSG) backbone for feature extraction.
     """
-    def __init__(self, num_points=5000, n_betas=20, n_pose=34, include_scales=True):
+    def __init__(self, num_points=5000, n_betas=20, n_pose=34, include_scales=True, rotation_representation='6d'):
         """
         Initialize the SMILPointNet2 model.
         
@@ -350,12 +362,14 @@ class SMILPointNet2(nn.Module):
             n_betas: Number of shape parameters in the SMIL model
             n_pose: Number of pose parameters in the SMIL model (excluding global rotation)
             include_scales: Whether to predict joint scales
+            rotation_representation: '6d' or 'axis_angle' for joint rotations
         """
         super(SMILPointNet2, self).__init__()
         
         self.n_betas = n_betas
         self.n_pose = n_pose
         self.include_scales = include_scales
+        self.rotation_representation = rotation_representation
 
         # PointNet++ (MSG) backbone
         # Assuming input point cloud has 3 channels (x, y, z) and no other features (e.g., normals)
@@ -368,9 +382,16 @@ class SMILPointNet2(nn.Module):
         self.sa3 = PointNetSetAbstraction(None, None, None, 640 + 3, [256, 512, 1024], True)
         # Output of sa3 is a global feature of 1024 channels
         
+        if self.rotation_representation == '6d':
+            self.global_rot_dim = 6
+            self.joint_rot_dim = self.n_pose * 6
+        else: # axis_angle
+            self.global_rot_dim = 3
+            self.joint_rot_dim = self.n_pose * 3
+            
         # Regression head for SMIL parameters (same as SMILPointNet)
         n_scales = 0 # Will be set later if include_scales=True
-        self.output_size = 3 + n_pose * 6 + n_betas + 3 + n_scales # global_rot(3) + joint_rot_6d(n_pose*6) + betas(n_betas) + trans(3)
+        self.output_size = self.global_rot_dim + self.joint_rot_dim + self.n_betas + 3 + n_scales # global_rot + joint_rot_dim + betas(n_betas) + trans(3)
         
         self.fc1 = nn.Linear(1024, 512)
         self.fc2 = nn.Linear(512, 256)
@@ -391,8 +412,8 @@ class SMILPointNet2(nn.Module):
         """
         if self.include_scales:
             n_scales = n_joints * 3  # 3 scale parameters per joint
-            # global_rot(3) + joint_rot_6d(n_pose*6) + betas(n_betas) + trans(3) + scales(n_scales)
-            self.output_size = 3 + self.n_pose * 6 + self.n_betas + 3 + n_scales
+            # global_rot + joint_rot_dim + betas(n_betas) + trans(3) + scales(n_scales)
+            self.output_size = self.global_rot_dim + self.joint_rot_dim + self.n_betas + 3 + n_scales
             
             # Recreate the final layer with the right output size
             self.fc3 = nn.Linear(256, self.output_size).to(self.fc2.weight.device)
@@ -431,13 +452,17 @@ class SMILPointNet2(nn.Module):
         # Parse the output into different parameter groups
         params = {}
         
-        # Global rotation (axis-angle, 3 values)
-        params['global_rot'] = output_params[:, :3]
+        # Global rotation (axis-angle or 6D)
+        params['global_rot'] = output_params[:, :self.global_rot_dim]
         
-        # Joint rotations (n_pose * 6 values for 6D representation)
-        joint_rot_start = 3
-        joint_rot_end = joint_rot_start + self.n_pose * 6
-        params['joint_rot'] = output_params[:, joint_rot_start:joint_rot_end].reshape(batch_size, self.n_pose, 6)
+        # Joint rotations (n_pose * 6 or n_pose * 3 values for 6D or axis-angle representation)
+        joint_rot_start = self.global_rot_dim
+        if self.rotation_representation == '6d':
+            joint_rot_end = joint_rot_start + self.n_pose * 6
+            params['joint_rot'] = output_params[:, joint_rot_start:joint_rot_end].reshape(batch_size, self.n_pose, 6)
+        else: # axis_angle
+            joint_rot_end = joint_rot_start + self.n_pose * 3
+            params['joint_rot'] = output_params[:, joint_rot_start:joint_rot_end].reshape(batch_size, self.n_pose, 3)
         
         # Shape parameters (n_betas values)
         betas_start = joint_rot_end
@@ -476,7 +501,7 @@ class SMILDataset(Dataset):
     Generates random SMIL configurations and their corresponding point clouds.
     """
     def __init__(self, num_samples=1000, num_points=5000, device='cuda', shape_family=-1, seed=None, param_stats=None, normalize=True,
-                 noise_std=0.01, dropout_prob=0.1, augment=True):
+                 noise_std=0.01, dropout_prob=0.1, augment=True, rotation_representation='6d', exclude_rot_from_norm=False):
         """
         Initialize the dataset.
         
@@ -491,6 +516,8 @@ class SMILDataset(Dataset):
             noise_std: Standard deviation of Gaussian noise to add (default: 0.01)
             dropout_prob: Probability of dropping points (default: 0.1)
             augment: Whether to apply augmentation during training (default: True)
+            rotation_representation: '6d' or 'axis_angle' for joint rotations
+            exclude_rot_from_norm: Whether to exclude rotations from normalization (default: False)
         """
         self.num_samples = num_samples
         self.num_points = num_points
@@ -502,6 +529,8 @@ class SMILDataset(Dataset):
         self.dropout_prob = dropout_prob
         self.augment = augment
         self.seed = seed
+        self.rotation_representation = rotation_representation
+        self.exclude_rot_from_norm = exclude_rot_from_norm
         
         # Load the SMIL model on CPU for data generation to avoid issues with DataLoader workers
         self.smal_fitter = load_smil_model(batch_size=1, device='cpu')
@@ -557,12 +586,19 @@ class SMILDataset(Dataset):
             self.point_clouds.append(point_cloud[0].cpu().detach())
             
             # Store the parameters (explicitly detach each tensor)
+            global_rot_aa = self.smal_fitter.global_rot[0].cpu().detach() # Axis-Angle Shape: (1, 3)
             joint_rot_aa = self.smal_fitter.joint_rot[0].cpu().detach() # Axis-Angle Shape: (N_POSE, 3)
-            joint_rot_6d = axis_angle_to_rotation_6d(joint_rot_aa) # 6D rot matrix Shape: (N_POSE, 6)
             
+            if self.rotation_representation == '6d':
+                global_rot_param = axis_angle_to_rotation_6d(global_rot_aa) # 6D rot matrix Shape: (1,6)
+                joint_rot_param = axis_angle_to_rotation_6d(joint_rot_aa) # 6D rot matrix Shape: (N_POSE, 6)
+            else: # axis_angle
+                global_rot_param = global_rot_aa
+                joint_rot_param = joint_rot_aa
+                
             params = {
-                'global_rot': self.smal_fitter.global_rot[0].cpu().detach(),
-                'joint_rot': joint_rot_6d,
+                'global_rot': global_rot_param, # Store potentially 6D global_rot
+                'joint_rot': joint_rot_param,
                 'betas': self.smal_fitter.betas[0].cpu().detach(),
                 'trans': self.smal_fitter.trans[0].cpu().detach(),
                 'log_beta_scales': self.smal_fitter.log_beta_scales[0].cpu().detach(),
@@ -573,6 +609,9 @@ class SMILDataset(Dataset):
         # Compute stats if not provided
         if self.param_stats is None:
             keys = ['global_rot', 'joint_rot', 'betas', 'trans', 'log_beta_scales', 'joints']
+            if self.exclude_rot_from_norm:
+                keys_to_exclude_from_stats = ['global_rot', 'joint_rot']
+                keys = [k for k in keys if k not in keys_to_exclude_from_stats]
             self.param_stats = compute_param_stats(self.parameters, keys)
         
         # Normalize all parameters if requested
@@ -662,10 +701,19 @@ def compute_mesh_and_joint_losses(smal_fitter, params, input_pointclouds, gt_joi
     
     for i in range(batch_size):
         current_betas = params['betas'][i].unsqueeze(0).to(device)
-        current_global_rot = params['global_rot'][i].unsqueeze(0).to(device)
+        current_global_rot_param = params['global_rot'][i].unsqueeze(0).to(device)
         # current_joint_rot is 6D, convert to axis-angle for smal_fitter
-        current_joint_rot_6d = params['joint_rot'][i].unsqueeze(0).to(device)
-        current_joint_rot_aa = rotation_6d_to_axis_angle(current_joint_rot_6d)
+        current_joint_rot_param = params['joint_rot'][i].unsqueeze(0).to(device)
+        if current_global_rot_param.shape[-1] == 6: # Check if global_rot is 6D
+            current_global_rot_aa = rotation_6d_to_axis_angle(current_global_rot_param)
+        else: # Assumed to be axis-angle (shape[-1] == 3)
+            current_global_rot_aa = current_global_rot_param
+
+        if current_joint_rot_param.shape[-1] == 6: # Check if joint_rot is 6D
+            current_joint_rot_aa = rotation_6d_to_axis_angle(current_joint_rot_param)
+        else: # Assumed to be axis-angle (shape[-1] == 3)
+            current_joint_rot_aa = current_joint_rot_param
+            
         current_trans = params['trans'][i].unsqueeze(0).to(device)
         
         current_log_beta_scales = None
@@ -680,7 +728,7 @@ def compute_mesh_and_joint_losses(smal_fitter, params, input_pointclouds, gt_joi
         # SMAL3DFitter.forward now returns verts and joints when return_joints=True
         verts, joints_single_sample = smal_fitter.forward( # New unpacking for 2 return values
             betas=current_betas,
-            global_rot=current_global_rot,
+            global_rot=current_global_rot_aa, # Use axis-angle representation
             joint_rot=current_joint_rot_aa, # Use axis-angle representation
             trans=current_trans,
             log_beta_scales=current_log_beta_scales,
@@ -695,7 +743,7 @@ def compute_mesh_and_joint_losses(smal_fitter, params, input_pointclouds, gt_joi
             print(f"  Verts shape: {verts.shape}, nans: {torch.isnan(verts).sum().item()}, infs: {torch.isinf(verts).sum().item()}")
             # Optionally print parameters that led to this
             print("  Parameters leading to NaN/Inf verts:")
-            for p_name, p_val in [("betas", current_betas), ("global_rot", current_global_rot), 
+            for p_name, p_val in [("betas", current_betas), ("global_rot", current_global_rot_aa), 
                                   ("joint_rot", current_joint_rot_aa), ("trans", current_trans),
                                   ("log_beta_scales", current_log_beta_scales if current_log_beta_scales is not None else "None (using fitter default)")]:
                 if isinstance(p_val, torch.Tensor):
@@ -784,10 +832,20 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
 
         # Apply predicted parameters to SMAL fitter to generate mesh AND JOINTS
         viz_betas = denorm_pred_params['betas'][0].unsqueeze(0).to(device)
-        viz_global_rot = denorm_pred_params['global_rot'][0].unsqueeze(0).to(device)
+        
+        viz_global_rot_param = denorm_pred_params['global_rot'][0].unsqueeze(0).to(device)
+        if viz_global_rot_param.shape[-1] == 6: # Check if global_rot is 6D
+            viz_global_rot_aa = rotation_6d_to_axis_angle(viz_global_rot_param)
+        else: # Assumed axis-angle
+            viz_global_rot_aa = viz_global_rot_param
+            
         # viz_joint_rot is 6D, convert to axis-angle for smal_fitter
-        viz_joint_rot_6d = denorm_pred_params['joint_rot'][0].unsqueeze(0).to(device)
-        viz_joint_rot_aa = rotation_6d_to_axis_angle(viz_joint_rot_6d)
+        viz_joint_rot_param = denorm_pred_params['joint_rot'][0].unsqueeze(0).to(device)
+        if viz_joint_rot_param.shape[-1] == 6:
+            viz_joint_rot_aa = rotation_6d_to_axis_angle(viz_joint_rot_param)
+        else: # Assumed axis-angle
+            viz_joint_rot_aa = viz_joint_rot_param
+            
         viz_trans = denorm_pred_params['trans'][0].unsqueeze(0).to(device)
         
         viz_log_beta_scales = None
@@ -799,7 +857,7 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
         # smal_fitter.forward returns verts, joints, Rs, v_shaped -> now verts, joints when return_joints=True
         verts, pred_joints = smal_fitter.forward( # New unpacking for 2 return values
             betas=viz_betas,
-            global_rot=viz_global_rot,
+            global_rot=viz_global_rot_aa, # Use axis-angle representation
             joint_rot=viz_joint_rot_aa, # Use axis-angle representation
             trans=viz_trans,
             log_beta_scales=viz_log_beta_scales,
@@ -882,8 +940,7 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
 
 def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device='cuda', 
                 weights=None, chamfer_weight=0.1, checkpoint_dir='checkpoints', 
-                vis_interval=5, log_interval=10, regenerate_training_every=-1,
-                gradient_clip_val=1.0):
+                vis_interval=5, log_interval=10, regenerate_training_every=-1):
     """
     Train the SMIL PointNet model.
     
@@ -900,7 +957,6 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
         vis_interval: Interval (in epochs) for visualizing validation results
         log_interval: Interval for logging training progress
         regenerate_training_every_epoch: Whether to regenerate training data every epoch
-        gradient_clip_val: Value for gradient clipping.
     Returns:
         Trained model and training history
     """
@@ -971,18 +1027,32 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
             pred_params = model(point_clouds)
             
             # Compute MSE loss for each parameter group
-            mse_loss = 0.0
+            current_batch_mse_loss = 0.0 # Renamed from mse_loss to avoid confusion in this scope
             for key in weights.keys():
                 if key == 'joints': 
-                    continue # Skip 'joints' key here, handled separately
+                    continue # Skip 'joints' key here, handled by compute_mesh_and_joint_losses if active
+                
                 if key in pred_params and key in param_tensors:
-                    param_loss = F.mse_loss(pred_params[key], param_tensors[key])
+                    if model.rotation_representation == '6d' and (key == 'global_rot' or key == 'joint_rot'):
+                        # Convert 6D representation to rotation matrices
+                        R_pred = rotation_6d_to_matrix(pred_params[key])
+                        R_gt = rotation_6d_to_matrix(param_tensors[key])
+                        
+                        # Compute Frobenius norm of the difference
+                        # For global_rot (batch_size, 3, 3) -> norm gives (batch_size)
+                        # For joint_rot (batch_size, n_pose, 3, 3) -> norm gives (batch_size, n_pose)
+                        matrix_diff_loss = torch.norm(R_pred - R_gt, p='fro', dim=(-2, -1))
+                        param_loss = matrix_diff_loss.mean() # Mean over batch and/or poses
+                    else:
+                        # Use MSE for other parameters or non-6d rotations
+                        param_loss = F.mse_loss(pred_params[key], param_tensors[key])
+                    
                     weighted_loss = weights[key] * param_loss
-                    mse_loss += weighted_loss
-                    param_losses[key] += weighted_loss.item()
+                    current_batch_mse_loss += weighted_loss
+                    param_losses[key] += weighted_loss.item() # Accumulate weighted loss for history
             
-            loss = mse_loss # Initial loss is MSE part
-            SMIL_mse_loss = mse_loss.clone().detach()  # Store SMIL parameterMSE loss separately
+            loss = current_batch_mse_loss # Initial loss is from parameters (MSE or matrix norm)
+            SMIL_param_loss_value = current_batch_mse_loss.clone().detach() # Store SMIL parameter loss separately
 
             # Compute chamfer distance loss and joint location loss
             cd_loss = torch.tensor(0.0, device=device) # Initialize cd_loss
@@ -1011,17 +1081,13 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
             # Backward pass and optimization
             loss.backward()
             
-            # Gradient Clipping
-            if gradient_clip_val > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_val)
-            
             optimizer.step()
             
             train_loss += loss.item()
             
             # Log progress
             if (i + 1) % log_interval == 0:
-                log_msg = f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(train_loader)}], Total Loss: {loss.item():.4f}, SMIL Param MSE Loss: {SMIL_mse_loss.item():.4f}'
+                log_msg = f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(train_loader)}], Total Loss: {loss.item():.4f}, SMIL Param Loss (MSE/Matrix): {SMIL_param_loss_value.item():.4f}'
                 if chamfer_weight > 0:
                     log_msg += f', Chamfer Loss: {cd_loss.item():.4f}'
                 if weights.get('joints', 0.0) > 0:
@@ -1057,14 +1123,20 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
                 pred_params = model(point_clouds)
                 
                 # Compute MSE loss
-                mse_loss_val = 0.0
+                current_batch_val_mse_loss = 0.0 # Renamed
                 for key in weights.keys():
                     if key == 'joints': continue # Skip 'joints' key here, handled separately
                     if key in pred_params and key in param_tensors:
-                        param_loss = F.mse_loss(pred_params[key], param_tensors[key])
-                        mse_loss_val += weights[key] * param_loss
+                        if model.rotation_representation == '6d' and (key == 'global_rot' or key == 'joint_rot'):
+                            R_pred_val = rotation_6d_to_matrix(pred_params[key])
+                            R_gt_val = rotation_6d_to_matrix(param_tensors[key])
+                            matrix_diff_loss_val = torch.norm(R_pred_val - R_gt_val, p='fro', dim=(-2,-1))
+                            param_loss_val = matrix_diff_loss_val.mean()
+                        else:
+                            param_loss_val = F.mse_loss(pred_params[key], param_tensors[key])
+                        current_batch_val_mse_loss += weights[key] * param_loss_val
                 
-                current_val_total_loss = mse_loss_val
+                current_val_total_loss = current_batch_val_mse_loss
 
                 cd_loss_val, joint_loc_loss_val = compute_mesh_and_joint_losses(
                     smal_fitter, pred_params, point_clouds, param_tensors['joints'], device=device
@@ -1223,6 +1295,8 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
     # Get param_stats and normalization flag from the test_loader's dataset
     param_stats = test_loader.dataset.param_stats
     normalize = getattr(test_loader.dataset, 'normalize', True)
+    dataset_rotation_representation = test_loader.dataset.rotation_representation
+    model_rotation_representation = model.rotation_representation
 
     with torch.no_grad():
         # Get a batch from the test loader
@@ -1248,10 +1322,18 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
             
             # Apply true parameters to SMAL fitter
             true_betas_i = true_params['betas'][i].unsqueeze(0).to(device)
-            true_global_rot_i = true_params['global_rot'][i].unsqueeze(0).to(device)
-            # true_joint_rot_i is 6D from dataset, convert to axis-angle for smal_fitter
-            true_joint_rot_6d_i = true_params['joint_rot'][i].unsqueeze(0).to(device)
-            true_joint_rot_aa_i = rotation_6d_to_axis_angle(true_joint_rot_6d_i)
+            true_global_rot_param_i = true_params['global_rot'][i].unsqueeze(0).to(device)
+            if dataset_rotation_representation == '6d': # Check dataset's global_rot format
+                true_global_rot_aa_i = rotation_6d_to_axis_angle(true_global_rot_param_i)
+            else: # axis_angle
+                true_global_rot_aa_i = true_global_rot_param_i
+                
+            true_joint_rot_param_i = true_params['joint_rot'][i].unsqueeze(0).to(device)
+            if dataset_rotation_representation == '6d':
+                true_joint_rot_aa_i = rotation_6d_to_axis_angle(true_joint_rot_param_i)
+            else: # axis_angle
+                true_joint_rot_aa_i = true_joint_rot_param_i
+                
             true_trans_i = true_params['trans'][i].unsqueeze(0).to(device)
             true_log_beta_scales_i = None
             if 'log_beta_scales' in true_params and true_params['log_beta_scales'] is not None:
@@ -1261,7 +1343,7 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
             with torch.no_grad(): # Keep no_grad for visualization/evaluation if not training
                 true_verts = smal_fitter.forward(
                     betas=true_betas_i,
-                    global_rot=true_global_rot_i,
+                    global_rot=true_global_rot_aa_i, # Use axis-angle
                     joint_rot=true_joint_rot_aa_i, # Use axis-angle
                     trans=true_trans_i,
                     log_beta_scales=true_log_beta_scales_i
@@ -1284,10 +1366,18 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
             
             # Apply predicted parameters to SMAL fitter
             pred_betas_i = pred_params['betas'][i].unsqueeze(0).to(device)
-            pred_global_rot_i = pred_params['global_rot'][i].unsqueeze(0).to(device)
-            # pred_joint_rot_i is 6D from model, convert to axis-angle for smal_fitter
-            pred_joint_rot_6d_i = pred_params['joint_rot'][i].unsqueeze(0).to(device)
-            pred_joint_rot_aa_i = rotation_6d_to_axis_angle(pred_joint_rot_6d_i)
+            pred_global_rot_param_i = pred_params['global_rot'][i].unsqueeze(0).to(device)
+            if model_rotation_representation == '6d': # Check model's global_rot format
+                pred_global_rot_aa_i = rotation_6d_to_axis_angle(pred_global_rot_param_i)
+            else: # axis_angle
+                pred_global_rot_aa_i = pred_global_rot_param_i
+                
+            pred_joint_rot_param_i = pred_params['joint_rot'][i].unsqueeze(0).to(device)
+            if model_rotation_representation == '6d':
+                pred_joint_rot_aa_i = rotation_6d_to_axis_angle(pred_joint_rot_param_i)
+            else: # axis_angle
+                pred_joint_rot_aa_i = pred_joint_rot_param_i
+                
             pred_trans_i = pred_params['trans'][i].unsqueeze(0).to(device)
             pred_log_beta_scales_i = None
             if 'log_beta_scales' in pred_params and pred_params['log_beta_scales'] is not None:
@@ -1297,7 +1387,7 @@ def visualize_predictions(model, test_loader, device, smal_fitter, num_samples=5
             with torch.no_grad(): # Keep no_grad for visualization/evaluation if not training
                 pred_verts = smal_fitter.forward(
                     betas=pred_betas_i,
-                    global_rot=pred_global_rot_i,
+                    global_rot=pred_global_rot_aa_i, # Use axis-angle
                     joint_rot=pred_joint_rot_aa_i, # Use axis-angle
                     trans=pred_trans_i,
                     log_beta_scales=pred_log_beta_scales_i
@@ -1409,6 +1499,10 @@ def parse_args():
                        help='Disable point cloud augmentation (default: False, i.e., augmentation is enabled)')
     parser.add_argument('--regenerate_training_every', type=int, default=-1,
                        help='Regenerate training data every N epochs (default: -1, i.e., never)')
+    parser.add_argument('--rotation-representation', type=str, default='6d', choices=['6d', 'axis_angle'],
+                        help='Rotation representation for global and joint rotations (default: 6d)')
+    parser.add_argument('--exclude-rot-from-norm', action='store_true',
+                        help='Exclude rotations (global_rot, joint_rot) from parameter normalization (default: False)')
     return parser.parse_args()
 
 def main():
@@ -1455,13 +1549,21 @@ def main():
         print(f"  - Gaussian noise std: {noise_std}")
         print(f"  - Point dropout probability: {dropout_prob}")
     
+    # Rotation normalization flag
+    exclude_rot_from_norm = args.exclude_rot_from_norm
+    print(f"Exclude rotations from normalization: {exclude_rot_from_norm}")
+
     # Create datasets
     train_dataset = SMILDataset(num_samples=num_train_samples, num_points=num_points, 
                                 device=device, seed=seed, normalize=normalize,
-                                noise_std=noise_std, dropout_prob=dropout_prob, augment=augment)
+                                noise_std=noise_std, dropout_prob=dropout_prob, augment=augment,
+                                rotation_representation=args.rotation_representation,
+                                exclude_rot_from_norm=exclude_rot_from_norm)
     val_dataset = SMILDataset(num_samples=num_val_samples, num_points=num_points, 
                               device=device, seed=seed+1, normalize=normalize,
-                              noise_std=noise_std, dropout_prob=dropout_prob, augment=False)  # No augmentation for validation
+                              noise_std=noise_std, dropout_prob=dropout_prob, augment=False,
+                              rotation_representation=args.rotation_representation,
+                              exclude_rot_from_norm=exclude_rot_from_norm)  # No augmentation for validation
 
     # Get model configuration
     n_betas = train_dataset.n_betas
@@ -1481,7 +1583,7 @@ def main():
     
     # New SMILPointNet2 (PointNet++ based)
     model = SMILPointNet2(num_points=num_points, n_betas=n_betas, n_pose=n_pose, 
-                         include_scales=config.ALLOW_LIMB_SCALING).to(device)
+                         include_scales=config.ALLOW_LIMB_SCALING, rotation_representation=args.rotation_representation).to(device)
     
     # Set joint scales size if using scales
     if config.ALLOW_LIMB_SCALING:
@@ -1493,11 +1595,11 @@ def main():
     # Define loss weights
     loss_weights = {
         'global_rot': 0.001,
-        'joint_rot': 0.2,
+        'joint_rot': 0.5,
         'betas': 0.2,
         'trans': 0.001,
         'log_beta_scales': 0.1 if config.ALLOW_LIMB_SCALING else 0.0,
-        'joints': 0.5
+        'joints': 0.25
     }
     
     # Set chamfer loss weight
@@ -1507,8 +1609,7 @@ def main():
     trained_model, history = train_model(model, train_loader, val_loader, num_epochs=num_epochs, 
                                           lr=0.001, device=device, weights=loss_weights,
                                           chamfer_weight=chamfer_weight, vis_interval=vis_interval,
-                                          regenerate_training_every=args.regenerate_training_every,
-                                          gradient_clip_val=1.0)
+                                          regenerate_training_every=args.regenerate_training_every)
     
     # Plot training history
     plot_training_history(history)
