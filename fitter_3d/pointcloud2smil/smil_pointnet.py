@@ -768,8 +768,15 @@ def compute_mesh_and_joint_losses(smal_fitter, params, input_pointclouds, gt_joi
     # Compute Chamfer distance loss
     chamfer_loss, _ = chamfer_distance(predicted_pointclouds, input_pointclouds)
     
-    # Compute Joint location loss
-    joint_loc_loss = F.mse_loss(predicted_joints_batch, gt_joints)
+    # Compute Joint location loss relative to the root joint (index 0)
+    # Root joint is assumed to be at index 0
+    root_joint_pred = predicted_joints_batch[:, 0:1, :]  # Keep dim for broadcasting
+    root_joint_gt = gt_joints[:, 0:1, :]              # Keep dim for broadcasting
+    
+    relative_pred_joints = predicted_joints_batch - root_joint_pred
+    relative_gt_joints = gt_joints - root_joint_gt
+    
+    joint_loc_loss = F.mse_loss(relative_pred_joints, relative_gt_joints)
 
     return chamfer_loss, joint_loc_loss # Return both losses
 
