@@ -1565,12 +1565,12 @@ def main():
                                 device=device, seed=seed, normalize=normalize,
                                 noise_std=noise_std, dropout_prob=dropout_prob, augment=augment,
                                 rotation_representation=args.rotation_representation,
-                                exclude_rot_from_norm=exclude_rot_from_norm)
+                                exclude_rot_from_norm=True) # Changed to True
     val_dataset = SMILDataset(num_samples=num_val_samples, num_points=num_points, 
                               device=device, seed=seed+1, normalize=normalize,
                               noise_std=noise_std, dropout_prob=dropout_prob, augment=False,
                               rotation_representation=args.rotation_representation,
-                              exclude_rot_from_norm=exclude_rot_from_norm)  # No augmentation for validation
+                              exclude_rot_from_norm=True)  # Changed to True, no augmentation for validation
 
     # Get model configuration
     n_betas = train_dataset.n_betas
@@ -1601,16 +1601,16 @@ def main():
     
     # Define loss weights
     loss_weights = {
-        'global_rot': 0.001,
-        'joint_rot': 0.5,
+        'global_rot': 0.1,  # Increased
+        'joint_rot': 0.2,  # Decreased
         'betas': 0.2,
-        'trans': 0.001,
+        'trans': 0.1,  # Increased
         'log_beta_scales': 0.1 if config.ALLOW_LIMB_SCALING else 0.0,
-        'joints': 0.25
+        'joints': 0.5 # Increased joint location loss weight
     }
     
     # Set chamfer loss weight
-    chamfer_weight = 1.0
+    chamfer_weight = 10.0 # Increased
     
     # Train the model
     trained_model, history = train_model(model, train_loader, val_loader, num_epochs=num_epochs, 
