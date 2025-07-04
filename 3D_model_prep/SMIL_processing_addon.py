@@ -242,21 +242,113 @@ def export_y_axis_vertices_to_npy(obj, filepath):
 
 
 def find_nearest_neighbors(vertices, joint_locations, n):
+    """
+    Find the n nearest vertices to each joint location and calculate their influence 
+    (here referred to as weights) based on inverse distance.
+    
+    This function is used to compute a joint regressor matrix by finding the closest 
+    vertices to each joint and assigning weights based on inverse distance. The weights 
+    are normalized so they sum to 1 for each joint, creating a smooth influence region
+    around each joint location.
+    
+    Args:
+        vertices (np.ndarray): Array of vertex positions with shape (num_vertices, 3)
+        joint_locations (np.ndarray): Array of joint positions with shape (num_joints, 3)
+        n (int): Number of nearest vertices to consider for each joint
+        
+    Returns:
+        tuple: (nearest_indices, nearest_weights)
+            - nearest_indices (np.ndarray): Indices of n nearest vertices for each joint,
+              shape (num_joints, n)
+            - nearest_weights (np.ndarray): Normalized weights for each nearest vertex,
+              shape (num_joints, n), where weights sum to 1 for each joint
+    """
     nearest_indices = np.zeros((len(joint_locations), n), dtype=np.int32)
     nearest_weights = np.zeros((len(joint_locations), n), dtype=np.float32)
     for i, joint_loc in enumerate(joint_locations):
         distances = np.linalg.norm(vertices - joint_loc, axis=1)
+        # get indices of n nearest vertices (argpartition is also fast as not the whole array is sorted here)
         nearest_indices[i] = np.argpartition(distances, n)[:n]
+        # get the distances (slice array) of the n nearest vertices
         nearest_distances = distances[nearest_indices[i]]
+        # the weight is the inverse of the distance
         weights = 1.0 / nearest_distances
+        # normalize the weights so they sum to 1
         weights /= weights.sum()
         nearest_weights[i] = weights
     return nearest_indices, nearest_weights
 
 
+def find_boundary_weights(vertices, joint_locations, n):
+    """
+    Find the weights of the vertices that are associated with both the current joint and the parent joint.
+    """
+    pass
+
+
+
+def check_J_regressor_alignment(J_regressor, joints, vertices, joint_names=None):
+    """
+    This function computes the discrepancy between the user-defined joint locations (joints)
+    and the regressed joint locations from the mesh vertices and J_regressor
+    
+    Args:
+        J_regressor (np.ndarray): (j,v) matrix, containing the weights of each vertex contributing to the location of each joint.
+                                 This is just a weighted linear combination of vertex positions.
+        joints (np.ndarray): (j,3) matrix, containing the x,y,z coordinates of each joint
+        vertices (np.ndarray): (v,3) matrix, containing the x,y,z coordinates of each mesh vertex
+        joint_names (list, optional): List of joint names for descriptive output
+        
+    Returns:
+        tuple: (regressed_joints, discrepancies, mean_discrepancy)
+            - regressed_joints (np.ndarray): The regressed joint positions using J_regressor
+            - discrepancies (np.ndarray): Euclidean distances between original and regressed joints
+            - mean_discrepancy (float): Mean discrepancy across all joints
+    """
+    # Compute regressed joint positions: J_regressor @ vertices
+    # J_regressor shape: (j, v), vertices shape: (v, 3)
+    # Result shape: (j, 3)
+    regressed_joints = np.matmul(J_regressor, vertices)
+    
+    # Compute discrepancies (Euclidean distances)
+    discrepancies = np.linalg.norm(joints - regressed_joints, axis=1)
+    
+    # Calculate model size for relative discrepancy reporting
+    # Get the bounding box of the model
+    min_coords = np.min(vertices, axis=0)
+    max_coords = np.max(vertices, axis=0)
+    model_size = max_coords - min_coords
+    longest_axis = np.max(model_size)
+    
+    # Compute relative discrepancies (as percentage of longest model axis)
+    relative_discrepancies = discrepancies / longest_axis * 100
+    
+    # Compute mean discrepancy
+    mean_discrepancy = np.mean(discrepancies)
+    mean_relative_discrepancy = np.mean(relative_discrepancies)
+    
+    # Print detailed information
+    print(f"\nJ_regressor alignment check:")
+    print(f"  Original joints shape: {joints.shape}")
+    print(f"  Regressed joints shape: {regressed_joints.shape}")
+    print(f"  Model size: {model_size}")
+    print(f"  Longest model axis: {longest_axis:.6f}")
+    print(f"  Mean absolute discrepancy: {mean_discrepancy:.6f}")
+    print(f"  Mean relative discrepancy: {mean_relative_discrepancy:.3f}% of model size")
+    print(f"  Max relative discrepancy: {np.max(relative_discrepancies):.3f}% of model size")
+    print(f"  Min relative discrepancy: {np.min(relative_discrepancies):.3f}% of model size")
+    
+    # Print individual joint discrepancies
+    for i in range(len(joints)):
+        joint_name = joint_names[i] if joint_names and i < len(joint_names) else f"Joint_{i}"
+        print(f"  {joint_name}: absolute = {discrepancies[i]:.6f}, relative = {relative_discrepancies[i]:.3f}%")
+    
+    return regressed_joints, discrepancies, mean_discrepancy
+
+
 @ensure_mesh
 # @ensure_armature (careful, the mesh is the active object!)
-def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath=None):
+def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath=None, influence_type="inverse_distance"):
     """
     Calculate or export the joint regressor matrix.
     
@@ -272,10 +364,20 @@ def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath=None):
     vertices, _ = mesh_to_numpy(mesh_obj)
     joints = armature_obj.data.bones
     joint_locations = np.array([bone.head_local for bone in joints], dtype=np.float32)
-    nearest_indices, nearest_weights = find_nearest_neighbors(vertices, joint_locations, n)
+    if influence_type == "inverse_distance":
+        nearest_indices, nearest_weights = find_nearest_neighbors(vertices, joint_locations, n)
+    elif influence_type == "boundary_weights":
+        #nearest_indices, nearest_weights = PLACEHOLDER
+        print("Boundary weights not implemented yet")
+    else:
+        raise ValueError(f"Invalid influence type: {influence_type}")
     J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
     for i in range(len(joints)):
         J_regressor[i, nearest_indices[i]] = nearest_weights[i]
+    
+    # Check alignment between original joints and regressed joints
+    joint_names = [bone.name for bone in joints]
+    check_J_regressor_alignment(J_regressor, joint_locations, vertices, joint_names)
     
     if filepath:
         np.save(filepath, J_regressor)
