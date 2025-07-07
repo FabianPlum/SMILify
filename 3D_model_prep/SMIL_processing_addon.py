@@ -177,8 +177,10 @@ def export_vertex_groups_to_npy(obj, filepath, clean_weights=False):
         bpy.ops.object.vertex_group_clean(group_select_mode='ALL', limit=0.001)
         # Normalize weights to sum to 1.0
         bpy.ops.object.vertex_group_normalize_all(lock_active=False)
-        # Limit total number of weights per vertex
-        bpy.ops.object.vertex_group_limit_total(group_select_mode='ALL', limit=1)
+        # Limit total number of weights per vertex 
+        # Originally, this was set to 1 but then we could not use bounadries between adjacent bones
+        # to inform the joint regressor.
+        bpy.ops.object.vertex_group_limit_total(group_select_mode='ALL', limit=2)
         # Return to object mode
         bpy.ops.object.mode_set(mode='OBJECT')
 
@@ -279,11 +281,113 @@ def find_nearest_neighbors(vertices, joint_locations, n):
     return nearest_indices, nearest_weights
 
 
-def find_boundary_weights(vertices, joint_locations, n):
+def J_regressor_from_boundary_weights(vertices, joint_locations, n, kintree_table, vertex_weights,
+                                     nn_for_leaf_bones=True, debug=False):
     """
     Find the weights of the vertices that are associated with both the current joint and the parent joint.
+    As in the find_nearest_neighbors function, we use the inverse of the distance to calculate the influence of all vertices
+    meeting the boundary weights criteria and normalise their influence. 
+    This implementation should then effectively use the ring of the vertices surrounding the joint
+    to inform its placement. Using the inverese of the distance also ensures only positive weights are used.
+
+    Args:
+        vertices (np.ndarray): Array of vertex positions with shape (num_vertices, 3)
+        joint_locations (np.ndarray): Array of joint positions with shape (num_joints, 3)
+        n (int): Number of nearest vertices required to meet the boundary weights criteria, otherwise default to using the nearest_neighbors function for THAT joint
+        kintree_table (np.ndarray): Array of shape (2, num_joints) containing the parent-child relationships between joints
+        vertex_weights (np.ndarray): Array of shape (num_vertices, num_joints) containing the weights of the nearest vertices for each joint 
+
+    Returns:
+        J_regressor (np.ndarray): (j,v) matrix, containing the weights of each vertex contributing to the location of each joint.
     """
-    pass
+    J_regressor = np.zeros((len(joint_locations), len(vertices)), dtype=np.float32)
+    if debug:
+        print("vertex_weights.shape: ", vertex_weights.shape)
+        print("kintree_table.shape: ", kintree_table.shape)
+        print("joint_locations.shape: ", joint_locations.shape)
+        print("vertices.shape: ", vertices.shape)
+        print("n: ", n)
+        print("kintree_table: ", kintree_table)
+
+    # compute the nearest neighbors so we can default to using them, when conditions are not met for bounadry weights
+    nearest_indices, nearest_weights = find_nearest_neighbors(vertices, joint_locations, n)
+    # Small epsilon to avoid division by zero
+    epsilon = 1e-8
+
+    for i in range(len(joint_locations)):
+        # Find parent joint index
+        parent_indices = np.where(kintree_table[1, :] == i)[0]
+        
+        # Extract parent index (should be only one)
+        parent_index = kintree_table[0, parent_indices[0]]
+        if debug:
+            print(f"Joint {i}: parent_index = {parent_index}")
+
+        joint_index = kintree_table[1, i]
+        print(f"Joint {i}: joint_index = {joint_index}")
+        # Check if this joint has children
+        child_indices = np.where(kintree_table[0, :] == i)[0]
+        has_children = len(child_indices) > 0
+        
+        # If nn_for_leaf_bones is True and this joint has no children, use nearest neighbor approach
+        if nn_for_leaf_bones and not has_children:
+            if debug:
+                print(f"Joint {i}: Leaf joint with no children, using nearest neighbor approach")
+            J_regressor[i, nearest_indices[i]] = nearest_weights[i]
+            continue
+
+        # Check if this is a root joint
+        if parent_index == -1:
+            if debug:
+                print(f"Joint {i}: Root joint, using nearest neighbor approach")
+            J_regressor[i, nearest_indices[i]] = nearest_weights[i]
+            continue
+        
+        # Create boolean masks for parent and child weights
+        parent_mask = (vertex_weights[:, parent_index] > 0)
+        child_mask = (vertex_weights[:, i] > 0)
+        
+        # Create boundary mask where both parent and child have non-zero weights
+        boundary_mask = parent_mask & child_mask
+        
+        # Count boundary vertices
+        num_boundary_vertices = np.sum(boundary_mask)
+        if debug:
+            print(f"Joint {i}: {num_boundary_vertices} boundary vertices found")
+        
+        if num_boundary_vertices < n:
+            if debug:
+                print(f"Joint {i}: Insufficient boundary vertices ({num_boundary_vertices} < {n}), using nearest neighbor approach")
+            J_regressor[i, nearest_indices[i]] = nearest_weights[i]
+        else:
+            if debug:
+                print(f"Joint {i}: Using boundary weighting approach")
+            # Calculate distances to all vertices
+            distances = np.linalg.norm(vertices - joint_locations[i], axis=1)
+            
+            # Apply boundary mask to distances (non-boundary vertices become 0)
+            boundary_distances = distances * boundary_mask.astype(np.float32)
+            
+            # Calculate inverse weights with epsilon protection
+            inverse_weights = 1.0 / (boundary_distances + epsilon)
+            
+            # Set weights for non-boundary vertices to 0 (where boundary_distances was 0)
+            inverse_weights[boundary_distances == 0] = 0
+            
+            # Normalize weights
+            weight_sum = np.sum(inverse_weights)
+            if weight_sum > 0:
+                normalized_weights = inverse_weights / weight_sum
+            else:
+                if debug:
+                    print(f"Joint {i}: Warning - all boundary weights are zero, using nearest neighbor approach")
+                J_regressor[i, nearest_indices[i]] = nearest_weights[i]
+                continue
+            
+            # Assign to J_regressor
+            J_regressor[i, :] = normalized_weights
+
+    return J_regressor
 
 
 
@@ -348,7 +452,8 @@ def check_J_regressor_alignment(J_regressor, joints, vertices, joint_names=None)
 
 @ensure_mesh
 # @ensure_armature (careful, the mesh is the active object!)
-def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath=None, influence_type="inverse_distance"):
+def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath=None, 
+                              influence_type="inverse_distance", weights=None, kintree_table=None):
     """
     Calculate or export the joint regressor matrix.
     
@@ -364,16 +469,18 @@ def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath=None, influenc
     vertices, _ = mesh_to_numpy(mesh_obj)
     joints = armature_obj.data.bones
     joint_locations = np.array([bone.head_local for bone in joints], dtype=np.float32)
-    if influence_type == "inverse_distance":
+    if influence_type == "inverse_distance" or influence_type == None:
         nearest_indices, nearest_weights = find_nearest_neighbors(vertices, joint_locations, n)
+        J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
+
+        for i in range(len(joints)):
+            J_regressor[i, nearest_indices[i]] = nearest_weights[i]
+
     elif influence_type == "boundary_weights":
-        #nearest_indices, nearest_weights = PLACEHOLDER
-        print("Boundary weights not implemented yet")
+        J_regressor = J_regressor_from_boundary_weights(vertices, joint_locations, n, kintree_table, weights)
     else:
+        J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
         raise ValueError(f"Invalid influence type: {influence_type}")
-    J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
-    for i in range(len(joints)):
-        J_regressor[i, nearest_indices[i]] = nearest_weights[i]
     
     # Check alignment between original joints and regressed joints
     joint_names = [bone.name for bone in joints]
@@ -381,8 +488,8 @@ def export_J_regressor_to_npy(mesh_obj, armature_obj, n, filepath=None, influenc
     
     if filepath:
         np.save(filepath, J_regressor)
-        return filepath, J_regressor
-    return None, J_regressor
+
+    return J_regressor
 
 
 """
@@ -999,7 +1106,8 @@ def export_smpl_model(obj, export_path, pkl_data=None):
 
     pkl_data["kintree_table"] = export_joint_hierarchy_to_npy(armature_obj, joint_hierarchy_npy_path)[1]
     pkl_data["J"], pkl_data["J_names"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1:]
-    pkl_data["J_regressor"] = export_J_regressor_to_npy(obj, armature_obj, 20, j_regressor_npy_path)[1]
+    pkl_data["J_regressor"] = export_J_regressor_to_npy(obj, armature_obj, 10, j_regressor_npy_path, weights=pkl_data["weights"], 
+                                                        kintree_table=pkl_data["kintree_table"], influence_type="boundary_weights")
 
     # Update "shapedirs" with the content of the blendshapes
     num_vertices = len(updated_vertices)
@@ -1348,7 +1456,7 @@ def export_joint_distances(context, filepath):
     
     # Recalculate J_regressor for current mesh state
     # This ensures it works even if mesh topology has changed
-    _, J_regressor = export_J_regressor_to_npy(mesh_obj, armature, 20)
+    J_regressor = export_J_regressor_to_npy(mesh_obj, armature, 10)
     
     # Check if reference measurements are available
     smpl_tool = context.scene.smpl_tool
@@ -1669,7 +1777,7 @@ def export_mesh_measurements(context, filepath):
             joint_distances = {}
             if reference_joint_pair and reference_measurements and armature:
                 # Recalculate J_regressor for current mesh state
-                _, J_regressor = export_J_regressor_to_npy(obj, armature, 20)
+                J_regressor = export_J_regressor_to_npy(obj, armature, 10)
                 joint_names = [bone.name for bone in armature.data.bones]
                 
                 # Get indices of reference joints
