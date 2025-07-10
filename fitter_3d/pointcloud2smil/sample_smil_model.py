@@ -41,13 +41,21 @@ def load_smil_model(batch_size=1, device='cuda'):
     return smal_fitter
 
 
-def generate_random_parameters(smal_fitter, seed=None):
+def generate_random_parameters(smal_fitter, seed=None, random_dist="normal", 
+                              shape_scale=2.0, pose_scale=0.25, trans_scale=0.01, 
+                              scale_scale=0.25, global_rot_scale=0.0):
     """
-    Generate random parameters for joint rotations and shape parameters.
+    Generate random parameters for joint rotations and shape parameters with customizable scales.
     
     Args:
         smal_fitter: SMAL3DFitter object
         seed: Random seed for reproducibility
+        random_dist: Distribution type for random sampling ("normal" or "uniform")
+        shape_scale: Scale for shape parameter (betas) randomization
+        pose_scale: Scale for joint rotation randomization
+        trans_scale: Scale for translation randomization
+        scale_scale: Scale for joint scaling randomization
+        global_rot_scale: Scale for global rotation randomization
         
     Returns:
         Updated SMAL3DFitter object with random parameters
@@ -59,31 +67,36 @@ def generate_random_parameters(smal_fitter, seed=None):
     device = smal_fitter.device
     batch_size = smal_fitter.batch_size
     
+    # Helper function to generate random values based on distribution type
+    def get_random_values(size, scale=1.0):
+        if random_dist == "uniform":
+            return scale * (2.0 * torch.rand(size, device=device) - 1.0)  # Uniform between -scale and scale
+        else:  # normal distribution (default)
+            return scale * torch.randn(size, device=device)  # Normal with mean 0, std=scale
+    
     # Generate random shape parameters (betas)
-    # Sample from a normal distribution around the mean betas with a variance of 1
-    random_betas = smal_fitter.mean_betas.unsqueeze(0) + 1.0 * torch.randn(batch_size, smal_fitter.n_betas, device=device)
+    # Sample from distribution around the mean betas
+    random_betas = smal_fitter.mean_betas.unsqueeze(0) + shape_scale * get_random_values((batch_size, smal_fitter.n_betas))
     smal_fitter.betas.data = random_betas
     
     # Generate random joint rotations (in axis-angle representation)
-    # Keep rotation small to avoid extreme poses
     # Each joint has 3 rotation parameters (axis-angle)
-    random_joint_rot = 0.8 * torch.randn(batch_size, config.N_POSE, 3, device=device)
+    random_joint_rot = pose_scale * get_random_values((batch_size, config.N_POSE, 3))
     smal_fitter.joint_rot.data = random_joint_rot
     
-    # Set global rotation to zero (as the root joint can rotate and this would make the rotation ambiguous)
-    # alternatively set the root rotation to 0,0,0 and we use global rotation relative to the scene camera
-    random_global_rot = torch.zeros(batch_size, 3, device=device)
+    # Generate random global rotation
+    random_global_rot = global_rot_scale * get_random_values((batch_size, 3))
     smal_fitter.global_rot.data = random_global_rot
     
-    # Optional: Generate random translation
-    random_trans = 0.01 * torch.randn(batch_size, 3, device=device)
+    # Generate random translation
+    random_trans = trans_scale * get_random_values((batch_size, 3))
     smal_fitter.trans.data = random_trans
     
-    # Optional: Generate random log_beta_scales for joint scaling
+    # Generate random log_beta_scales for joint scaling
     if config.ALLOW_LIMB_SCALING:
         # Generate random scales for all joints except root (index 0)
         random_scales = torch.zeros(batch_size, smal_fitter.n_joints, 3, device=device)
-        random_scales[:, 1:] = 0.3 * torch.randn(batch_size, smal_fitter.n_joints - 1, 3, device=device)
+        random_scales[:, 1:] = scale_scale * get_random_values((batch_size, smal_fitter.n_joints - 1, 3))
         smal_fitter.log_beta_scales.data = random_scales
 
     return smal_fitter
