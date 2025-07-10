@@ -499,9 +499,11 @@ class SMILDataset(Dataset):
     Dataset for SMIL parameter estimation from point clouds.
     
     Generates random SMIL configurations and their corresponding point clouds.
+    Supports curriculum learning through customizable randomization scales.
     """
     def __init__(self, num_samples=1000, num_points=5000, device='cuda', shape_family=-1, seed=None, param_stats=None, normalize=True,
-                 noise_std=0.01, dropout_prob=0.1, augment=True, rotation_representation='6d', exclude_rot_from_norm=False):
+                 noise_std=0.01, dropout_prob=0.1, augment=True, rotation_representation='6d', exclude_rot_from_norm=False,
+                 shape_scale=2.0, pose_scale=0.25, trans_scale=0.01, scale_scale=0.25, global_rot_scale=0.0):
         """
         Initialize the dataset.
         
@@ -518,6 +520,11 @@ class SMILDataset(Dataset):
             augment: Whether to apply augmentation during training (default: True)
             rotation_representation: '6d' or 'axis_angle' for joint rotations
             exclude_rot_from_norm: Whether to exclude rotations from normalization (default: False)
+            shape_scale: Scale for shape parameter randomization (default: 2.0)
+            pose_scale: Scale for joint rotation randomization (default: 0.25)
+            trans_scale: Scale for translation randomization (default: 0.01)
+            scale_scale: Scale for joint scaling randomization (default: 0.25)
+            global_rot_scale: Scale for global rotation randomization (default: 0.0)
         """
         self.num_samples = num_samples
         self.num_points = num_points
@@ -531,6 +538,13 @@ class SMILDataset(Dataset):
         self.seed = seed
         self.rotation_representation = rotation_representation
         self.exclude_rot_from_norm = exclude_rot_from_norm
+        
+        # Curriculum learning parameters
+        self.shape_scale = shape_scale
+        self.pose_scale = pose_scale
+        self.trans_scale = trans_scale
+        self.scale_scale = scale_scale
+        self.global_rot_scale = global_rot_scale
         
         # Load the SMIL model on CPU for data generation to avoid issues with DataLoader workers
         self.smal_fitter = load_smil_model(batch_size=1, device='cpu')
@@ -546,7 +560,33 @@ class SMILDataset(Dataset):
         self.normalized_parameters = []
         
         print(f"Generating {self.num_samples} random SMIL configurations and point clouds...")
-        self.generate_dataset()
+        print(f"Randomization scales - Shape: {self.shape_scale}, Pose: {self.pose_scale}, Trans: {self.trans_scale}, Scale: {self.scale_scale}, Global Rot: {self.global_rot_scale}")
+        #self.generate_dataset()
+
+    def update_randomization_scales(self, shape_scale=None, pose_scale=None, trans_scale=None, 
+                                   scale_scale=None, global_rot_scale=None):
+        """
+        Update randomization scales for curriculum learning.
+        
+        Args:
+            shape_scale: New scale for shape parameter randomization
+            pose_scale: New scale for joint rotation randomization
+            trans_scale: New scale for translation randomization
+            scale_scale: New scale for joint scaling randomization
+            global_rot_scale: New scale for global rotation randomization
+        """
+        if shape_scale is not None:
+            self.shape_scale = shape_scale
+        if pose_scale is not None:
+            self.pose_scale = pose_scale
+        if trans_scale is not None:
+            self.trans_scale = trans_scale
+        if scale_scale is not None:
+            self.scale_scale = scale_scale
+        if global_rot_scale is not None:
+            self.global_rot_scale = global_rot_scale
+            
+        print(f"Updated randomization scales - Shape: {self.shape_scale}, Pose: {self.pose_scale}, Trans: {self.trans_scale}, Scale: {self.scale_scale}, Global Rot: {self.global_rot_scale}")
 
     def generate_dataset(self, regenerate=False):
         # Set random seed if provided
@@ -558,8 +598,15 @@ class SMILDataset(Dataset):
             np.random.seed(self.seed)
 
         for i in tqdm(range(self.num_samples)):
-            # Generate random parameters
-            generate_random_parameters(self.smal_fitter, seed=self.seed + i if self.seed is not None else None)
+            # Generate random parameters with current scales
+            generate_random_parameters(self.smal_fitter, 
+                                       seed=self.seed + i if self.seed is not None else None,
+                                       random_dist="uniform",
+                                       shape_scale=self.shape_scale,
+                                       pose_scale=self.pose_scale,
+                                       trans_scale=self.trans_scale,
+                                       scale_scale=self.scale_scale,
+                                       global_rot_scale=self.global_rot_scale)
             
             # Forward pass to get vertices
             with torch.no_grad():
@@ -673,6 +720,74 @@ class SMILDataset(Dataset):
         # Detach all parameter tensors
         detached_params = {key: value.detach() for key, value in params.items()}
         return point_cloud, detached_params
+
+
+# ----------------------- CURRICULUM LEARNING UTILS ----------------------- #
+
+def update_curriculum_scales(dataset, epoch, curriculum_schedule):
+    """
+    Update dataset randomization scales based on curriculum learning schedule.
+    
+    Args:
+        dataset: SMILDataset instance
+        epoch: Current training epoch
+        curriculum_schedule: Dictionary defining curriculum schedule
+    """
+    updates = {}
+    
+    for param_name, schedule in curriculum_schedule.items():
+        start_epoch = schedule.get('start_epoch', 0)
+        end_epoch = schedule.get('end_epoch', epoch)
+        start_value = schedule.get('start_value', 0.0)
+        end_value = schedule.get('end_value', 1.0)
+        schedule_type = schedule.get('schedule', 'linear')
+        
+        if epoch < start_epoch:
+            # Before curriculum starts, use start value
+            current_value = start_value
+        elif epoch >= end_epoch:
+            # After curriculum ends, use end value
+            current_value = end_value
+        else:
+            # During curriculum, interpolate between start and end values
+            progress = (epoch - start_epoch) / (end_epoch - start_epoch)
+            
+            if schedule_type == 'linear':
+                current_value = start_value + progress * (end_value - start_value)
+            elif schedule_type == 'exponential':
+                # Exponential interpolation (starts slow, accelerates)
+                current_value = start_value + (end_value - start_value) * (progress ** 2)
+            else:
+                # Default to linear
+                current_value = start_value + progress * (end_value - start_value)
+        
+        updates[param_name] = current_value
+    
+    # Update the dataset with new scales
+    if updates:
+        dataset.update_randomization_scales(**updates)
+        
+        # Regenerate dataset with new scales if we have significant changes
+        # Only regenerate if any scale changed by more than 10%
+        current_scales = {
+            'shape_scale': dataset.shape_scale,
+            'pose_scale': dataset.pose_scale,
+            'trans_scale': dataset.trans_scale,
+            'scale_scale': dataset.scale_scale,
+            'global_rot_scale': dataset.global_rot_scale
+        }
+        
+        should_regenerate = False
+        for param_name, new_value in updates.items():
+            if param_name in current_scales:
+                old_value = current_scales[param_name]
+                if abs(new_value - old_value) / (abs(old_value) + 1e-8) > 0.1:  # 10% threshold
+                    should_regenerate = True
+                    break
+        
+        if should_regenerate:
+            print(f"Regenerating dataset due to curriculum scale changes at epoch {epoch}")
+            dataset.generate_dataset(regenerate=True)
 
 
 # ----------------------- TRAINING CODE ----------------------- #
@@ -947,7 +1062,8 @@ def visualize_epoch_results(model, val_loader, smal_fitter, epoch, device, save_
 
 def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device='cuda', 
                 weights=None, chamfer_weight=0.1, checkpoint_dir='checkpoints', 
-                vis_interval=5, log_interval=10, regenerate_training_every=-1):
+                vis_interval=5, log_interval=10, regenerate_training_every=-1,
+                curriculum_learning=False, curriculum_schedule=None):
     """
     Train the SMIL PointNet model.
     
@@ -963,7 +1079,25 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
         checkpoint_dir: Directory to save model checkpoints
         vis_interval: Interval (in epochs) for visualizing validation results
         log_interval: Interval for logging training progress
-        regenerate_training_every_epoch: Whether to regenerate training data every epoch
+        regenerate_training_every: Whether to regenerate training data every N epochs
+        curriculum_learning: Whether to use curriculum learning (default: False)
+        curriculum_schedule: Dictionary defining curriculum schedule. Example:
+            {
+                'pose_scale': {
+                    'start_epoch': 10,
+                    'end_epoch': 50,
+                    'start_value': 0.0,
+                    'end_value': 0.25,
+                    'schedule': 'linear'  # 'linear' or 'exponential'
+                },
+                'global_rot_scale': {
+                    'start_epoch': 20,
+                    'end_epoch': 60,
+                    'start_value': 0.0,
+                    'end_value': 0.1,
+                    'schedule': 'linear'
+                }
+            }
     Returns:
         Trained model and training history
     """
@@ -996,6 +1130,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
 
     # Initialize scheduler
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
+
     
     # Initialize training history
     history = {
@@ -1011,6 +1146,10 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001, device
     best_val_loss = float('inf')
     
     for epoch in range(num_epochs):
+        # Curriculum learning: update randomization scales if enabled
+        if curriculum_learning and curriculum_schedule is not None:
+            update_curriculum_scales(train_loader.dataset, epoch, curriculum_schedule)
+        
         model.train()
         train_loss = 0.0
         param_losses = {key: 0.0 for key in weights.keys()} # Initializes all keys from weights, including 'joints'
@@ -1508,8 +1647,18 @@ def parse_args():
                        help='Regenerate training data every N epochs (default: -1, i.e., never)')
     parser.add_argument('--rotation-representation', type=str, default='6d', choices=['6d', 'axis_angle'],
                         help='Rotation representation for global and joint rotations (default: 6d)')
-    parser.add_argument('--exclude-rot-from-norm', action='store_true',
+    parser.add_argument('--exclude-rot-from-norm', action='store_true', default=True,
                         help='Exclude rotations (global_rot, joint_rot) from parameter normalization (default: False)')
+    parser.add_argument('--curriculum-learning', action='store_true', default=False,
+                        help='Enable curriculum learning (default: False)')
+    parser.add_argument('--curriculum-pose-start', type=int, default=10,
+                        help='Epoch to start pose curriculum (default: 10)')
+    parser.add_argument('--curriculum-pose-end', type=int, default=50,
+                        help='Epoch to end pose curriculum (default: 50)')
+    parser.add_argument('--curriculum-pose-start-value', type=float, default=0.0,
+                        help='Starting pose scale value (default: 0.0)')
+    parser.add_argument('--curriculum-pose-end-value', type=float, default=0.25,
+                        help='Ending pose scale value (default: 0.25)')
     return parser.parse_args()
 
 def main():
@@ -1586,7 +1735,7 @@ def main():
     
     # Original SMILPointNet (PointNet-based)
     # model = SMILPointNet(num_points=num_points, n_betas=n_betas, n_pose=n_pose, 
-    #                     include_scales=config.ALLOW_LIMB_SCALING).to(device)
+    #                      include_scales=config.ALLOW_LIMB_SCALING, rotation_representation=args.rotation_representation).to(device)
     
     # New SMILPointNet2 (PointNet++ based)
     model = SMILPointNet2(num_points=num_points, n_betas=n_betas, n_pose=n_pose, 
@@ -1601,22 +1750,50 @@ def main():
     
     # Define loss weights
     loss_weights = {
-        'global_rot': 0.1,  # Increased
-        'joint_rot': 0.2,  # Decreased
+        'global_rot': 0.01,  
+        'joint_rot': 0.2, 
         'betas': 0.2,
-        'trans': 0.1,  # Increased
+        'trans': 0.1,  #
         'log_beta_scales': 0.1 if config.ALLOW_LIMB_SCALING else 0.0,
-        'joints': 0.5 # Increased joint location loss weight
+        'joints': 0.2 
     }
     
     # Set chamfer loss weight
-    chamfer_weight = 10.0 # Increased
+    chamfer_weight = 2.0 # Increased
+    
+    # Curriculum learning configuration
+    curriculum_learning = args.curriculum_learning
+    curriculum_schedule = None
+    
+    if curriculum_learning:
+        curriculum_schedule = {
+            'pose_scale': {
+                'start_epoch': args.curriculum_pose_start,
+                'end_epoch': args.curriculum_pose_end,
+                'start_value': args.curriculum_pose_start_value,
+                'end_value': args.curriculum_pose_end_value,
+                'schedule': 'linear'
+            }
+        }
+        
+        print("Curriculum Learning Configuration:")
+        for param_name, schedule in curriculum_schedule.items():
+            print(f"  {param_name}: {schedule['start_value']} -> {schedule['end_value']} "
+                  f"(epochs {schedule['start_epoch']}-{schedule['end_epoch']}, {schedule['schedule']})")
+        
+        # Initialize training dataset with curriculum starting values
+        train_dataset.update_randomization_scales(
+            pose_scale=curriculum_schedule['pose_scale']['start_value'],
+        )
+        train_dataset.generate_dataset(regenerate=True)
     
     # Train the model
     trained_model, history = train_model(model, train_loader, val_loader, num_epochs=num_epochs, 
                                           lr=0.001, device=device, weights=loss_weights,
                                           chamfer_weight=chamfer_weight, vis_interval=vis_interval,
-                                          regenerate_training_every=args.regenerate_training_every)
+                                          regenerate_training_every=args.regenerate_training_every,
+                                          curriculum_learning=curriculum_learning,
+                                          curriculum_schedule=curriculum_schedule)
     
     # Plot training history
     plot_training_history(history)
