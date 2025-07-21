@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import tempfile
 import csv
 import bmesh
+import time
 
 
 # TODO if you are very bored, implement package installation with subprocesses
@@ -507,6 +508,7 @@ def export_J_regressor_to_npy(
     influence_type="inverse_distance",
     weights=None,
     kintree_table=None,
+    export_as_csv=True,
 ):
     """
     Calculate or export the joint regressor matrix.
@@ -546,6 +548,10 @@ def export_J_regressor_to_npy(
 
     if filepath:
         np.save(filepath, J_regressor)
+
+    if export_as_csv:
+        #np.savetxt(filepath.replace(".npy", ".csv"), J_regressor, delimiter=",")
+        np.savetxt("test_J_reg.csv", J_regressor, delimiter=",", fmt="%1.8f")
 
     return J_regressor
 
@@ -1282,6 +1288,10 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "symmetrise")
 
         layout.operator("smpl.import_model", text="Import SMPL Model")
+        # Add new button for loading all unposed registered meshes
+        layout.operator("smpl.load_all_unposed_meshes", text="Load all unposed registered meshes")
+        # Add button for recomputing joint positions
+        layout.operator("smpl.recompute_joint_positions", text="Recompute joint positions")
 
         # Add output filename field before export button
         layout.prop(smpl_tool, "output_filename")
@@ -2011,6 +2021,124 @@ class SMPL_OT_ExportModel(bpy.types.Operator):
             return {"CANCELLED"}
 
 
+class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
+    bl_idname = "smpl.load_all_unposed_meshes"
+    bl_label = "Load all unposed registered meshes"
+    bl_description = "Load and rig all registered meshes from the .npz file, offsetting them in the viewport."
+
+    def execute(self, context):
+        import time
+        scene = context.scene
+        smpl_tool = scene.smpl_tool
+        wm = context.window_manager
+
+        # Load PKL data (for rigging info)
+        pkl_filepath = bpy.path.abspath(smpl_tool.pkl_filepath)
+        pkl_data = load_pkl_file(pkl_filepath)
+        if not pkl_data:
+            self.report({"ERROR"}, "Failed to load .pkl file.")
+            return {'CANCELLED'}
+        # Always use a fresh copy of J_regressor from the loaded file
+        J_regressor_orig = np.copy(pkl_data["J_regressor"]) if "J_regressor" in pkl_data else None
+
+        # Load NPZ data (for registered meshes)
+        npz_filepath = bpy.path.abspath(smpl_tool.npz_filepath)
+        if not os.path.exists(npz_filepath):
+            self.report({"ERROR"}, "Could not find .npz file.")
+            return {'CANCELLED'}
+        npz_data = load_npz_file(npz_filepath)
+        if npz_data is None or "verts" not in npz_data:
+            self.report({"ERROR"}, "No 'verts' key found in .npz file.")
+            return {'CANCELLED'}
+
+        verts_array = npz_data["verts"]  # shape (N, V, 3)
+        labels = npz_data["labels"] if "labels" in npz_data else [f"mesh_{i}" for i in range(len(verts_array))]
+        faces = pkl_data["f"]
+        weights = pkl_data["weights"]
+        joints = pkl_data["J"]
+        kintree_table = pkl_data["kintree_table"]
+        joint_names = pkl_data["J_names"] if "J_names" in pkl_data else [f"J_{i}" for i in range(joints.shape[0])]
+
+        n_meshes = len(verts_array)
+        wm.progress_begin(0, n_meshes)
+        try:
+            for i, verts in enumerate(verts_array):
+                wm.progress_update(i)
+                # Always use a fresh copy of the original J_regressor
+                J_regressor = np.copy(J_regressor_orig) if J_regressor_orig is not None else None
+                # Build a data dict for this mesh
+                mesh_data = {
+                    "v_template": verts,
+                    "f": faces,
+                    "weights": weights,
+                    "J": joints.copy(),  # will be updated below
+                    "kintree_table": kintree_table,
+                    "J_names": joint_names,
+                    "J_regressor": J_regressor,
+                }
+                obj = create_mesh_from_pkl(mesh_data)
+                if obj is None:
+                    self.report({"WARNING"}, f"Failed to create mesh for {labels[i]}")
+                    continue
+                obj.name = str(labels[i])
+                # Rig the mesh
+                create_armature_and_weights(mesh_data, obj)
+                # Find the armature just created (should be the active object and of type 'ARMATURE')
+                armature = bpy.context.active_object if bpy.context.active_object and bpy.context.active_object.type == 'ARMATURE' else None
+                if armature is None:
+                    # Try to find the most recently created armature
+                    armatures = [a for a in bpy.data.objects if a.type == 'ARMATURE']
+                    armature = armatures[-1] if armatures else None
+                if armature is not None:
+                    # Move the armature to the offset position
+                    armature.location = (0, i, 0)
+                    # Move the mesh to the origin relative to the armature
+                    obj.location = (0, 0, 0)
+                # Update joint locations using J_regressor and current mesh vertices
+                if J_regressor is not None and armature is not None:
+                    vertex_positions = verts
+                    joint_positions = J_regressor @ vertex_positions  # (num_joints, 3)
+                    bpy.context.view_layer.objects.active = armature
+                    bpy.ops.object.mode_set(mode="EDIT")
+                    for j, bone in enumerate(armature.data.edit_bones):
+                        bone.head = joint_positions[j]
+                        bone.tail = joint_positions[j] + [0, 0, 0.1]
+                    bpy.ops.object.mode_set(mode="OBJECT")
+            wm.progress_update(n_meshes)
+        finally:
+            wm.progress_end()
+        self.report({"INFO"}, f"Loaded and rigged {n_meshes} meshes.")
+        return {'FINISHED'}
+
+
+class SMPL_OT_RecomputeJointPositions(bpy.types.Operator):
+    bl_idname = "smpl.recompute_joint_positions"
+    bl_label = "Recompute joint positions"
+    bl_description = "Recompute the J_regressor and update joint locations for the selected armature only."
+
+    def execute(self, context):
+        obj = context.active_object
+        if not obj or obj.type != 'MESH':
+            self.report({'ERROR'}, 'Select a mesh object with an armature.')
+            return {'CANCELLED'}
+        armature = obj.find_armature()
+        if not armature:
+            self.report({'ERROR'}, 'Selected mesh has no armature.')
+            return {'CANCELLED'}
+        # Recompute J_regressor for this mesh+armature
+        J_regressor = export_J_regressor_to_npy(obj, armature, 10)
+        vertex_positions = np.array([np.array(v.co) for v in obj.data.vertices])
+        joint_positions = np.matmul(J_regressor, vertex_positions)
+        bpy.context.view_layer.objects.active = armature
+        bpy.ops.object.mode_set(mode="EDIT")
+        for j, bone in enumerate(armature.data.edit_bones):
+            bone.head = joint_positions[j]
+            bone.tail = joint_positions[j] + [0, 0, 0.1]
+        bpy.ops.object.mode_set(mode="OBJECT")
+        self.report({'INFO'}, 'Joint positions updated for selected armature.')
+        return {'FINISHED'}
+
+
 class SMPLProperties(bpy.types.PropertyGroup):
     pkl_filepath: bpy.props.StringProperty(
         name="PKL Filepath",
@@ -2285,6 +2413,8 @@ classes = (
     SMPL_OT_ExportJointDistances,
     SMPL_OT_ExportMeshMeasurements,
     SMPL_OT_LoadReferenceMeasurements,
+    SMPL_OT_LoadAllUnposedMeshes,
+    SMPL_OT_RecomputeJointPositions,  # <-- Add here
     SMPLProperties,
 )
 
