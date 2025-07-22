@@ -2027,7 +2027,6 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
     bl_description = "Load and rig all registered meshes from the .npz file, offsetting them in the viewport."
 
     def execute(self, context):
-        import time
         scene = context.scene
         smpl_tool = scene.smpl_tool
         wm = context.window_manager
@@ -2058,14 +2057,26 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         joints = pkl_data["J"]
         kintree_table = pkl_data["kintree_table"]
         joint_names = pkl_data["J_names"] if "J_names" in pkl_data else [f"J_{i}" for i in range(joints.shape[0])]
+        J_regressor = np.copy(pkl_data["J_regressor"]) if "J_regressor" in pkl_data else None
+        global_rots = npz_data["global_rot"] if "global_rot" in npz_data else None  # (N, 3)
+        joint_rots = npz_data["joint_rot"] if "joint_rot" in npz_data else None    # (N, J-1, 3)
 
         n_meshes = len(verts_array)
+        # --- Compute mean shape and mean joint locations ---
+        mean_shape = np.mean(verts_array, axis=0)  # (V, 3)
+        mean_joints = J_regressor @ mean_shape  # (J, 3)
+        # Build child lookup for each joint from kintree_table
+        num_joints = mean_joints.shape[0]
+        children = [[] for _ in range(num_joints)]
+        for parent, child in zip(kintree_table[0], kintree_table[1]):
+            if parent >= 0:
+                children[parent].append(child)
         wm.progress_begin(0, n_meshes)
         try:
             for i, verts in enumerate(verts_array):
                 wm.progress_update(i)
                 # Always use a fresh copy of the original J_regressor
-                J_regressor = np.copy(J_regressor_orig) if J_regressor_orig is not None else None
+                J_reg = np.copy(J_regressor) if J_regressor is not None else None
                 # Build a data dict for this mesh
                 mesh_data = {
                     "v_template": verts,
@@ -2074,7 +2085,7 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     "J": joints.copy(),  # will be updated below
                     "kintree_table": kintree_table,
                     "J_names": joint_names,
-                    "J_regressor": J_regressor,
+                    "J_regressor": J_reg,
                 }
                 obj = create_mesh_from_pkl(mesh_data)
                 if obj is None:
@@ -2094,16 +2105,63 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     armature.location = (0, i, 0)
                     # Move the mesh to the origin relative to the armature
                     obj.location = (0, 0, 0)
-                # Update joint locations using J_regressor and current mesh vertices
-                if J_regressor is not None and armature is not None:
+                # Update joint locations using J_reg and current mesh vertices
+                if J_reg is not None and armature is not None:
                     vertex_positions = verts
-                    joint_positions = J_regressor @ vertex_positions  # (num_joints, 3)
+                    mesh_joints = J_reg @ vertex_positions  # (J, 3)
                     bpy.context.view_layer.objects.active = armature
                     bpy.ops.object.mode_set(mode="EDIT")
                     for j, bone in enumerate(armature.data.edit_bones):
-                        bone.head = joint_positions[j]
-                        bone.tail = joint_positions[j] + [0, 0, 0.1]
+                        bone.head = mesh_joints[j]
+                        bone.tail = mesh_joints[j] + [0, 0, 0.1]
                     bpy.ops.object.mode_set(mode="OBJECT")
+                # --- PER-BONE LENGTH NORMALIZATION (HIERARCHICAL) ---
+                if armature is not None:
+                    bpy.context.view_layer.objects.active = armature
+                    bpy.ops.object.mode_set(mode="POSE")
+                    pose_bones = armature.pose.bones
+                    # For each joint, compute mean and mesh distances to direct children
+                    raw_scales = np.ones(num_joints)
+                    min_dist = 1e-6  # Avoid division by zero
+                    for j in range(num_joints):
+                        if j == 0:
+                            continue  # Do not scale the root bone
+                        child_indices = children[j]
+                        if not child_indices:
+                            continue  # Skip scaling for joints with no children
+                        mesh_dists = [np.linalg.norm(mesh_joints[j] - mesh_joints[c]) for c in child_indices]
+                        mean_dists = [np.linalg.norm(mean_joints[j] - mean_joints[c]) for c in child_indices]
+                        ratios = []
+                        for md, mmd in zip(mesh_dists, mean_dists):
+                            if mmd > min_dist:
+                                ratios.append(md / mmd)
+                        if ratios:
+                            raw_scales[j] = np.mean(ratios)
+                        else:
+                            raw_scales[j] = 1.0
+                    # Now compute hierarchical scales
+                    final_scales = np.ones(num_joints)
+                    # Build parent lookup for each joint
+                    parent_lookup = {child: parent for parent, child in zip(kintree_table[0], kintree_table[1]) if parent >= 0}
+                    for j in range(1, num_joints):  # skip root
+                        # Compute cumulative product of all ancestor scales
+                        cumulative = 1.0
+                        parent = parent_lookup.get(j, None)
+                        while parent is not None and parent > 0:
+                            cumulative *= final_scales[parent]
+                            parent = parent_lookup.get(parent, None)
+                        if raw_scales[j] > 0:
+                            final_scales[j] = raw_scales[j] / cumulative
+                        else:
+                            final_scales[j] = 1.0
+                        pose_bones[j].scale = Vector([1.0 / final_scales[j]] * 3)
+                        # Debug print for first mesh and first few joints
+                        if i == 0 and j < 5:
+                            print(f"Joint {j}: raw_scale={raw_scales[j]:.4f}, final_scale={final_scales[j]:.4f}")
+                    bpy.ops.object.mode_set(mode="OBJECT")
+                # --- END PER-BONE LENGTH NORMALIZATION (HIERARCHICAL) ---
+                obj.data.update()
+                bpy.context.view_layer.update()
             wm.progress_update(n_meshes)
         finally:
             wm.progress_end()
