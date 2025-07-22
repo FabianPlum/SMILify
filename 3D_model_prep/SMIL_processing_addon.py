@@ -2158,6 +2158,61 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                         # Debug print for first mesh and first few joints
                         if i == 0 and j < 5:
                             print(f"Joint {j}: raw_scale={raw_scales[j]:.4f}, final_scale={final_scales[j]:.4f}")
+                    bpy.ops.object.mode_set(mode="POSE")
+                    
+                    # --- HIERARCHICAL JOINT ALIGNMENT ---
+                    # Move all joints to their corresponding positions in the mean shape
+                    # Work hierarchically to preserve parent-child relationships
+                    
+                    # Get current pose positions
+                    pose_positions = [pose_bones[k].head.copy() for k in range(num_joints)]
+                    
+                    # Process joints in hierarchical order (root to leaves)
+                    for j in range(num_joints):
+                        if j == 0:
+                            # Root joint: its location is relative to the armature object.
+                            # The target world position is the mean joint position offset by the armature's location.
+                            target_pos_root = Vector(mean_joints[j]) + armature.location
+                            current_pos_root = Vector(pose_positions[j])
+                            
+                            translation = target_pos_root - current_pos_root
+                            pose_bones[j].location += translation
+                        else:
+                            # Child joint: its location is relative to its parent bone's pose.
+                            parent_idx = kintree_table[0, j]
+                            
+                            # Get the desired relative position vector from mean shape (in world space)
+                            mean_relative = mean_joints[j] - mean_joints[parent_idx]
+                            
+                            # Get the current relative position vector (in world space)
+                            current_relative = pose_positions[j] - pose_positions[parent_idx]
+                            
+                            # Calculate the world-space adjustment needed for the child joint's head
+                            adjustment_world = mean_relative - current_relative
+                            
+                            # Get the parent's world matrix to convert the adjustment to local space
+                            parent_matrix_world = pose_bones[parent_idx].matrix
+                            
+                            # For a direction vector, we use the 3x3 part of the inverse matrix
+                            # to transform it from world to the parent's local space
+                            local_adjustment = parent_matrix_world.inverted().to_3x3() @ Vector(adjustment_world)
+
+                            # Apply the adjustment in the correct (local) space
+                            pose_bones[j].location += local_adjustment
+                        
+                        # Force Blender to update bone transforms after each joint update
+                        bpy.ops.object.mode_set(mode="OBJECT")
+                        bpy.ops.object.mode_set(mode="POSE")
+                        bpy.context.view_layer.update()
+                        pose_positions = [pose_bones[k].head.copy() for k in range(num_joints)]
+                        
+                        # Debug print for first mesh and first few joints
+                        if i == 0 and j < 5:
+                            if j == 0:
+                                print(f"Root joint {j}: moved by {translation}")
+                            else:
+                                print(f"Joint {j} (parent {parent_idx}): adjusted by {local_adjustment}")
+                    
                     bpy.ops.object.mode_set(mode="OBJECT")
                 # --- END PER-BONE LENGTH NORMALIZATION (HIERARCHICAL) ---
                 obj.data.update()
