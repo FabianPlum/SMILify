@@ -2072,8 +2072,6 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         wm.progress_begin(0, n_meshes)
         try:
             for i, verts in enumerate(verts_array):
-                if i > 5:
-                    break
                 wm.progress_update(i)
 
                 # Apply translation from npz if it exists
@@ -2248,13 +2246,74 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
 
                     ik_constraint = pose_bone.constraints.new('IK')
                     ik_constraint.target = ik_target
-                    ik_constraint.chain_count = 2
+                    ik_constraint.chain_count = 1
                     ik_constraint.influence = 1.0
 
                 # 6. Return to Object Mode
                 bpy.ops.object.mode_set(mode='OBJECT')
 
-                wm.progress_update(n_meshes)
+                # --- Hierarchical Joint Alignment to Mean Shape ---
+                # This aligns the posed rig to the mean shape's proportions.
+
+                # A. Calculate tail target positions from the mean shape
+                mean_shape_tail_targets = {}
+                for j in range(num_joints):
+                    if j in leaf_bone_indices:
+                        continue
+
+                    child_indices = children[j]
+                    if not child_indices:
+                        continue
+
+                    if len(child_indices) == 1:
+                        target_pos = Vector(mean_joints[child_indices[0]])
+                    else:
+                        child_head_vectors = [Vector(mean_joints[child_idx]) for child_idx in child_indices]
+                        target_pos = sum(child_head_vectors, Vector()) / len(child_indices)
+
+                    bone_name = joint_names[j]
+                    mean_shape_tail_targets[bone_name] = target_pos + armature.location
+
+                # B. Move the IK empties to their new target locations to pose the rig
+                for bone_name, ik_empty in ik_targets.items():
+                    if bone_name in mean_shape_tail_targets:
+                        ik_empty.location = mean_shape_tail_targets[bone_name] - armature.location
+
+                # C. For bones with siblings, prepare to snap their heads to the mean shape's head position
+                parent_lookup = {child: parent for parent, child in zip(kintree_table[1], kintree_table[0]) if parent >= 0}
+                snap_target_data = {} # {bone_name: target_world_pos}
+                for j in range(1, num_joints): # Skip root bone
+                    parent_idx = parent_lookup.get(j)
+                    if parent_idx is not None and len(children[parent_idx]) > 1:
+                        bone_name = joint_names[j]
+                        snap_target_data[bone_name] = Vector(mean_joints[j]) + armature.location
+
+                # D. Batch-create snap targets and constraints
+                if snap_target_data:
+                    # Create a parent for snap targets for organization
+                    snap_controls_parent_name = f"Snap_Controls_{armature.name}"
+                    snap_controls_parent = bpy.data.objects.new(snap_controls_parent_name, None)
+                    snap_controls_parent.location = armature.location
+                    context.collection.objects.link(snap_controls_parent)
+
+                    snap_targets = {}
+                    for bone_name, target_pos in snap_target_data.items():
+                        snap_target = bpy.data.objects.new(f"Snap_Target_{armature.name}_{bone_name}", None)
+                        snap_target.location = target_pos - armature.location
+                        snap_target.empty_display_size = 0.02
+                        snap_target.parent = snap_controls_parent
+                        context.collection.objects.link(snap_target)
+                        snap_targets[bone_name] = snap_target
+
+                    # Apply constraints
+                    bpy.context.view_layer.objects.active = armature
+                    bpy.ops.object.mode_set(mode='POSE')
+                    for bone_name, snap_target_empty in snap_targets.items():
+                        pose_bone = armature.pose.bones.get(bone_name)
+                        if pose_bone:
+                            copy_loc_constraint = pose_bone.constraints.new('COPY_LOCATION')
+                            copy_loc_constraint.target = snap_target_empty
+                    bpy.ops.object.mode_set(mode='OBJECT')
         finally:
             wm.progress_end()
         self.report({"INFO"}, f"Loaded and rigged {n_meshes} meshes.")
