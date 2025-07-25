@@ -769,7 +769,6 @@ def create_armature_and_weights(data, obj):
     for i, (parent_idx, child_idx, bone_name) in enumerate(
         zip(kintree_table[0], kintree_table[1], joint_names)
     ):
-        print(bone_name)
         bone = armature.data.edit_bones.new(bone_name)
         bone.head = joints[child_idx]
         bone.tail = joints[child_idx] + np.array([0, 0, 0.1])
@@ -2074,6 +2073,8 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         wm.progress_begin(0, n_meshes)
         try:
             for i, verts in enumerate(verts_array):
+                if i > 5:
+                    break
                 wm.progress_update(i)
                 # Always use a fresh copy of the original J_regressor
                 J_reg = np.copy(J_regressor) if J_regressor is not None else None
@@ -2101,6 +2102,8 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     armatures = [a for a in bpy.data.objects if a.type == 'ARMATURE']
                     armature = armatures[-1] if armatures else None
                 if armature is not None:
+                    # Name the armature with SMIL_ prefix
+                    armature.name = f"SMIL_{labels[i]}"
                     # Move the armature to the offset position
                     armature.location = (0, i, 0)
                     # Move the mesh to the origin relative to the armature
@@ -2111,10 +2114,31 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     mesh_joints = J_reg @ vertex_positions  # (J, 3)
                     bpy.context.view_layer.objects.active = armature
                     bpy.ops.object.mode_set(mode="EDIT")
-                    for j, bone in enumerate(armature.data.edit_bones):
+
+                    edit_bones = armature.data.edit_bones
+
+                    # First, set all head positions, as they are needed for tail calculations
+                    for j, bone in enumerate(edit_bones):
                         bone.head = mesh_joints[j]
-                        bone.tail = mesh_joints[j] + [0, 0, 0.1]
+
+                    # Then, set tail positions based on children
+                    for j, bone in enumerate(edit_bones):
+                        child_indices = children[j]
+                        num_children = len(child_indices)
+
+                        if num_children == 0:  # Leaf bone
+                            bone.tail = bone.head + Vector((0, 0, 0.1))
+                        elif num_children == 1:  # Single child
+                            child_bone = edit_bones[child_indices[0]]
+                            bone.tail = child_bone.head
+                        else:  # Multiple children
+                            # Calculate the mean position of children heads
+                            child_head_vectors = [edit_bones[child_idx].head for child_idx in child_indices]
+                            mean_pos = sum(child_head_vectors, Vector()) / num_children
+                            bone.tail = mean_pos
+
                     bpy.ops.object.mode_set(mode="OBJECT")
+
                 # --- PER-BONE LENGTH NORMALIZATION (HIERARCHICAL) ---
                 if armature is not None:
                     bpy.context.view_layer.objects.active = armature
@@ -2160,64 +2184,73 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                             print(f"Joint {j}: raw_scale={raw_scales[j]:.4f}, final_scale={final_scales[j]:.4f}")
                     bpy.ops.object.mode_set(mode="POSE")
                     
-                    # --- HIERARCHICAL JOINT ALIGNMENT ---
-                    # Move all joints to their corresponding positions in the mean shape
-                    # Work hierarchically to preserve parent-child relationships
-                    
-                    # Get current pose positions
-                    pose_positions = [pose_bones[k].head.copy() for k in range(num_joints)]
-                    
-                    # Process joints in hierarchical order (root to leaves)
-                    for j in range(num_joints):
-                        if j == 0:
-                            # Root joint: its location is relative to the armature object.
-                            # The target world position is the mean joint position offset by the armature's location.
-                            target_pos_root = Vector(mean_joints[j]) + armature.location
-                            current_pos_root = Vector(pose_positions[j])
-                            
-                            translation = target_pos_root - current_pos_root
-                            pose_bones[j].location += translation
-                        else:
-                            # Child joint: its location is relative to its parent bone's pose.
-                            parent_idx = kintree_table[0, j]
-                            
-                            # Get the desired relative position vector from mean shape (in world space)
-                            mean_relative = mean_joints[j] - mean_joints[parent_idx]
-                            
-                            # Get the current relative position vector (in world space)
-                            current_relative = pose_positions[j] - pose_positions[parent_idx]
-                            
-                            # Calculate the world-space adjustment needed for the child joint's head
-                            adjustment_world = mean_relative - current_relative
-                            
-                            # Get the parent's world matrix to convert the adjustment to local space
-                            parent_matrix_world = pose_bones[parent_idx].matrix
-                            
-                            # For a direction vector, we use the 3x3 part of the inverse matrix
-                            # to transform it from world to the parent's local space
-                            local_adjustment = parent_matrix_world.inverted().to_3x3() @ Vector(adjustment_world)
-
-                            # Apply the adjustment in the correct (local) space
-                            pose_bones[j].location += local_adjustment
-                        
-                        # Force Blender to update bone transforms after each joint update
-                        bpy.ops.object.mode_set(mode="OBJECT")
-                        bpy.ops.object.mode_set(mode="POSE")
-                        bpy.context.view_layer.update()
-                        pose_positions = [pose_bones[k].head.copy() for k in range(num_joints)]
-                        
-                        # Debug print for first mesh and first few joints
-                        if i == 0 and j < 5:
-                            if j == 0:
-                                print(f"Root joint {j}: moved by {translation}")
-                            else:
-                                print(f"Joint {j} (parent {parent_idx}): adjusted by {local_adjustment}")
-                    
-                    bpy.ops.object.mode_set(mode="OBJECT")
                 # --- END PER-BONE LENGTH NORMALIZATION (HIERARCHICAL) ---
                 obj.data.update()
                 bpy.context.view_layer.update()
-            wm.progress_update(n_meshes)
+
+                # --- IK Rig Setup ---
+
+                # 1. Get armature and bone data
+                kintree_table = pkl_data['kintree_table']
+                joint_names = pkl_data['J_names']
+                num_joints = len(joint_names)
+
+                # 2. Identify leaf bones
+                parent_indices = set(kintree_table[0, :])
+                leaf_bone_indices = [i for i in range(num_joints) if i not in parent_indices]
+
+                # 3. Batch-calculate all IK target positions in Pose Mode
+                bpy.context.view_layer.objects.active = armature
+                bpy.ops.object.mode_set(mode='POSE')
+                
+                target_positions = {}
+                for bone_idx in range(num_joints):
+                    # Do not create targets for leaf bones
+                    if bone_idx in leaf_bone_indices:
+                        continue
+                    pose_bone = armature.pose.bones[bone_idx]
+                    world_tail_pos = armature.matrix_world @ pose_bone.tail
+                    target_positions[pose_bone.name] = world_tail_pos
+
+                # 4. Batch-create all IK target empties in Object Mode
+                bpy.ops.object.mode_set(mode='OBJECT')
+                
+                # Create a parent for the controls
+                controls_parent_name = f"IK_Controls_{armature.name}"
+                controls_parent = bpy.data.objects.new(controls_parent_name, None)
+                controls_parent.location = armature.location
+                context.collection.objects.link(controls_parent)
+                
+                ik_targets = {}
+                for bone_name, pos in target_positions.items():
+                    ik_target = bpy.data.objects.new(f"IK_Target_{armature.name}_{bone_name}", None)
+                    # Set location relative to the parent to avoid double transformation
+                    ik_target.location = pos - armature.location
+                    ik_target.empty_display_size = 0.05
+                    ik_target.parent = controls_parent
+                    context.collection.objects.link(ik_target)
+                    ik_targets[bone_name] = ik_target
+
+                # 5. Batch-apply all constraints in Pose Mode
+                bpy.context.view_layer.objects.active = armature
+                bpy.ops.object.mode_set(mode='POSE')
+
+                for bone_idx in range(num_joints):
+                    pose_bone = armature.pose.bones[bone_idx]
+                    ik_target = ik_targets.get(pose_bone.name)
+
+                    if not ik_target:
+                        continue
+
+                    ik_constraint = pose_bone.constraints.new('IK')
+                    ik_constraint.target = ik_target
+                    ik_constraint.chain_count = 2
+                    ik_constraint.influence = 1.0
+
+                # 6. Return to Object Mode
+                bpy.ops.object.mode_set(mode='OBJECT')
+
+                wm.progress_update(n_meshes)
         finally:
             wm.progress_end()
         self.report({"INFO"}, f"Loaded and rigged {n_meshes} meshes.")
