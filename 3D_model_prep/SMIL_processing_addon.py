@@ -2036,8 +2036,6 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         if not pkl_data:
             self.report({"ERROR"}, "Failed to load .pkl file.")
             return {'CANCELLED'}
-        # Always use a fresh copy of J_regressor from the loaded file
-        J_regressor_orig = np.copy(pkl_data["J_regressor"]) if "J_regressor" in pkl_data else None
 
         # Load NPZ data (for registered meshes)
         npz_filepath = bpy.path.abspath(smpl_tool.npz_filepath)
@@ -2059,6 +2057,7 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         J_regressor = np.copy(pkl_data["J_regressor"]) if "J_regressor" in pkl_data else None
         global_rots = npz_data["global_rot"] if "global_rot" in npz_data else None  # (N, 3)
         joint_rots = npz_data["joint_rot"] if "joint_rot" in npz_data else None    # (N, J-1, 3)
+        translations = npz_data["trans"] if "trans" in npz_data else None          # (N, 3)
 
         n_meshes = len(verts_array)
         # --- Compute mean shape and mean joint locations ---
@@ -2076,6 +2075,11 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 if i > 5:
                     break
                 wm.progress_update(i)
+
+                # Apply translation from npz if it exists
+                if translations is not None and i < len(translations):
+                    verts = verts - translations[i]
+
                 # Always use a fresh copy of the original J_regressor
                 J_reg = np.copy(J_regressor) if J_regressor is not None else None
                 # Build a data dict for this mesh
