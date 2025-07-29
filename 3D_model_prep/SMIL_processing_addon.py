@@ -1928,6 +1928,7 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
             if data:
                 obj = create_mesh_from_pkl(data)
                 if obj:
+                    obj["SMIL_TYPE"] = "SMIL_model_from_direct_npz_import"
                     # Store SMPL data in the object
                     store_smpl_data(context, data)
 
@@ -2097,6 +2098,7 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     self.report({"WARNING"}, f"Failed to create mesh for {labels[i]}")
                     continue
                 obj.name = str(labels[i])
+                obj["SMIL_TYPE"] = "unposed_registered_mesh"
                 # Rig the mesh
                 create_armature_and_weights(mesh_data, obj)
                 # Find the armature just created (should be the active object and of type 'ARMATURE')
@@ -2204,10 +2206,7 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                         else:
                             final_scales[j] = 1.0
                         pose_bones[j].scale = Vector([1.0 / final_scales[j]] * 3)
-                        # Debug print for first mesh and first few joints
-                        if i == 0 and j < 5:
-                            print(f"Joint {j}: raw_scale={raw_scales[j]:.4f}, final_scale={final_scales[j]:.4f}")
-                    
+
                     # Store the inverse of the applied scale (which is final_scales)
                     # The applied scale is 1.0 / final_scales[j]
                     scale_col_start = i * 6
@@ -2310,7 +2309,6 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 for j in range(1, num_joints): # Skip root bone
                     parent_idx = parent_lookup.get(j)
                     if parent_idx is not None and len(children[parent_idx]) > 1:
-                        print(f"Bone {j} has siblings! Using direct mean shape position")
                         bone_name = joint_names[j]
                         snap_target_data[bone_name] = Vector(mean_joints[j]) + armature_offset
                         # Calculate and store translation for joints with siblings
