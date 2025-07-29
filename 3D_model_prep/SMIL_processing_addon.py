@@ -2074,9 +2074,6 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         wm.progress_begin(0, n_meshes)
         try:
             for i, verts in enumerate(verts_array):
-                print(f"Processing mesh {i}")
-                if i > 5:
-                    break
                 wm.progress_update(i)
 
                 # Apply translation from npz if it exists
@@ -2111,8 +2108,29 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 if armature is not None:
                     # Name the armature with SMIL_ prefix
                     armature.name = f"SMIL_{labels[i]}"
-                    # Move the armature to the offset position
-                    armature.location = (0, i, 0)
+                    # --- Control Hierarchy Setup ---
+                    # Main parent for all controls of this mesh
+                    snap_controls_parent_name = f"Snap_Controls_{armature.name}"
+                    snap_controls_parent = bpy.data.objects.new(snap_controls_parent_name, None)
+                    snap_controls_parent.location = (0, i, 0)
+                    context.collection.objects.link(snap_controls_parent)
+
+                    # Parent for IK controls, shaped as a sphere
+                    controls_parent_name = f"IK_Controls_{armature.name}"
+                    controls_parent = bpy.data.objects.new(controls_parent_name, None)
+                    controls_parent.empty_display_type = 'SPHERE'
+                    controls_parent.empty_display_size = 0.8
+                    controls_parent.parent = snap_controls_parent
+                    controls_parent.location = (0, 0, 0)  # Relative to snap_controls_parent
+                    context.collection.objects.link(controls_parent)
+
+                    # Parent armature to the main control and reset its location
+                    armature.parent = snap_controls_parent
+                    armature.location = (0, 0, 0)
+                    
+                    # Store offset for world space calculations
+                    armature_offset = snap_controls_parent.location
+                    
                     # Move the mesh to the origin relative to the armature
                     obj.location = (0, 0, 0)
                 # Update joint locations using J_reg and current mesh vertices
@@ -2230,17 +2248,11 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 # 4. Batch-create all IK target empties in Object Mode
                 bpy.ops.object.mode_set(mode='OBJECT')
                 
-                # Create a parent for the controls
-                controls_parent_name = f"IK_Controls_{armature.name}"
-                controls_parent = bpy.data.objects.new(controls_parent_name, None)
-                controls_parent.location = armature.location
-                context.collection.objects.link(controls_parent)
-                
                 ik_targets = {}
                 for bone_name, pos in target_positions.items():
                     ik_target = bpy.data.objects.new(f"IK_Target_{armature.name}_{bone_name}", None)
                     # Set location relative to the parent to avoid double transformation
-                    ik_target.location = pos - armature.location
+                    ik_target.location = pos - armature_offset
                     ik_target.empty_display_size = 0.05
                     ik_target.parent = controls_parent
                     context.collection.objects.link(ik_target)
@@ -2285,12 +2297,12 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                         target_pos = sum(child_head_vectors, Vector()) / len(child_indices)
 
                     bone_name = joint_names[j]
-                    mean_shape_tail_targets[bone_name] = target_pos + armature.location
+                    mean_shape_tail_targets[bone_name] = target_pos + armature_offset
 
                 # B. Move the IK empties to their new target locations to pose the rig
                 for bone_name, ik_empty in ik_targets.items():
                     if bone_name in mean_shape_tail_targets:
-                        ik_empty.location = mean_shape_tail_targets[bone_name] - armature.location
+                        ik_empty.location = mean_shape_tail_targets[bone_name] - armature_offset
 
                 # C. For bones with siblings, prepare to snap their heads to the mean shape's head position
                 parent_lookup = {child: parent for parent, child in zip(kintree_table[0], kintree_table[1]) if parent >= 0}
@@ -2300,7 +2312,7 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     if parent_idx is not None and len(children[parent_idx]) > 1:
                         print(f"Bone {j} has siblings! Using direct mean shape position")
                         bone_name = joint_names[j]
-                        snap_target_data[bone_name] = Vector(mean_joints[j]) + armature.location
+                        snap_target_data[bone_name] = Vector(mean_joints[j]) + armature_offset
                         # Calculate and store translation for joints with siblings
                         translation = mean_joints[j] - mesh_joints[j]
                         trans_col_start = i * 6 + 3
@@ -2308,16 +2320,10 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                         
                 # D. Batch-create snap targets and constraints
                 if snap_target_data:
-                    # Create a parent for snap targets for organization
-                    snap_controls_parent_name = f"Snap_Controls_{armature.name}"
-                    snap_controls_parent = bpy.data.objects.new(snap_controls_parent_name, None)
-                    snap_controls_parent.location = armature.location
-                    context.collection.objects.link(snap_controls_parent)
-
                     snap_targets = {}
                     for bone_name, target_pos in snap_target_data.items():
                         snap_target = bpy.data.objects.new(f"Snap_Target_{armature.name}_{bone_name}", None)
-                        snap_target.location = target_pos - armature.location
+                        snap_target.location = target_pos - armature_offset
                         snap_target.empty_display_size = 0.02
                         snap_target.parent = snap_controls_parent
                         context.collection.objects.link(snap_target)
