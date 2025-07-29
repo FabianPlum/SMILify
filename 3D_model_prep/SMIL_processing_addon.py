@@ -2065,6 +2065,8 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         mean_joints = J_regressor @ mean_shape  # (J, 3)
         # Build child lookup for each joint from kintree_table
         num_joints = mean_joints.shape[0]
+        # array to store scaling and translation to morph from mean shape to target shapes
+        transform_data = np.zeros((num_joints, n_meshes * 6))
         children = [[] for _ in range(num_joints)]
         for parent, child in zip(kintree_table[0], kintree_table[1]):
             if parent >= 0:
@@ -2072,6 +2074,9 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         wm.progress_begin(0, n_meshes)
         try:
             for i, verts in enumerate(verts_array):
+                print(f"Processing mesh {i}")
+                if i > 5:
+                    break
                 wm.progress_update(i)
 
                 # Apply translation from npz if it exists
@@ -2184,6 +2189,14 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                         # Debug print for first mesh and first few joints
                         if i == 0 and j < 5:
                             print(f"Joint {j}: raw_scale={raw_scales[j]:.4f}, final_scale={final_scales[j]:.4f}")
+                    
+                    # Store the inverse of the applied scale (which is final_scales)
+                    # The applied scale is 1.0 / final_scales[j]
+                    scale_col_start = i * 6
+                    transform_data[:, scale_col_start : scale_col_start + 3] = np.tile(
+                        final_scales.reshape(-1, 1), (1, 3)
+                    )
+                    
                     bpy.ops.object.mode_set(mode="POSE")
                     
                 # --- END PER-BONE LENGTH NORMALIZATION (HIERARCHICAL) ---
@@ -2280,14 +2293,19 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                         ik_empty.location = mean_shape_tail_targets[bone_name] - armature.location
 
                 # C. For bones with siblings, prepare to snap their heads to the mean shape's head position
-                parent_lookup = {child: parent for parent, child in zip(kintree_table[1], kintree_table[0]) if parent >= 0}
+                parent_lookup = {child: parent for parent, child in zip(kintree_table[0], kintree_table[1]) if parent >= 0}
                 snap_target_data = {} # {bone_name: target_world_pos}
                 for j in range(1, num_joints): # Skip root bone
                     parent_idx = parent_lookup.get(j)
                     if parent_idx is not None and len(children[parent_idx]) > 1:
+                        print(f"Bone {j} has siblings! Using direct mean shape position")
                         bone_name = joint_names[j]
                         snap_target_data[bone_name] = Vector(mean_joints[j]) + armature.location
-
+                        # Calculate and store translation for joints with siblings
+                        translation = mean_joints[j] - mesh_joints[j]
+                        trans_col_start = i * 6 + 3
+                        transform_data[j, trans_col_start : trans_col_start + 3] = translation
+                        
                 # D. Batch-create snap targets and constraints
                 if snap_target_data:
                     # Create a parent for snap targets for organization
@@ -2316,6 +2334,36 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     bpy.ops.object.mode_set(mode='OBJECT')
         finally:
             wm.progress_end()
+            
+        # --- Export morph data to CSV ---
+        try:
+            output_path = os.path.join(
+                os.path.dirname(pkl_filepath), "smil_morph_data.csv"
+            )
+            with open(output_path, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                # Header
+                header = ["joint_name"]
+                for label in labels:
+                    header.extend(
+                        [
+                            f"{label}_scale_x",
+                            f"{label}_scale_y",
+                            f"{label}_scale_z",
+                            f"{label}_translation_x",
+                            f"{label}_translation_y",
+                            f"{label}_translation_z",
+                        ]
+                    )
+                writer.writerow(header)
+                # Data rows
+                for j in range(num_joints):
+                    row = [joint_names[j]] + transform_data[j, :].tolist()
+                    writer.writerow(row)
+            print(f"Morph data exported to {output_path}")
+        except Exception as e:
+            print(f"Failed to export morph data: {e}")
+            
         self.report({"INFO"}, f"Loaded and rigged {n_meshes} meshes.")
         return {'FINISHED'}
 
