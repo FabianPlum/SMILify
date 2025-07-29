@@ -2217,7 +2217,6 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     bpy.ops.object.mode_set(mode="POSE")
                     
                 # --- END PER-BONE LENGTH NORMALIZATION (HIERARCHICAL) ---
-                obj.data.update()
                 bpy.context.view_layer.update()
 
                 # --- IK Rig Setup ---
@@ -2233,7 +2232,6 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
 
                 # 3. Batch-calculate all IK target positions in Pose Mode
                 bpy.context.view_layer.objects.active = armature
-                bpy.ops.object.mode_set(mode='POSE')
                 
                 target_positions = {}
                 for bone_idx in range(num_joints):
@@ -2306,6 +2304,16 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 # C. For bones with siblings, prepare to snap their heads to the mean shape's head position
                 parent_lookup = {child: parent for parent, child in zip(kintree_table[0], kintree_table[1]) if parent >= 0}
                 snap_target_data = {} # {bone_name: target_world_pos}
+                
+                # Manually align the root bone's head to the mean shape's root joint position
+                root_bone_name = joint_names[0]
+                snap_target_data[root_bone_name] = Vector(mean_joints[0]) + armature_offset
+
+                # Calculate and store translation for the root bone
+                translation = mean_joints[0] - mesh_joints[0]
+                trans_col_start = i * 6 + 3
+                transform_data[0, trans_col_start : trans_col_start + 3] = translation
+                
                 for j in range(1, num_joints): # Skip root bone
                     parent_idx = parent_lookup.get(j)
                     if parent_idx is not None and len(children[parent_idx]) > 1:
