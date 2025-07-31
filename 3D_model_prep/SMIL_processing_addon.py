@@ -1,7 +1,7 @@
 bl_info = {
     "name": "SMIL Model Importer",
     "author": "Fabian Plum",
-    "version": (1, 0, 2),
+    "version": (1, 1, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Tool Shelf",
     "description": "Import, configure, and export SMPL / SMIL models",
@@ -1287,6 +1287,7 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "symmetrise")
 
         layout.operator("smpl.import_model", text="Import SMPL Model")
+        layout.operator("smpl.generate_from_unposed", text="Generate SMIL from unposed meshes")
         # Add new button for loading all unposed registered meshes
         layout.operator("smpl.load_all_unposed_meshes", text="Load all unposed registered meshes")
         # Add button for recomputing joint positions
@@ -1988,6 +1989,110 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
             return {"CANCELLED"}
 
 
+class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
+    bl_idname = "smpl.generate_from_unposed"
+    bl_label = "Generate SMIL model from unposed meshes"
+    bl_description = "Generates a new SMIL model by using all loaded unposed meshes as shapekeys"
+
+    def execute(self, context):
+        scene = context.scene
+        smpl_tool = scene.smpl_tool
+
+        # 1. Find all tagged objects
+        unposed_meshes = [
+            obj
+            for obj in bpy.data.objects
+            if obj.get("SMIL_TYPE") == "unposed_registered_mesh"
+        ]
+        if not unposed_meshes:
+            self.report({"ERROR"}, "No unposed registered meshes found in the scene.")
+            return {"CANCELLED"}
+
+        self.report(
+            {"INFO"}, f"Found {len(unposed_meshes)} unposed meshes to use as shapekeys."
+        )
+
+        try:
+            # 2. Load base pkl file to create the new model on
+            pkl_filepath = bpy.path.abspath(smpl_tool.pkl_filepath)
+            data = load_pkl_file(pkl_filepath)
+            if not data:
+                self.report({"ERROR"}, "Failed to load base .pkl file.")
+                return {"CANCELLED"}
+
+            obj = create_mesh_from_pkl(data)
+            if not obj:
+                self.report({"ERROR"}, "Failed to create mesh from .pkl file.")
+                return {"CANCELLED"}
+
+            # 3. Get vertex data from scene objects
+            verts_list = []
+            labels_list = []
+            depsgraph = context.evaluated_depsgraph_get()
+
+            for unposed_obj in unposed_meshes:
+                eval_obj = unposed_obj.evaluated_get(depsgraph)
+
+                # Ensure vertex counts match before proceeding
+                if len(eval_obj.data.vertices) != len(obj.data.vertices):
+                    self.report(
+                        {
+                            "ERROR"
+                        },
+                        f"Vertex count mismatch between base model and '{unposed_obj.name}'. Skipping.",
+                    )
+                    continue
+
+                mesh_verts = np.array([v.co[:] for v in eval_obj.data.vertices])
+                verts_list.append(mesh_verts)
+                labels_list.append(unposed_obj.name)
+
+            if not verts_list:
+                self.report(
+                    {"ERROR"}, "No valid unposed meshes found with matching vertex counts."
+                )
+                bpy.data.objects.remove(obj)
+                return {"CANCELLED"}
+
+            verts_data = np.array(verts_list)
+
+            npz_data = {"verts": verts_data, "labels": labels_list}
+
+            # The rest is similar to SMPL_OT_ImportModel
+            obj["SMIL_TYPE"] = "SMIL_model_from_unposed_meshes"
+            store_smpl_data(context, data)
+
+            create_armature_and_weights(data, obj)
+
+            if smpl_tool.shapekeys_from_PCA:
+                cov, mean_betas = apply_pca_and_create_shapekeys(
+                    verts_data, obj, smpl_tool.number_of_PC, overwrite_mesh=True
+                )
+            else:
+                cov, mean_betas = create_shapekeys(npz_data, obj)
+
+            data["shape_cov"] = cov
+            data["shape_mean_betas"] = mean_betas
+
+            if smpl_tool.symmetrise:
+                make_symmetrical(obj, data)
+
+            if smpl_tool.regress_joints:
+                apply_updated_joint_positions(obj, data)
+
+            if smpl_tool.clean_mesh:
+                cleanup_mesh(obj, center_tolerance=smpl_tool.merging_threshold)
+
+            self.report(
+                {"INFO"}, "SMIL Model generated from unposed meshes successfully."
+            )
+            return {"FINISHED"}
+
+        except Exception as e:
+            self.report({"ERROR"}, f"Failed to generate SMIL Model: {e}")
+            return {"CANCELLED"}
+
+
 class SMPL_OT_ExportModel(bpy.types.Operator):
     bl_idname = "smpl.export_model"
     bl_label = "Export SMPL Model"
@@ -2564,7 +2669,7 @@ class SMPL_OT_ExportJointDistances(bpy.types.Operator):
 
 
 class SMPL_PT_MorphometryPanel(bpy.types.Panel):
-    bl_label = "SMAL Morphometry"
+    bl_label = "SMIL Morphometry"
     bl_idname = "SMPL_PT_MorphometryPanel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -2677,6 +2782,7 @@ classes = (
     SMPL_PT_Panel,
     SMPL_PT_MorphometryPanel,
     SMPL_OT_ImportModel,
+    SMPL_OT_GenerateFromUnposed,
     SMPL_OT_ExportModel,
     SMPL_OT_ApplyPoseCorrectivesOperator,
     SMPL_OT_ExportJointDistances,
