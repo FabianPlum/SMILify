@@ -1311,9 +1311,11 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.operator("smpl.apply_pose_correctives", text="Apply Pose Correctives")
 
 
-def store_smpl_data(context, data):
+def store_smpl_data(context, data, obj=None):
     """Store SMPL data in a temporary file and save the path"""
-    obj = context.active_object
+    if obj is None:
+        obj = context.active_object
+
     if obj:
         # Create a temporary file to store the data
         temp_dir = tempfile.gettempdir()
@@ -1933,7 +1935,7 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                 if obj:
                     obj["SMIL_TYPE"] = "SMIL_model_from_direct_npz_import"
                     # Store SMPL data in the object
-                    store_smpl_data(context, data)
+                    store_smpl_data(context, data, obj=obj)
 
                     create_armature_and_weights(data, obj)
                     if not smpl_tool.npz_filepath:
@@ -1968,6 +1970,8 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
 
                     data["shape_cov"] = cov
                     data["shape_mean_betas"] = mean_betas
+                    # Update the stored data with the new shape info
+                    store_smpl_data(context, data, obj=obj)
 
                     if smpl_tool.symmetrise:
                         make_symmetrical(obj, data)
@@ -2063,7 +2067,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
 
             # The rest is similar to SMPL_OT_ImportModel
             obj["SMIL_TYPE"] = "SMIL_model_from_unposed_meshes"
-            store_smpl_data(context, data)
+            store_smpl_data(context, data, obj=obj)
 
             create_armature_and_weights(data, obj)
 
@@ -2081,6 +2085,8 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
 
             data["shape_cov"] = cov
             data["shape_mean_betas"] = mean_betas
+            # Update the stored data with the new shape info
+            store_smpl_data(context, data, obj=obj)
 
             if smpl_tool.symmetrise:
                 make_symmetrical(obj, data)
