@@ -524,7 +524,7 @@ if __name__ == "__main__":
         "data/replicAnt_trials/replicAnt-x-SMIL-demo/replicAnt-x-SMIL-demo_00.json"
     )
     # Generate additional plots for debugging
-    plot_tests = True
+    plot_tests = False
 
     # get the batch data file path
     batch_data_file_path = json_file_path.replace(
@@ -597,7 +597,11 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Extract shape and pose parameters
-    shape_betas = data["iterationData"]["subject Data"][0]["1"]["shape betas"]
+    try:
+        shape_betas = data["iterationData"]["subject Data"][0]["1"]["shape betas"]
+    except KeyError:
+        shape_betas = []
+
     pose_data = data["iterationData"]["subject Data"][0]["1"]["keypoints"]
 
     joint_angles, joint_names = get_joint_angles_from_pose_data(pose_data)
@@ -609,7 +613,7 @@ if __name__ == "__main__":
 
     # Convert shape betas to a NumPy array
     if len(shape_betas) == 0:
-        shape_betas = np.zeros(20)
+        shape_betas = np.zeros(config.dd["shapedirs"].shape[2])
     else:
         shape_betas = np.array(shape_betas)
 
