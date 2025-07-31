@@ -1297,7 +1297,7 @@ class SMPL_PT_Panel(bpy.types.Panel):
         
         layout.separator()
         layout.prop(smpl_tool, "output_filename")
-        layout.operator("smpl.export_model", text="Export SMPL Model")
+        layout.operator("smpl.export_model", text="Export SMIL Model")
 
         # Add section for pose correctives
         layout.separator()
@@ -2103,7 +2103,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
 
 class SMPL_OT_ExportModel(bpy.types.Operator):
     bl_idname = "smpl.export_model"
-    bl_label = "Export SMPL Model"
+    bl_label = "Export SMIL Model"
 
     def execute(self, context):
         # Get SMPL data from the active object
