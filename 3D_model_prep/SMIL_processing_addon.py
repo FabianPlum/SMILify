@@ -1287,13 +1287,15 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "symmetrise")
 
         layout.operator("smpl.import_model", text="Import SMPL Model")
-        layout.operator("smpl.generate_from_unposed", text="Generate SMIL from unposed meshes")
-        # Add new button for loading all unposed registered meshes
-        layout.operator("smpl.load_all_unposed_meshes", text="Load all unposed registered meshes")
-        # Add button for recomputing joint positions
-        layout.operator("smpl.recompute_joint_positions", text="Recompute joint positions")
 
-        # Add output filename field before export button
+        # Add section for pose correctives
+        layout.separator()
+        layout.label(text="Advanced processing options:")
+        layout.operator("smpl.recompute_joint_positions", text="Recompute joint positions")
+        layout.operator("smpl.load_all_unposed_meshes", text="Load all unposed registered meshes")
+        layout.operator("smpl.generate_from_unposed", text="Generate SMIL model from unposed meshes")
+        
+        layout.separator()
         layout.prop(smpl_tool, "output_filename")
         layout.operator("smpl.export_model", text="Export SMPL Model")
 
@@ -1917,7 +1919,7 @@ def get_reference_measurements(context):
 
 class SMPL_OT_ImportModel(bpy.types.Operator):
     bl_idname = "smpl.import_model"
-    bl_label = "Import SMPL Model"
+    bl_label = "Import SMIL Model"
 
     def execute(self, context):
         scene = context.scene
