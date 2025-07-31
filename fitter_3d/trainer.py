@@ -12,7 +12,7 @@ from pytorch3d.structures import Meshes
 from tqdm import tqdm
 import torch
 import matplotlib.pyplot as plt
-from fitter_3d.utils import plot_pointclouds, plot_meshes, SDF_distance, sample_points_from_meshes_and_SDF
+from fitter_3d.utils import plot_pointclouds, plot_meshes, SDF_distance, sample_points_from_meshes_and_SDF, try_mkdir
 import numpy as np
 import os
 import config
@@ -134,45 +134,92 @@ class SMAL3DFitter(nn.Module):
         self.deform_verts = nn.Parameter(torch.zeros(batch_size, *self.smal_model.v_template.shape).to(device),
                                          requires_grad=True)
 
-    def get_joint_scales(self):
+    def get_joint_scales(self, log_beta_scales_arg=None):
         """
         Compute the final scale for each joint taking into account the kinematic chain.
         A joint's scale is influenced by its own scale parameters and all its parents.
+        
+        Args:
+            log_beta_scales_arg (optional): Tensor of shape (batch_size, n_joints, 3) 
+                                            to use instead of self.log_beta_scales.
         """
+        current_log_beta_scales = log_beta_scales_arg if log_beta_scales_arg is not None else self.log_beta_scales
         # Start with base scales from log_beta_scales
-        joint_scales = torch.exp(self.log_beta_scales)  # Convert from log space
+        joint_scales = torch.exp(current_log_beta_scales)  # Convert from log space
         
         # For each joint
         for joint_idx in range(self.n_joints):
             parent_idx = self.kintree_table[0, joint_idx]
             
             # If this joint has a parent (parent_idx != joint_idx)
-            if parent_idx != joint_idx:
+            # and the parent_idx is valid (within bounds of joint_scales)
+            if parent_idx != joint_idx and parent_idx < joint_scales.shape[1]:
                 # Accumulate parent's scale
-                joint_scales[:, joint_idx] *= joint_scales[:, parent_idx]
+                joint_scales[:, joint_idx] = joint_scales[:, joint_idx] * joint_scales[:, parent_idx]
         
         return joint_scales
 
-    def forward(self):
-        # Get accumulated joint scales
-        joint_scales = self.get_joint_scales()
+    def forward(self, betas=None, global_rot=None, joint_rot=None, trans=None, 
+                log_beta_scales=None, deform_verts=None, return_joints=False):
+        """
+        Forward pass for the SMAL model.
+        Can accept optional parameters to override the internal nn.Parameter attributes.
+
+        Args:
+            betas (optional): Shape parameters, tensor of shape (batch_size, N_BETAS).
+            global_rot (optional): Global rotation in axis-angle, tensor of shape (batch_size, 3).
+            joint_rot (optional): Joint rotations in axis-angle, tensor of shape (batch_size, N_POSE, 3).
+            trans (optional): Global translation, tensor of shape (batch_size, 3).
+            log_beta_scales (optional): Logarithm of joint scales, tensor of shape (batch_size, n_joints, 3).
+            deform_verts (optional): Vertex offsets, tensor of shape (batch_size, n_template_verts, 3).
+            return_joints (bool): Whether to return joints.
+
+        Returns:
+            verts: Predicted vertices, tensor of shape (batch_size, n_verts, 3).
+            joints: Predicted joints, tensor of shape (batch_size, n_joints, 3), if return_joints is True.
+        """
         
-        # Reshape to match expected format: batch_size x num_joints x 3
-        betas_logscale = self.log_beta_scales.reshape(self.batch_size, -1, 3)
+        # Determine which parameters to use (passed argument or self.attribute)
+        _betas = betas if betas is not None else self.betas
+        _global_rot = global_rot if global_rot is not None else self.global_rot
+        _joint_rot = joint_rot if joint_rot is not None else self.joint_rot
+        _trans = trans if trans is not None else self.trans
+        # Use provided log_beta_scales if available, otherwise use the internal one.
+        # This will be passed to get_joint_scales and directly to smal_model if needed.
+        _log_beta_scales_to_use = log_beta_scales if log_beta_scales is not None else self.log_beta_scales
+        _deform_verts = deform_verts if deform_verts is not None else self.deform_verts
+
+        # The original get_joint_scales uses self.log_beta_scales.
+        # We don't need joint_scales for the smal_model call directly,
+        # as smal_model itself handles the betas_logscale.
+        # The get_joint_scales method itself is not directly used in the smal_model call here,
+        # but it's good practice to make it consistent if it were to be used externally
+        # or if smal_model's interface changes.
+        # For the current self.smal_model call, we pass _log_beta_scales_to_use directly.
         
+        # The SMAL model expects betas_logscale to be of shape (batch_size, n_joints, 3).
+        # self.log_beta_scales is already initialized with this shape.
+        # If log_beta_scales is passed as an argument, it should also conform to this shape.
+        # The reshape operation in the original code was:
+        # `betas_logscale = self.log_beta_scales.reshape(self.batch_size, -1, 3)`
+        # This is effectively a no-op if self.log_beta_scales is already (bs, n_joints, 3).
+
         verts, joints, Rs, v_shaped = self.smal_model(
-            self.betas,
+            _betas,
             torch.cat([
-                self.global_rot.unsqueeze(1),
-                self.joint_rot], dim=1),
-            betas_logscale=betas_logscale)  # Pass properly shaped tensor
+                _global_rot.unsqueeze(1), # _global_rot is (bs, 3) -> (bs, 1, 3)
+                _joint_rot], dim=1),      # _joint_rot is (bs, N_POSE, 3)
+            betas_logscale=_log_beta_scales_to_use)  # Pass the determined log_beta_scales
 
-        verts = verts + self.trans.unsqueeze(1)
-        joints = joints + self.trans.unsqueeze(1)
+        verts = verts + _trans.unsqueeze(1) # _trans is (bs, 3) -> (bs, 1, 3)
+        joints = joints + _trans.unsqueeze(1)
 
-        verts += self.deform_verts
+        verts = verts + _deform_verts # _deform_verts is (bs, n_template_verts, 3)
 
-        return verts
+        if return_joints:
+            return verts, joints
+        else:
+            return verts
 
 
 class SMALParamGroup:
@@ -224,12 +271,15 @@ class Stage:
                  name="optimise",
                  loss_weights=None, lr=1e-3, out_dir="static_fits_output",
                  custom_lrs=None, device='cuda', plot_normals=False,
-                 sample_size=1000, sdf_values=None, source_sdf_values=None):
+                 sample_size=1000, sdf_values=None, source_sdf_values=None,
+                 visualize_sdf_loss=False, sdf_vis_frequency=10):
         """
         nits = integer, number of iterations in stage
         parameters = list of items over which to be optimised
         get_mesh = function that returns Mesh object for identifying losses
         name = name of stage
+        visualize_sdf_loss = whether to visualize SDF loss contribution
+        sdf_vis_frequency = how often to visualize SDF loss (every N iterations)
 
         lr_decay = factor by which lr decreases at each it"""
 
@@ -252,6 +302,10 @@ class Stage:
         # Store SDF values if provided
         self.sdf_values = sdf_values
         self.source_sdf_values = source_sdf_values
+        
+        # SDF loss visualization parameters
+        self.visualize_sdf_loss = visualize_sdf_loss
+        self.sdf_vis_frequency = sdf_vis_frequency
 
         self.losses_to_plot = []  # Store losses for review later
 
@@ -272,49 +326,70 @@ class Stage:
         self.consider_loss = lambda loss_name: self.loss_weights[
                                                    f"w_{loss_name}"] > 0  # function to check if loss is non-zero
 
-    def forward(self, src_mesh):
+    def forward(self, src_mesh, iteration=0):
         loss = 0
+        loss_components = {}
 
         # Sample from target meshes
         target_verts = sample_points_from_meshes(self.target_meshes, 3000)
 
         if self.consider_loss("chamfer"):
             loss_chamfer, _ = chamfer_distance(target_verts, src_mesh.verts_padded())
+            loss_components["chamfer"] = loss_chamfer
             loss += self.loss_weights["w_chamfer"] * loss_chamfer
 
         if self.consider_loss("edge"):
             loss_edge = mesh_edge_loss(src_mesh)  # and (b) the edge length of the predicted mesh
+            loss_components["edge"] = loss_edge
             loss += self.loss_weights["w_edge"] * loss_edge
 
         if self.consider_loss("normal"):
             loss_normal = mesh_normal_consistency(src_mesh)  # mesh normal consistency
+            loss_components["normal"] = loss_normal
             loss += self.loss_weights["w_normal"] * loss_normal
 
         if self.consider_loss("laplacian"):
             loss_laplacian = mesh_laplacian_smoothing(src_mesh, method="uniform")  # mesh laplacian smoothing
+            loss_components["laplacian"] = loss_laplacian
             loss += self.loss_weights["w_laplacian"] * loss_laplacian
 
         # Add SDF distance loss if SDF values are provided
         if self.consider_loss("sdf") and self.sdf_values is not None and self.source_sdf_values is not None:
             # Sample points from source mesh for SDF calculation
-            src_verts, src_sdf = sample_points_from_meshes_and_SDF(src_mesh, self.source_sdf_values, 3000)
-            target_verts, target_sdf = sample_points_from_meshes_and_SDF(self.target_meshes, self.sdf_values, 3000)
+            src_verts, src_sdf = sample_points_from_meshes_and_SDF(src_mesh, self.source_sdf_values, 10000)
+            target_verts, target_sdf = sample_points_from_meshes_and_SDF(self.target_meshes, self.sdf_values, 10000)
             
+            # Determine if we should visualize on this iteration
+            visualize_now = (self.visualize_sdf_loss and 
+                            (iteration % self.sdf_vis_frequency == 0 or iteration == self.n_it - 1))
+            
+            # Create visualization directory if needed
+            if visualize_now:
+                vis_dir = os.path.join(self.out_dir, "sdf_visualization", self.name)
+                try_mkdir(vis_dir)
+            else:
+                vis_dir = "sdf_visualization"
+                
             # Calculate SDF distance
             loss_sdf = SDF_distance(
                 src_verts,  # source points
                 target_verts,  # target points
                 src_sdf,  # source SDF values
                 target_sdf,  # target SDF values
-                k=10,  # number of nearest neighbors
+                k=50,  # number of nearest neighbors
                 batch_reduction="mean",
                 point_reduction="mean",
                 norm=2,
-                single_directional=False
+                single_directional=False,
+                visualize=visualize_now,
+                output_dir=vis_dir,
+                title=f"{self.name}_iteration{iteration}",
+                mesh_names=self.mesh_names  # Pass mesh names for better file naming
             )
+            loss_components["sdf"] = loss_sdf
             loss += self.loss_weights["w_sdf"] * loss_sdf
 
-        return loss
+        return loss, loss_components
 
     def step(self, epoch):
         """Runs step of Stage, calculating loss, and running the optimiser"""
@@ -323,13 +398,13 @@ class Stage:
         offsets = new_src_verts - self.src_verts
         new_src_mesh = self.src_mesh.offset_verts(offsets.view(-1, 3))
 
-        loss = self.forward(new_src_mesh)
+        loss, loss_components = self.forward(new_src_mesh, iteration=epoch)
 
         # Optimization step
         loss.backward()
         self.optimizer.step()
 
-        return loss
+        return loss, loss_components
 
     def plot(self):
 
@@ -349,12 +424,22 @@ class Stage:
         with tqdm(np.arange(self.n_it)) as tqdm_iterator:
             for i in tqdm_iterator:
                 self.optimizer.zero_grad()  # Initialise optimiser
-                loss = self.step(i)
+                loss, loss_components = self.step(i)
 
                 self.losses_to_plot.append(loss)
+                if not hasattr(self, 'loss_components_to_plot'):
+                    self.loss_components_to_plot = {k: [] for k in loss_components.keys()}
+                for k, v in loss_components.items():
+                    self.loss_components_to_plot[k].append(v)
+
+                # Print loss components at the end of each stage
+                if i == self.n_it - 1:
+                    print(f"\nFinal loss components for stage {self.name}:")
+                    for k, v in loss_components.items():
+                        print(f"{k}: {v.item():.6f}")
 
                 tqdm_iterator.set_description(
-                    f"STAGE = {self.name}, TOT_LOSS = {loss:.6f}")  # Print the losses
+                    f"STAGE = {self.name}, TOT_LOSS = {loss:.6f}")
 
         if plot:
             self.plot()
@@ -391,8 +476,8 @@ class StageManager:
             stage.run(plot=config.PLOT_RESULTS)
             stage.save_npz(labels=self.labels)
 
-        # commented out for now, as we plot losses in the run method
-        #self.plot_losses()
+        # plot loss components, total loss is plotted in the run method
+        self.plot_loss_components()
 
     def plot_losses(self, out_src="losses"):
         """Plot combined losses for all stages."""
@@ -410,6 +495,40 @@ class StageManager:
         ax.legend()
         out_src = os.path.join(self.out_dir, out_src + ".png")
         plt.tight_layout()
+        fig.savefig(out_src)
+        plt.close(fig)
+
+    def plot_loss_components(self, out_src="loss_components"):
+        """Plot individual loss components for all stages."""
+        
+        # Get all unique loss component names across all stages
+        all_components = set()
+        for stage in self.stages:
+            if hasattr(stage, 'loss_components_to_plot'):
+                all_components.update(stage.loss_components_to_plot.keys())
+        
+        # Create a subplot for each loss component
+        n_components = len(all_components)
+        fig, axes = plt.subplots(n_components, 1, figsize=(10, 4*n_components))
+        if n_components == 1:
+            axes = [axes]
+        
+        it_start = 0
+        for stage in self.stages:
+            if hasattr(stage, 'loss_components_to_plot'):
+                for i, component in enumerate(all_components):
+                    if component in stage.loss_components_to_plot:
+                        values = [v.cpu().detach().numpy() for v in stage.loss_components_to_plot[component]]
+                        axes[i].semilogy(np.arange(it_start, it_start + len(values)), 
+                                       values, label=f"{stage.name}")
+                        axes[i].set_title(f"{component} loss")
+                        axes[i].set_xlabel('Epoch')
+                        axes[i].set_ylabel('Loss value')
+                        axes[i].legend()
+            it_start += stage.n_it
+
+        plt.tight_layout()
+        out_src = os.path.join(self.out_dir, out_src + ".png")
         fig.savefig(out_src)
         plt.close(fig)
 
