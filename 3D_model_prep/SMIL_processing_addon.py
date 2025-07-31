@@ -1266,7 +1266,7 @@ GUI-ify
 
 
 class SMPL_PT_Panel(bpy.types.Panel):
-    bl_label = "SMPL Model Importer"
+    bl_label = "SMIL Model Importer"
     bl_idname = "SMPL_PT_Panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -1286,7 +1286,7 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "regress_joints")
         layout.prop(smpl_tool, "symmetrise")
 
-        layout.operator("smpl.import_model", text="Import SMPL Model")
+        layout.operator("smpl.import_model", text="Import SMIL Model")
 
         # Add section for pose correctives
         layout.separator()
@@ -1978,7 +1978,7 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                     if smpl_tool.clean_mesh:
                         cleanup_mesh(obj, center_tolerance=smpl_tool.merging_threshold)
 
-                    self.report({"INFO"}, "SMPL Model imported successfully.")
+                    self.report({"INFO"}, "SMIL Model imported successfully.")
                     return {"FINISHED"}
                 else:
                     self.report({"ERROR"}, "Failed to create mesh from .pkl file.")
@@ -2057,6 +2057,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                 return {"CANCELLED"}
 
             verts_data = np.array(verts_list)
+            mean_shape = np.mean(verts_data, axis=0)
 
             npz_data = {"verts": verts_data, "labels": labels_list}
 
@@ -2065,6 +2066,11 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
             store_smpl_data(context, data)
 
             create_armature_and_weights(data, obj)
+
+            # Overwrite the base mesh geometry with the mean shape of the unposed meshes.
+            # This is crucial for the shapekeys to be based on the correct average shape.
+            for i, v_co in enumerate(mean_shape):
+                obj.data.vertices[i].co = v_co
 
             if smpl_tool.shapekeys_from_PCA:
                 cov, mean_betas = apply_pca_and_create_shapekeys(
