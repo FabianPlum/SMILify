@@ -19,6 +19,11 @@ output/
 3D_model_prep/morph_anim/
 3D_model_prep/measurements/
 sdf_batch_output/
+sample_output/
+plots/
+
+#ignore other repos cloned during dev / debugging
+fitter_3d/pointcloud2smil/
 
 # unless specifically added, ignore videos
 *.mp4

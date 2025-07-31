@@ -18,7 +18,7 @@ GPU_IDS = "0"  # GPU number to run on (not applicable for CPU)
 # Run settings (I wouldn't recommend changing these unless you have good reason)
 FORCE_SMAL_PRIOR = False  # Allow the more recent Unity-based prior for dogs.
 ALLOW_LIMB_SCALING = True  # Allow scaling parameters, see Who Left the Dogs Out?
-SPLIT_TARGET_MESHES_INTO_BATCHES_OF_SIZE = -1  # Split target meshes into batches of size N. -1 means process all simultaneously
+SPLIT_TARGET_MESHES_INTO_BATCHES_OF_SIZE = 100  # Split target meshes into batches of size N. -1 means process all simultaneously
 # moved up the following line to have in one place with other prior data
 UNITY_SHAPE_PRIOR = join(data_path, 'priors', 'unity_betas.npz')
 

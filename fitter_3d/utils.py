@@ -29,7 +29,7 @@ set_start_method('spawn', force=True)
 
 def try_mkdir(loc):
     if not os.path.isdir(loc):
-        os.mkdir(loc)
+        os.makedirs(loc, exist_ok=True)
 
 
 def try_mkdirs(locs):
@@ -843,6 +843,107 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Surf
     plt.close(fig)
 
 
+def plot_vertex_heatmap(points, values, title="SDF Loss Contribution", output_path="sdf_loss_heatmap.png", 
+                     figsize=(10, 10), dpi=300, target_points=None):
+    """
+    Creates a 3D visualization of points with colors based on their associated values.
+    
+    Args:
+        points: Tensor or array of shape (P, 3) containing 3D points
+        values: Tensor or array of shape (P,) containing values for each point
+        title: Title for the plot
+        output_path: Path to save the output image
+        figsize: Size of the figurei
+        dpi: DPI for the output image
+        target_points: Optional tensor or array of shape (Q, 3) containing target points to plot with low opacity
+    """
+    # Convert to numpy if necessary
+    if torch.is_tensor(points):
+        points = points.numpy()
+    if torch.is_tensor(values):
+        values = values.numpy()
+    if target_points is not None and torch.is_tensor(target_points):
+        target_points = target_points.numpy()
+    
+    # Create figure with 3D projection
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Create colormap: grey for low values, red for high values
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+        "sdf_diff_cmap", [(0.8, 0.8, 0.8), (1, 0, 0)])
+    
+    # Ensure we have valid points and values
+    if len(points) == 0:
+        print(f"Warning: No points to visualize for {title}")
+        plt.close(fig)
+        return
+    
+    # Plot target points first (if provided) with very low opacity
+    if target_points is not None and len(target_points) > 0:
+        ax.scatter(
+            target_points[:, 0], target_points[:, 1], target_points[:, 2],
+            color='lightblue',
+            s=10,  # Smaller size
+            alpha=0.1,  # Very low opacity
+            label='Target points'
+        )
+    
+    # Plot points colored by their values
+    sc = ax.scatter(
+        points[:, 0], points[:, 1], points[:, 2],
+        c=values,
+        cmap=cmap,
+        s=20,  # Point size
+        alpha=0.8,
+        vmin=0.0,
+        vmax=1.0,
+        label='Source points'
+    )
+    
+    # Add colorbar
+    cbar = fig.colorbar(sc, ax=ax, label='Normalized SDF Difference')
+    cbar.set_ticks([0, 0.25, 0.5, 0.75, 1.0])
+    cbar.set_ticklabels(['0 (Low)', '0.25', '0.5', '0.75', '1.0 (High)'])
+    
+    # Set labels and title
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title(title)
+    
+    # Add legend
+    ax.legend()
+    
+    # Ensure equal scale for all axes using equal_3d_axes function
+    # If we have target points, include them in scale calculation
+    if target_points is not None and len(target_points) > 0:
+        all_x = np.concatenate([points[:, 0], target_points[:, 0]])
+        all_y = np.concatenate([points[:, 1], target_points[:, 1]])
+        all_z = np.concatenate([points[:, 2], target_points[:, 2]])
+        equal_3d_axes(ax, all_x, all_y, all_z, zoom=1.0)
+    else:
+        equal_3d_axes(ax, points[:, 0], points[:, 1], points[:, 2], zoom=1.0)
+    
+    # Get rid of colored axes planes and gray panes
+    ax.xaxis.pane.fill = False
+    ax.yaxis.pane.fill = False
+    ax.zaxis.pane.fill = False
+    ax.xaxis.pane.set_edgecolor('w')
+    ax.yaxis.pane.set_edgecolor('w')
+    ax.zaxis.pane.set_edgecolor('w')
+    
+    # Remove grid
+    ax.grid(False)
+    
+    # Save figure
+    out_dir = os.path.dirname(output_path)
+    try_mkdir(out_dir)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=dpi)
+    plt.close(fig)
+
+
 def _SDF_distance_single_direction(
     x: torch.Tensor,
     y: torch.Tensor,
@@ -854,6 +955,11 @@ def _SDF_distance_single_direction(
     batch_reduction: Union[str, None],
     point_reduction: Union[str, None],
     norm: int,
+    visualize: bool = False,
+    output_dir: str = "sdf_visualization",
+    title: str = "sdf_loss_contribution",
+    mesh_names: list = None,
+    normalize_sdf: bool = True
 ):
     """
     Compute the SDF distance in a single direction (x to y).
@@ -869,6 +975,11 @@ def _SDF_distance_single_direction(
         batch_reduction: Reduction operation to apply for the loss across the batch
         point_reduction: Reduction operation to apply for the loss across the points
         norm: int indicates the norm used for the distance
+        visualize: Whether to generate visualization of per-vertex SDF loss contributions
+        output_dir: Directory to save visualization plots
+        title: Base title for the visualization plots
+        mesh_names: List of names for each mesh in the batch
+        normalize_sdf: Whether to apply Z-score normalization to SDF values
 
     Returns:
         Tensor giving the reduced SDF distance between the pointclouds in x and y
@@ -884,6 +995,39 @@ def _SDF_distance_single_direction(
     # Get the distances to k nearest neighbors
     nn_dists = x_nn.dists  # Shape: (N, P1, k)
     
+    # Apply Z-score normalization to SDF values if requested
+    # This makes SDF values comparable across different scales by standardizing distributions
+    if normalize_sdf:
+        # Create empty tensors to hold normalized SDF values
+        x_sdf_normalized = torch.zeros_like(x_sdf)
+        y_sdf_normalized = torch.zeros_like(y_sdf)
+        
+        # Normalize each batch separately to handle varying distributions
+        for batch_idx in range(N):
+            # Get valid points for this batch
+            x_valid = x_sdf[batch_idx, :x_lengths[batch_idx]]
+            y_valid = y_sdf[batch_idx, :y_lengths[batch_idx]]
+            
+            # Compute statistics for normalization
+            x_mean = x_valid.mean()
+            x_std = x_valid.std()
+            y_mean = y_valid.mean()
+            y_std = y_valid.std()
+            
+            # Prevent division by zero with small epsilon
+            eps = 1e-8
+            x_std = torch.clamp(x_std, min=eps)
+            y_std = torch.clamp(y_std, min=eps)
+            
+            # Apply Z-score normalization: (value - mean) / std
+            # This centers the distribution at 0 with standard deviation of 1
+            x_sdf_normalized[batch_idx, :x_lengths[batch_idx]] = (x_valid - x_mean) / x_std
+            y_sdf_normalized[batch_idx, :y_lengths[batch_idx]] = (y_valid - y_mean) / y_std
+        
+        # Use normalized SDF values for subsequent computations
+        x_sdf = x_sdf_normalized
+        y_sdf = y_sdf_normalized
+    
     # Expand x_sdf for broadcasting
     x_sdf_expanded = x_sdf.unsqueeze(-1)  # Shape: (N, P1, 1)
     
@@ -893,11 +1037,50 @@ def _SDF_distance_single_direction(
     # Compute absolute differences between SDF values
     sdf_diffs = torch.abs(x_sdf_expanded - y_sdf_nn)  # Shape: (N, P1, k)
     
-    # Find the index of the neighbor with minimum SDF difference
-    min_sdf_diff_idx = torch.argmin(sdf_diffs, dim=-1)  # Shape: (N, P1)
+    # Instead of using argmin (non-differentiable), use softmax with negative values (differentiable)
+    # This creates a soft selection that will focus primarily on the minimum difference
+    # but maintains gradient flow through all neighbors
+    temperature = 0.1  # Controls how "sharp" the selection is (lower = closer to argmin)
+    weights = torch.softmax(-sdf_diffs / temperature, dim=-1)  # Shape: (N, P1, k)
     
-    # Get the corresponding distances
-    sdf_dist = torch.gather(nn_dists, 2, min_sdf_diff_idx.unsqueeze(-1)).squeeze(-1)  # Shape: (N, P1)
+    # Weighted sum of distances
+    sdf_dist = (weights * nn_dists).sum(dim=-1)  # Shape: (N, P1)
+    
+    # Generate visualizations if requested
+    if visualize:
+        try_mkdir(output_dir)
+        
+        # For visualization, let's compute the mean SDF difference for each point
+        # We'll use the weights to get a weighted average of differences
+        mean_sdf_diff = (weights * sdf_diffs).sum(dim=-1)  # Shape: (N, P1)
+        
+        # Generate visualization for each batch
+        for batch_idx in range(N):
+            # Get mesh name or use batch index
+            if mesh_names is not None and batch_idx < len(mesh_names):
+                mesh_name = mesh_names[batch_idx]
+            else:
+                mesh_name = f"batch{batch_idx}"
+                
+            # Normalize to [0, 1] range for visualization
+            batch_diffs = mean_sdf_diff[batch_idx]
+            max_diff = batch_diffs.max().item()
+            if max_diff > 0:
+                normalized_diffs = batch_diffs / max_diff
+            else:
+                normalized_diffs = torch.zeros_like(batch_diffs)
+            
+            # Get target points for this batch (up to y_lengths)
+            target_points = y[batch_idx, :y_lengths[batch_idx]].detach().cpu()
+            
+            # Create visualization plot with mesh name at beginning of filename
+            plot_vertex_heatmap(
+                points=x[batch_idx, :x_lengths[batch_idx]].detach().cpu(),
+                values=normalized_diffs[:x_lengths[batch_idx]].detach().cpu(),
+                title=f"{mesh_name} - {title}",
+                output_path=os.path.join(output_dir, f"{mesh_name}_{title}.png"),
+                target_points=target_points
+            )
     
     # Apply point reduction if specified
     if point_reduction is not None:
@@ -925,6 +1108,10 @@ def SDF_distance(
     point_reduction: Union[str, None] = "mean",
     norm: int = 2,
     single_directional: bool = False,
+    visualize: bool = False,
+    output_dir: str = "sdf_visualization",
+    title: str = "sdf_loss_contribution",
+    mesh_names: list = None
 ):
     """
     Spatial Diameter Function (SDF) distance between two pointclouds x and y.
@@ -948,6 +1135,10 @@ def SDF_distance(
         norm: int indicates the norm used for the distance. Supports 1 for L1 and 2 for L2 (euclidean).
         single_directional: If False (default), loss comes from both directions.
             If True, loss is only computed from x to y.
+        visualize: Whether to generate visualization of per-vertex SDF loss contributions
+        output_dir: Directory to save visualization plots
+        title: Base title for the visualization plots
+        mesh_names: List of names for each mesh in the batch
 
     Returns:
         Tensor giving the reduced SDF distance between the pointclouds in x and y.
@@ -986,10 +1177,23 @@ def SDF_distance(
     x_lengths = torch.full((N,), P1, dtype=torch.int64, device=x.device)
     y_lengths = torch.full((N,), P2, dtype=torch.int64, device=y.device)
     
+    # Prepare visualization directory with forward and backward subdirectories if needed
+    if visualize:
+        try_mkdir(output_dir)
+        forward_dir = os.path.join(output_dir, "forward")
+        try_mkdir(forward_dir)
+        if not single_directional:
+            backward_dir = os.path.join(output_dir, "backward")
+            try_mkdir(backward_dir)
+    
     # Compute forward direction
     sdf_dist = _SDF_distance_single_direction(
         x, y, x_sdf, y_sdf, x_lengths, y_lengths, k,
-        batch_reduction, point_reduction, norm
+        batch_reduction, point_reduction, norm,
+        visualize=visualize,
+        output_dir=os.path.join(output_dir, "forward") if visualize else output_dir,
+        title=title,
+        mesh_names=mesh_names
     )
     
     if single_directional:
@@ -998,7 +1202,11 @@ def SDF_distance(
     # Compute reverse direction
     sdf_dist_rev = _SDF_distance_single_direction(
         y, x, y_sdf, x_sdf, y_lengths, x_lengths, k,
-        batch_reduction, point_reduction, norm
+        batch_reduction, point_reduction, norm,
+        visualize=visualize,
+        output_dir=os.path.join(output_dir, "backward") if visualize else output_dir,
+        title=f"{title}_backward",
+        mesh_names=mesh_names
     )
     
     if point_reduction is not None:
@@ -1015,6 +1223,7 @@ def sample_points_from_meshes_and_SDF(
     """
     Convert a batch of meshes to a batch of pointclouds by uniformly sampling
     vertices from the mesh and return their corresponding SDF values.
+    This version preserves gradients to allow proper optimization.
 
     Args:
         meshes: A Meshes object with a batch of N meshes.
@@ -1033,16 +1242,19 @@ def sample_points_from_meshes_and_SDF(
         - sdf_samples: FloatTensor of shape (N, num_samples) giving the
           SDF values corresponding to the sampled points.
     """
-    # Get device and check if meshes is valid
-    if not isinstance(meshes, Meshes):
-        raise TypeError("meshes must be an instance of pytorch3d.structures.Meshes")
+    if meshes.isempty():
+        raise ValueError("Meshes are empty.")
+
+    verts = meshes.verts_packed()
+    if not torch.isfinite(verts).all():
+        raise ValueError("Meshes contain nan or inf.")
     
+    # Process and validate SDF values
     device = meshes.device
     num_meshes = len(meshes)
 
-    # Process and validate SDF values
+    # Convert SDF values to appropriate tensor format
     if isinstance(sdf_values, list):
-        # Make sure the list has the right length
         if len(sdf_values) != num_meshes:
             raise ValueError(f"Number of SDF value tensors ({len(sdf_values)}) must match number of meshes ({num_meshes})")
         
@@ -1052,6 +1264,9 @@ def sample_points_from_meshes_and_SDF(
                 sdf_values[i] = torch.tensor(sdf, device=device)
             elif sdf.device != device:
                 sdf_values[i] = sdf.to(device)
+                
+        # We'll handle this case with per-mesh processing
+        single_tensor_sdf = False
     else:
         # Single tensor of SDF values
         if not torch.is_tensor(sdf_values):
@@ -1061,11 +1276,10 @@ def sample_points_from_meshes_and_SDF(
         if sdf_values.device != device:
             sdf_values = sdf_values.to(device)
 
-        # Check the shape of the tensor
+        # Expand to batch dimension if needed
         if sdf_values.ndim == 1:
             # Single set of SDF values for all meshes
-            # Get vertex counts - move to CPU for comparison to avoid CUDA errors
-            verts_per_mesh = meshes.num_verts_per_mesh().cpu()
+            verts_per_mesh = meshes.num_verts_per_mesh()
             if verts_per_mesh.numel() == 0:
                 raise ValueError("Meshes object appears to be empty")
             
@@ -1081,96 +1295,48 @@ def sample_points_from_meshes_and_SDF(
             
             # Expand to batch dimension
             sdf_values = sdf_values.unsqueeze(0).expand(num_meshes, -1)
-        elif sdf_values.ndim == 2:
-            # Batch of SDF values
-            if sdf_values.shape[0] != num_meshes:
-                raise ValueError(f"First dimension of SDF values ({sdf_values.shape[0]}) must match number of meshes ({num_meshes})")
-        else:
-            raise ValueError(f"SDF values tensor must have 1 or 2 dimensions, got {sdf_values.ndim}")
-
+        
+        single_tensor_sdf = True
+    
     # Initialize output tensors
     samples = torch.zeros((num_meshes, num_samples, 3), device=device)
     sdf_samples = torch.zeros((num_meshes, num_samples), device=device)
-
-    # Get vertices data
-    try:
-        verts_packed = meshes.verts_packed()  # All vertices concatenated
-        verts_per_mesh = meshes.num_verts_per_mesh()  # Number of vertices per mesh
-        mesh_to_vert_idx = meshes.mesh_to_verts_packed_first_idx()  # Starting index for each mesh's vertices
-        valid_meshes = meshes.valid
-    except Exception as e:
-        raise RuntimeError(f"Error accessing mesh attributes: {str(e)}")
-
-    # For safety, move needed computations to CPU for indexing
-    mesh_to_vert_idx_cpu = mesh_to_vert_idx.cpu()
-    verts_per_mesh_cpu = verts_per_mesh.cpu()
-    valid_meshes_cpu = valid_meshes.cpu() if hasattr(valid_meshes, 'cpu') else valid_meshes
-
-    # Only compute samples for non-empty meshes
-    with torch.no_grad():
-        for i in range(num_meshes):
-            # Check if mesh is valid
-            if isinstance(valid_meshes_cpu, bool) or valid_meshes_cpu[i]:
-                # Get number of vertices for this mesh and ensure it's positive
-                num_verts = verts_per_mesh_cpu[i].item()
-                if num_verts <= 0:
-                    print(f"Warning: Mesh {i} has {num_verts} vertices, skipping")
-                    continue
-                
-                # Get starting offset for this mesh's vertices
-                if i < len(mesh_to_vert_idx_cpu):
-                    vert_offset = mesh_to_vert_idx_cpu[i].item()
+    
+    # Get mesh vertex data
+    mesh_to_vert_idx = meshes.mesh_to_verts_packed_first_idx()
+    verts_per_mesh = meshes.num_verts_per_mesh()
+    
+    # Sample for each mesh in the batch
+    for i in range(num_meshes):
+        num_verts = verts_per_mesh[i].item()
+        if num_verts <= 0:
+            continue  # Skip empty meshes
+        
+        # Get start index for this mesh's vertices
+        vert_offset = mesh_to_vert_idx[i].item()
+        
+        # Sample indices with replacement
+        indices = torch.randint(0, num_verts, (num_samples,), device=device)
+        
+        # Get global indices into verts_packed
+        global_indices = vert_offset + indices
+        
+        # Sample vertices
+        samples[i] = verts[global_indices]
+        
+        # Sample SDF values
+        if single_tensor_sdf:
+            # Use the expanded tensor
+            sdf_samples[i] = sdf_values[i][indices]
+        else:
+            # Use the list of per-mesh tensors
+            if i < len(sdf_values):
+                sdf = sdf_values[i]
+                if indices.max() < len(sdf):
+                    sdf_samples[i] = sdf[indices]
                 else:
-                    print(f"Warning: Mesh index {i} out of bounds for mesh_to_vert_idx (len={len(mesh_to_vert_idx_cpu)})")
-                    continue
-                
-                # Generate random indices for sampling vertices
-                # Limit num_samples to the number of vertices to avoid out-of-bounds errors
-                safe_num_samples = min(num_samples, num_verts)
-                if safe_num_samples < num_samples:
-                    print(f"Warning: Mesh {i} has only {num_verts} vertices, reducing samples from {num_samples} to {safe_num_samples}")
-                
-                # Always use replacement=True when sampling with safe_num_samples >= num_verts
-                # This avoids potential duplicate indices issues when num_verts is small
-                indices = torch.randint(0, num_verts, (safe_num_samples,), device=device)
-                
-                try:
-                    # Sample vertices with safe indexing
-                    global_indices = vert_offset + indices
-                    if global_indices.max() >= len(verts_packed):
-                        print(f"Warning: Invalid indices for mesh {i}: max index {global_indices.max().item()} >= verts_packed length {len(verts_packed)}")
-                        # Clamp indices to valid range
-                        global_indices = torch.clamp(global_indices, 0, len(verts_packed) - 1)
-                    
-                    # Sample vertices
-                    samples[i, :safe_num_samples] = verts_packed[global_indices]
-                    
-                    # Sample SDF values
-                    if isinstance(sdf_values, list):
-                        if i < len(sdf_values):
-                            sdf = sdf_values[i]
-                            if indices.max() < len(sdf):
-                                sdf_samples[i, :safe_num_samples] = sdf[indices]
-                            else:
-                                print(f"Warning: Invalid SDF indices for mesh {i}: max index {indices.max().item()} >= sdf length {len(sdf)}")
-                                # Clamp indices to valid range
-                                safe_indices = torch.clamp(indices, 0, len(sdf) - 1)
-                                sdf_samples[i, :safe_num_samples] = sdf[safe_indices]
-                        else:
-                            print(f"Warning: Mesh index {i} out of bounds for sdf_values list (len={len(sdf_values)})")
-                    else:
-                        if i < sdf_values.shape[0] and indices.max() < sdf_values.shape[1]:
-                            sdf_samples[i, :safe_num_samples] = sdf_values[i][indices]
-                        else:
-                            print(f"Warning: Invalid SDF tensor indexing for mesh {i}: sdf_values shape={sdf_values.shape}, max index={indices.max().item() if indices.numel() > 0 else -1}")
-                            # Try to handle potential indexing errors
-                            if i < sdf_values.shape[0]:
-                                safe_indices = torch.clamp(indices, 0, sdf_values.shape[1] - 1)
-                                sdf_samples[i, :safe_num_samples] = sdf_values[i][safe_indices]
-                            
-                except Exception as e:
-                    print(f"Error sampling from mesh {i}: {str(e)}")
-                    # Continue with next mesh instead of failing entirely
-                    continue
-
+                    # Handle out-of-bounds indices safely
+                    safe_indices = torch.clamp(indices, 0, len(sdf) - 1)
+                    sdf_samples[i] = sdf[safe_indices]
+    
     return samples, sdf_samples
