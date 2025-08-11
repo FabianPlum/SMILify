@@ -521,7 +521,7 @@ if __name__ == "__main__":
     """
     # Read the JSON file
     json_file_path = (
-        "data/replicAnt_trials/replicAnt-x-SMIL-demo/replicAnt-x-SMIL-demo_00.json"
+        "data/replicAnt_trials/replicAnt-x-SMIL-ALL_PC-demo/replicAnt-x-SMIL-ALL_PC-demo_00.json"
     )
     # Generate additional plots for debugging
     plot_tests = False
@@ -599,6 +599,14 @@ if __name__ == "__main__":
     # Extract shape and pose parameters
     try:
         shape_betas = data["iterationData"]["subject Data"][0]["1"]["shape betas"]
+        if isinstance(shape_betas, dict):
+            print("INFO: Shape betas is a dict.")
+            shape_betas_temp = []
+            for key, value in shape_betas.items():
+                print(key, value)
+                shape_betas_temp.append(value)
+            shape_betas = shape_betas_temp
+        print("INFO: Shape betas", shape_betas)
     except KeyError:
         shape_betas = []
 
@@ -616,6 +624,13 @@ if __name__ == "__main__":
         shape_betas = np.zeros(config.dd["shapedirs"].shape[2])
     else:
         shape_betas = np.array(shape_betas)
+
+    # Check if the loaded shape betas have the same number of dimensions as the model
+    if shape_betas.shape[0] != config.dd["shapedirs"].shape[2]:
+        print("\nERROR: Shape betas have the wrong number of dimensions")
+        print("INFO: Shape betas from data:", len(shape_betas))
+        print("INFO: Model shape betas:", config.dd["shapedirs"].shape[2])
+        exit()
 
     # Display the extracted data
     print("Shape Betas:", shape_betas.shape)
@@ -641,7 +656,6 @@ if __name__ == "__main__":
         device, data_json, config.WINDOW_SIZE, config.SHAPE_FAMILY, use_unity_prior
     )
 
-    # CURRENTLY SHAPE BETAS ARE DISABLED IN UNREAL / set to zero
     # model parameters
     model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
 
