@@ -521,7 +521,8 @@ if __name__ == "__main__":
     """
     # Read the JSON file
     json_file_path = (
-        "data/replicAnt_trials/replicAnt-x-SMIL-ALL_PC-demo/replicAnt-x-SMIL-ALL_PC-demo_00.json"
+        #"data/replicAnt_trials/replicAnt-x-SMIL-ALL_PC-demo/replicAnt-x-SMIL-ALL_PC-demo_00.json"
+        "/media/fabi/Data/SMIL_Full_x_Plants/SMIL_Full_x_Plants_000.json"
     )
     # Generate additional plots for debugging
     plot_tests = False
@@ -635,6 +636,17 @@ if __name__ == "__main__":
     # Display the extracted data
     print("Shape Betas:", shape_betas.shape)
     print("Pose Data:", np_joint_angles_mapped.shape)
+
+    # Check if scaledirs and transdirs exist in the model data
+    if "scaledirs" in config.dd:
+        print(f"Found scaledirs in model with shape: {config.dd['scaledirs'].shape}")
+    else:
+        print("No scaling components (scaledirs) found in model data")
+        
+    if "transdirs" in config.dd:
+        print(f"Found transdirs in model with shape: {config.dd['transdirs'].shape}")
+    else:
+        print("No translation components (transdirs) found in model data")
 
     # setting pose data to None supresses displaing joint locations in the rendered image
     data_json, filenames = return_placeholder_data(

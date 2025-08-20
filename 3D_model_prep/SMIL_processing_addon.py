@@ -46,6 +46,25 @@ pip.main(['install', 'scikit-learn', 'matplotlib' '--target', (sys.exec_prefix) 
 # global, so the model is not re-loaded
 pkl_data = None
 
+# Global variables to store computed Transformation PCA components from 
+computed_scaledirs = None
+computed_transdirs = None
+
+def clear_morph_pca_globals():
+    """Clear the global morph PCA variables"""
+    global computed_scaledirs, computed_transdirs
+    computed_scaledirs = None
+    computed_transdirs = None
+    print("Cleared global morph PCA variables")
+
+def get_morph_pca_status():
+    """Check if Transformation PCA components are available"""
+    global computed_scaledirs, computed_transdirs
+    if computed_scaledirs is not None and computed_transdirs is not None:
+        return True, f"Available - scaledirs: {computed_scaledirs.shape}, transdirs: {computed_transdirs.shape}"
+    else:
+        return False, "Not available - run 'Load all unposed registered meshes' first"
+
 """
 SMIL-ify
 """
@@ -600,6 +619,13 @@ def load_pkl_file(filepath):
                 except:
                     print(len(data_de_chumpied[key]))
         print("Loaded .pkl file successfully.")
+        
+        # Check for new morph PCA entries
+        if "scaledirs" in data_de_chumpied:
+            print(f"Found scaledirs with shape: {data_de_chumpied['scaledirs'].shape}")
+        if "transdirs" in data_de_chumpied:
+            print(f"Found transdirs with shape: {data_de_chumpied['transdirs'].shape}")
+            
         return data_de_chumpied
     except Exception as e:
         print(f"Failed to load .pkl file: {e}")
@@ -839,7 +865,13 @@ def create_shapekeys(data, obj):
 
 
 def apply_pca_and_create_shapekeys(
-    scans, obj, num_components=10, overwrite_mesh=False, std_range=1
+    scans,
+    obj,
+    num_components=10,
+    overwrite_mesh=False,
+    std_range=1,
+    labels=None,
+    output_dir=None,
 ):
     n, v, _ = scans.shape
     # Reshape the scans into (n, v*3)
@@ -898,7 +930,43 @@ def apply_pca_and_create_shapekeys(
     print(
         f"Created {num_components} PCA shapekeys with custom min and max ranges based on standard deviations."
     )
+    # Optional: export XY (PC1, PC2) scatter data and PCA stats
+    try:
+        if output_dir is not None:
+            if labels is None or len(labels) != scans.shape[0]:
+                labels = [f"sample_{i}" for i in range(scans.shape[0])]
+            # XY coordinates for first two PCs
+            pc_xy_path = os.path.join(output_dir, "smil_shape_PC_xy.csv")
+            with open(pc_xy_path, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["label", "PC1", "PC2"]) 
+                for i, lab in enumerate(labels):
+                    pc1 = transformed_betas[i, 0] if transformed_betas.shape[1] > 0 else 0.0
+                    pc2 = transformed_betas[i, 1] if transformed_betas.shape[1] > 1 else 0.0
+                    writer.writerow([lab, pc1, pc2])
 
+            # PCA stats
+            stats_path = os.path.join(output_dir, "smil_shape_PCA_stats.txt")
+            with open(stats_path, "w") as f:
+                f.write("PCA stats for shape-derived PCs\n")
+                f.write(f"n_samples: {scans_reshaped.shape[0]}\n")
+                f.write(f"n_features: {scans_reshaped.shape[1]}\n")
+                f.write(f"n_components: {num_components}\n")
+                f.write(f"explained_variance_ratio: {pca.explained_variance_ratio_.tolist()}\n")
+                f.write(f"explained_variance: {pca.explained_variance_.tolist()}\n")
+                f.write(f"singular_values: {pca.singular_values_.tolist()}\n")
+                f.write(f"mean_l2_norm: {float(np.linalg.norm(pca.mean_))}\n")
+                # Add per-shape PC weights (scores) needed to reproduce each input shape
+                f.write("\npc_weights_per_shape (scores):\n")
+                header = ",".join(["label"] + [f"PC{i+1}" for i in range(min(num_components, transformed_betas.shape[1]))])
+                f.write(header + "\n")
+                for i, lab in enumerate(labels):
+                    weights = transformed_betas[i, : num_components]
+                    weights_str = ",".join([f"{w}" for w in weights.tolist()])
+                    f.write(f"{lab},{weights_str}\n")
+            print(f"Shape PCA XY exported to {pc_xy_path}; stats to {stats_path}")
+    except Exception as e:
+        print(f"Failed exporting shape PCA XY/stats: {e}")
     return cov_out, mean_betas
 
 
@@ -1162,6 +1230,8 @@ def export_smpl_model(obj, export_path, pkl_data=None):
             "shapedirs": [],
             "bs_type": "lrotmin",
             "sym_verts": [],
+            "scaledirs": [],  # optional PCA components for joint scaling variation
+            "transdirs": [],  # optional PCA components for joint translation variation
         }
 
         # new models most likely have weight paiting / assignment issues that need to be resolved
@@ -1248,6 +1318,12 @@ def export_smpl_model(obj, export_path, pkl_data=None):
     pkl_data["shapedirs"] = shapedirs
     print(shapedirs.shape)
 
+    # Check if scaledirs and transdirs exist and include them in export
+    if "scaledirs" in pkl_data:
+        print(f"Including scaledirs in export with shape: {pkl_data['scaledirs'].shape}")
+    if "transdirs" in pkl_data:
+        print(f"Including transdirs in export with shape: {pkl_data['transdirs'].shape}")
+
     # Write out the new pkl file to the same location as the input pkl file with the user-specified name
     output_path = os.path.join(
         os.path.dirname(export_path), bpy.context.scene.smpl_tool.output_filename
@@ -1286,7 +1362,7 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "regress_joints")
         layout.prop(smpl_tool, "symmetrise")
 
-        layout.operator("smpl.import_model", text="Import SMIL Model")
+        layout.operator("smpl.import_model", text="Direct Import SMIL Model")
 
         # Add section for pose correctives
         layout.separator()
@@ -1294,6 +1370,21 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.operator("smpl.recompute_joint_positions", text="Recompute joint positions")
         layout.operator("smpl.load_all_unposed_meshes", text="Load all unposed registered meshes")
         layout.operator("smpl.generate_from_unposed", text="Generate SMIL model from unposed meshes")
+        
+        # Add morph PCA status indicator
+        morph_available, morph_status = get_morph_pca_status()
+        if morph_available:
+            status_box = layout.box()
+            status_box.label(text="Transformation PCA components:", icon="CHECKMARK")
+            status_box.label(text=morph_status)
+        else:
+            status_box = layout.box()
+            status_box.label(text="Transformation PCA components:", icon="INFO")
+            status_box.label(text=morph_status)
+        
+        # Add clear button if components are available
+        if morph_available:
+            layout.operator("smpl.clear_morph_pca", text="Clear Transformation PCA components")
         
         layout.separator()
         layout.prop(smpl_tool, "output_filename")
@@ -1961,8 +2052,17 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                         return {"CANCELLED"}
 
                     if smpl_tool.shapekeys_from_PCA:
+                        output_dir = os.path.dirname(pkl_filepath)
+                        labels = (
+                            list(npz_data["labels"]) if "labels" in npz_data else None
+                        )
                         cov, mean_betas = apply_pca_and_create_shapekeys(
-                            verts_data, obj, smpl_tool.number_of_PC, overwrite_mesh=True
+                            verts_data,
+                            obj,
+                            smpl_tool.number_of_PC,
+                            overwrite_mesh=True,
+                            labels=labels,
+                            output_dir=output_dir,
                         )
 
                     else:
@@ -2077,8 +2177,14 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                 obj.data.vertices[i].co = v_co
 
             if smpl_tool.shapekeys_from_PCA:
+                output_dir = os.path.dirname(pkl_filepath)
                 cov, mean_betas = apply_pca_and_create_shapekeys(
-                    verts_data, obj, smpl_tool.number_of_PC, overwrite_mesh=True
+                    verts_data,
+                    obj,
+                    smpl_tool.number_of_PC,
+                    overwrite_mesh=True,
+                    labels=labels_list,
+                    output_dir=output_dir,
                 )
             else:
                 cov, mean_betas = create_shapekeys(npz_data, obj)
@@ -2087,6 +2193,27 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
             data["shape_mean_betas"] = mean_betas
             # Update the stored data with the new shape info
             store_smpl_data(context, data, obj=obj)
+
+            # Check if Transformation PCA components are available from LoadAllUnposedMeshes
+            global computed_scaledirs, computed_transdirs
+            if computed_scaledirs is not None and computed_transdirs is not None:
+                # Additional safety check for array shapes
+                if (isinstance(computed_scaledirs, np.ndarray) and 
+                    isinstance(computed_transdirs, np.ndarray) and
+                    len(computed_scaledirs.shape) == 3 and 
+                    len(computed_transdirs.shape) == 3):
+                    
+                    data["scaledirs"] = computed_scaledirs
+                    data["transdirs"] = computed_transdirs
+                    print(f"Added Transformation PCA components to generated model:")
+                    print(f"  scaledirs shape: {computed_scaledirs.shape}")
+                    print(f"  transdirs shape: {computed_transdirs.shape}")
+                    # Update the stored data with the morph PCA info
+                    store_smpl_data(context, data, obj=obj)
+                else:
+                    print("Transformation PCA components found but with invalid shapes. Run 'Load all unposed registered meshes' again.")
+            else:
+                print("No Transformation PCA components found. Run 'Load all unposed registered meshes' first to compute them.")
 
             if smpl_tool.symmetrise:
                 make_symmetrical(obj, data)
@@ -2492,6 +2619,117 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     row = [joint_names[j]] + transform_data[j, :].tolist()
                     writer.writerow(row)
             print(f"Morph data exported to {output_path}")
+
+            # --- Also export PCA of morph data in same layout ---
+            try:
+                # Build feature matrix X with one row per mesh and features per joint (scale xyz + translation xyz)
+                features_per_joint = 6
+                X = np.zeros((n_meshes, num_joints * features_per_joint), dtype=np.float32)
+                for i in range(n_meshes):
+                    # collect features for mesh i across all joints
+                    for j in range(num_joints):
+                        start_feat = j * features_per_joint
+                        end_feat = start_feat + features_per_joint
+                        start_src = i * features_per_joint
+                        end_src = start_src + features_per_joint
+                        X[i, start_feat:end_feat] = transform_data[j, start_src:end_src]
+
+                # Determine number of components respecting limits
+                requested_components = int(getattr(smpl_tool, "number_of_PC", 1))
+                n_components = max(1, min(requested_components, X.shape[0], X.shape[1]))
+
+                pca = PCA(n_components=n_components)
+                pca.fit(X)
+                components = pca.components_  # (k, num_joints*6)
+
+                # Store PCA components in pkl_data for export
+                # Reshape components to separate scale and translation data
+                # components shape: (k, num_joints*6) -> reshape to (k, num_joints, 6)
+                components_reshaped = components.reshape(n_components, num_joints, 6)
+                
+                # Extract scale and translation components
+                # Scale data: components[:, :, 0:3] (first 3 columns)
+                # Translation data: components[:, :, 3:6] (last 3 columns)
+                scaledirs = components_reshaped[:, :, 0:3]  # (k, num_joints, 3)
+                transdirs = components_reshaped[:, :, 3:6]  # (k, num_joints, 3)
+                
+                # Store in pkl_data for later export
+                pkl_data["scaledirs"] = scaledirs
+                pkl_data["transdirs"] = transdirs
+                
+                # Also store in global variables for use by other operators
+                global computed_scaledirs, computed_transdirs
+                computed_scaledirs = scaledirs
+                computed_transdirs = transdirs
+                
+                print(f"Stored PCA components in pkl_data:")
+                print(f"  scaledirs shape: {scaledirs.shape}")
+                print(f"  transdirs shape: {transdirs.shape}")
+                print(f"Also stored in global variables for use by other operators")
+
+                pc_output_path = os.path.join(
+                    os.path.dirname(pkl_filepath), "smil_morph_PC_data.csv"
+                )
+                with open(pc_output_path, "w", newline="") as csvfile:
+                    writer = csv.writer(csvfile)
+                    # Header: joint_name, then for each PC six columns matching the original naming pattern
+                    header_pc = ["joint_name"]
+                    for k in range(n_components):
+                        pc_label = f"PC_{k+1}"
+                        header_pc.extend(
+                            [
+                                f"{pc_label}_scale_x",
+                                f"{pc_label}_scale_y",
+                                f"{pc_label}_scale_z",
+                                f"{pc_label}_translation_x",
+                                f"{pc_label}_translation_y",
+                                f"{pc_label}_translation_z",
+                            ]
+                        )
+                    writer.writerow(header_pc)
+
+                    # Rows per joint, values sliced from component loadings
+                    for j in range(num_joints):
+                        row = [joint_names[j]]
+                        start_feat = j * features_per_joint
+                        end_feat = start_feat + features_per_joint
+                        for k in range(n_components):
+                            row.extend(components[k, start_feat:end_feat].tolist())
+                        writer.writerow(row)
+
+                print(
+                    f"Morph PCA data (k={n_components}) exported to {pc_output_path}. Explained variance ratios: {pca.explained_variance_ratio_}"
+                )
+
+                # Export XY coordinates (PC1, PC2 scores) and PCA stats
+                try:
+                    # Scores for each mesh
+                    scores = pca.transform(X)  # shape (n_meshes, k)
+                    pc_xy_path = os.path.join(os.path.dirname(pkl_filepath), "smil_morph_PC_xy.csv")
+                    with open(pc_xy_path, "w", newline="") as csvfile:
+                        writer = csv.writer(csvfile)
+                        writer.writerow(["label", "PC1", "PC2"]) 
+                        for i, lab in enumerate(labels):
+                            pc1 = scores[i, 0] if scores.shape[1] > 0 else 0.0
+                            pc2 = scores[i, 1] if scores.shape[1] > 1 else 0.0
+                            writer.writerow([lab, pc1, pc2])
+
+                    stats_path = os.path.join(os.path.dirname(pkl_filepath), "smil_morph_PCA_stats.txt")
+                    with open(stats_path, "w") as f:
+                        f.write("PCA stats for morph (scale/translation) PCs\n")
+                        f.write(f"n_samples: {X.shape[0]}\n")
+                        f.write(f"n_features: {X.shape[1]}\n")
+                        f.write(f"n_components: {n_components}\n")
+                        f.write(f"explained_variance_ratio: {pca.explained_variance_ratio_.tolist()}\n")
+                        f.write(f"explained_variance: {pca.explained_variance_.tolist()}\n")
+                        f.write(f"singular_values: {pca.singular_values_.tolist()}\n")
+                        # mean vector may be large; just record L2 norm
+                        f.write(f"mean_l2_norm: {float(np.linalg.norm(pca.mean_))}\n")
+                    print(f"Morph PCA XY exported to {pc_xy_path}; stats to {stats_path}")
+                except Exception as e:
+                    print(f"Failed exporting morph PCA XY/stats: {e}")
+            except Exception as e:
+                print(f"Failed to export morph PCA data: {e}")
         except Exception as e:
             print(f"Failed to export morph data: {e}")
             
@@ -2524,6 +2762,17 @@ class SMPL_OT_RecomputeJointPositions(bpy.types.Operator):
             bone.tail = joint_positions[j] + [0, 0, 0.1]
         bpy.ops.object.mode_set(mode="OBJECT")
         self.report({'INFO'}, 'Joint positions updated for selected armature.')
+        return {'FINISHED'}
+
+
+class SMPL_OT_ClearMorphPCA(bpy.types.Operator):
+    bl_idname = "smpl.clear_morph_pca"
+    bl_label = "Clear Transformation PCA components"
+    bl_description = "Clear the globally stored Transformation PCA components"
+
+    def execute(self, context):
+        clear_morph_pca_globals()
+        self.report({'INFO'}, 'Transformation PCA components cleared.')
         return {'FINISHED'}
 
 
@@ -2804,6 +3053,7 @@ classes = (
     SMPL_OT_LoadReferenceMeasurements,
     SMPL_OT_LoadAllUnposedMeshes,
     SMPL_OT_RecomputeJointPositions,  # <-- Add here
+    SMPL_OT_ClearMorphPCA,
     SMPLProperties,
 )
 
