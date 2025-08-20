@@ -46,6 +46,25 @@ pip.main(['install', 'scikit-learn', 'matplotlib' '--target', (sys.exec_prefix) 
 # global, so the model is not re-loaded
 pkl_data = None
 
+# Global variables to store computed Transformation PCA components from 
+computed_scaledirs = None
+computed_transdirs = None
+
+def clear_morph_pca_globals():
+    """Clear the global morph PCA variables"""
+    global computed_scaledirs, computed_transdirs
+    computed_scaledirs = None
+    computed_transdirs = None
+    print("Cleared global morph PCA variables")
+
+def get_morph_pca_status():
+    """Check if Transformation PCA components are available"""
+    global computed_scaledirs, computed_transdirs
+    if computed_scaledirs is not None and computed_transdirs is not None:
+        return True, f"Available - scaledirs: {computed_scaledirs.shape}, transdirs: {computed_transdirs.shape}"
+    else:
+        return False, "Not available - run 'Load all unposed registered meshes' first"
+
 """
 SMIL-ify
 """
@@ -600,6 +619,13 @@ def load_pkl_file(filepath):
                 except:
                     print(len(data_de_chumpied[key]))
         print("Loaded .pkl file successfully.")
+        
+        # Check for new morph PCA entries
+        if "scaledirs" in data_de_chumpied:
+            print(f"Found scaledirs with shape: {data_de_chumpied['scaledirs'].shape}")
+        if "transdirs" in data_de_chumpied:
+            print(f"Found transdirs with shape: {data_de_chumpied['transdirs'].shape}")
+            
         return data_de_chumpied
     except Exception as e:
         print(f"Failed to load .pkl file: {e}")
@@ -1204,6 +1230,8 @@ def export_smpl_model(obj, export_path, pkl_data=None):
             "shapedirs": [],
             "bs_type": "lrotmin",
             "sym_verts": [],
+            "scaledirs": [],  # optional PCA components for joint scaling variation
+            "transdirs": [],  # optional PCA components for joint translation variation
         }
 
         # new models most likely have weight paiting / assignment issues that need to be resolved
@@ -1290,6 +1318,12 @@ def export_smpl_model(obj, export_path, pkl_data=None):
     pkl_data["shapedirs"] = shapedirs
     print(shapedirs.shape)
 
+    # Check if scaledirs and transdirs exist and include them in export
+    if "scaledirs" in pkl_data:
+        print(f"Including scaledirs in export with shape: {pkl_data['scaledirs'].shape}")
+    if "transdirs" in pkl_data:
+        print(f"Including transdirs in export with shape: {pkl_data['transdirs'].shape}")
+
     # Write out the new pkl file to the same location as the input pkl file with the user-specified name
     output_path = os.path.join(
         os.path.dirname(export_path), bpy.context.scene.smpl_tool.output_filename
@@ -1328,7 +1362,7 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "regress_joints")
         layout.prop(smpl_tool, "symmetrise")
 
-        layout.operator("smpl.import_model", text="Import SMIL Model")
+        layout.operator("smpl.import_model", text="Direct Import SMIL Model")
 
         # Add section for pose correctives
         layout.separator()
@@ -1336,6 +1370,21 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.operator("smpl.recompute_joint_positions", text="Recompute joint positions")
         layout.operator("smpl.load_all_unposed_meshes", text="Load all unposed registered meshes")
         layout.operator("smpl.generate_from_unposed", text="Generate SMIL model from unposed meshes")
+        
+        # Add morph PCA status indicator
+        morph_available, morph_status = get_morph_pca_status()
+        if morph_available:
+            status_box = layout.box()
+            status_box.label(text="Transformation PCA components:", icon="CHECKMARK")
+            status_box.label(text=morph_status)
+        else:
+            status_box = layout.box()
+            status_box.label(text="Transformation PCA components:", icon="INFO")
+            status_box.label(text=morph_status)
+        
+        # Add clear button if components are available
+        if morph_available:
+            layout.operator("smpl.clear_morph_pca", text="Clear Transformation PCA components")
         
         layout.separator()
         layout.prop(smpl_tool, "output_filename")
@@ -2145,6 +2194,27 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
             # Update the stored data with the new shape info
             store_smpl_data(context, data, obj=obj)
 
+            # Check if Transformation PCA components are available from LoadAllUnposedMeshes
+            global computed_scaledirs, computed_transdirs
+            if computed_scaledirs is not None and computed_transdirs is not None:
+                # Additional safety check for array shapes
+                if (isinstance(computed_scaledirs, np.ndarray) and 
+                    isinstance(computed_transdirs, np.ndarray) and
+                    len(computed_scaledirs.shape) == 3 and 
+                    len(computed_transdirs.shape) == 3):
+                    
+                    data["scaledirs"] = computed_scaledirs
+                    data["transdirs"] = computed_transdirs
+                    print(f"Added Transformation PCA components to generated model:")
+                    print(f"  scaledirs shape: {computed_scaledirs.shape}")
+                    print(f"  transdirs shape: {computed_transdirs.shape}")
+                    # Update the stored data with the morph PCA info
+                    store_smpl_data(context, data, obj=obj)
+                else:
+                    print("Transformation PCA components found but with invalid shapes. Run 'Load all unposed registered meshes' again.")
+            else:
+                print("No Transformation PCA components found. Run 'Load all unposed registered meshes' first to compute them.")
+
             if smpl_tool.symmetrise:
                 make_symmetrical(obj, data)
 
@@ -2572,6 +2642,31 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 pca.fit(X)
                 components = pca.components_  # (k, num_joints*6)
 
+                # Store PCA components in pkl_data for export
+                # Reshape components to separate scale and translation data
+                # components shape: (k, num_joints*6) -> reshape to (k, num_joints, 6)
+                components_reshaped = components.reshape(n_components, num_joints, 6)
+                
+                # Extract scale and translation components
+                # Scale data: components[:, :, 0:3] (first 3 columns)
+                # Translation data: components[:, :, 3:6] (last 3 columns)
+                scaledirs = components_reshaped[:, :, 0:3]  # (k, num_joints, 3)
+                transdirs = components_reshaped[:, :, 3:6]  # (k, num_joints, 3)
+                
+                # Store in pkl_data for later export
+                pkl_data["scaledirs"] = scaledirs
+                pkl_data["transdirs"] = transdirs
+                
+                # Also store in global variables for use by other operators
+                global computed_scaledirs, computed_transdirs
+                computed_scaledirs = scaledirs
+                computed_transdirs = transdirs
+                
+                print(f"Stored PCA components in pkl_data:")
+                print(f"  scaledirs shape: {scaledirs.shape}")
+                print(f"  transdirs shape: {transdirs.shape}")
+                print(f"Also stored in global variables for use by other operators")
+
                 pc_output_path = os.path.join(
                     os.path.dirname(pkl_filepath), "smil_morph_PC_data.csv"
                 )
@@ -2667,6 +2762,17 @@ class SMPL_OT_RecomputeJointPositions(bpy.types.Operator):
             bone.tail = joint_positions[j] + [0, 0, 0.1]
         bpy.ops.object.mode_set(mode="OBJECT")
         self.report({'INFO'}, 'Joint positions updated for selected armature.')
+        return {'FINISHED'}
+
+
+class SMPL_OT_ClearMorphPCA(bpy.types.Operator):
+    bl_idname = "smpl.clear_morph_pca"
+    bl_label = "Clear Transformation PCA components"
+    bl_description = "Clear the globally stored Transformation PCA components"
+
+    def execute(self, context):
+        clear_morph_pca_globals()
+        self.report({'INFO'}, 'Transformation PCA components cleared.')
         return {'FINISHED'}
 
 
@@ -2947,6 +3053,7 @@ classes = (
     SMPL_OT_LoadReferenceMeasurements,
     SMPL_OT_LoadAllUnposedMeshes,
     SMPL_OT_RecomputeJointPositions,  # <-- Add here
+    SMPL_OT_ClearMorphPCA,
     SMPLProperties,
 )
 
