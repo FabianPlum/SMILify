@@ -28,7 +28,6 @@ class Renderer(torch.nn.Module):
         R, T = look_at_view_transform(2.7, 0, 0, device=device)
         #self.cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T, fov=60)
         self.cameras = FoVPerspectiveCameras(R=R, T=T, device=device, fov=60)
-        print("Camera field of view:", str(self.cameras.fov.item()), "degrees")
         self.mesh_color = torch.FloatTensor(config.MESH_COLOR).to(device)[None, None, :] / 255.0
 
         blend_params = BlendParams(sigma=1e-4, gamma=1e-4)

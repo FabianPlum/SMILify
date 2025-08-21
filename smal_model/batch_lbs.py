@@ -74,7 +74,11 @@ def batch_lrotmin(theta):
     return lrotmin
 
 def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
-                                    betas_logscale=None, opts=None,
+                                    betas_logscale=None, 
+                                    betas_logtrans=None,
+                                    propagate_scaling=True,
+                                    propagate_translation=False,
+                                    opts=None,
                                     num_joints=35):
     """
     Computes absolute joint locations given pose and scaling.
@@ -84,6 +88,9 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
       Js: N x J x 3, joint locations before posing
       parent: J holding the parent id for each index
       betas_logscale: N x J x 3 tensor of log scaling factors for each joint axis
+      betas_logtrans: N x J x 3 tensor of log translation factors for each joint axis
+      propagate_scaling: bool, whether to propagate scaling factors to child joints
+      propagate_translation: bool, whether to propagate translation factors to child joints
       
     Returns
       new_J : `Tensor`: N x J x 3 location of absolute joints
@@ -105,11 +112,8 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
 
     # Initialize scaling factors as identity
     scaling_factors = torch.ones(N, parent.shape[0], 3).to(Rs.device)
-    
-    # TODO: Remove this once we know why the old hardcoded scaling is not working
-    # I don't care why it was implemented like this before but I will remove the old stuff
-    # and just use the new scaling factor for all segments.
-    if betas_logscale.shape[1] == 6 or config.ALLOW_LIMB_SCALING == False:
+
+    if torch.sum(betas_logscale) == 0 or config.ALLOW_LIMB_SCALING == False:
         betas_logscale = None
         # not sure where this broke, but if left unchecked this causes the optimise_to_joints code to fail
 
@@ -137,7 +141,12 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
         j_here = Js[:, i] - Js[:, parent[i]]
 
         # Get inverse of parent scale to cancel out parent scaling
-        s_par_inv = torch.inverse(scale_factors_3x3[:, parent[i]])
+        if not propagate_scaling:
+            s_par_inv = torch.inverse(scale_factors_3x3[:, parent[i]])
+        else:
+            # when propagating the scale, we can instead use the identity matrix
+            s_par_inv = torch.eye(3, device=Rs.device).unsqueeze(0).expand(N, 3, 3)
+
         rot = Rs[:, i]
         s = scale_factors_3x3[:, i]
         
