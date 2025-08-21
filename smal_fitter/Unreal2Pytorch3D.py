@@ -29,6 +29,131 @@ from pytorch3d.renderer import (
     TexturesVertex,
 )
 
+
+"""
+General / Helper functions
+"""
+
+def _reorder_dirs_array(dirs: np.ndarray, bones_len: int, what: str = "input array") -> np.ndarray:
+    """
+    Reorder PCA direction tensors to shape (num_joints, 3, num_components).
+
+    Detects axes using:
+    - one axis with size 3 -> channel axis
+    - one axis with size == bones_len -> joint axis
+    - remaining axis -> component axis
+    """
+    if not isinstance(dirs, np.ndarray):
+        raise ValueError(f"{what} must be a numpy array, got {type(dirs)}")
+    if dirs.ndim != 3:
+        raise ValueError(f"{what} must be 3D but has shape {dirs.shape}")
+
+    shape = dirs.shape
+    channel_axes = [i for i, s in enumerate(shape) if s == 3]
+    if len(channel_axes) != 1:
+        raise ValueError(f"{what}: expected exactly one axis of size 3 (channels), got shape {shape}")
+    channel_axis = channel_axes[0]
+
+    joint_axes = [i for i, s in enumerate(shape) if s == bones_len]
+    if len(joint_axes) != 1:
+        raise ValueError(f"{what}: expected exactly one axis of size bones_len={bones_len} (joints), got shape {shape}")
+    joint_axis = joint_axes[0]
+
+    pc_axis = [i for i in range(3) if i not in (channel_axis, joint_axis)]
+    if len(pc_axis) != 1:
+        raise ValueError(f"{what}: could not determine PC axis from shape {shape}")
+    pc_axis = pc_axis[0]
+
+    return np.transpose(dirs, (joint_axis, channel_axis, pc_axis))
+
+
+def sample_pca_transforms_from_dirs(dd: dict, scale_weights, trans_weights, bone_names=None, check_strict: bool = True):
+    """
+    Compute per-bone PCA scale and translation using SMIL/SMAL PCA dirs and weights.
+
+    Inputs:
+    - dd: dict loaded from SMIL .pkl containing 'scaledirs', 'transdirs', and 'J_names'
+    - scale_weights: array-like of length num_components for scale PCs
+    - trans_weights: array-like of length num_components for translation PCs
+    - bone_names: optional list of joint/bone names; defaults to dd['J_names']
+    - check_strict: if True, enforce that scaledirs/transdirs share identical (J,C)
+
+    Returns:
+    - translation_out: dict {bone_name: np.ndarray shape (3,)}
+    - scale_out: dict {bone_name: np.ndarray shape (3,)} where values are (1 + weighted sum)
+
+    Shape expectations (after normalization):
+    - scaledirs: (J, 3, C)
+    - transdirs: (J, 3, C)
+    - len(scale_weights) == C == len(trans_weights)
+    - len(bone_names) == J
+    """
+    if dd is None:
+        raise ValueError("dd must be provided and contain PCA dirs")
+
+    if 'scaledirs' not in dd:
+        raise KeyError("scaledirs not found in dd")
+    if 'transdirs' not in dd:
+        raise KeyError("transdirs not found in dd")
+
+    scaledirs_raw = dd['scaledirs']
+    transdirs_raw = dd['transdirs']
+
+    # Prepare bone names first so we know expected joint axis size
+    if bone_names is None:
+        if 'J_names' not in dd:
+            raise KeyError("J_names not found in dd and bone_names not provided")
+        bone_names = dd['J_names']
+    bones_len = len(bone_names)
+
+    # Convert to numpy if needed (in case of lists)
+    scaledirs_raw = np.asarray(scaledirs_raw)
+    transdirs_raw = np.asarray(transdirs_raw)
+
+    # reorder scaledirs and transdirs to match the expected shape (J, 3, C)
+    scaledirs = _reorder_dirs_array(scaledirs_raw, bones_len=bones_len, what='scaledirs')
+    transdirs = _reorder_dirs_array(transdirs_raw, bones_len=bones_len, what='transdirs')
+
+    num_joints_s, _, num_pcs_s = scaledirs.shape
+    num_joints_t, _, num_pcs_t = transdirs.shape
+
+    # Validate joint counts
+    if len(bone_names) != num_joints_s or len(bone_names) != num_joints_t:
+        raise ValueError(
+            f"Bone names length ({len(bone_names)}) must match num_joints of dirs (scale={num_joints_s}, trans={num_joints_t})"
+        )
+
+    # Convert weights
+    scale_weights = np.asarray(scale_weights, dtype=np.float64).reshape(-1)
+    trans_weights = np.asarray(trans_weights, dtype=np.float64).reshape(-1)
+
+    # Check component counts
+    if scale_weights.shape[0] != num_pcs_s:
+        raise ValueError(
+            f"scale_weights length ({scale_weights.shape[0]}) must equal num scale PCs ({num_pcs_s})"
+        )
+    if trans_weights.shape[0] != num_pcs_t:
+        raise ValueError(
+            f"trans_weights length ({trans_weights.shape[0]}) must equal num translation PCs ({num_pcs_t})"
+        )
+
+    if check_strict and (num_pcs_s != num_pcs_t or num_joints_s != num_joints_t):
+        raise ValueError(
+            f"scaledirs and transdirs must share same (num_joints, num_pcs). Got scale=({num_joints_s},{num_pcs_s}), trans=({num_joints_t},{num_pcs_t})"
+        )
+
+    # Weighted sums over components -> (J, 3)
+    # translation: direct sum over PCs
+    translation_sum = np.tensordot(transdirs, trans_weights, axes=([2], [0]))  # (J, 3)
+    # scale: base of 1.0 + weighted sum
+    scale_sum = np.tensordot(scaledirs, scale_weights, axes=([2], [0]))  # (J, 3)
+    scale_sum = 1.0 + scale_sum
+
+    translation_out = {bone_names[j]: translation_sum[j].astype(np.float32) for j in range(len(bone_names))}
+    scale_out = {bone_names[j]: scale_sum[j].astype(np.float32) for j in range(len(bone_names))}
+
+    return translation_out, scale_out
+
 """
 Unreal data parsing functions
 """
@@ -563,6 +688,15 @@ if __name__ == "__main__":
 
     print("INFO: Camera FOV", cam_fov)
 
+    # read Scale and Translation weights from iteration file, if available
+    try:
+        scale_weights = data["iterationData"]["subject Data"][0]["1"]["ScaleWeights"]
+        trans_weights = data["iterationData"]["subject Data"][0]["1"]["TranslationWeights"]
+        print("INFO: Scale and translation weights found.")
+    except KeyError:
+        scale_weights = None
+        trans_weights = None
+
     """
     STEP 2 - Verify parsed data is correct
     """
@@ -602,7 +736,6 @@ if __name__ == "__main__":
             for key, value in shape_betas.items():
                 shape_betas_temp.append(value)
             shape_betas = shape_betas_temp
-        print("INFO: Shape betas", shape_betas)
     except KeyError:
         shape_betas = []
 
@@ -642,6 +775,14 @@ if __name__ == "__main__":
         print(f"Found transdirs in model with shape: {config.dd['transdirs'].shape}")
     else:
         print("No translation components (transdirs) found in model data")
+
+    translation_out, scale_out = sample_pca_transforms_from_dirs(config.dd, scale_weights, trans_weights)
+    
+    # TODO: Apply translation and scale to the model
+    # Scale: We should be able to handle this via the log_beta_scale parameter
+    #        Check if this requires log/exp scaling or can be handled directly
+    # Translation: Requires a new parameter and application logic
+
 
     # setting pose data to None supresses displaing joint locations in the rendered image
     data_json, filenames = return_placeholder_data(
