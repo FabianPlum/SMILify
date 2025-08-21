@@ -79,8 +79,8 @@ def sample_pca_transforms_from_dirs(dd: dict, scale_weights, trans_weights, bone
     - check_strict: if True, enforce that scaledirs/transdirs share identical (J,C)
 
     Returns:
-    - translation_out: dict {bone_name: np.ndarray shape (3,)}
-    - scale_out: dict {bone_name: np.ndarray shape (3,)} where values are (1 + weighted sum)
+    - translation: np.ndarray of shape (J, 3), ordered by bone_names (default dd['J_names'])
+    - scale: np.ndarray of shape (J, 3), ordered by bone_names (default dd['J_names']), values are (1 + weighted sum)
 
     Shape expectations (after normalization):
     - scaledirs: (J, 3, C)
@@ -149,10 +149,7 @@ def sample_pca_transforms_from_dirs(dd: dict, scale_weights, trans_weights, bone
     scale_sum = np.tensordot(scaledirs, scale_weights, axes=([2], [0]))  # (J, 3)
     scale_sum = 1.0 + scale_sum
 
-    translation_out = {bone_names[j]: translation_sum[j].astype(np.float32) for j in range(len(bone_names))}
-    scale_out = {bone_names[j]: scale_sum[j].astype(np.float32) for j in range(len(bone_names))}
-
-    return translation_out, scale_out
+    return translation_sum.astype(np.float32), scale_sum.astype(np.float32)
 
 """
 Unreal data parsing functions
@@ -645,6 +642,11 @@ if __name__ == "__main__":
         #"data/replicAnt_trials/replicAnt-x-SMIL-ALL_PC-demo/replicAnt-x-SMIL-ALL_PC-demo_00.json"
         "data/replicAnt_trials/SMIL_Full_x_Plants/SMIL_Full_x_Plants_015.json"
     )
+    # By default, we propagate scaling and translation to the child joints in our Unreal data.
+    # If this is ever changed, make sure to update the state of "propagate_scaling" and "propagate_translation" below
+    propagate_scaling = True
+    propagate_translation = True
+
     # Generate additional plots for debugging
     plot_tests = False
 
@@ -765,25 +767,6 @@ if __name__ == "__main__":
     print("Shape Betas:", shape_betas.shape)
     print("Pose Data:", np_joint_angles_mapped.shape)
 
-    # Check if scaledirs and transdirs exist in the model data
-    if "scaledirs" in config.dd:
-        print(f"Found scaledirs in model with shape: {config.dd['scaledirs'].shape}")
-    else:
-        print("No scaling components (scaledirs) found in model data")
-        
-    if "transdirs" in config.dd:
-        print(f"Found transdirs in model with shape: {config.dd['transdirs'].shape}")
-    else:
-        print("No translation components (transdirs) found in model data")
-
-    translation_out, scale_out = sample_pca_transforms_from_dirs(config.dd, scale_weights, trans_weights)
-    
-    # TODO: Apply translation and scale to the model
-    # Scale: We should be able to handle this via the log_beta_scale parameter
-    #        Check if this requires log/exp scaling or can be handled directly
-    # Translation: Requires a new parameter and application logic
-
-
     # setting pose data to None supresses displaing joint locations in the rendered image
     data_json, filenames = return_placeholder_data(
         input_image=input_image, num_joints=len(np_joint_angles_mapped), pose_data=pose_data
@@ -806,6 +789,36 @@ if __name__ == "__main__":
 
     # model parameters
     model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
+
+    # Check if scaledirs and transdirs exist in the model data
+    if "scaledirs" in config.dd:
+        print(f"Found scaledirs in model with shape: {config.dd['scaledirs'].shape}")
+        scaledirs_found = True
+    else:
+        print("No scaling components (scaledirs) found in model data")
+        scaledirs_found = False
+    if "transdirs" in config.dd:
+        print(f"Found transdirs in model with shape: {config.dd['transdirs'].shape}")
+        transdirs_found = True
+    else:
+        print("No translation components (transdirs) found in model data")
+        transdirs_found = False
+
+    if scaledirs_found and transdirs_found and scale_weights is not None and trans_weights is not None:
+        translation_out, scale_out = sample_pca_transforms_from_dirs(config.dd, scale_weights, trans_weights)
+
+        # TODO: Apply translation and scale to the model
+        # Scale: We should be able to handle this via the log_beta_scale parameter
+        #        Check if this requires log/exp scaling or can be handled directly
+        # Translation: Requires a new parameter and application logic
+
+        model.log_beta_scales = torch.nn.Parameter(torch.Tensor(np.log(scale_out)).to(device))
+        model.propagate_scaling = propagate_scaling
+        model.propagate_translation = propagate_translation
+
+
+    else:
+        print("No scaling or translation components found in model data")
 
     # set model joint rotations
     model.joint_rotations = torch.nn.Parameter(
@@ -961,6 +974,8 @@ if __name__ == "__main__":
 
     model.global_rotation = global_rotation
     model.trans = torch.nn.Parameter(torch.Tensor(np.array([model_loc])).to(device))
+
+    print
 
     """
     STEP 5 - RENDER POSED MESH
