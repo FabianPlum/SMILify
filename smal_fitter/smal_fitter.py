@@ -75,6 +75,9 @@ class SMALFitter(nn.Module):
 
         self.shape_family_list = np.array(shape_family)
 
+        self.propagate_scaling = False
+        self.propagate_translation = False
+
         if use_unity_prior:
             with open(config.SMAL_DATA_FILE, 'rb') as f:
                 u = pkl._Unpickler(f)
@@ -159,8 +162,17 @@ class SMALFitter(nn.Module):
 
             self.betas = nn.Parameter(
                 self.mean_betas.clone())  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
-            self.log_beta_scales = torch.nn.Parameter(
-                torch.zeros(self.num_images, 6).to(device), requires_grad=False)
+
+            if config.ignore_hardcoded_body:
+                # In the SMIL implementation, we allow all bones/joints to scale independently
+                self.log_beta_scales = torch.nn.Parameter(
+                    torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False)
+            else:
+                # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters 
+                # for coupled variation in legs, tail, and ear joints. 
+                # (See: https://github.com/benjiebob/SMALify/blob/7f6f06f9e3080c32bb286cde1185de401c7b46e8/smal_model/batch_lbs.py#L106-L129)
+                self.log_beta_scales = torch.nn.Parameter(
+                    torch.zeros(self.num_images, 6).to(device), requires_grad=False)
 
         # In the original SMALify code, the joint limits are not used.
         if config.ignore_hardcoded_body:
@@ -208,10 +220,20 @@ class SMALFitter(nn.Module):
             'global_rotation': self.global_rotation[batch_range] * self.global_mask,
             'joint_rotations': self.joint_rotations[batch_range] * self.rotation_mask,
             'betas': self.betas.expand(len(batch_range), self.n_betas),
-            'log_betascale': self.log_beta_scales.expand(len(batch_range), 6),
             'trans': self.trans[batch_range],
             'fov': self.fov[batch_range]
         }
+
+        if config.ignore_hardcoded_body:
+            batch_params['log_betascale'] = self.log_beta_scales.expand(
+                len(batch_range), self.joint_rotations.shape[1] + 1, 3
+            ).to(self.device)
+            print("log_betascale.shape", batch_params['log_betascale'].shape)
+        else:
+            # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters 
+            # for coupled variation in legs, tail, and ear joints. 
+            # (See: https://github.com/benjiebob/SMALify/blob/7f6f06f9e3080c32bb286cde1185de401c7b46e8/smal_model/batch_lbs.py#L106-L129)
+            batch_params['log_betascale'] = self.log_beta_scales.expand(len(batch_range), 6)
 
         target_joints = self.target_joints[batch_range].to(self.device)
         target_visibility = self.target_visibility[batch_range].to(self.device)
@@ -226,7 +248,9 @@ class SMALFitter(nn.Module):
             torch.cat([
                 batch_params['global_rotation'].unsqueeze(1),
                 batch_params['joint_rotations']], dim=1),
-            betas_logscale=batch_params['log_betascale'])
+            betas_logscale=batch_params['log_betascale'],
+            propagate_scaling=self.propagate_scaling,
+            propagate_translation=self.propagate_translation)
 
         verts = verts + batch_params['trans'].unsqueeze(1)
         joints = joints + batch_params['trans'].unsqueeze(1)
@@ -323,10 +347,19 @@ class SMALFitter(nn.Module):
                 'global_rotation': self.global_rotation[batch_range] * self.global_mask,
                 'joint_rotations': self.joint_rotations[batch_range] * self.rotation_mask,
                 'betas': self.betas.expand(len(batch_range), self.n_betas),
-                'log_betascale': self.log_beta_scales.expand(len(batch_range), 6),
                 'trans': self.trans[batch_range],
                 'fov': self.fov[batch_range]
             }
+
+            if config.ignore_hardcoded_body:
+                batch_params['log_betascale'] = self.log_beta_scales.expand(
+                    len(batch_range), self.joint_rotations.shape[1] + 1, 3
+                ).to(self.device)
+            else:
+                # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters 
+                # for coupled variation in legs, tail, and ear joints. 
+                # (See: https://github.com/benjiebob/SMALify/blob/7f6f06f9e3080c32bb286cde1185de401c7b46e8/smal_model/batch_lbs.py#L106-L129)
+                batch_params['log_betascale'] = self.log_beta_scales.expand(len(batch_range), 6)
 
             target_joints = self.target_joints[batch_range]
             target_visibility = self.target_visibility[batch_range]
@@ -339,7 +372,9 @@ class SMALFitter(nn.Module):
                     torch.cat([
                         batch_params['global_rotation'].unsqueeze(1),
                         batch_params['joint_rotations']], dim=1),
-                    betas_logscale=batch_params['log_betascale'])
+                    betas_logscale=batch_params['log_betascale'],
+                    propagate_scaling=self.propagate_scaling,
+                    propagate_translation=self.propagate_translation)
 
                 if apply_UE_transform:
                     # in UE5 the model is scaled up by 10 (double check model size in your replicant project, if modified)
