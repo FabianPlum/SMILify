@@ -256,7 +256,6 @@ def get_joint_angles_from_pose_data(pose_data):
 
         rodrigues_angle = vector * theta
 
-        print(key, rodrigues_angle)
         joint_angles.append(rodrigues_angle)
 
     return np.array(joint_angles), joint_names
@@ -316,9 +315,6 @@ def plot_3D_points(pose_data, input_image):
         ]
         for key in pose_data.keys()
     ]
-
-    for i, name in enumerate(display_points_names):
-        print(name, display_points_3D[i])
 
     for i, xyz in enumerate(display_points_3D):
         ax.scatter(xyz[0], xyz[1], xyz[2], marker="o", s=10)
@@ -522,7 +518,7 @@ if __name__ == "__main__":
     # Read the JSON file
     json_file_path = (
         #"data/replicAnt_trials/replicAnt-x-SMIL-ALL_PC-demo/replicAnt-x-SMIL-ALL_PC-demo_00.json"
-        "/media/fabi/Data/SMIL_Full_x_Plants/SMIL_Full_x_Plants_000.json"
+        "data/replicAnt_trials/SMIL_Full_x_Plants/SMIL_Full_x_Plants_015.json"
     )
     # Generate additional plots for debugging
     plot_tests = False
@@ -604,7 +600,6 @@ if __name__ == "__main__":
             print("INFO: Shape betas is a dict.")
             shape_betas_temp = []
             for key, value in shape_betas.items():
-                print(key, value)
                 shape_betas_temp.append(value)
             shape_betas = shape_betas_temp
         print("INFO: Shape betas", shape_betas)
