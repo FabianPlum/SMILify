@@ -639,13 +639,13 @@ if __name__ == "__main__":
     """
     # Read the JSON file
     json_file_path = (
-        #"data/replicAnt_trials/replicAnt-x-SMIL-ALL_PC-demo/replicAnt-x-SMIL-ALL_PC-demo_00.json"
-        "data/replicAnt_trials/SMIL_Full_x_Plants/SMIL_Full_x_Plants_015.json"
+        "data/replicAnt_trials/replicAnt-x-SMIL-TEX/replicAnt-x-SMIL-TEX_00.json"
     )
-    # By default, we propagate scaling and translation to the child joints in our Unreal data.
-    # If this is ever changed, make sure to update the state of "propagate_scaling" and "propagate_translation" below
+    # By default, we propagate scaling to the child joints in our Unreal data.
+    # If this is ever changed, make sure to update the state of "propagate_scaling" below
     propagate_scaling = True
-    propagate_translation = True
+    # in Unreal we multiply the translation by 100 due to scale differences
+    translation_factor = 0.01
 
     # Generate additional plots for debugging
     plot_tests = False
@@ -807,14 +807,10 @@ if __name__ == "__main__":
     if scaledirs_found and transdirs_found and scale_weights is not None and trans_weights is not None:
         translation_out, scale_out = sample_pca_transforms_from_dirs(config.dd, scale_weights, trans_weights)
 
-        # TODO: Apply translation and scale to the model
-        # Scale: We should be able to handle this via the log_beta_scale parameter
-        #        Check if this requires log/exp scaling or can be handled directly
-        # Translation: Requires a new parameter and application logic
-
-        model.log_beta_scales = torch.nn.Parameter(torch.Tensor(np.log(scale_out)).to(device))
+        # Scale remains log-space; add batch dimension
+        model.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.log(scale_out))[None, ...].float().to(device))
+        model.betas_trans = torch.nn.Parameter(torch.from_numpy(translation_out * translation_factor)[None, ...].float().to(device))
         model.propagate_scaling = propagate_scaling
-        model.propagate_translation = propagate_translation
 
 
     else:
