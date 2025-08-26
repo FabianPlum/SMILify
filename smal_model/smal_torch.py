@@ -197,8 +197,7 @@ class SMAL(nn.Module):
             torch.Tensor(undo_chumpy(dd['weights'])),
             requires_grad=False).to(device)
 
-    def __call__(self, beta, theta, trans=None, del_v=None, betas_logscale=None, get_skin=True, v_template=None, 
-                 propagate_scaling=True, propagate_translation=False):
+    def __call__(self, beta, theta, trans=None, del_v=None, betas_logscale=None, betas_trans=None, get_skin=True, v_template=None, propagate_scaling=False):
 
         nBetas = beta.shape[1]
 
@@ -290,9 +289,8 @@ class SMAL(nn.Module):
         # betas_logscale = None
 
         self.J_transformed, A = batch_global_rigid_transformation(
-            Rs, J, self.parents, betas_logscale=betas_logscale,
+            Rs, J, self.parents, betas_logscale=betas_logscale, betas_trans=betas_trans,
             propagate_scaling=propagate_scaling,
-            propagate_translation=propagate_translation,
             num_joints=NUM_JOINTS)
 
         # 5. Do skinning:
