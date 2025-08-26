@@ -255,8 +255,7 @@ class SMALFitter(nn.Module):
                 batch_params['joint_rotations']], dim=1),
             betas_logscale=batch_params.get('log_betascale', None),
             betas_trans=batch_params.get('betas_trans', None),
-            propagate_scaling=self.propagate_scaling,
-            propagate_translation=self.propagate_translation)
+            propagate_scaling=self.propagate_scaling)
 
         verts = verts + batch_params['trans'].unsqueeze(1)
         joints = joints + batch_params['trans'].unsqueeze(1)
