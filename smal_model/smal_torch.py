@@ -155,10 +155,15 @@ class SMAL(nn.Module):
                 I=symmetry_axis_vertices)
             # symmetry file
 
-        # Mean template vertices
-        self.v_template = Variable(
-            torch.Tensor(v_sym),
-            requires_grad=False).to(device)
+        if config.IGNORE_SYMMETRY:
+            self.v_template = Variable(
+                torch.Tensor(v_template),
+                requires_grad=False).to(device)
+        else:
+            # Mean template vertices
+            self.v_template = Variable(
+                torch.Tensor(v_sym),
+                requires_grad=False).to(device)
 
         # Regressor for joint locations given shape
         try:
