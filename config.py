@@ -36,11 +36,14 @@ EPOCH_NAME = "st10_ep0"  # convention used for the final output file. Don't chan
 
 # SMAL
 SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
+# ENABLE IGNORE SYMMETRY FOR NON-SYMMERTIC MOLDES OR IF SYMMETRY ENFORECEMENT LEADS TO POORLY CONNECTED MESHES
+IGNORE_SYMMETRY = True
 #SMAL_FILE = join(SMAL_MODEL_PATH, 'my_smpl_00781_4_all.pkl')
 
 # custom elements added:
 # SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
-SMAL_FILE = join("3D_model_prep", 'SMIL_OmniAnt.pkl') # USING LATEST SMIL DATA
+# SMAL_FILE = join("3D_model_prep", 'SMIL_OmniAnt.pkl') # USING LATEST SMIL DATA
+SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_no_sym.pkl') # USING LATEST SMIL DATA
 
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
