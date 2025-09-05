@@ -636,7 +636,9 @@ def create_sphere_meshes_at_points(
 def load_SMIL_Unreal_sample(json_file_path, 
                         plot_tests=False, 
                         propagate_scaling=True, 
-                        translation_factor=0.01):
+                        translation_factor=0.01,
+                        load_image=True,
+                        verbose=False):
     """
     Load a SMIL sample from replicAnt generated SMIL data and return the loaded image and SMIL data
 
@@ -645,11 +647,40 @@ def load_SMIL_Unreal_sample(json_file_path,
         plot_tests (bool): Whether to plot the tests
         propagate_scaling (bool): Whether to propagate scaling to the child joints
         translation_factor (float): The factor to multiply the translation by
+        verbose (bool): Whether to print verbose output
+
+    Returns:
+        tuple: (x_output, y_output)
+            - x_output (dict): Dictionary containing the input data
+                - input_image (str): Input image path
+                - input_image_data (np.array): Input image data
+            - y_output (dict): Dictionary containing the output data
+                - pose_data (dict): Raw pose data
+                - joint_angles (np.array): Joint angles
+                - joint_names (list): Joint names
+                - cam_rot (torch.tensor): Camera rotation
+                - cam_trans (torch.tensor): Camera translation
+                - cam_rot_orig (np.array): Original camera rotation from Unreal data
+                - cam_trans_orig (np.array): Original camera translation from Unreal data
+                - cx (float): Image centre x
+                - cy (float): Image centre y
+                - fx (float): Focal length x
+                - fy (float): Focal length y
+                - cam_fov (float): Camera FOV
+                - scale_weights (np.array): Scale weights
+                - trans_weights (np.array): Translation weights
+                - root_loc (np.array): Root location
+                - root_rot (np.array): Root rotation
+                - translation_factor (float): for scaling sampled translations
+                - propagate_scaling (bool): Whether to propagate scaling to the child joints
+
     """
 
     """
     STEP 1 - LOAD replicAnt generated SMIL data
     """
+    x_output = {}
+    y_output = {}
 
     # get the batch data file path
     batch_data_file_path = json_file_path.replace(
@@ -660,6 +691,15 @@ def load_SMIL_Unreal_sample(json_file_path,
     # get the input image path
     input_image = json_file_path.split(".")[0] + ".JPG"
 
+    if load_image:
+        # load the image
+        input_image_data = imageio.v2.imread(input_image)
+    else:
+        input_image_data = None
+    
+    x_output["input_image"] = input_image
+    x_output["input_image_data"] = input_image_data
+
     # load the json data
     with open(json_file_path, "r") as file:
         data = json.load(file)
@@ -669,72 +709,57 @@ def load_SMIL_Unreal_sample(json_file_path,
 
     # Extract pose data contained in "keypoints"
     pose_data = data["iterationData"]["subject Data"][0]["1"]["keypoints"]
-    
+    y_output["pose_data"] = pose_data
+
     # get camera data into correct format: 
     # extrinsics: rotation and translation
     cam_rot, cam_trans = parse_projection_components(data)
-
-    print("INFO: Camera rotation", cam_rot)
-    print("INFO: Camera translation", cam_trans)
+    y_output["cam_rot_orig"] = cam_rot
+    y_output["cam_trans_orig"] = cam_trans
 
     # intrinsics: image centre, focal length, and field of view
     cx, cy, fx, fy = parse_camera_intrinsics(
         batch_data_file=batch_data_file, iteration_data_file=data
     )
 
-    print("INFO: Image centre x", cx)
-    print("INFO: Image centre y", cy)
-    print("INFO: Focal length x", fx)
-    print("INFO: Focal length y", fy)
-
     cam_fov = [data["iterationData"]["camera"]["FOV"]]
 
-    print("INFO: Camera FOV", cam_fov)
+    y_output["cam_fov"] = cam_fov
+    y_output["cx"] = cx
+    y_output["cy"] = cy
+    y_output["fx"] = fx
+    y_output["fy"] = fy
+
+    if verbose:
+        print("INFO: Camera rotation", cam_rot)
+        print("INFO: Camera translation", cam_trans)
+        print("INFO: Image centre x", cx)
+        print("INFO: Image centre y", cy)
+        print("INFO: Focal length x", fx)
+        print("INFO: Focal length y", fy)
+        print("INFO: Camera FOV", cam_fov)
 
     # read Scale and Translation weights from iteration file, if available
     try:
         scale_weights = data["iterationData"]["subject Data"][0]["1"]["ScaleWeights"]
         trans_weights = data["iterationData"]["subject Data"][0]["1"]["TranslationWeights"]
-        print("INFO: Scale and translation weights found.")
+        if verbose:
+            print("INFO: Scale and translation weights found.")
     except KeyError:
         scale_weights = None
         trans_weights = None
+        if verbose:
+            print("INFO: No scale and translation weights")
 
-    """
-    STEP 2 - Verify parsed data is correct
-    """
-
-    if plot_tests:
-        # plot 3D points
-        plot_3D_points(pose_data=pose_data, input_image=input_image)
-
-        # check, the 3D points align with their corresponding projected 2D points
-        plot_3D_projected_points(
-            pose_data=pose_data,
-            input_image=input_image,
-            cam_rot=cam_rot,
-            cam_trans=cam_trans,
-            fx=fx,
-            fy=fy,
-            cx=cx,
-            cy=cy,
-        )
-
-    """
-    STEP 3 - Set up basic pytorch3d scene with 3D points as spheres
-    """
-
-    # set the device to use (first available GPU by default)
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    y_output["scale_weights"] = scale_weights
+    y_output["trans_weights"] = trans_weights
+    y_output["translation_factor"] = translation_factor
+    y_output["propagate_scaling"] = propagate_scaling
 
     # Extract shape and pose parameters
     try:
         shape_betas = data["iterationData"]["subject Data"][0]["1"]["shape betas"]
         if isinstance(shape_betas, dict):
-            print("INFO: Shape betas is a dict.")
             shape_betas_temp = []
             for key, value in shape_betas.items():
                 shape_betas_temp.append(value)
@@ -742,7 +767,6 @@ def load_SMIL_Unreal_sample(json_file_path,
     except KeyError:
         shape_betas = []
 
-    pose_data = data["iterationData"]["subject Data"][0]["1"]["keypoints"]
 
     joint_angles, joint_names = get_joint_angles_from_pose_data(pose_data)
 
@@ -751,11 +775,16 @@ def load_SMIL_Unreal_sample(json_file_path,
         config.dd["J_names"], joint_names, joint_angles
     )
 
+    y_output["joint_angles"] = np_joint_angles_mapped
+    y_output["joint_names"] = config.dd["J_names"] # should be identical to joint_names from the loaded data but just to be safe
+
     # Convert shape betas to a NumPy array
     if len(shape_betas) == 0:
         shape_betas = np.zeros(config.dd["shapedirs"].shape[2])
     else:
         shape_betas = np.array(shape_betas)
+
+    y_output["shape_betas"] = shape_betas
 
     # Check if the loaded shape betas have the same number of dimensions as the model
     if shape_betas.shape[0] != config.dd["shapedirs"].shape[2]:
@@ -764,13 +793,81 @@ def load_SMIL_Unreal_sample(json_file_path,
         print("INFO: Model shape betas:", config.dd["shapedirs"].shape[2])
         exit()
 
-    # Display the extracted data
-    print("Shape Betas:", shape_betas.shape)
-    print("Pose Data:", np_joint_angles_mapped.shape)
+    if verbose:
+        # Print the extracted shape and pose data
+        print("Shape Betas:", shape_betas.shape)
+        print("Pose Data:", np_joint_angles_mapped.shape)
 
-    # setting pose data to None supresses displaing joint locations in the rendered image
+    # Convert to PyTorch tensors and extract R, T components
+    # Mirror the rotation matrix for x-axis
+    mirror_matrix = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
+
+    # Apply mirroring to rotation matrix
+    mirrored_rot = mirror_matrix @ cam_rot.T @ mirror_matrix.T
+    R = torch.tensor(mirrored_rot, dtype=torch.float32)
+
+    # Mirror the translation vector for x-axis
+    T = torch.tensor([-cam_trans[0], cam_trans[1], cam_trans[2]], dtype=torch.float32)
+
+    y_output["cam_rot"] = R
+    y_output["cam_trans"] = T
+
+    # get the model location
+    model_loc = np.array(
+        [
+            -pose_data["b_t"]["3DPos"]["x"],
+            pose_data["b_t"]["3DPos"]["y"],
+            pose_data["b_t"]["3DPos"]["z"],
+        ],
+        dtype=np.float32,
+    )
+
+    rot = Rotation.from_quat(
+        [
+            pose_data["b_t"]["globalRotation"]["x"],
+            pose_data["b_t"]["globalRotation"]["y"],
+            pose_data["b_t"]["globalRotation"]["z"],
+            pose_data["b_t"]["globalRotation"]["w"],
+        ],
+        scalar_first=False,
+    )
+
+    rot_eul = rot.as_euler("zyx", degrees=False)
+
+    # Z is actually Z here (so YAW)
+    # Y is PITCH
+    # X is ROLL
+
+    theta, vector = eulerangles.euler2angle_axis(
+        z=-rot_eul[0] + np.pi, y=-rot_eul[1], x=rot_eul[2]
+    )
+
+    global_rotation_np = vector * theta
+
+    y_output["root_loc"] = model_loc
+    y_output["root_rot"] = global_rotation_np
+
+    if verbose:
+        print("\nINFO: Sucessfully loaded data from", json_file_path)
+
+    return x_output, y_output
+
+
+def Render_SMAL_Model_from_Unreal_data(x,y,device,verbose=False):
+    """
+    Render a SMAL model from Unreal data
+    
+    Args:
+        x (dict): Dictionary containing the input data
+        y (dict): Dictionary containing the output data
+    
+    """
+
+    # setting pose data to None supresses displaying joint locations in the rendered image
     data_json, filenames = return_placeholder_data(
-        input_image=input_image, num_joints=len(np_joint_angles_mapped), pose_data=pose_data
+        input_image=x["input_image"], 
+        num_joints=len(y["joint_angles"]), 
+        pose_data=y["pose_data"]
     )
 
     # Some code from the original SMALFitter to set up the model
@@ -789,29 +886,33 @@ def load_SMIL_Unreal_sample(json_file_path,
     )
 
     # model parameters
-    model.betas = torch.nn.Parameter(torch.Tensor(shape_betas).to(device))
+    model.betas = torch.nn.Parameter(torch.Tensor(y["shape_betas"]).to(device))
 
     # Check if scaledirs and transdirs exist in the model data
     if "scaledirs" in config.dd:
-        print(f"Found scaledirs in model with shape: {config.dd['scaledirs'].shape}")
+        if verbose:
+            print(f"Found scaledirs in model with shape: {config.dd['scaledirs'].shape}")
         scaledirs_found = True
     else:
-        print("No scaling components (scaledirs) found in model data")
+        if verbose:
+            print("No scaling components (scaledirs) found in model data")
         scaledirs_found = False
     if "transdirs" in config.dd:
-        print(f"Found transdirs in model with shape: {config.dd['transdirs'].shape}")
+        if verbose:
+            print(f"Found transdirs in model with shape: {config.dd['transdirs'].shape}")
         transdirs_found = True
     else:
-        print("No translation components (transdirs) found in model data")
+        if verbose:
+            print("No translation components (transdirs) found in model data")
         transdirs_found = False
 
-    if scaledirs_found and transdirs_found and scale_weights is not None and trans_weights is not None:
-        translation_out, scale_out = sample_pca_transforms_from_dirs(config.dd, scale_weights, trans_weights)
+    if scaledirs_found and transdirs_found and y["scale_weights"] is not None and y["trans_weights"] is not None:
+        translation_out, scale_out = sample_pca_transforms_from_dirs(config.dd, y["scale_weights"], y["trans_weights"])
 
         # Scale remains log-space; add batch dimension
         model.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.log(scale_out))[None, ...].float().to(device))
-        model.betas_trans = torch.nn.Parameter(torch.from_numpy(translation_out * translation_factor)[None, ...].float().to(device))
-        model.propagate_scaling = propagate_scaling
+        model.betas_trans = torch.nn.Parameter(torch.from_numpy(translation_out * y["translation_factor"])[None, ...].float().to(device))
+        model.propagate_scaling = y["propagate_scaling"]
 
 
     else:
@@ -819,27 +920,79 @@ def load_SMIL_Unreal_sample(json_file_path,
 
     # set model joint rotations
     model.joint_rotations = torch.nn.Parameter(
-        torch.Tensor(np_joint_angles_mapped[1:])
-        .reshape((1, np_joint_angles_mapped[1:].shape[0], 3))
+        torch.Tensor(y["joint_angles"][1:])
+        .reshape((1, y["joint_angles"][1:].shape[0], 3))
         .to(device)
     )
 
-    # Convert to PyTorch tensors and extract R, T components
-    # Mirror the rotation matrix for x-axis
-    mirror_matrix = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
 
-    # Apply mirroring to rotation matrix
-    mirrored_rot = mirror_matrix @ cam_rot.T @ mirror_matrix.T
-    R = torch.tensor(mirrored_rot, dtype=torch.float32)
+    """
+    STEP 4 - Set up pytorch3d scene with the SMIL model
+    """
 
-    # Mirror the translation vector for x-axis
-    T = torch.tensor([-cam_trans[0], cam_trans[1], cam_trans[2]], dtype=torch.float32)
+    R = y["cam_rot"].clone().detach().to(device).unsqueeze(0)
+    T = y["cam_trans"].clone().detach().to(device).unsqueeze(0)
 
-    R = R.clone().detach().to(device).unsqueeze(0)
-    T = T.clone().detach().to(device).unsqueeze(0)
+    model.fov = torch.nn.Parameter(torch.Tensor(y["cam_fov"]).to(device))
+    model.renderer.cameras.fov = torch.nn.Parameter(torch.Tensor(y["cam_fov"]).to(device))
+    model.renderer.cameras.R = torch.nn.Parameter(torch.Tensor(R).to(device))
+    model.renderer.cameras.T = torch.nn.Parameter(torch.Tensor(T).to(device))
+
+
+    global_rotation = torch.nn.Parameter(
+        torch.from_numpy(y["root_rot"]).float().to(device).unsqueeze(0)
+    )
+
+    model.global_rotation = global_rotation
+    model.trans = torch.nn.Parameter(torch.Tensor(np.array([y["root_loc"]])).to(device))
+
+
+    """
+    STEP 5 - RENDER POSED MESH
+    """
+
+    print("\nINFO: Rendering output")
+    image_exporter = ImageExporter("LOCAL_TEST", [os.path.basename(x["input_image"])])
+    image_exporter.stage_id = 0
+    image_exporter.epoch_name = str(0)
+    model.generate_visualization(image_exporter, apply_UE_transform=True)
+
+
+
+
+def plot_loaded_data_tests(x,y,device):
+
+
+    # plot 3D points
+    plot_3D_points(pose_data=y["pose_data"], input_image=x["input_image"])
+
+    # check, the 3D points align with their corresponding projected 2D points
+    plot_3D_projected_points(
+        pose_data=y["pose_data"],
+        input_image=x["input_image"],
+        cam_rot=y["cam_rot_orig"],
+        cam_trans=y["cam_trans_orig"],
+        fx=y["fx"],
+        fy=y["fy"],
+        cx=y["cx"],
+        cy=y["cy"],
+    )
+
+
+    # Create sphere meshes for keypoints - no need to mirror here as the function will do it
+    keypoints_3d = np.array(
+        [
+            [
+                y["pose_data"][key]["3DPos"]["x"],
+                y["pose_data"][key]["3DPos"]["y"],
+                y["pose_data"][key]["3DPos"]["z"],
+            ]
+            for key in y["pose_data"].keys()
+        ]
+    )
 
     cameras = FoVPerspectiveCameras(
-        device=device, R=R, T=T, fov=cam_fov, degrees=True, znear=0.01, zfar=5000
+        device=device, R=y["cam_rot"].unsqueeze(0), T=y["cam_trans"].unsqueeze(0), fov=y["cam_fov"], degrees=True, znear=0.01, zfar=5000
     )
 
     # Define the settings for rasterization and shading. Here we set the output image to be of size
@@ -871,133 +1024,68 @@ def load_SMIL_Unreal_sample(json_file_path,
         device=device, specular_color=[[1.0, 1.0, 1.0]], shininess=10.0
     )
 
-    # get the model location
-    model_loc = np.array(
-        [
-            -pose_data["b_t"]["3DPos"]["x"],
-            pose_data["b_t"]["3DPos"]["y"],
-            pose_data["b_t"]["3DPos"]["z"],
-        ],
-        dtype=np.float32,
+    # visualize keypoints with mirroring enabled
+    sphere_meshes = create_sphere_meshes_at_points(
+        keypoints_3d, radius=0.25, device=device, use_rainbow=True, mirror_x=True
     )
 
+    # requires same types of materials for both meshes
+    # combined_meshes = join_meshes_as_scene([mesh, sphere_meshes])
 
-    if plot_tests:
-
-        # Create sphere meshes for keypoints - no need to mirror here as the function will do it
-        keypoints_3d = np.array(
-            [
-                [
-                    pose_data[key]["3DPos"]["x"],
-                    pose_data[key]["3DPos"]["y"],
-                    pose_data[key]["3DPos"]["z"],
-                ]
-                for key in pose_data.keys()
-            ]
-        )
-
-        # visualize keypoints with mirroring enabled
-        sphere_meshes = create_sphere_meshes_at_points(
-            keypoints_3d, radius=0.25, device=device, use_rainbow=True, mirror_x=True
-        )
-
-        # requires same types of materials for both meshes
-        # combined_meshes = join_meshes_as_scene([mesh, sphere_meshes])
-
-        # render the spheres
-        sphere_images = renderer(
-            sphere_meshes, lights=lights, materials=materials, cameras=cameras
-        )
-
-        plt.figure(figsize=(10, 10))
-
-        # Read input image
-        display_img = cv2.imread(input_image)
-        # Convert to RGB
-        display_img = cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
-
-        # Get render dimensions
-        render_height, render_width = sphere_images[0].shape[:2]
-
-        # Resize input image to match render dimensions
-        display_img = cv2.resize(display_img, (render_width, render_height))
-
-        # Get render as numpy array and create mask
-        render = sphere_images[0, ..., :3].cpu().numpy()
-        mask = ~np.all(render == 1.0, axis=-1)
-        mask = np.expand_dims(mask, axis=-1)
-
-        # Blend render with input image using mask
-        blended = np.where(mask, render, display_img / 255.0)
-
-        plt.imshow(blended)
-        plt.axis("off")
-        plt.show()
-
-    """
-    STEP 4 - Set up pytorch3d scene with the SMIL model
-    """
-
-    model.fov = torch.nn.Parameter(torch.Tensor(cam_fov).to(device))
-    model.renderer.cameras.fov = torch.nn.Parameter(torch.Tensor(cam_fov).to(device))
-    model.renderer.cameras.R = torch.nn.Parameter(torch.Tensor(R).to(device))
-    model.renderer.cameras.T = torch.nn.Parameter(torch.Tensor(T).to(device))
-
-    rot = Rotation.from_quat(
-        [
-            pose_data["b_t"]["globalRotation"]["x"],
-            pose_data["b_t"]["globalRotation"]["y"],
-            pose_data["b_t"]["globalRotation"]["z"],
-            pose_data["b_t"]["globalRotation"]["w"],
-        ],
-        scalar_first=False,
+    # render the spheres
+    sphere_images = renderer(
+        sphere_meshes, lights=lights, materials=materials, cameras=cameras
     )
 
-    rot_eul = rot.as_euler("zyx", degrees=False)
+    plt.figure(figsize=(10, 10))
 
-    # Z is actually Z here (so YAW)
-    # Y is PITCH
-    # X is ROLL
+    # Read input image
+    display_img = cv2.imread(x["input_image"])
+    # Convert to RGB
+    display_img = cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
 
-    theta, vector = eulerangles.euler2angle_axis(
-        z=-rot_eul[0] + np.pi, y=-rot_eul[1], x=rot_eul[2]
-    )
+    # Get render dimensions
+    render_height, render_width = sphere_images[0].shape[:2]
 
-    global_rotation_np = vector * theta
+    # Resize input image to match render dimensions
+    display_img = cv2.resize(display_img, (render_width, render_height))
 
-    global_rotation = torch.nn.Parameter(
-        torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0)
-    )
+    # Get render as numpy array and create mask
+    render = sphere_images[0, ..., :3].cpu().numpy()
+    mask = ~np.all(render == 1.0, axis=-1)
+    mask = np.expand_dims(mask, axis=-1)
 
-    model.global_rotation = global_rotation
-    model.trans = torch.nn.Parameter(torch.Tensor(np.array([model_loc])).to(device))
+    # Blend render with input image using mask
+    blended = np.where(mask, render, display_img / 255.0)
 
-
-    """
-    STEP 5 - RENDER POSED MESH
-    """
-
-    print("\nINFO: Rendering output")
-    image_exporter = ImageExporter("LOCAL_TEST", [os.path.basename(input_image)])
-    image_exporter.stage_id = 0
-    image_exporter.epoch_name = str(0)
-    model.generate_visualization(image_exporter, apply_UE_transform=True)
-
-
-def SMAL_Model_from_Unreal_data():
-    pass
-
-def Render_SMAL_Model():
-    pass
+    plt.imshow(blended)
+    plt.axis("off")
+    plt.show()
 
 
 if __name__ == "__main__":
+    """
+    IMPORTANT: Verify the data has been generated with the same SMIL model that is referenced in the config.py file
+    """
+    # set the device to use (first available GPU by default)
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
     # Read the JSON file
     json_file_path = (
         "data/replicAnt_trials/replicAnt-x-SMIL-TEX/replicAnt-x-SMIL-TEX_00.json"
     )
 
-    load_SMIL_Unreal_sample(json_file_path, 
-                            plot_tests=False, 
-                            propagate_scaling=True, 
-                            translation_factor=0.01)
+    # Load the SMIL data
+    x,y = load_SMIL_Unreal_sample(json_file_path, 
+                                  plot_tests=False, 
+                                  propagate_scaling=True, 
+                                  translation_factor=0.01)
+
+    # Verify things plot correctly
+    plot_loaded_data_tests(x,y,device)
+
+    # Render the SMAL model based on the loaded data
+    Render_SMAL_Model_from_Unreal_data(x,y,device)
