@@ -633,22 +633,23 @@ def create_sphere_meshes_at_points(
     return spheres_mesh
 
 
-if __name__ == "__main__":
+def load_SMIL_Unreal_sample(json_file_path, 
+                        plot_tests=False, 
+                        propagate_scaling=True, 
+                        translation_factor=0.01):
+    """
+    Load a SMIL sample from replicAnt generated SMIL data and return the loaded image and SMIL data
+
+    Args:
+        json_file_path (str): Path to the JSON file containing the SMIL data
+        plot_tests (bool): Whether to plot the tests
+        propagate_scaling (bool): Whether to propagate scaling to the child joints
+        translation_factor (float): The factor to multiply the translation by
+    """
+
     """
     STEP 1 - LOAD replicAnt generated SMIL data
     """
-    # Read the JSON file
-    json_file_path = (
-        "data/replicAnt_trials/replicAnt-x-SMIL-TEX/replicAnt-x-SMIL-TEX_00.json"
-    )
-    # By default, we propagate scaling to the child joints in our Unreal data.
-    # If this is ever changed, make sure to update the state of "propagate_scaling" below
-    propagate_scaling = True
-    # in Unreal we multiply the translation by 100 due to scale differences
-    translation_factor = 0.01
-
-    # Generate additional plots for debugging
-    plot_tests = False
 
     # get the batch data file path
     batch_data_file_path = json_file_path.replace(
@@ -971,7 +972,6 @@ if __name__ == "__main__":
     model.global_rotation = global_rotation
     model.trans = torch.nn.Parameter(torch.Tensor(np.array([model_loc])).to(device))
 
-    print
 
     """
     STEP 5 - RENDER POSED MESH
@@ -982,3 +982,22 @@ if __name__ == "__main__":
     image_exporter.stage_id = 0
     image_exporter.epoch_name = str(0)
     model.generate_visualization(image_exporter, apply_UE_transform=True)
+
+
+def SMAL_Model_from_Unreal_data():
+    pass
+
+def Render_SMAL_Model():
+    pass
+
+
+if __name__ == "__main__":
+    # Read the JSON file
+    json_file_path = (
+        "data/replicAnt_trials/replicAnt-x-SMIL-TEX/replicAnt-x-SMIL-TEX_00.json"
+    )
+
+    load_SMIL_Unreal_sample(json_file_path, 
+                            plot_tests=False, 
+                            propagate_scaling=True, 
+                            translation_factor=0.01)
