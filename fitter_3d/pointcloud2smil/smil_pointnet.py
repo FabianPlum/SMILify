@@ -561,7 +561,7 @@ class SMILDataset(Dataset):
         
         print(f"Generating {self.num_samples} random SMIL configurations and point clouds...")
         print(f"Randomization scales - Shape: {self.shape_scale}, Pose: {self.pose_scale}, Trans: {self.trans_scale}, Scale: {self.scale_scale}, Global Rot: {self.global_rot_scale}")
-        #self.generate_dataset()
+        self.generate_dataset()
 
     def update_randomization_scales(self, shape_scale=None, pose_scale=None, trans_scale=None, 
                                    scale_scale=None, global_rot_scale=None):
@@ -589,6 +589,13 @@ class SMILDataset(Dataset):
         print(f"Updated randomization scales - Shape: {self.shape_scale}, Pose: {self.pose_scale}, Trans: {self.trans_scale}, Scale: {self.scale_scale}, Global Rot: {self.global_rot_scale}")
 
     def generate_dataset(self, regenerate=False):
+        # Clear existing data if regenerating
+        if regenerate:
+            self.point_clouds = []
+            self.parameters = []
+            self.normalized_parameters = []
+            print("Regenerating dataset...")
+        
         # Set random seed if provided
         if self.seed is not None:
             if regenerate:
@@ -596,6 +603,11 @@ class SMILDataset(Dataset):
                 self.seed += 3 # so the seed is never the same as for the training or validation set
             torch.manual_seed(self.seed)
             np.random.seed(self.seed)
+
+        print(f"Generating {self.num_samples} samples with scales: "
+              f"shape={self.shape_scale}, pose={self.pose_scale}, "
+              f"trans={self.trans_scale}, scale={self.scale_scale}, "
+              f"global_rot={self.global_rot_scale}")
 
         for i in tqdm(range(self.num_samples)):
             # Generate random parameters with current scales
@@ -1617,13 +1629,13 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train SMIL PointNet model')
     parser.add_argument('--batch-size', type=int, default=32, 
                        help='Batch size for training (default: 32)')
-    parser.add_argument('--epochs', type=int, default=200,
+    parser.add_argument('--epochs', type=int, default=100,
                        help='Number of epochs to train (default: 100)')
     parser.add_argument('--num-workers', type=int, default=0,
                        help='Number of worker processes for DataLoader (default: 4, 0 for no multiprocessing)')
     parser.add_argument('--seed', type=int, default=0,
                        help='Random seed (default: 0)')
-    parser.add_argument('--train-samples', type=int, default=1000,
+    parser.add_argument('--train-samples', type=int, default=10000,
                        help='Number of training samples (default: 1000)')
     parser.add_argument('--val-samples', type=int, default=100,
                        help='Number of validation samples (default: 100)')
@@ -1751,15 +1763,15 @@ def main():
     # Define loss weights
     loss_weights = {
         'global_rot': 0.01,  
-        'joint_rot': 0.2, 
+        'joint_rot': 0.5, 
         'betas': 0.2,
         'trans': 0.1,  #
         'log_beta_scales': 0.1 if config.ALLOW_LIMB_SCALING else 0.0,
-        'joints': 0.2 
+        'joints': 0.5 
     }
     
     # Set chamfer loss weight
-    chamfer_weight = 2.0 # Increased
+    chamfer_weight = 1.0
     
     # Curriculum learning configuration
     curriculum_learning = args.curriculum_learning
@@ -1789,7 +1801,7 @@ def main():
     
     # Train the model
     trained_model, history = train_model(model, train_loader, val_loader, num_epochs=num_epochs, 
-                                          lr=0.001, device=device, weights=loss_weights,
+                                          lr=0.0005, device=device, weights=loss_weights,
                                           chamfer_weight=chamfer_weight, vis_interval=vis_interval,
                                           regenerate_training_every=args.regenerate_training_every,
                                           curriculum_learning=curriculum_learning,
