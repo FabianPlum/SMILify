@@ -37,7 +37,7 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
 
 if __name__ == "__main__":
     # provide path to a replicAnt SMIL dataset
-    data_path = "/home/fabi/dev/SMILify/data/replicAnt_trials/replicAnt-x-SMIL-TEX"
+    data_path = "data/replicAnt_trials/replicAnt-x-SMIL-TEX"
     synthDataset = replicAntSMILDataset(data_path)
     print("Number of samples in the dataset: ", len(synthDataset))
 
