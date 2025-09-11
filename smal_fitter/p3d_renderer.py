@@ -74,7 +74,7 @@ class Renderer(torch.nn.Module):
             T (torch.Tensor): Translation vector of the camera.
             fov (torch.Tensor): Field of view of the camera.
         """
-        self.cameras = OpenGLPerspectiveCameras(device=self.device, R=R, T=T, fov=fov)
+        self.cameras = FoVPerspectiveCameras(device=self.device, R=R, T=T, fov=fov)
         self.silhouette_renderer.rasterizer.cameras = self.cameras
         self.color_renderer.rasterizer.cameras = self.cameras
 
