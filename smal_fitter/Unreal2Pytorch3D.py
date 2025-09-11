@@ -847,6 +847,48 @@ def load_SMIL_Unreal_sample(json_file_path,
     y_output["root_loc"] = model_loc
     y_output["root_rot"] = global_rotation_np
 
+    # --- Re-parameterize scene: place model at origin with zero rotation ---
+    # PyTorch3D uses row-vector convention: X_cam = X_world R + T
+    # With X_world = X_model R_model + t_model, the equivalent camera extrinsics are:
+    #   R_cam_new = R_model R_cam
+    #   T_cam_new = t_model R_cam + T_cam
+    # Derive model rotation directly from Unreal quaternion and mirror to PyTorch3D
+    rot_model_ue = Rotation.from_quat(
+        [
+            -pose_data["b_t"]["globalRotation"]["x"],
+            -pose_data["b_t"]["globalRotation"]["y"],
+            -pose_data["b_t"]["globalRotation"]["z"],
+            pose_data["b_t"]["globalRotation"]["w"],
+        ],
+        scalar_first=False,
+    )
+    R_model_ue = rot_model_ue.as_matrix().astype(np.float32)
+    R_model_p3d = mirror_matrix @ R_model_ue @ mirror_matrix.T
+
+    t_model_p3d = y_output["root_loc"].astype(np.float32)
+
+    R_cam_p3d = y_output["cam_rot"].cpu().numpy() if isinstance(y_output["cam_rot"], torch.Tensor) else np.array(y_output["cam_rot"], dtype=np.float32)
+    T_cam_p3d = y_output["cam_trans"].cpu().numpy() if isinstance(y_output["cam_trans"], torch.Tensor) else np.array(y_output["cam_trans"], dtype=np.float32)
+
+    # Compose camera relative to the (now-origin) model using PyTorch3D row-vector convention
+    R_cam_new = R_model_p3d @ R_cam_p3d
+    T_cam_new = t_model_p3d @ R_cam_p3d + T_cam_p3d
+
+    # Apply -180° yaw correction around the model's up axis (z) to align Unreal/PyTorch3D conventions
+    yaw_offset = np.pi
+    cos_y = np.cos(yaw_offset).astype(np.float32)
+    sin_y = np.sin(yaw_offset).astype(np.float32)
+    Rz = np.array([[cos_y, -sin_y, 0.0], 
+                   [sin_y, cos_y, 0.0], 
+                   [0.0, 0.0, 1.0]], dtype=np.float32)
+    R_cam_new = Rz @ R_cam_new
+
+    # Update outputs: camera now encodes the relative transform; model at origin with zero rotation
+    y_output["cam_rot"] = torch.tensor(R_cam_new, dtype=torch.float32)
+    y_output["cam_trans"] = torch.tensor(T_cam_new, dtype=torch.float32)
+    y_output["root_loc"] = np.zeros_like(t_model_p3d, dtype=np.float32)
+    y_output["root_rot"] = np.zeros(3, dtype=np.float32)
+
     if verbose:
         print("\nINFO: Sucessfully loaded data from", json_file_path)
 
@@ -930,8 +972,12 @@ def Render_SMAL_Model_from_Unreal_data(x,y,device,verbose=False):
     STEP 4 - Set up pytorch3d scene with the SMIL model
     """
 
-    R = y["cam_rot"].clone().detach().to(device).unsqueeze(0)
-    T = y["cam_trans"].clone().detach().to(device).unsqueeze(0)
+    try:
+        R = y["cam_rot"].clone().detach().to(device).unsqueeze(0)
+        T = y["cam_trans"].clone().detach().to(device).unsqueeze(0)
+    except AttributeError:
+        R = torch.tensor(y["cam_rot"]).clone().detach().to(device).unsqueeze(0)
+        T = torch.tensor(y["cam_trans"]).clone().detach().to(device).unsqueeze(0)
 
     model.fov = torch.nn.Parameter(torch.Tensor(y["cam_fov"]).to(device))
     model.renderer.cameras.fov = torch.nn.Parameter(torch.Tensor(y["cam_fov"]).to(device))
@@ -1075,7 +1121,7 @@ if __name__ == "__main__":
     
     # Read the JSON file
     json_file_path = (
-        "data/replicAnt_trials/replicAnt-x-SMIL-TEX/replicAnt-x-SMIL-TEX_00.json"
+        "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt/replicAnt-x-SMIL-OmniAnt_0000.json"
     )
 
     # Load the SMIL data
