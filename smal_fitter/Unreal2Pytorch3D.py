@@ -847,6 +847,32 @@ def load_SMIL_Unreal_sample(json_file_path,
     y_output["root_loc"] = model_loc
     y_output["root_rot"] = global_rotation_np
 
+    # Extract 2D keypoint coordinates for training
+    keypoints_2d = []
+    keypoint_names = []
+    
+    # Get image dimensions for normalization
+    image_width = batch_data_file["Image Resolution"]["x"]
+    image_height = batch_data_file["Image Resolution"]["y"]
+    
+    for key in pose_data.keys():
+        keypoint_names.append(key)
+        # Note: x-coordinate is negated to account for coordinate system differences
+        # Normalize coordinates to [0, 1] range based on image dimensions
+        norm_x = -pose_data[key]["2DPos"]["x"] / image_width
+        norm_y = pose_data[key]["2DPos"]["y"] / image_height
+        keypoints_2d.append([norm_x, norm_y])
+    
+    # Map keypoints to SMIL joint order (create a 2D-specific mapping)
+    mapped_keypoints_2d = np.zeros((len(config.dd["J_names"]), 2), float)
+    for o, orig_joint in enumerate(config.dd["J_names"]):
+        for m, mapped_joint in enumerate(keypoint_names):
+            if orig_joint == mapped_joint:
+                mapped_keypoints_2d[o] = keypoints_2d[m]  # Assign normalized 2D coordinates
+    
+    y_output["keypoints_2d"] = mapped_keypoints_2d  # Normalized 2D coordinates [0, 1]
+    y_output["keypoint_visibility"] = np.ones(len(config.dd["J_names"]))  # All joints are treated as visible in synthetic data
+
     # --- Re-parameterize scene: place model at origin with zero rotation ---
     # PyTorch3D uses row-vector convention: X_cam = X_world R + T
     # With X_world = X_model R_model + t_model, the equivalent camera extrinsics are:
