@@ -1,13 +1,16 @@
 import torch
 import os
 import sys
+import numpy as np
+from scipy.spatial.transform import Rotation
 
 # Add the parent directories to the path to import modules
 # not very pretty, but it works.
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from Unreal2Pytorch3D import load_SMIL_Unreal_sample
+from Unreal2Pytorch3D import load_SMIL_Unreal_sample, Render_SMAL_Model_from_Unreal_data
+from utils import eul_to_axis
 
 class replicAntSMILDataset(torch.utils.data.Dataset):    
     def __init__(self, data_path):
@@ -46,6 +49,10 @@ if __name__ == "__main__":
     data, labels = synthDataset[0]
     print("First sample: ", data["input_image"])
     print("First sample camera rotation: ", labels["cam_rot"])
+
+    # Render the SMAL model based on the loaded data
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    Render_SMAL_Model_from_Unreal_data(data, labels, device)
 
     # example dataloaders for training, validation, and testing
     # lets split the dataset into three parts (train 70%, test 15%, validation 15%)
