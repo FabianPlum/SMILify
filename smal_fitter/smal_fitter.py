@@ -57,11 +57,19 @@ else:
 
 
 class SMALFitter(nn.Module):
-    def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior):
+    def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior, rgb_only=False):
         super(SMALFitter, self).__init__()
 
-        self.rgb_imgs, self.sil_imgs, self.target_joints, self.target_visibility = data_batch
-        self.target_visibility = self.target_visibility.long()
+        # for neuralSMIL we will only provide rgb images, no silhouettes or 2D keypoint data
+        self.rgb_only = rgb_only
+
+        if rgb_only:
+            self.rgb_imgs = data_batch
+            self.target_visibility = torch.ones(self.rgb_imgs.shape[0]).long()
+            self.target_joints = torch.zeros(self.rgb_imgs.shape[0], config.N_POSE, 3)
+        else:
+            self.rgb_imgs, self.sil_imgs, self.target_joints, self.target_visibility = data_batch
+            self.target_visibility = self.target_visibility.long()
 
         assert self.rgb_imgs.max() <= 1.0 and self.rgb_imgs.min() >= 0.0, "RGB Image range is incorrect"
 
@@ -242,7 +250,8 @@ class SMALFitter(nn.Module):
 
         target_joints = self.target_joints[batch_range].to(self.device)
         target_visibility = self.target_visibility[batch_range].to(self.device)
-        sil_imgs = self.sil_imgs[batch_range].to(self.device)
+        if not self.rgb_only:
+            sil_imgs = self.sil_imgs[batch_range].to(self.device)
 
         # Then, have the model retain its current 'appearance' taking as input the currently estimated model parameters
         # betas (shape input)
@@ -305,7 +314,8 @@ class SMALFitter(nn.Module):
             diff_betas = (all_betas - self.mean_betas.unsqueeze(0))  # N, B
             res = torch.tensordot(diff_betas, self.betas_prec, dims=([1], [0]))
             objs['betas'] = w_betas * (res ** 2).mean()
-        if w_reproj > 0:
+            
+        if w_reproj > 0 and not self.rgb_only:
             objs['sil_reproj'] = w_reproj * F.l1_loss(rendered_silhouettes, sil_imgs)
 
         return reduce(lambda x, y: x + y, objs.values()), objs
@@ -344,7 +354,8 @@ class SMALFitter(nn.Module):
         self.betas = torch.nn.Parameter(torch.from_numpy(np.mean(beta_list, axis=0)).float().to(self.device))
         self.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.mean(scale_list, axis=0)).float().to(self.device))
 
-    def generate_visualization(self, image_exporter, apply_UE_transform=False):
+    def generate_visualization(self, image_exporter, apply_UE_transform=False, img_idx=0):
+        # rotation matrix here only used to produce alternative rotated view
         rot_matrix = torch.from_numpy(R.from_euler('y', 180.0, degrees=True).as_matrix()).float().to(self.device)
         for j in range(0, self.num_images, self.batch_size):
             batch_range = list(range(j, min(self.num_images, j + self.batch_size)))
@@ -373,7 +384,11 @@ class SMALFitter(nn.Module):
             target_joints = self.target_joints[batch_range]
             target_visibility = self.target_visibility[batch_range]
             rgb_imgs = self.rgb_imgs[batch_range].to(self.device)
-            sil_imgs = self.sil_imgs[batch_range].to(self.device)
+            if not self.rgb_only:
+                sil_imgs = self.sil_imgs[batch_range].to(self.device)
+            else:
+                # Create dummy silhouette for rgb_only mode
+                sil_imgs = torch.zeros_like(rgb_imgs[:, :1, :, :])
 
             with torch.no_grad():
                 verts, joints, Rs, v_shaped = self.smal_model(
@@ -432,4 +447,5 @@ class SMALFitter(nn.Module):
                     image_exporter.export(
                         (collage_np * 255.0).astype(np.uint8),
                         batch_id, global_id, img_parameters,
-                        verts, self.smal_model.faces.data.cpu().numpy())
+                        verts, self.smal_model.faces.data.cpu().numpy(), 
+                        img_idx)
