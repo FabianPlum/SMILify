@@ -40,7 +40,7 @@ class ImageExporter():
 
         return output_dirs
 
-    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces):
+    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0):
         imageio.imsave(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.png".format(self.stage_id, self.epoch_name)), collage_np)
 
         # Export parameters
