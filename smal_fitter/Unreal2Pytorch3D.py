@@ -228,13 +228,12 @@ def parse_camera_intrinsics(batch_data_file, iteration_data_file):
     return cx, cy, fx, fy
 
 
-def return_placeholder_data(input_image=None, num_joints=55, pose_data=None):
+def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, keypoints_2d=None, keypoint_visibility=None):
     """
     Create placeholder data for SMALFitter initialization from Unreal Engine pose data.
     
     Prepares input data in the format expected by SMALFitter class. Can load an actual
-    image or create placeholder tensors. If pose_data is provided, extracts 2D joint
-    positions and sets visibility flags for visualization.
+    image or create placeholder tensors. Supports both raw pose_data and preprocessed keypoints.
     
     Args:
         input_image (str, optional): Path to input image file. If None, creates placeholder
@@ -242,21 +241,22 @@ def return_placeholder_data(input_image=None, num_joints=55, pose_data=None):
         num_joints (int, optional): Number of joints in the pose data. Default is 55.
         pose_data (dict, optional): Dictionary containing 2D joint positions from Unreal data.
                                    Expected format: {joint_name: {"2DPos": {"x": float, "y": float}}}
-                                   If None, creates zero tensors for joints and visibility.
-                                   Default is None.
+                                   If None and keypoints_2d is None, creates zero tensors.
+        keypoints_2d (np.ndarray, optional): Preprocessed normalized 2D keypoint coordinates 
+                                            of shape (num_joints, 2) with values in [0, 1].
+        keypoint_visibility (np.ndarray, optional): Visibility array of shape (num_joints,).
     
     Returns:
         tuple: ((rgb, sil, joints, visibility), filenames)
             - rgb (torch.Tensor): RGB image tensor of shape (1, 3, H, W) with values in [0, 1]
             - sil (torch.Tensor): Silhouette tensor of shape (1, 1, H, W) filled with zeros
-            - joints (torch.Tensor): Joint positions tensor of shape (1, num_joints, 2)
+            - joints (torch.Tensor): Joint positions tensor of shape (1, num_joints, 2) in pixel coordinates
             - visibility (torch.Tensor): Joint visibility tensor of shape (1, num_joints)
             - filenames (list): List containing the input image filename or ["PLACEHOLDER"]
     
     Note:
-        When pose_data is provided, joint positions are extracted and visibility is set to 1
-        for all joints. The x-coordinate is negated to account for coordinate system differences.
-        Setting visibility to 1 means the joints of the posed model will be displayed.
+        Prioritizes keypoints_2d/keypoint_visibility over pose_data if both are provided.
+        Converts normalized coordinates to pixel coordinates based on loaded image size.
     
     """
     image_size = (512, 512)
@@ -277,20 +277,32 @@ def return_placeholder_data(input_image=None, num_joints=55, pose_data=None):
         rgb = torch.zeros((1, 3, image_size[0], image_size[1]))
         filenames = ["PLACEHOLDER"]
     sil = torch.zeros((1, 1, image_size[0], image_size[1]))
-    if pose_data is None:
-        joints = torch.zeros((1, num_joints, 2))
-        visibility = torch.zeros((1, num_joints))
-    else:
-        # NOTE: This does not actually display the ground truth points directtly.
+    
+    # Prioritize preprocessed keypoints_2d over raw pose_data
+    if keypoints_2d is not None and keypoint_visibility is not None:
+        # Convert normalized coordinates [0,1] to pixel coordinates
+        # keypoints_2d from load_SMIL_Unreal_sample is already in [y_norm, x_norm] format
+        # which matches what draw_joints expects [y, x], so just scale to pixels
+        pixel_coords = keypoints_2d.copy()
+        pixel_coords[:, 0] = pixel_coords[:, 0] * image_size[0]  # y coordinates  
+        pixel_coords[:, 1] = pixel_coords[:, 1] * image_size[1]  # x coordinates
+        
+        joints = torch.tensor(pixel_coords.reshape(1, num_joints, 2), dtype=torch.float32)
+        visibility = torch.tensor(keypoint_visibility.reshape(1, num_joints), dtype=torch.float32)
+    elif pose_data is not None:
+        # NOTE: This does not actually display the ground truth points directly.
         # Setting the visibility of the joints to 1 simply means, that the joints of the posed model are displayed.
         display_points_2D = [
-            [-pose_data[key]["2DPos"]["x"], pose_data[key]["2DPos"]["y"]]
+            [pose_data[key]["2DPos"]["y"], pose_data[key]["2DPos"]["x"]]
             for key in pose_data.keys()
         ]
         joints = torch.tensor(
             np.array(display_points_2D).reshape(1, num_joints, 2), dtype=torch.float32
         )
         visibility = torch.ones((1, num_joints))
+    else:
+        joints = torch.zeros((1, num_joints, 2))
+        visibility = torch.zeros((1, num_joints))
 
     return (rgb, sil, joints, visibility), filenames
 
@@ -857,10 +869,10 @@ def load_SMIL_Unreal_sample(json_file_path,
     
     for key in pose_data.keys():
         keypoint_names.append(key)
-        # Note: x-coordinate is negated to account for coordinate system differences
+        # Note: y and x are swapped to account for coordinate system differences
         # Normalize coordinates to [0, 1] range based on image dimensions
-        norm_x = -pose_data[key]["2DPos"]["x"] / image_width
-        norm_y = pose_data[key]["2DPos"]["y"] / image_height
+        norm_x = pose_data[key]["2DPos"]["y"] / image_height
+        norm_y = pose_data[key]["2DPos"]["x"] / image_width
         keypoints_2d.append([norm_x, norm_y])
     
     # Map keypoints to SMIL joint order (create a 2D-specific mapping)
@@ -931,11 +943,12 @@ def Render_SMAL_Model_from_Unreal_data(x,y,device,verbose=False):
     
     """
 
-    # setting pose data to None supresses displaying joint locations in the rendered image
+    # Use processed normalized coordinates instead of raw pose_data for better accuracy
     data_json, filenames = return_placeholder_data(
         input_image=x["input_image"], 
         num_joints=len(y["joint_angles"]), 
-        pose_data=y["pose_data"]
+        keypoints_2d=y["keypoints_2d"],
+        keypoint_visibility=y["keypoint_visibility"]
     )
 
     # Some code from the original SMALFitter to set up the model
