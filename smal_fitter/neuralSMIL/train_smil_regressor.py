@@ -218,8 +218,13 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch):
                         'keypoint_visibility': y_data['keypoint_visibility']
                     }
                 
-                # Compute loss with components (including keypoint loss if keypoint_data is available)
-                loss, loss_components = model.compute_prediction_loss(predicted_params, target_params, pose_data=keypoint_data, return_components=True)
+                # Prepare silhouette data for loss computation
+                silhouette_data = None
+                if x_data.get("input_image_mask") is not None:
+                    silhouette_data = x_data["input_image_mask"]
+                
+                # Compute loss with components (including keypoint and silhouette loss if data is available)
+                loss, loss_components = model.compute_prediction_loss(predicted_params, target_params, pose_data=keypoint_data, silhouette_data=silhouette_data, return_components=True)
                 batch_loss += loss.item()
                 valid_samples += 1
                 
@@ -329,8 +334,13 @@ def validate_epoch(model, val_loader, criterion, device, epoch):
                             'keypoint_visibility': y_data['keypoint_visibility']
                         }
                     
-                    # Compute loss with components (including keypoint loss if keypoint_data is available)
-                    loss, loss_components = model.compute_prediction_loss(predicted_params, target_params, pose_data=keypoint_data, return_components=True)
+                    # Prepare silhouette data for loss computation
+                    silhouette_data = None
+                    if x_data.get("input_image_mask") is not None:
+                        silhouette_data = x_data["input_image_mask"]
+                    
+                    # Compute loss with components (including keypoint and silhouette loss if data is available)
+                    loss, loss_components = model.compute_prediction_loss(predicted_params, target_params, pose_data=keypoint_data, silhouette_data=silhouette_data, return_components=True)
                     batch_loss += loss.item()
                     valid_samples += 1
                     
@@ -621,7 +631,7 @@ def main():
     #data_path = "data/replicAnt_trials/replicAnt-x-SMIL-TEX"
     batch_size = 32
     num_epochs = 500
-    learning_rate = 0.001
+    learning_rate = 0.0001
     
     # Create dataset
     print("Loading dataset...")
