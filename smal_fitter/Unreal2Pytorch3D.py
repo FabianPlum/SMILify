@@ -279,7 +279,6 @@ def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, key
         filenames = ["PLACEHOLDER"]
 
     if silhouette is not None:
-        print(f"Info: Silhouette shape: {silhouette.shape}")
         sil = torch.FloatTensor(silhouette)[None, None, ...]
     else:
         sil = torch.zeros((1, 1, image_size[0], image_size[1]))
