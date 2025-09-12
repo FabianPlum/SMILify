@@ -387,15 +387,15 @@ class SMILImageRegressor(SMALFitter):
         # Define loss weights for different parameter types
         loss_weights = {
             'global_rot': 0.1,
-            'joint_rot': 0.1,  # Joint rotations are typically smaller values
+            'joint_rot': 0.05,  # Joint rotations are typically smaller values
             'betas': 0.01,     # Shape parameters need higher weight
             'trans': 0.01,
-            'fov': 0.0001,     # FOV is typically a large value (degrees) - divide by 100
+            'fov': 0.0001,     # FOV is typically a large value (degrees)
             'cam_rot': 0.01,    # Camera rotation
             'cam_trans': 0.01, # Camera translation
             'log_beta_scales': 0.1,
             'betas_trans': 0.1,
-            'keypoint_2d': 0.25  # 2D keypoint loss weight (higher since normalized coordinates are small)
+            'keypoint_2d': 0.1  # 2D keypoint loss weight (higher since normalized coordinates are small)
         }
         
         # Global rotation loss

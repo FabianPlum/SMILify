@@ -448,9 +448,26 @@ def visualize_training_progress(model, val_loader, device, epoch, output_dir='vi
                 )
                 
                 # Set proper target joints and visibility for visualization
-                # The target_joints should be in format (batch_size, num_joints, 2) with (x, y) coordinates
-                temp_fitter.target_joints = torch.zeros((1, config.N_POSE, 2), device=device)
-                temp_fitter.target_visibility = torch.ones((1, config.N_POSE), device=device)
+                # Convert normalized keypoints back to pixel coordinates for visualization
+                if 'keypoints_2d' in y_data and 'keypoint_visibility' in y_data:
+                    # Get image dimensions (assuming square image matching the tensor size)
+                    image_height, image_width = image_tensor.shape[-2:]
+                    
+                    # Convert normalized [0,1] coordinates to pixel coordinates
+                    keypoints_2d = y_data['keypoints_2d']  # Shape: (num_joints, 2), already in [y_norm, x_norm] format
+                    keypoint_visibility = y_data['keypoint_visibility']  # Shape: (num_joints,)
+                    
+                    # Convert to pixel coordinates (already in [y, x] format expected by draw_joints)
+                    pixel_coords = keypoints_2d.copy()
+                    pixel_coords[:, 0] = pixel_coords[:, 0] * image_height  # y to pixels
+                    pixel_coords[:, 1] = pixel_coords[:, 1] * image_width   # x to pixels
+                    
+                    temp_fitter.target_joints = torch.tensor(pixel_coords, dtype=torch.float32, device=device).unsqueeze(0)
+                    temp_fitter.target_visibility = torch.tensor(keypoint_visibility, dtype=torch.float32, device=device).unsqueeze(0)
+                else:
+                    # Fallback to zeros if no keypoint data
+                    temp_fitter.target_joints = torch.zeros((1, config.N_POSE, 2), device=device)
+                    temp_fitter.target_visibility = torch.zeros((1, config.N_POSE), device=device)
                 
                 # Set the predicted parameters to the SMALFitter
                 temp_fitter.global_rotation.data = predicted_params['global_rot'][0:1]
@@ -587,9 +604,9 @@ def main():
     # Dataset parameters
     data_path = "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt"
     #data_path = "data/replicAnt_trials/replicAnt-x-SMIL-TEX"
-    batch_size = 4
+    batch_size = 32
     num_epochs = 500
-    learning_rate = 0.001  # Reduced learning rate for stability
+    learning_rate = 0.001
     
     # Create dataset
     print("Loading dataset...")
