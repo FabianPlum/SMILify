@@ -24,6 +24,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from smil_image_regressor import SMILImageRegressor
 from smil_datasets import replicAntSMILDataset
+from smal_fitter import SMALFitter
+from Unreal2Pytorch3D import return_placeholder_data
 import config
 
 
@@ -431,21 +433,34 @@ def visualize_training_progress(model, val_loader, device, epoch, output_dir='vi
                 # Get prediction from model
                 predicted_params = model(image_tensor)
                 
-                # Create a temporary SMALFitter for visualization
-                from smal_fitter import SMALFitter
-                
                 # Create placeholder data for SMALFitter
                 rgb = image_tensor.cpu()
-                
-                # Initialize SMALFitter with rgb_only=True (only needs RGB tensor)
-                temp_fitter = SMALFitter(
-                    device=device,
-                    data_batch=rgb,  # For rgb_only=True, just pass the RGB tensor
-                    batch_size=1,
-                    shape_family=config.SHAPE_FAMILY,
-                    use_unity_prior=False,
-                    rgb_only=True
-                )
+
+                if x_data["input_image_mask"] is not None:
+                    temp_batch, filenames = return_placeholder_data(
+                        input_image=x_data["input_image"],
+                        num_joints=len(y_data["joint_angles"]),
+                        keypoints_2d=y_data["keypoints_2d"],
+                        keypoint_visibility=y_data["keypoint_visibility"],
+                        silhouette=x_data["input_image_mask"]
+                    )
+                    temp_fitter = SMALFitter(
+                        device=device,
+                        data_batch=temp_batch,  # For rgb_only=False, use the temp_batch
+                        batch_size=1,
+                        shape_family=config.SHAPE_FAMILY,
+                        use_unity_prior=False,
+                        rgb_only=False
+                    )
+                else:
+                    temp_fitter = SMALFitter(
+                        device=device,
+                        data_batch=rgb,  # For rgb_only=True, just pass the RGB tensor
+                        batch_size=1,
+                        shape_family=config.SHAPE_FAMILY,
+                        use_unity_prior=False,
+                        rgb_only=True
+                    )
                 
                 # Set proper target joints and visibility for visualization
                 # Convert normalized keypoints back to pixel coordinates for visualization
@@ -602,7 +617,7 @@ def main():
     print(f"Using device: {device}")
     
     # Dataset parameters
-    data_path = "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt"
+    data_path = "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Masked"
     #data_path = "data/replicAnt_trials/replicAnt-x-SMIL-TEX"
     batch_size = 32
     num_epochs = 500
