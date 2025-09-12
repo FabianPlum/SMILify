@@ -368,7 +368,7 @@ class SMILImageRegressor(SMALFitter):
             self.betas_trans[batch_idx] = params['betas_trans'][batch_idx]
     
     def compute_prediction_loss(self, predicted_params: Dict[str, torch.Tensor], 
-                               target_params: Dict[str, torch.Tensor], pose_data=None, return_components=False) -> torch.Tensor:
+                               target_params: Dict[str, torch.Tensor], pose_data=None, silhouette_data=None, return_components=False) -> torch.Tensor:
         """
         Compute loss between predicted and target SMIL parameters.
         
@@ -376,6 +376,7 @@ class SMILImageRegressor(SMALFitter):
             predicted_params: Dictionary containing predicted parameters
             target_params: Dictionary containing target parameters
             pose_data: Optional dictionary containing 2D keypoint data and visibility for keypoint loss computation
+            silhouette_data: Optional tensor containing target silhouette mask for silhouette loss computation
             return_components: If True, return both total loss and individual components
             
         Returns:
@@ -390,12 +391,13 @@ class SMILImageRegressor(SMALFitter):
             'joint_rot': 0.05,  # Joint rotations are typically smaller values
             'betas': 0.01,     # Shape parameters need higher weight
             'trans': 0.01,
-            'fov': 0.0001,     # FOV is typically a large value (degrees)
+            'fov': 0.001,     # FOV is typically a large (constant) value (degrees)
             'cam_rot': 0.01,    # Camera rotation
             'cam_trans': 0.01, # Camera translation
             'log_beta_scales': 0.1,
             'betas_trans': 0.1,
-            'keypoint_2d': 0.1  # 2D keypoint loss weight (higher since normalized coordinates are small)
+            'keypoint_2d': 0.05,  # 2D keypoint loss weight (higher since normalized coordinates are small)
+            'silhouette': 0.1     # Silhouette loss weight (similar to keypoint loss)
         }
         
         # Global rotation loss
@@ -526,6 +528,65 @@ class SMILImageRegressor(SMALFitter):
                 traceback.print_exc()
                 loss_components['keypoint_2d'] = torch.tensor(0.0, device=self.device)
         
+        # Silhouette loss (if silhouette data is available)
+        if silhouette_data is not None:
+            try:
+                # Compute rendered silhouette from predicted parameters
+                rendered_silhouette = self._compute_rendered_silhouette(predicted_params)
+                
+                # Ensure target silhouette has correct format and device
+                target_silhouette = safe_to_tensor(silhouette_data, device=self.device)
+                
+                # Ensure batch dimensions match
+                batch_size = predicted_params['global_rot'].shape[0]
+                if target_silhouette.dim() == 3:  # Shape (height, width, channels) or (channels, height, width)
+                    if target_silhouette.shape[0] != batch_size:
+                        # Assume it's (height, width, channels) - add batch dimension
+                        target_silhouette = target_silhouette.unsqueeze(0).expand(batch_size, -1, -1, -1)
+                elif target_silhouette.dim() == 2:  # Shape (height, width)
+                    # Add batch and channel dimensions
+                    target_silhouette = target_silhouette.unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
+                
+                # Ensure target silhouette has the same shape as rendered silhouette
+                if target_silhouette.shape != rendered_silhouette.shape:
+                    # If target has more than 1 channel (e.g., RGB), convert to single channel
+                    if target_silhouette.shape[1] > 1:
+                        # Take the mean across channels or the first channel
+                        target_silhouette = target_silhouette.mean(dim=1, keepdim=True)
+                    
+                    # Resize if necessary
+                    if target_silhouette.shape[-2:] != rendered_silhouette.shape[-2:]:
+                        target_silhouette = F.interpolate(
+                            target_silhouette, 
+                            size=rendered_silhouette.shape[-2:], 
+                            mode='bilinear', 
+                            align_corners=False
+                        )
+                
+                # Convert to binary mask if necessary (threshold at 0.5)
+                if target_silhouette.max() > 1.0:
+                    target_silhouette = target_silhouette / 255.0  # Normalize from [0, 255] to [0, 1]
+                
+                # Compute L1 loss (same as in SMALFitter)
+                loss = F.l1_loss(rendered_silhouette, target_silhouette)
+                loss_components['silhouette'] = loss
+                total_loss += loss_weights['silhouette'] * loss
+                
+                # Debug output (occasionally)
+                if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # Only 1% of the time
+                    print(f"DEBUG - Rendered silhouette shape: {rendered_silhouette.shape}")
+                    print(f"DEBUG - Target silhouette shape: {target_silhouette.shape}")
+                    print(f"DEBUG - Silhouette loss: {loss.item():.6f}")
+                    print(f"DEBUG - Rendered range: [{rendered_silhouette.min():.3f}, {rendered_silhouette.max():.3f}]")
+                    print(f"DEBUG - Target range: [{target_silhouette.min():.3f}, {target_silhouette.max():.3f}]")
+                    
+            except Exception as e:
+                # If silhouette loss computation fails, continue without it
+                print(f"Warning: Failed to compute silhouette loss: {e}")
+                import traceback
+                traceback.print_exc()
+                loss_components['silhouette'] = torch.tensor(0.0, device=self.device)
+        
         if return_components:
             return total_loss, loss_components
         return total_loss
@@ -617,6 +678,70 @@ class SMILImageRegressor(SMALFitter):
             print(f"DEBUG - Joints in bounds: {in_bounds_count}/{total_joints}")
         
         return rendered_joints_final
+    
+    def _compute_rendered_silhouette(self, predicted_params: Dict[str, torch.Tensor]) -> torch.Tensor:
+        # TODO: THIS REQUIRES AN EXTRA PASS OF THE SMIL MODEL SO THIS REQUIRES NEEDSLESS EXTRA COMPUTATION
+        # MAKE THE WHOLE TRAINING SLEEKER ONCE IT'S VERIFIABLY RUNNING CORRECTLY
+        """
+        Compute rendered silhouette from predicted SMIL parameters.
+        
+        Args:
+            predicted_params: Dictionary containing predicted SMIL parameters
+            
+        Returns:
+            Rendered silhouette as tensor of shape (batch_size, 1, height, width)
+        """
+        # Create batch parameters for SMAL model
+        batch_size = predicted_params['global_rot'].shape[0]
+        
+        batch_params = {
+            'global_rotation': predicted_params['global_rot'],
+            'joint_rotations': predicted_params['joint_rot'],
+            'betas': predicted_params['betas'],
+            'trans': predicted_params['trans'],
+            'fov': predicted_params['fov']
+        }
+        
+        # Add joint scales and translations if available
+        if 'log_beta_scales' in predicted_params:
+            batch_params['log_betascale'] = predicted_params['log_beta_scales']
+        if 'betas_trans' in predicted_params:
+            batch_params['betas_trans'] = predicted_params['betas_trans']
+        
+        # Generate SMAL model vertices and joints
+        verts, joints, Rs, v_shaped = self.smal_model(
+            batch_params['betas'],
+            torch.cat([
+                batch_params['global_rotation'].unsqueeze(1),
+                batch_params['joint_rotations']], dim=1),
+            betas_logscale=batch_params.get('log_betascale', None),
+            betas_trans=batch_params.get('betas_trans', None),
+            propagate_scaling=self.propagate_scaling)
+        
+        # Apply translation
+        verts = verts + batch_params['trans'].unsqueeze(1)
+        joints = joints + batch_params['trans'].unsqueeze(1)
+        
+        # Get canonical joints for rendering
+        canonical_model_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
+        
+        # Set camera parameters from predicted values if available
+        if 'cam_rot' in predicted_params and 'cam_trans' in predicted_params:
+            self.renderer.set_camera_parameters(
+                R=predicted_params['cam_rot'],
+                T=predicted_params['cam_trans'],
+                fov=predicted_params['fov']
+            )
+        else:
+            # Use default camera FOV
+            self.renderer.cameras.fov = batch_params['fov']
+        
+        # Render to get silhouette
+        rendered_silhouettes, _ = self.renderer(
+            verts, canonical_model_joints,
+            self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1))
+        
+        return rendered_silhouettes
     
     def enable_debug(self, enable=True):
         """Enable debug output for keypoint loss computation."""
