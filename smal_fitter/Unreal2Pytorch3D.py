@@ -228,7 +228,7 @@ def parse_camera_intrinsics(batch_data_file, iteration_data_file):
     return cx, cy, fx, fy
 
 
-def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, keypoints_2d=None, keypoint_visibility=None):
+def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, keypoints_2d=None, keypoint_visibility=None, silhouette=None):
     """
     Create placeholder data for SMALFitter initialization from Unreal Engine pose data.
     
@@ -245,11 +245,12 @@ def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, key
         keypoints_2d (np.ndarray, optional): Preprocessed normalized 2D keypoint coordinates 
                                             of shape (num_joints, 2) with values in [0, 1].
         keypoint_visibility (np.ndarray, optional): Visibility array of shape (num_joints,).
+        silhouette (np.ndarray, optional): Silhouette array of shape (H, W).
     
     Returns:
         tuple: ((rgb, sil, joints, visibility), filenames)
             - rgb (torch.Tensor): RGB image tensor of shape (1, 3, H, W) with values in [0, 1]
-            - sil (torch.Tensor): Silhouette tensor of shape (1, 1, H, W) filled with zeros
+            - sil (torch.Tensor): Silhouette tensor of shape (1, 1, H, W) filled with zeros if silhouette is None, otherwise the silhouette tensor
             - joints (torch.Tensor): Joint positions tensor of shape (1, num_joints, 2) in pixel coordinates
             - visibility (torch.Tensor): Joint visibility tensor of shape (1, num_joints)
             - filenames (list): List containing the input image filename or ["PLACEHOLDER"]
@@ -276,8 +277,13 @@ def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, key
     else:
         rgb = torch.zeros((1, 3, image_size[0], image_size[1]))
         filenames = ["PLACEHOLDER"]
-    sil = torch.zeros((1, 1, image_size[0], image_size[1]))
-    
+
+    if silhouette is not None:
+        print(f"Info: Silhouette shape: {silhouette.shape}")
+        sil = torch.FloatTensor(silhouette)[None, None, ...]
+    else:
+        sil = torch.zeros((1, 1, image_size[0], image_size[1]))
+
     # Prioritize preprocessed keypoints_2d over raw pose_data
     if keypoints_2d is not None and keypoint_visibility is not None:
         # Convert normalized coordinates [0,1] to pixel coordinates
@@ -666,6 +672,7 @@ def load_SMIL_Unreal_sample(json_file_path,
             - x_output (dict): Dictionary containing the input data
                 - input_image (str): Input image path
                 - input_image_data (np.array): Input image data
+                - input_image_mask (np.array): Input image mask
             - y_output (dict): Dictionary containing the output data
                 - pose_data (dict): Raw pose data
                 - joint_angles (np.array): Joint angles
@@ -708,9 +715,22 @@ def load_SMIL_Unreal_sample(json_file_path,
         input_image_data = imageio.v2.imread(input_image)
     else:
         input_image_data = None
-    
+
     x_output["input_image"] = input_image
     x_output["input_image_data"] = input_image_data
+    
+    # load the input image mask
+    try:
+        input_image_mask = imageio.v2.imread(input_image.replace(".JPG", "_ID.png"))
+        # convert to binary mask (in replicAnt data, the mask is in the red channel)
+        input_image_mask = cv2.threshold(input_image_mask, 0, 255, cv2.THRESH_BINARY)[1]
+        # Extract single channel if multi-channel
+        if len(input_image_mask.shape) > 2:
+            input_image_mask = input_image_mask[:, :, 0]
+        x_output["input_image_mask"] = input_image_mask
+    except FileNotFoundError:
+        input_image_mask = None
+        x_output["input_image_mask"] = None
 
     # load the json data
     with open(json_file_path, "r") as file:
@@ -948,7 +968,8 @@ def Render_SMAL_Model_from_Unreal_data(x,y,device,verbose=False):
         input_image=x["input_image"], 
         num_joints=len(y["joint_angles"]), 
         keypoints_2d=y["keypoints_2d"],
-        keypoint_visibility=y["keypoint_visibility"]
+        keypoint_visibility=y["keypoint_visibility"],
+        silhouette=x["input_image_mask"]
     )
 
     # Some code from the original SMALFitter to set up the model
@@ -1160,7 +1181,7 @@ if __name__ == "__main__":
     
     # Read the JSON file
     json_file_path = (
-        "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt/replicAnt-x-SMIL-OmniAnt_0000.json"
+        "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Masked/replicAnt-x-SMIL-OmniAnt-Masked_0000.json"
     )
 
     # Load the SMIL data
