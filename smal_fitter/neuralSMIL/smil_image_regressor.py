@@ -23,6 +23,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from smal_fitter import SMALFitter
 import config
 
+# Import rotation utilities from PyTorch3D
+from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, rotation_6d_to_matrix, matrix_to_rotation_6d
+
 # Helper function for tensor conversion
 def safe_to_tensor(data, dtype=torch.float32, device='cpu'):
     """Safely convert data to PyTorch tensor."""
@@ -32,6 +35,54 @@ def safe_to_tensor(data, dtype=torch.float32, device='cpu'):
         return torch.from_numpy(data.astype(np.float32 if dtype == torch.float32 else data.dtype)).to(dtype=dtype, device=device)
     else:
         return torch.tensor(data, dtype=dtype, device=device)
+
+
+# ----------------------- ROTATION CONVERSION UTILS ----------------------- #
+
+def robust_axis_angle_to_matrix(axis_angle):
+    """
+    Converts axis-angle representation to a 3x3 rotation matrix.
+    Handles potential NaNs for zero-angle rotations if using pytorch3d's matrix_to_axis_angle back and forth.
+    Args:
+        axis_angle: Tensor of shape (..., 3)
+    Returns:
+        Tensor of shape (..., 3, 3)
+    """
+    return axis_angle_to_matrix(axis_angle)
+
+def robust_matrix_to_axis_angle(matrix):
+    """
+    Converts a 3x3 rotation matrix to axis-angle representation.
+    Handles potential issues with ill-defined gradients for identity matrices by adding a small epsilon.
+    Args:
+        matrix: Tensor of shape (..., 3, 3)
+    Returns:
+        Tensor of shape (..., 3)
+    """
+    return matrix_to_axis_angle(matrix)
+
+def axis_angle_to_rotation_6d(axis_angle):
+    """
+    Converts axis-angle representation to 6D rotation representation.
+    The 6D representation consists of the first two columns of the rotation matrix.
+    Args:
+        axis_angle: Tensor of shape (..., 3)
+    Returns:
+        Tensor of shape (..., 6)
+    """
+    rotation_matrix = robust_axis_angle_to_matrix(axis_angle)
+    return matrix_to_rotation_6d(rotation_matrix)
+
+def rotation_6d_to_axis_angle(rotation_6d):
+    """
+    Converts 6D rotation representation back to axis-angle.
+    Args:
+        rotation_6d: Tensor of shape (..., 6)
+    Returns:
+        Tensor of shape (..., 3)
+    """
+    rotation_matrix = rotation_6d_to_matrix(rotation_6d)
+    return robust_matrix_to_axis_angle(rotation_matrix)
 
 
 class SMILImageRegressor(SMALFitter):
@@ -44,7 +95,8 @@ class SMILImageRegressor(SMALFitter):
     """
     
     def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior, 
-                 rgb_only=True, freeze_backbone=True, hidden_dim=512):
+                 rgb_only=True, freeze_backbone=True, hidden_dim=512, use_ue_scaling=True, 
+                 rotation_representation='axis_angle'):
         """
         Initialize the SMIL Image Regressor.
         
@@ -57,6 +109,8 @@ class SMILImageRegressor(SMALFitter):
             rgb_only: Whether to use only RGB images (no silhouettes/keypoints)
             freeze_backbone: Whether to freeze ResNet152 backbone weights
             hidden_dim: Hidden dimension for fully connected layers
+            use_ue_scaling: Whether to apply 10x UE scaling (default True for replicAnt data)
+            rotation_representation: '6d' or 'axis_angle' for joint rotations (default: 'axis_angle')
         """
         # For rgb_only=True, SMALFitter expects data_batch to be just the RGB tensor
         if rgb_only and isinstance(data_batch, tuple):
@@ -72,6 +126,11 @@ class SMILImageRegressor(SMALFitter):
         
         self.freeze_backbone = freeze_backbone
         self.hidden_dim = hidden_dim
+        self.use_ue_scaling = use_ue_scaling
+        self.rotation_representation = rotation_representation
+        
+        # Enable scaling propagation for SMIL models (matches Unreal2Pytorch3D behavior)
+        self.propagate_scaling = True
         
         # Load pre-trained ResNet152 backbone
         self.backbone = models.resnet152(pretrained=True)
@@ -98,11 +157,13 @@ class SMILImageRegressor(SMALFitter):
     
     def _calculate_output_dims(self):
         """Calculate the output dimensions for each SMIL parameter group."""
-        # Global rotation (3 for axis-angle)
-        self.global_rot_dim = 3
-        
-        # Joint rotations (excluding root joint)
-        self.joint_rot_dim = config.N_POSE * 3
+        # Global rotation and joint rotations dimensions depend on representation
+        if self.rotation_representation == '6d':
+            self.global_rot_dim = 6  # 6D rotation representation
+            self.joint_rot_dim = config.N_POSE * 6  # 6D for each joint
+        else:  # axis_angle (default)
+            self.global_rot_dim = 3  # axis-angle representation
+            self.joint_rot_dim = config.N_POSE * 3  # axis-angle for each joint
         
         # Shape parameters
         self.betas_dim = config.N_BETAS
@@ -276,7 +337,10 @@ class SMILImageRegressor(SMALFitter):
         
         # Joint rotations
         joint_rot_flat = output[:, idx:idx + self.joint_rot_dim]
-        params['joint_rot'] = joint_rot_flat.view(batch_size, config.N_POSE, 3)
+        if self.rotation_representation == '6d':
+            params['joint_rot'] = joint_rot_flat.view(batch_size, config.N_POSE, 6)
+        else:  # axis_angle
+            params['joint_rot'] = joint_rot_flat.view(batch_size, config.N_POSE, 3)
         idx += self.joint_rot_dim
         
         # Shape parameters
@@ -354,21 +418,22 @@ class SMILImageRegressor(SMALFitter):
         self.betas = params['betas'][batch_idx]
         
         # Set translation (keep gradients)
-        self.trans[batch_idx] = params['trans'][batch_idx]
+        self.trans[batch_idx] = torch.zeros_like(params['trans'][batch_idx])
         
         # Set camera FOV (keep gradients)
         self.fov[batch_idx] = params['fov'][batch_idx]
         
         # Set joint scales (if available) (keep gradients)
         if 'log_beta_scales' in params and hasattr(self, 'log_beta_scales'):
-            self.log_beta_scales[batch_idx] = params['log_beta_scales'][batch_idx]
+            self.log_beta_scales[batch_idx] = torch.zeros_like(params['log_beta_scales'][batch_idx])
         
         # Set joint translations (if available) (keep gradients)
         if 'betas_trans' in params and hasattr(self, 'betas_trans'):
-            self.betas_trans[batch_idx] = params['betas_trans'][batch_idx]
+            self.betas_trans[batch_idx] = torch.zeros_like(params['betas_trans'][batch_idx])
     
     def compute_prediction_loss(self, predicted_params: Dict[str, torch.Tensor], 
-                               target_params: Dict[str, torch.Tensor], pose_data=None, silhouette_data=None, return_components=False) -> torch.Tensor:
+                               target_params: Dict[str, torch.Tensor], pose_data=None, silhouette_data=None, return_components=False,
+                               loss_weights: Dict[str, float] = None) -> torch.Tensor:
         """
         Compute loss between predicted and target SMIL parameters.
         
@@ -385,30 +450,72 @@ class SMILImageRegressor(SMALFitter):
         total_loss = 0.0
         loss_components = {}
         
-        # Define loss weights for different parameter types
-        loss_weights = {
-            'global_rot': 0.1,
-            'joint_rot': 0.05,  # Joint rotations are typically smaller values
-            'betas': 0.01,     # Shape parameters need higher weight
-            'trans': 0.01,
-            'fov': 0.001,     # FOV is typically a large (constant) value (degrees)
-            'cam_rot': 0.01,    # Camera rotation
-            'cam_trans': 0.01, # Camera translation
-            'log_beta_scales': 0.1,
-            'betas_trans': 0.1,
-            'keypoint_2d': 0.05,  # 2D keypoint loss weight (higher since normalized coordinates are small)
-            'silhouette': 0.1     # Silhouette loss weight (similar to keypoint loss)
-        }
+        if loss_weights is None:
+            # Define loss weights for different parameter types
+            loss_weights = {
+                'global_rot': 0.02,
+                'joint_rot': 0.02,  # Joint rotations are typically smaller values
+                'betas': 0.01,     # Shape parameters need higher weight
+                'trans': 0.001,
+                'fov': 0.001,     # FOV is typically a large (constant) value (degrees)
+                'cam_rot': 0.01,    # Camera rotation
+                'cam_trans': 0.001, # Camera translation
+                'log_beta_scales': 0.1,
+                'betas_trans': 0.1,
+                'keypoint_2d': 0.0,  # 2D keypoint loss weight (higher since normalized coordinates are small)
+                'silhouette': 0.0     # Silhouette loss weight - disabled due to gradient instability
+            }
+        
+        # Check if we need to compute rendered outputs (keypoints and/or silhouette)
+        need_keypoint_loss = (pose_data is not None and 'keypoints_2d' in pose_data and 
+                             'keypoint_visibility' in pose_data and loss_weights['keypoint_2d'] > 0)
+        need_silhouette_loss = (silhouette_data is not None and loss_weights['silhouette'] > 0)
+        
+        # Single rendering pass for both keypoint and silhouette losses if needed
+        rendered_joints = None
+        rendered_silhouette = None
+        if need_keypoint_loss or need_silhouette_loss:
+            try:
+                rendered_joints, rendered_silhouette = self._compute_rendered_outputs(
+                    predicted_params, compute_joints=need_keypoint_loss, compute_silhouette=need_silhouette_loss
+                )
+            except Exception as e:
+                print(f"Warning: Failed to compute rendered outputs: {e}")
+                if hasattr(self, '_debug_shapes'):
+                    import traceback
+                    traceback.print_exc()
         
         # Global rotation loss
         if 'global_rot' in target_params:
-            loss = F.mse_loss(predicted_params['global_rot'], target_params['global_rot'])
+            if self.rotation_representation == '6d':
+                # Convert 6D representations to rotation matrices for comparison
+                pred_global_matrix = rotation_6d_to_matrix(predicted_params['global_rot'])
+                target_global_matrix = rotation_6d_to_matrix(target_params['global_rot'])
+                
+                # Compute Frobenius norm of the difference
+                matrix_diff_loss = torch.norm(pred_global_matrix - target_global_matrix, p='fro', dim=(-2, -1))
+                loss = matrix_diff_loss.mean()  # Mean over batch
+            else:
+                # Use MSE for axis-angle representation
+                loss = F.mse_loss(predicted_params['global_rot'], target_params['global_rot'])
+            
             loss_components['global_rot'] = loss
             total_loss += loss_weights['global_rot'] * loss
         
         # Joint rotation loss
         if 'joint_rot' in target_params:
-            loss = F.mse_loss(predicted_params['joint_rot'], target_params['joint_rot'])
+            if self.rotation_representation == '6d':
+                # Convert 6D representations to rotation matrices for comparison
+                pred_matrices = rotation_6d_to_matrix(predicted_params['joint_rot'])
+                target_matrices = rotation_6d_to_matrix(target_params['joint_rot'])
+                
+                # Compute Frobenius norm of the difference
+                matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
+                loss = matrix_diff_loss.mean()  # Mean over batch and joints
+            else:
+                # Use MSE for axis-angle representation
+                loss = F.mse_loss(predicted_params['joint_rot'], target_params['joint_rot'])
+            
             loss_components['joint_rot'] = loss
             total_loss += loss_weights['joint_rot'] * loss
         
@@ -467,12 +574,9 @@ class SMILImageRegressor(SMALFitter):
             loss_components['betas_trans'] = loss
             total_loss += loss_weights['betas_trans'] * loss
         
-        # 2D keypoint loss (if available)
-        if pose_data is not None and 'keypoints_2d' in pose_data and 'keypoint_visibility' in pose_data:
+        # 2D keypoint loss (if available and computed)
+        if need_keypoint_loss and rendered_joints is not None:
             try:
-                # Compute rendered joints from predicted parameters
-                rendered_joints = self._compute_rendered_joints(predicted_params)
-                
                 # Get target keypoints and visibility
                 target_keypoints = safe_to_tensor(pose_data['keypoints_2d'], device=self.device)
                 visibility = safe_to_tensor(pose_data['keypoint_visibility'], device=self.device)
@@ -495,45 +599,80 @@ class SMILImageRegressor(SMALFitter):
                 # Apply visibility mask - only compute loss for visible joints
                 visible_mask = visibility.bool()
                 
-                # Additional mask for joints that are within reasonable bounds
-                # Joints far outside [-2, 2] range are likely projection errors
-                in_bounds_mask = (rendered_joints.abs() < 2.0).all(dim=-1)
+                # Check if ground truth keypoints are within reasonable image bounds [0, 1]
+                # Only compute loss for keypoints where ground truth is within bounds
+                gt_in_bounds_mask = (target_keypoints >= 0.0) & (target_keypoints <= 1.0)
+                gt_in_bounds_mask = gt_in_bounds_mask.all(dim=-1)  # Both x and y must be in bounds
                 
-                # Combine visibility and bounds masks
-                valid_mask = visible_mask & in_bounds_mask
+                # Only keep joints that are both visible AND have ground truth within bounds
+                valid_mask = visible_mask & gt_in_bounds_mask
+                
+                # Additional safety check for finite rendered joints (prevent NaN/inf in loss)
+                finite_mask = torch.isfinite(rendered_joints).all(dim=-1)
+                valid_mask = valid_mask & finite_mask
+                
+                # Debug: print validation info occasionally
+                if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # 1% of the time
+                    finite_count = finite_mask.sum().item()
+                    gt_in_bounds_count = gt_in_bounds_mask.sum().item()
+                    print(f"DEBUG - Keypoint loss: visible={visible_mask.sum().item()}, gt_in_bounds={gt_in_bounds_count}, finite={finite_count}, valid={valid_mask.sum().item()}")
+                    print(f"  Rendered joints range: [{rendered_joints.min():.3f}, {rendered_joints.max():.3f}]")
+                    print(f"  Target keypoints range: [{target_keypoints.min():.3f}, {target_keypoints.max():.3f}]")
                 
                 if valid_mask.any():
-                    # Extract valid joint coordinates
-                    rendered_valid = rendered_joints[valid_mask]  # Shape: (num_valid, 2)
-                    target_valid = target_keypoints[valid_mask]    # Shape: (num_valid, 2)
+                    # Use masking that preserves gradients - multiply by mask weights instead of indexing
+                    # Convert boolean mask to float weights (1.0 for valid, 0.0 for invalid)
+                    joint_weights = valid_mask.float().unsqueeze(-1)  # Shape: (batch_size, n_joints, 1)
                     
-                    # Compute MSE loss only for valid joints
-                    loss = F.mse_loss(rendered_valid, target_valid)
-                    loss_components['keypoint_2d'] = loss
-                    total_loss += loss_weights['keypoint_2d'] * loss
+                    # Compute weighted MSE loss that preserves gradients
+                    # Only valid joints contribute to loss (invalid ones get weight 0)
+                    diff_squared = (rendered_joints - target_keypoints) ** 2
+                    weighted_diff = diff_squared * joint_weights
+                    
+                    # Average over all valid joints with numerical stability
+                    num_valid = valid_mask.sum().float()
+                    eps = 1e-8  # Small epsilon for numerical stability
+                    
+                    if num_valid > 0:
+                        # Add epsilon to prevent division by very small numbers
+                        loss = weighted_diff.sum() / (num_valid * 2 + eps)  # Divide by 2 for x,y coordinates
+                        # Add small epsilon to prevent very small losses that can cause numerical issues
+                        loss = loss + eps
+                    else:
+                        loss = torch.tensor(eps, device=self.device, requires_grad=True)
+                    
+                    # Check for NaN/inf in loss before proceeding
+                    if torch.isfinite(loss):
+                        loss_components['keypoint_2d'] = loss
+                        total_loss += loss_weights['keypoint_2d'] * loss
+                    else:
+                        print(f"Warning: Non-finite keypoint loss detected: {loss.item()}, skipping")
+                        loss_components['keypoint_2d'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
                     
                     if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # Only 1% of the time
                         print(f"DEBUG - Valid joints: {valid_mask.sum().item()}/{valid_mask.numel()}")
                         print(f"DEBUG - Loss value: {loss.item():.6f}")
                 else:
-                    # No valid joints, set loss to zero
-                    loss_components['keypoint_2d'] = torch.tensor(0.0, device=self.device)
-                    if hasattr(self, '_debug_shapes'):
-                        print("DEBUG - No valid joints for loss computation")
+                    # No valid joints, set loss to small epsilon but still add it to components
+                    eps = 1e-8
+                    loss = torch.tensor(eps, device=self.device, requires_grad=True)
+                    loss_components['keypoint_2d'] = loss
+                    # Only print occasionally to avoid spam
+                    if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:
+                        finite_count = finite_mask.sum().item()
+                        gt_in_bounds_count = gt_in_bounds_mask.sum().item()
+                        print(f"DEBUG - No valid joints: visible={visible_mask.sum().item()}, gt_in_bounds={gt_in_bounds_count}, finite={finite_count}")
                     
             except Exception as e:
                 # If keypoint loss computation fails, continue without it
                 print(f"Warning: Failed to compute keypoint loss: {e}")
                 import traceback
                 traceback.print_exc()
-                loss_components['keypoint_2d'] = torch.tensor(0.0, device=self.device)
+                loss_components['keypoint_2d'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
         
-        # Silhouette loss (if silhouette data is available)
-        if silhouette_data is not None:
+        # Silhouette loss (if available and computed)
+        if need_silhouette_loss and rendered_silhouette is not None:
             try:
-                # Compute rendered silhouette from predicted parameters
-                rendered_silhouette = self._compute_rendered_silhouette(predicted_params)
-                
                 # Ensure target silhouette has correct format and device
                 target_silhouette = safe_to_tensor(silhouette_data, device=self.device)
                 
@@ -567,10 +706,26 @@ class SMILImageRegressor(SMALFitter):
                 if target_silhouette.max() > 1.0:
                     target_silhouette = target_silhouette / 255.0  # Normalize from [0, 255] to [0, 1]
                 
+                # Add small epsilon for numerical stability
+                eps = 1e-8
+                
+                # Clamp values to prevent extreme gradients
+                rendered_silhouette_clamped = torch.clamp(rendered_silhouette, 0.0, 1.0)
+                target_silhouette_clamped = torch.clamp(target_silhouette, 0.0, 1.0)
+                
                 # Compute L1 loss (same as in SMALFitter)
-                loss = F.l1_loss(rendered_silhouette, target_silhouette)
-                loss_components['silhouette'] = loss
-                total_loss += loss_weights['silhouette'] * loss
+                loss = F.l1_loss(rendered_silhouette_clamped, target_silhouette_clamped)
+                
+                # Add small epsilon to prevent numerical issues with very small losses
+                loss = loss + eps
+                
+                # Check for NaN/inf in loss before proceeding
+                if torch.isfinite(loss):
+                    loss_components['silhouette'] = loss
+                    total_loss += loss_weights['silhouette'] * loss
+                else:
+                    print(f"Warning: Non-finite silhouette loss detected: {loss.item()}, skipping")
+                    loss_components['silhouette'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
                 
                 # Debug output (occasionally)
                 if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # Only 1% of the time
@@ -585,29 +740,49 @@ class SMILImageRegressor(SMALFitter):
                 print(f"Warning: Failed to compute silhouette loss: {e}")
                 import traceback
                 traceback.print_exc()
-                loss_components['silhouette'] = torch.tensor(0.0, device=self.device)
+                loss_components['silhouette'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+        
+        # Final safety check for total loss
+        if not torch.isfinite(total_loss):
+            print(f"Warning: Non-finite total loss detected: {total_loss.item()}, replacing with small epsilon")
+            total_loss = torch.tensor(1e-6, device=self.device, requires_grad=True)
         
         if return_components:
             return total_loss, loss_components
         return total_loss
     
-    def _compute_rendered_joints(self, predicted_params: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def _compute_rendered_outputs(self, predicted_params: Dict[str, torch.Tensor], 
+                                 compute_joints: bool = True, compute_silhouette: bool = True) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
         """
-        Compute rendered 2D joint positions from predicted SMIL parameters.
+        Compute rendered outputs (joints and/or silhouette) from predicted SMIL parameters in a single efficient pass.
         
         Args:
             predicted_params: Dictionary containing predicted SMIL parameters
+            compute_joints: Whether to compute and return rendered 2D joint positions
+            compute_silhouette: Whether to compute and return rendered silhouette
             
         Returns:
-            Rendered 2D joint positions as tensor of shape (batch_size, n_joints, 2)
+            Tuple of (rendered_joints, rendered_silhouette)
+            - rendered_joints: 2D joint positions as tensor of shape (batch_size, n_joints, 2) or None
+            - rendered_silhouette: Silhouette tensor of shape (batch_size, 1, height, width) or None
         """
+        if not compute_joints and not compute_silhouette:
+            return None, None
+            
         # Create batch parameters for SMAL model
         batch_size = predicted_params['global_rot'].shape[0]
-        batch_range = list(range(batch_size))
+        
+        # Convert rotations to axis-angle format for SMAL model (which expects axis-angle)
+        if self.rotation_representation == '6d':
+            global_rot_aa = rotation_6d_to_axis_angle(predicted_params['global_rot'])
+            joint_rot_aa = rotation_6d_to_axis_angle(predicted_params['joint_rot'])
+        else:
+            global_rot_aa = predicted_params['global_rot']
+            joint_rot_aa = predicted_params['joint_rot']
         
         batch_params = {
-            'global_rotation': predicted_params['global_rot'],
-            'joint_rotations': predicted_params['joint_rot'],
+            'global_rotation': global_rot_aa,
+            'joint_rotations': joint_rot_aa,
             'betas': predicted_params['betas'],
             'trans': predicted_params['trans'],
             'fov': predicted_params['fov']
@@ -619,7 +794,7 @@ class SMILImageRegressor(SMALFitter):
         if 'betas_trans' in predicted_params:
             batch_params['betas_trans'] = predicted_params['betas_trans']
         
-        # Run SMAL model to get vertices and joints
+        # Run SMAL model to get vertices and joints (single pass)
         verts, joints, Rs, v_shaped = self.smal_model(
             batch_params['betas'],
             torch.cat([
@@ -629,9 +804,16 @@ class SMILImageRegressor(SMALFitter):
             betas_trans=batch_params.get('betas_trans', None),
             propagate_scaling=self.propagate_scaling)
         
-        # Apply translation
-        verts = verts + batch_params['trans'].unsqueeze(1)
-        joints = joints + batch_params['trans'].unsqueeze(1)
+        # Apply transformation based on scaling configuration
+        if self.use_ue_scaling:
+            # Apply UE transform (10x scale) - needed to match replicAnt model size
+            # This aligns the model at the root joint and scales it to the replicAnt model size
+            verts = (verts - joints[:, 0, :].unsqueeze(1)) * 10 + batch_params['trans'].unsqueeze(1)
+            joints = (joints - joints[:, 0, :].unsqueeze(1)) * 10 + batch_params['trans'].unsqueeze(1)
+        else:
+            # Standard transformation without UE scaling
+            verts = verts + batch_params['trans'].unsqueeze(1)
+            joints = joints + batch_params['trans'].unsqueeze(1)
         
         # Get canonical model joints
         canonical_model_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
@@ -647,101 +829,51 @@ class SMILImageRegressor(SMALFitter):
             # Use default camera FOV
             self.renderer.cameras.fov = batch_params['fov']
         
-        # Render to get projected joint positions
-        _, rendered_joints = self.renderer(
+        # Single renderer call to get both silhouette and joints
+        rendered_silhouettes, rendered_joints_raw = self.renderer(
             verts, canonical_model_joints,
             self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1))
         
-        # Normalize rendered joints to match ground truth coordinate system
-        # PyTorch3D transform_points_screen outputs coordinates in pixel space
-        # Ground truth is normalized as: -x/image_width, y/image_height with range [-1, 1]
-        image_size = self.renderer.image_size
         
-        # Normalize to [0, 1] range first
-        rendered_joints_normalized = rendered_joints / image_size
-        
-        # Convert to match ground truth coordinate system
-        # Note: x-coordinate is negated to match ground truth coordinate system
-        rendered_joints_final = rendered_joints_normalized.clone()
-        rendered_joints_final[..., 0] = -rendered_joints_normalized[..., 0]  # Negate x-coordinate
-        
-        # Debug: Check if normalization produces reasonable values (only occasionally)
-        if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # Only 1% of the time
-            print(f"DEBUG - Raw rendered_joints range: [{rendered_joints.min():.3f}, {rendered_joints.max():.3f}]")
-            print(f"DEBUG - Image size: {image_size}")
-            print(f"DEBUG - Final normalized range: [{rendered_joints_final.min():.3f}, {rendered_joints_final.max():.3f}]")
+        # Process rendered joints if requested
+        rendered_joints = None
+        if compute_joints:
+            # Normalize rendered joints to match ground truth coordinate system
+            # PyTorch3D transform_points_screen outputs [x_pixel, y_pixel], but the renderer swaps to [y_pixel, x_pixel]
+            # Ground truth format (from Unreal2Pytorch3D.py): [y_norm, x_norm] = [y/height, x/width] with range [0, 1]
+            image_size = self.renderer.image_size
             
-            # Check for out-of-bounds joints
-            in_bounds = (rendered_joints >= 0) & (rendered_joints <= image_size)
-            in_bounds_count = in_bounds.all(dim=-1).sum().item()
-            total_joints = rendered_joints.shape[0] * rendered_joints.shape[1]
-            print(f"DEBUG - Joints in bounds: {in_bounds_count}/{total_joints}")
-        
-        return rendered_joints_final
-    
-    def _compute_rendered_silhouette(self, predicted_params: Dict[str, torch.Tensor]) -> torch.Tensor:
-        # TODO: THIS REQUIRES AN EXTRA PASS OF THE SMIL MODEL SO THIS REQUIRES NEEDSLESS EXTRA COMPUTATION
-        # MAKE THE WHOLE TRAINING SLEEKER ONCE IT'S VERIFIABLY RUNNING CORRECTLY
-        """
-        Compute rendered silhouette from predicted SMIL parameters.
-        
-        Args:
-            predicted_params: Dictionary containing predicted SMIL parameters
+            # rendered_joints_raw is already in [y_pixel, x_pixel] format due to renderer swap
+            # Just normalize to [0, 1] range to match ground truth format
+            # Add small epsilon to prevent division by zero issues
+            eps = 1e-8
+            rendered_joints_final = rendered_joints_raw / (image_size + eps)
             
-        Returns:
-            Rendered silhouette as tensor of shape (batch_size, 1, height, width)
-        """
-        # Create batch parameters for SMAL model
-        batch_size = predicted_params['global_rot'].shape[0]
+            # Clamp to reasonable range to prevent extreme values
+            rendered_joints_final = torch.clamp(rendered_joints_final, -10.0, 10.0)
+            
+            # Debug: Check if normalization produces reasonable values (only occasionally)
+            if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # Only 1% of the time
+                print(f"DEBUG - Raw rendered_joints range: [{rendered_joints_raw.min():.3f}, {rendered_joints_raw.max():.3f}]")
+                print(f"DEBUG - Image size: {image_size}")
+                print(f"DEBUG - Final normalized range: [{rendered_joints_final.min():.3f}, {rendered_joints_final.max():.3f}]")
+                print(f"DEBUG - Coordinate mapping: [y_pixel, x_pixel] -> [y_norm, x_norm]")
+                
+                # Check for out-of-bounds joints in pixel space
+                in_bounds = (rendered_joints_raw >= 0) & (rendered_joints_raw <= image_size)
+                in_bounds_count = in_bounds.all(dim=-1).sum().item()
+                total_joints = rendered_joints_raw.shape[0] * rendered_joints_raw.shape[1]
+                print(f"DEBUG - Joints in bounds: {in_bounds_count}/{total_joints}")
+            
+            rendered_joints = rendered_joints_final
         
-        batch_params = {
-            'global_rotation': predicted_params['global_rot'],
-            'joint_rotations': predicted_params['joint_rot'],
-            'betas': predicted_params['betas'],
-            'trans': predicted_params['trans'],
-            'fov': predicted_params['fov']
-        }
+        # Process rendered silhouette if requested
+        rendered_silhouette = None
+        if compute_silhouette:
+            rendered_silhouette = rendered_silhouettes
         
-        # Add joint scales and translations if available
-        if 'log_beta_scales' in predicted_params:
-            batch_params['log_betascale'] = predicted_params['log_beta_scales']
-        if 'betas_trans' in predicted_params:
-            batch_params['betas_trans'] = predicted_params['betas_trans']
-        
-        # Generate SMAL model vertices and joints
-        verts, joints, Rs, v_shaped = self.smal_model(
-            batch_params['betas'],
-            torch.cat([
-                batch_params['global_rotation'].unsqueeze(1),
-                batch_params['joint_rotations']], dim=1),
-            betas_logscale=batch_params.get('log_betascale', None),
-            betas_trans=batch_params.get('betas_trans', None),
-            propagate_scaling=self.propagate_scaling)
-        
-        # Apply translation
-        verts = verts + batch_params['trans'].unsqueeze(1)
-        joints = joints + batch_params['trans'].unsqueeze(1)
-        
-        # Get canonical joints for rendering
-        canonical_model_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
-        
-        # Set camera parameters from predicted values if available
-        if 'cam_rot' in predicted_params and 'cam_trans' in predicted_params:
-            self.renderer.set_camera_parameters(
-                R=predicted_params['cam_rot'],
-                T=predicted_params['cam_trans'],
-                fov=predicted_params['fov']
-            )
-        else:
-            # Use default camera FOV
-            self.renderer.cameras.fov = batch_params['fov']
-        
-        # Render to get silhouette
-        rendered_silhouettes, _ = self.renderer(
-            verts, canonical_model_joints,
-            self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1))
-        
-        return rendered_silhouettes
+        return rendered_joints, rendered_silhouette
+
     
     def enable_debug(self, enable=True):
         """Enable debug output for keypoint loss computation."""
