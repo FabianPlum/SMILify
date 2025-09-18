@@ -133,7 +133,7 @@ class SMILImageRegressor(SMALFitter):
         self.propagate_scaling = True
         
         # Load pre-trained ResNet152 backbone
-        self.backbone = models.resnet152(pretrained=True)
+        self.backbone = models.resnet152(weights=models.ResNet152_Weights.DEFAULT)
         
         # Remove the final classification layer
         self.backbone = nn.Sequential(*list(self.backbone.children())[:-1])
