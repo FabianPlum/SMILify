@@ -12,9 +12,47 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from Unreal2Pytorch3D import load_SMIL_Unreal_sample, Render_SMAL_Model_from_Unreal_data
 from utils import eul_to_axis
 
+# Import rotation utilities from PyTorch3D
+from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, rotation_6d_to_matrix, matrix_to_rotation_6d
+
+
+# ----------------------- ROTATION CONVERSION UTILS ----------------------- #
+
+def axis_angle_to_rotation_6d(axis_angle):
+    """
+    Converts axis-angle representation to 6D rotation representation.
+    Args:
+        axis_angle: Tensor of shape (..., 3) or numpy array
+    Returns:
+        Tensor of shape (..., 6) or numpy array
+    """
+    if isinstance(axis_angle, np.ndarray):
+        axis_angle_tensor = torch.from_numpy(axis_angle)
+        is_numpy = True
+    else:
+        axis_angle_tensor = axis_angle
+        is_numpy = False
+    
+    rotation_matrix = axis_angle_to_matrix(axis_angle_tensor)
+    rotation_6d = matrix_to_rotation_6d(rotation_matrix)
+    
+    if is_numpy:
+        return rotation_6d.numpy()
+    return rotation_6d
+
 class replicAntSMILDataset(torch.utils.data.Dataset):    
-    def __init__(self, data_path):
+    def __init__(self, data_path, use_ue_scaling=True, rotation_representation='axis_angle'):
+        """
+        Initialize replicAnt SMIL Dataset.
+        
+        Args:
+            data_path: Path to the dataset directory
+            use_ue_scaling: Whether this dataset expects UE scaling (default True for replicAnt data)
+            rotation_representation: '6d' or 'axis_angle' for joint rotations (default: 'axis_angle')
+        """
         self.data_path = data_path
+        self.use_ue_scaling = use_ue_scaling
+        self.rotation_representation = rotation_representation
         self.data_json_paths = []
         for file in os.listdir(self.data_path):
             if file.endswith('.json') and not file.startswith('_BatchData'):
@@ -24,18 +62,37 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
         self.data_json_paths.sort()
 
     def __getitem__(self, idx):
-        x,y = load_SMIL_Unreal_sample(self.data_json_paths[idx], 
-                                      plot_tests=False, 
-                                      propagate_scaling=True, 
-                                      translation_factor=0.01)
+        x, y = load_SMIL_Unreal_sample(self.data_json_paths[idx], 
+                                       plot_tests=False, 
+                                       propagate_scaling=True, 
+                                       translation_factor=0.01)
 
         # x contains the input image path and the input image data
         # y contains the processed SMIL data
 
-        return x,y
+        # Convert rotation representations if needed
+        if self.rotation_representation == '6d':
+            # Convert root rotation (global rotation) from axis-angle to 6D
+            if 'root_rot' in y:
+                y['root_rot'] = axis_angle_to_rotation_6d(y['root_rot'])
+            
+            # Convert joint angles from axis-angle to 6D
+            if 'joint_angles' in y:
+                y['joint_angles'] = axis_angle_to_rotation_6d(y['joint_angles'])
+
+        return x, y
 
     def __len__(self):
         return len(self.data_json_paths)
+    
+    def get_ue_scaling_flag(self):
+        """
+        Get the UE scaling flag for this dataset.
+        
+        Returns:
+            bool: Whether this dataset expects UE scaling
+        """
+        return self.use_ue_scaling
 
 
 if __name__ == "__main__":
