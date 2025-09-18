@@ -796,6 +796,20 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     if checkpoint_path is None:
         checkpoint_path = training_params.get('resume_checkpoint')
     
+    # Handle test mode - disable checkpoint loading and use temp directories
+    is_test_mode = (checkpoint_path == 'DISABLE_CHECKPOINT_LOADING' or 
+                   os.environ.get('PYTEST_TEMP_DIR') is not None)
+    
+    if is_test_mode:
+        checkpoint_path = None  # Disable checkpoint loading in test mode
+        # Use temporary directory for outputs if in test mode
+        if 'PYTEST_TEMP_DIR' in os.environ:
+            temp_dir = os.environ['PYTEST_TEMP_DIR']
+            output_config['checkpoint_dir'] = os.path.join(temp_dir, 'checkpoints')
+            output_config['plots_dir'] = os.path.join(temp_dir, 'plots')
+            output_config['visualizations_dir'] = os.path.join(temp_dir, 'visualizations')
+            print(f"Test mode: Using temporary directory: {temp_dir}")
+    
     # Set random seeds for reproducibility
     seed = training_params['seed']
     set_random_seeds(seed)
@@ -910,22 +924,28 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             val_err = val_param_err.get(param_name, 0.0)
             print(f'    {param_name:15s}: {train_err:.6f} / {val_err:.6f}')
         
-        # Save best model
+        # Save best model (unless in test mode)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_model_path = os.path.join(output_config['checkpoint_dir'], 'best_model.pth')
-            save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
-                          train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
-                          best_model_path)
-            print(f'  New best model saved with validation loss: {val_loss:.6f}')
+            if not is_test_mode:
+                best_model_path = os.path.join(output_config['checkpoint_dir'], 'best_model.pth')
+                save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
+                              train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
+                              best_model_path)
+                print(f'  New best model saved with validation loss: {val_loss:.6f}')
+            else:
+                print(f'  New best validation loss: {val_loss:.6f} (checkpoint saving disabled in test mode)')
         
-        # Save regular checkpoint
+        # Save regular checkpoint (unless in test mode)
         if (epoch + 1) % output_config['save_checkpoint_every'] == 0:
-            checkpoint_path = os.path.join(output_config['checkpoint_dir'], f'checkpoint_epoch_{epoch}.pth')
-            save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
-                          train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
-                          checkpoint_path)
-            print(f'  Checkpoint saved at epoch {epoch}')
+            if not is_test_mode:
+                checkpoint_path_save = os.path.join(output_config['checkpoint_dir'], f'checkpoint_epoch_{epoch}.pth')
+                save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
+                              train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
+                              checkpoint_path_save)
+                print(f'  Checkpoint saved at epoch {epoch}')
+            else:
+                print(f'  Checkpoint saving disabled in test mode (epoch {epoch})')
         
         # Generate visualizations
         if (epoch + 1) % output_config['generate_visualizations_every'] == 0:
@@ -933,12 +953,13 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                                       output_dir=output_config['visualizations_dir'], 
                                       num_samples=output_config['num_visualization_samples'])
         
-        # Plot training history
+        # Plot training history (unless in test mode)
         if (epoch + 1) % output_config['plot_history_every'] == 0:
-            history_path = os.path.join(output_config['plots_dir'], f'training_history_epoch_{epoch}.png')
-            param_errors_path = os.path.join(output_config['plots_dir'], f'parameter_errors_epoch_{epoch}.png')
-            plot_training_history(train_losses, val_losses, history_path)
-            plot_parameter_errors(train_param_errors, val_param_errors, param_errors_path)
+            if not is_test_mode:
+                history_path = os.path.join(output_config['plots_dir'], f'training_history_epoch_{epoch}.png')
+                param_errors_path = os.path.join(output_config['plots_dir'], f'parameter_errors_epoch_{epoch}.png')
+                plot_training_history(train_losses, val_losses, history_path)
+                plot_parameter_errors(train_param_errors, val_param_errors, param_errors_path)
     
     print("Training completed!")
     
@@ -952,11 +973,12 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     for param_name, param_err in sorted(test_param_err.items()):
         print(f'  {param_name:15s}: {param_err:.6f}')
     
-    # Save final training history
-    final_history_path = os.path.join(output_config['plots_dir'], 'final_training_history.png')
-    final_param_errors_path = os.path.join(output_config['plots_dir'], 'final_parameter_errors.png')
-    plot_training_history(train_losses, val_losses, final_history_path)
-    plot_parameter_errors(train_param_errors, val_param_errors, final_param_errors_path)
+    # Save final training history (unless in test mode)
+    if not is_test_mode:
+        final_history_path = os.path.join(output_config['plots_dir'], 'final_training_history.png')
+        final_param_errors_path = os.path.join(output_config['plots_dir'], 'final_parameter_errors.png')
+        plot_training_history(train_losses, val_losses, final_history_path)
+        plot_parameter_errors(train_param_errors, val_param_errors, final_param_errors_path)
 
 
 if __name__ == "__main__":
