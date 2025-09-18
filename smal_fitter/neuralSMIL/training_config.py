@@ -36,6 +36,7 @@ class TrainingConfig:
         'learning_rate': 0.0001,
         'seed': 0,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
+        'resume_checkpoint': "/home/fabi/dev/SMILify/checkpoints/best_model.pth",  # Path to checkpoint file to resume training from (None for training from scratch)
     }
     
     # Model configuration
@@ -110,7 +111,7 @@ class TrainingConfig:
         Get the data path for the specified dataset.
         
         Args:
-            dataset_name: Name of the dataset ('masked_simple', 'pose_only_simple', 'tex')
+            dataset_name: Name of the dataset ('masked_simple', 'pose_only_simple', 'test_textured')
                          If None, uses DEFAULT_DATASET
         
         Returns:

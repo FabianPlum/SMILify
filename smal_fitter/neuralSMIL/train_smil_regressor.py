@@ -792,6 +792,10 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     model_config = training_config['model_config']
     output_config = training_config['output_config']
     
+    # Use checkpoint from config if not provided as argument
+    if checkpoint_path is None:
+        checkpoint_path = training_params.get('resume_checkpoint')
+    
     # Set random seeds for reproducibility
     seed = training_params['seed']
     set_random_seeds(seed)
@@ -963,7 +967,7 @@ if __name__ == "__main__":
                        choices=['masked_simple', 'pose_only_simple', 'test_textured'],
                        help='Dataset to use (default: uses TrainingConfig.DEFAULT_DATASET)')
     parser.add_argument('--checkpoint', type=str, default=None,
-                       help='Path to checkpoint file to resume training from (default: None)')
+                       help='Path to checkpoint file to resume training from (overrides config setting, default: None)')
     parser.add_argument('--seed', type=int, default=None,
                        help='Random seed for reproducibility (overrides config default)')
     parser.add_argument('--rotation-representation', type=str, default=None, 
