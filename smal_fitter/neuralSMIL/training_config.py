@@ -36,7 +36,7 @@ class TrainingConfig:
         'learning_rate': 0.0001,
         'seed': 0,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': "/home/fabi/dev/SMILify/checkpoints/best_model.pth",  # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': None,  # Path to checkpoint file to resume training from (None for training from scratch)
     }
     
     # Model configuration
