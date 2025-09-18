@@ -418,18 +418,18 @@ class SMILImageRegressor(SMALFitter):
         self.betas = params['betas'][batch_idx]
         
         # Set translation (keep gradients)
-        self.trans[batch_idx] = torch.zeros_like(params['trans'][batch_idx])
+        self.trans[batch_idx] = params['trans'][batch_idx]
         
         # Set camera FOV (keep gradients)
         self.fov[batch_idx] = params['fov'][batch_idx]
         
         # Set joint scales (if available) (keep gradients)
         if 'log_beta_scales' in params and hasattr(self, 'log_beta_scales'):
-            self.log_beta_scales[batch_idx] = torch.zeros_like(params['log_beta_scales'][batch_idx])
+            self.log_beta_scales[batch_idx] = params['log_beta_scales'][batch_idx]
         
         # Set joint translations (if available) (keep gradients)
         if 'betas_trans' in params and hasattr(self, 'betas_trans'):
-            self.betas_trans[batch_idx] = torch.zeros_like(params['betas_trans'][batch_idx])
+            self.betas_trans[batch_idx] = params['betas_trans'][batch_idx]
     
     def compute_prediction_loss(self, predicted_params: Dict[str, torch.Tensor], 
                                target_params: Dict[str, torch.Tensor], pose_data=None, silhouette_data=None, return_components=False,
