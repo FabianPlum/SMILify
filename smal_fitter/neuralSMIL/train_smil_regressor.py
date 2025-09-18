@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 import os
 import sys
+import random
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
@@ -22,11 +23,30 @@ import trimesh
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from smil_image_regressor import SMILImageRegressor
+from smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
 from smil_datasets import replicAntSMILDataset
 from smal_fitter import SMALFitter
 from Unreal2Pytorch3D import return_placeholder_data
 import config
+
+
+def set_random_seeds(seed=0):
+    """
+    Set random seeds for reproducibility.
+    
+    Args:
+        seed (int): Random seed value (default: 0)
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    
+    # For deterministic behavior (may impact performance)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 class ImageExporter():
@@ -222,18 +242,52 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch):
                 silhouette_data = None
                 if x_data.get("input_image_mask") is not None:
                     silhouette_data = x_data["input_image_mask"]
+
+                loss_weights = {
+                    'global_rot': 0.02,
+                    'joint_rot': 0.02,  # Joint rotations are typically smaller values
+                    'betas': 0.01,     # Shape parameters need higher weight
+                    'trans': 0.001,
+                    'fov': 0.001,     # FOV is typically a large (constant) value (degrees)
+                    'cam_rot': 0.01,    # Camera rotation
+                    'cam_trans': 0.001, # Camera translation
+                    'log_beta_scales': 0.1,
+                    'betas_trans': 0.1,
+                    'keypoint_2d': 0.0,  # set to zero initially until training has become stable
+                    'silhouette': 0.0     # set to zero initially until training has become stable
+                }
+
+                if epoch > 20:
+                    loss_weights['keypoint_2d'] = 0.001
+                    loss_weights['silhouette'] = 0.0001
+                
+                if epoch > 25:
+                    loss_weights['keypoint_2d'] = 0.01
+                    loss_weights['silhouette'] = 0.001
+                
+                if epoch > 30:
+                    loss_weights['keypoint_2d'] = 0.05
+                    loss_weights['joint_rot'] = 0.01 # decrease influence of joint rotations in favour of keypoint loss to incentivize larger changes
+                    loss_weights['silhouette'] = 0.001
+
+                if epoch > 50:
+                    loss_weights['keypoint_2d'] = 0.2
+                    loss_weights['joint_rot'] = 0.01 # decrease influence of joint rotations in favour of keypoint loss to incentivize larger changes
+                    loss_weights['silhouette'] = 0.01
+
                 
                 # Compute loss with components (including keypoint and silhouette loss if data is available)
-                loss, loss_components = model.compute_prediction_loss(predicted_params, target_params, pose_data=keypoint_data, silhouette_data=silhouette_data, return_components=True)
+                loss, loss_components = model.compute_prediction_loss(predicted_params, target_params, pose_data=keypoint_data, silhouette_data=silhouette_data, return_components=True, loss_weights=loss_weights)
                 batch_loss += loss.item()
                 valid_samples += 1
                 
-                # Accumulate gradients (divide by batch size to get average)
-                loss = loss / len(x_data_batch)  # Normalize by batch size
+                # Accumulate gradients properly
+                # Scale loss by batch size for proper gradient averaging
+                scaled_loss = loss / len(x_data_batch)
                 if accumulated_loss is None:
-                    accumulated_loss = loss
+                    accumulated_loss = scaled_loss
                 else:
-                    accumulated_loss += loss
+                    accumulated_loss = accumulated_loss + scaled_loss
                 
                 # Accumulate parameter errors
                 for param_name, param_loss in loss_components.items():
@@ -338,9 +392,43 @@ def validate_epoch(model, val_loader, criterion, device, epoch):
                     silhouette_data = None
                     if x_data.get("input_image_mask") is not None:
                         silhouette_data = x_data["input_image_mask"]
+
+
+                    loss_weights = {
+                    'global_rot': 0.02,
+                    'joint_rot': 0.02,  # Joint rotations are typically smaller values
+                    'betas': 0.01,     # Shape parameters need higher weight
+                    'trans': 0.001,
+                    'fov': 0.001,     # FOV is typically a large (constant) value (degrees)
+                    'cam_rot': 0.01,    # Camera rotation
+                    'cam_trans': 0.001, # Camera translation
+                    'log_beta_scales': 0.1,
+                    'betas_trans': 0.1,
+                    'keypoint_2d': 0.0,  # set to zero initially until training has become stable
+                    'silhouette': 0.0     # set to zero initially until training has become stable
+                    }
+
+                    if epoch > 20:
+                        loss_weights['keypoint_2d'] = 0.001
+                        loss_weights['silhouette'] = 0.0001
+                    
+                    if epoch > 25:
+                        loss_weights['keypoint_2d'] = 0.01
+                        loss_weights['silhouette'] = 0.001
+                    
+                    if epoch > 30:
+                        loss_weights['keypoint_2d'] = 0.05
+                        loss_weights['joint_rot'] = 0.01 # decrease influence of joint rotations in favour of keypoint loss to incentivize larger changes
+                        loss_weights['silhouette'] = 0.001
+
+                    if epoch > 50:
+                        loss_weights['keypoint_2d'] = 0.2
+                        loss_weights['joint_rot'] = 0.01 # decrease influence of joint rotations in favour of keypoint loss to incentivize larger changes
+                        loss_weights['silhouette'] = 0.01
+                    
                     
                     # Compute loss with components (including keypoint and silhouette loss if data is available)
-                    loss, loss_components = model.compute_prediction_loss(predicted_params, target_params, pose_data=keypoint_data, silhouette_data=silhouette_data, return_components=True)
+                    loss, loss_components = model.compute_prediction_loss(predicted_params, target_params, pose_data=keypoint_data, silhouette_data=silhouette_data, return_components=True, loss_weights=loss_weights)
                     batch_loss += loss.item()
                     valid_samples += 1
                     
@@ -495,8 +583,18 @@ def visualize_training_progress(model, val_loader, device, epoch, output_dir='vi
                     temp_fitter.target_visibility = torch.zeros((1, config.N_POSE), device=device)
                 
                 # Set the predicted parameters to the SMALFitter
-                temp_fitter.global_rotation.data = predicted_params['global_rot'][0:1]
-                temp_fitter.joint_rotations.data = predicted_params['joint_rot'][0:1]
+                # Convert rotations to axis-angle if they're in 6D representation
+                if model.rotation_representation == '6d':
+                    # Convert 6D rotations to axis-angle for SMALFitter
+                    global_rot_aa = rotation_6d_to_axis_angle(predicted_params['global_rot'][0:1])
+                    joint_rot_aa = rotation_6d_to_axis_angle(predicted_params['joint_rot'][0:1])
+                else:
+                    # Already in axis-angle format
+                    global_rot_aa = predicted_params['global_rot'][0:1]
+                    joint_rot_aa = predicted_params['joint_rot'][0:1]
+                
+                temp_fitter.global_rotation.data = global_rot_aa
+                temp_fitter.joint_rotations.data = joint_rot_aa
                 temp_fitter.betas.data = predicted_params['betas'][0:1]
                 temp_fitter.trans.data = predicted_params['trans'][0:1]
                 temp_fitter.fov.data = predicted_params['fov'][0:1]
@@ -616,10 +714,131 @@ def plot_parameter_errors(train_param_errors, val_param_errors, save_path='param
     plt.close()
 
 
-def main():
+def load_checkpoint(checkpoint_path, model, optimizer, device):
+    """
+    Load checkpoint and restore model, optimizer state and training history.
+    
+    Args:
+        checkpoint_path (str): Path to the checkpoint file
+        model: SMILImageRegressor model to load state into
+        optimizer: Optimizer to load state into
+        device: PyTorch device
+        
+    Returns:
+        Tuple of (start_epoch, train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss)
+    """
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+    
+    print(f"Loading checkpoint from: {checkpoint_path}")
+    
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        
+        # Load model state
+        model.load_state_dict(checkpoint['model_state_dict'])
+        print("Model state loaded successfully")
+        
+        # Load optimizer state
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        print("Optimizer state loaded successfully")
+        
+        # Get epoch information
+        start_epoch = checkpoint.get('epoch', 0) + 1  # Resume from next epoch
+        
+        # Initialize training history lists
+        train_losses = []
+        val_losses = []
+        train_param_errors = []
+        val_param_errors = []
+        best_val_loss = float('inf')
+        
+        # Try to load training history if available
+        if 'train_losses' in checkpoint:
+            train_losses = checkpoint['train_losses']
+            print(f"Loaded training history with {len(train_losses)} epochs")
+        
+        if 'val_losses' in checkpoint:
+            val_losses = checkpoint['val_losses']
+            print(f"Loaded validation history with {len(val_losses)} epochs")
+        
+        if 'train_param_errors_history' in checkpoint:
+            train_param_errors = checkpoint['train_param_errors_history']
+            print(f"Loaded training parameter error history with {len(train_param_errors)} epochs")
+        
+        if 'val_param_errors_history' in checkpoint:
+            val_param_errors = checkpoint['val_param_errors_history']
+            print(f"Loaded validation parameter error history with {len(val_param_errors)} epochs")
+        
+        # Get best validation loss
+        if 'best_val_loss' in checkpoint:
+            best_val_loss = checkpoint['best_val_loss']
+        elif 'val_loss' in checkpoint:
+            best_val_loss = checkpoint['val_loss']
+        elif val_losses:
+            best_val_loss = min(val_losses)
+        
+        print(f"Resuming training from epoch {start_epoch}")
+        print(f"Best validation loss so far: {best_val_loss:.6f}")
+        
+        return start_epoch, train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss
+        
+    except Exception as e:
+        print(f"Error loading checkpoint: {e}")
+        print("Starting training from scratch...")
+        return 0, [], [], [], [], float('inf')
+
+
+def save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
+                   train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss, 
+                   checkpoint_path):
+    """
+    Save training checkpoint with complete state.
+    
+    Args:
+        epoch: Current epoch number
+        model: SMILImageRegressor model
+        optimizer: Optimizer
+        train_loss: Current training loss
+        val_loss: Current validation loss
+        train_param_err: Current training parameter errors
+        val_param_err: Current validation parameter errors
+        train_losses: Full training loss history
+        val_losses: Full validation loss history
+        train_param_errors: Full training parameter error history
+        val_param_errors: Full validation parameter error history
+        best_val_loss: Best validation loss so far
+        checkpoint_path: Path to save checkpoint
+    """
+    torch.save({
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'train_loss': train_loss,
+        'val_loss': val_loss,
+        'train_param_errors': train_param_err,
+        'val_param_errors': val_param_err,
+        'train_losses': train_losses,
+        'val_losses': val_losses,
+        'train_param_errors_history': train_param_errors,
+        'val_param_errors_history': val_param_errors,
+        'best_val_loss': best_val_loss,
+    }, checkpoint_path)
+
+
+def main(seed=0, rotation_representation='axis_angle', checkpoint_path=None):
     """
     Main training function.
+    
+    Args:
+        seed (int): Random seed for reproducibility (default: 0)
+        rotation_representation (str): '6d' or 'axis_angle' for joint rotations (default: 'axis_angle')
+        checkpoint_path (str): Path to checkpoint file to resume training from (default: None)
     """
+    # Set random seeds for reproducibility
+    set_random_seeds(seed)
+    print(f"Random seed set to: {seed}")
+    
     # Set device
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
@@ -627,7 +846,8 @@ def main():
     print(f"Using device: {device}")
     
     # Dataset parameters
-    data_path = "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Masked"
+    #data_path = "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Masked-Simple"
+    data_path = "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-PoseOnly-Simple"
     #data_path = "data/replicAnt_trials/replicAnt-x-SMIL-TEX"
     batch_size = 32
     num_epochs = 500
@@ -635,12 +855,13 @@ def main():
     
     # Create dataset
     print("Loading dataset...")
-    dataset = replicAntSMILDataset(data_path)
+    print(f"Using rotation representation: {rotation_representation}")
+    dataset = replicAntSMILDataset(data_path, rotation_representation=rotation_representation)
     print(f"Dataset size: {len(dataset)}")
     
     # Split dataset
     test_size = 0.1
-    val_size = 0.1
+    val_size = 0.05
     test_amount = int(len(dataset) * test_size)
     val_amount = int(len(dataset) * val_size)
     train_amount = len(dataset) - test_amount - val_amount
@@ -669,9 +890,11 @@ def main():
         batch_size=batch_size,
         shape_family=config.SHAPE_FAMILY,
         use_unity_prior=False,
-        rgb_only=True,
+        rgb_only=False,
         freeze_backbone=True,
-        hidden_dim=512
+        hidden_dim=2048,
+        use_ue_scaling=dataset.get_ue_scaling_flag(),
+        rotation_representation=rotation_representation
     ).to(device)
     
     print(f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
@@ -680,21 +903,32 @@ def main():
     optimizer = optim.Adam(model.get_trainable_parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
     
-    # Training history
-    train_losses = []
-    val_losses = []
-    train_param_errors = []
-    val_param_errors = []
-    
     # Create output directories
     os.makedirs('checkpoints', exist_ok=True)
     os.makedirs('plots', exist_ok=True)
     os.makedirs('visualizations', exist_ok=True)
     
-    print("Starting training...")
+    # Initialize training state
+    start_epoch = 0
+    train_losses = []
+    val_losses = []
+    train_param_errors = []
+    val_param_errors = []
     best_val_loss = float('inf')
     
-    for epoch in range(num_epochs):
+    # Load checkpoint if provided
+    if checkpoint_path is not None:
+        start_epoch, train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss = load_checkpoint(
+            checkpoint_path, model, optimizer, device
+        )
+    
+    print("Starting training...")
+    if start_epoch > 0:
+        print(f"Resuming from epoch {start_epoch}")
+    else:
+        print("Training from scratch")
+    
+    for epoch in range(start_epoch, num_epochs):
         # Train
         train_loss, train_param_err = train_epoch(model, train_loader, optimizer, criterion, device, epoch)
         train_losses.append(train_loss)
@@ -720,16 +954,17 @@ def main():
         # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'train_loss': train_loss,
-                'val_loss': val_loss,
-                'train_param_errors': train_param_err,
-                'val_param_errors': val_param_err,
-            }, 'checkpoints/best_model.pth')
+            save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
+                          train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
+                          'checkpoints/best_model.pth')
             print(f'  New best model saved with validation loss: {val_loss:.6f}')
+        
+        # Save regular checkpoint every 10 epochs
+        if (epoch + 1) % 10 == 0:
+            save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
+                          train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
+                          f'checkpoints/checkpoint_epoch_{epoch}.pth')
+            print(f'  Checkpoint saved at epoch {epoch}')
         
         # Generate visualizations every epoch
         visualize_training_progress(model, val_loader, device, epoch, output_dir='visualizations', num_samples=5)
@@ -755,4 +990,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Train SMIL Image Regressor')
+    parser.add_argument('--seed', type=int, default=0, help='Random seed for reproducibility (default: 0)')
+    parser.add_argument('--rotation-representation', type=str, default='6d', choices=['6d', 'axis_angle'],
+                       help='Rotation representation for joint rotations (default: 6d)')
+    parser.add_argument('--checkpoint', type=str, default=None,
+                       help='Path to checkpoint file to resume training from (default: None)')
+    args = parser.parse_args()
+    
+    main(seed=args.seed, rotation_representation=args.rotation_representation, checkpoint_path=args.checkpoint)
