@@ -2,6 +2,8 @@ import torch
 import os
 import sys
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Use non-GUI backend to prevent tkinter issues in multiprocessing
 from scipy.spatial.transform import Rotation
 
 # Add the parent directories to the path to import modules
@@ -62,10 +64,15 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
         self.data_json_paths.sort()
 
     def __getitem__(self, idx):
-        x, y = load_SMIL_Unreal_sample(self.data_json_paths[idx], 
-                                       plot_tests=False, 
-                                       propagate_scaling=True, 
-                                       translation_factor=0.01)
+        # Use optimized loading with reduced I/O operations
+        x, y = load_SMIL_Unreal_sample(
+            self.data_json_paths[idx], 
+            plot_tests=False, 
+            propagate_scaling=True, 
+            translation_factor=0.01,
+            load_image=True,  # Ensure image is loaded
+            verbose=False  # Reduce output
+        )
 
         # x contains the input image path and the input image data
         # y contains the processed SMIL data
