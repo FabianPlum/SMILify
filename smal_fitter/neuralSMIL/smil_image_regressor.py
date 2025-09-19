@@ -685,15 +685,23 @@ class SMILImageRegressor(SMALFitter):
             loss_components['global_rot'] = loss
             total_loss += loss_weights['global_rot'] * loss
         
-        # Joint rotation loss
+        # Joint rotation loss (with visibility awareness)
         if 'joint_rot' in target_params_batch:
-            if self.rotation_representation == '6d':
-                pred_matrices = rotation_6d_to_matrix(predicted_params['joint_rot'])
-                target_matrices = rotation_6d_to_matrix(target_params_batch['joint_rot'])
-                matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
-                loss = matrix_diff_loss.mean()
+            # Check if we have visibility information for joint-specific loss
+            if auxiliary_data is not None and 'keypoint_data' in auxiliary_data and auxiliary_data['keypoint_data']:
+                # Use visibility-aware joint rotation loss
+                loss = self._compute_visibility_aware_joint_rotation_loss_batch(
+                    predicted_params['joint_rot'], target_params_batch['joint_rot'], auxiliary_data['keypoint_data']
+                )
             else:
-                loss = F.mse_loss(predicted_params['joint_rot'], target_params_batch['joint_rot'])
+                # Fallback to standard joint rotation loss if no visibility data
+                if self.rotation_representation == '6d':
+                    pred_matrices = rotation_6d_to_matrix(predicted_params['joint_rot'])
+                    target_matrices = rotation_6d_to_matrix(target_params_batch['joint_rot'])
+                    matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
+                    loss = matrix_diff_loss.mean()
+                else:
+                    loss = F.mse_loss(predicted_params['joint_rot'], target_params_batch['joint_rot'])
             
             loss_components['joint_rot'] = loss
             total_loss += loss_weights['joint_rot'] * loss
@@ -857,19 +865,27 @@ class SMILImageRegressor(SMALFitter):
             loss_components['global_rot'] = loss
             total_loss += loss_weights['global_rot'] * loss
         
-        # Joint rotation loss
+        # Joint rotation loss (with visibility awareness)
         if 'joint_rot' in target_params:
-            if self.rotation_representation == '6d':
-                # Convert 6D representations to rotation matrices for comparison
-                pred_matrices = rotation_6d_to_matrix(predicted_params['joint_rot'])
-                target_matrices = rotation_6d_to_matrix(target_params['joint_rot'])
-                
-                # Compute Frobenius norm of the difference
-                matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
-                loss = matrix_diff_loss.mean()  # Mean over batch and joints
+            # Check if we have visibility information for joint-specific loss
+            if pose_data is not None and 'keypoint_visibility' in pose_data:
+                # Use visibility-aware joint rotation loss
+                loss = self._compute_visibility_aware_joint_rotation_loss_single(
+                    predicted_params['joint_rot'], target_params['joint_rot'], pose_data['keypoint_visibility']
+                )
             else:
-                # Use MSE for axis-angle representation
-                loss = F.mse_loss(predicted_params['joint_rot'], target_params['joint_rot'])
+                # Fallback to standard joint rotation loss if no visibility data
+                if self.rotation_representation == '6d':
+                    # Convert 6D representations to rotation matrices for comparison
+                    pred_matrices = rotation_6d_to_matrix(predicted_params['joint_rot'])
+                    target_matrices = rotation_6d_to_matrix(target_params['joint_rot'])
+                    
+                    # Compute Frobenius norm of the difference
+                    matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
+                    loss = matrix_diff_loss.mean()  # Mean over batch and joints
+                else:
+                    # Use MSE for axis-angle representation
+                    loss = F.mse_loss(predicted_params['joint_rot'], target_params['joint_rot'])
             
             loss_components['joint_rot'] = loss
             total_loss += loss_weights['joint_rot'] * loss
@@ -990,12 +1006,11 @@ class SMILImageRegressor(SMALFitter):
                 gt_in_bounds_mask = (target_keypoints >= 0.0) & (target_keypoints <= 1.0)
                 gt_in_bounds_mask = gt_in_bounds_mask.all(dim=-1)  # Both x and y must be in bounds
                 
-                # Only keep joints that are both visible AND have ground truth within bounds
-                valid_mask = visible_mask & gt_in_bounds_mask
-                
                 # Additional safety check for finite rendered joints (prevent NaN/inf in loss)
                 finite_mask = torch.isfinite(rendered_joints).all(dim=-1)
-                valid_mask = valid_mask & finite_mask
+                
+                # Only keep joints that are visible AND have ground truth within bounds AND are finite
+                valid_mask = visible_mask & gt_in_bounds_mask & finite_mask
                 
                 # Debug: print validation info occasionally
                 if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # 1% of the time
@@ -1020,11 +1035,13 @@ class SMILImageRegressor(SMALFitter):
                     eps = 1e-8  # Small epsilon for numerical stability
                     
                     if num_valid > 0:
-                        # Add epsilon to prevent division by very small numbers
+                        # Compute loss only for valid joints, preserving gradients
+                        # Sum over all joints (weighted by visibility) and divide by number of valid joints
                         loss = weighted_diff.sum() / (num_valid * 2 + eps)  # Divide by 2 for x,y coordinates
                         # Add small epsilon to prevent very small losses that can cause numerical issues
                         loss = loss + eps
                     else:
+                        # No valid joints - return small epsilon with gradients
                         loss = torch.tensor(eps, device=self.device, requires_grad=True)
                     
                     # Check for NaN/inf in loss before proceeding
@@ -1335,6 +1352,149 @@ class SMILImageRegressor(SMALFitter):
                     sample_loss = weighted_diff.sum() / (num_valid * 2 + eps)
                     total_loss += sample_loss
                     valid_samples += 1
+        
+        if valid_samples > 0:
+            return total_loss / valid_samples + eps
+        else:
+            return torch.tensor(eps, device=self.device, requires_grad=True)
+    
+    def _compute_visibility_aware_joint_rotation_loss_single(self, predicted_joint_rot, target_joint_rot, visibility):
+        """
+        Compute joint rotation loss with visibility awareness for single sample.
+        
+        Args:
+            predicted_joint_rot: Predicted joint rotations (batch_size, n_joints, rot_dim)
+            target_joint_rot: Target joint rotations (batch_size, n_joints, rot_dim)
+            visibility: Joint visibility (batch_size, n_joints) or (n_joints,)
+            
+        Returns:
+            Visibility-aware joint rotation loss
+        """
+        # Ensure visibility has correct dimensions
+        if visibility.dim() == 1:
+            # Single sample case - expand to batch dimension
+            batch_size = predicted_joint_rot.shape[0]
+            visibility = visibility.unsqueeze(0).expand(batch_size, -1)
+        
+        # Exclude root joint from visibility (first element) since joint rotations exclude root
+        # Root joint rotation is handled separately as global rotation
+        if visibility.shape[1] > 1:
+            visibility = visibility[:, 1:]  # Remove root joint (first element) for all samples in batch
+        else:
+            print(f"Warning: Visibility array too small - expected at least 2 joints, got {visibility.shape[1]}")
+            return torch.tensor(1e-8, device=self.device, requires_grad=True)
+        
+        # Check dimension compatibility between joint rotations and visibility
+        n_joints_pred = predicted_joint_rot.shape[1]  # Number of joints in predictions
+        n_joints_vis = visibility.shape[1]  # Number of joints in visibility (after removing root)
+        
+        if n_joints_pred != n_joints_vis:
+            print(f"Warning: Joint count mismatch in single sample - predicted: {n_joints_pred}, visibility: {n_joints_vis}")
+            # Return small epsilon with gradients if dimensions don't match
+            return torch.tensor(1e-8, device=self.device, requires_grad=True)
+        
+        # Convert visibility to boolean mask
+        visible_mask = visibility.bool()
+        
+        # Handle different rotation representations
+        if self.rotation_representation == '6d':
+            # Convert 6D representations to rotation matrices for comparison
+            pred_matrices = rotation_6d_to_matrix(predicted_joint_rot)
+            target_matrices = rotation_6d_to_matrix(target_joint_rot)
+            
+            # Compute Frobenius norm of the difference for each joint
+            matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
+        else:
+            # Use MSE for axis-angle representation
+            matrix_diff_loss = torch.sum((predicted_joint_rot - target_joint_rot) ** 2, dim=-1)
+        
+        # Apply visibility mask - only compute loss for visible joints
+        joint_weights = visible_mask.float()  # Shape: (batch_size, n_joints)
+        weighted_loss = matrix_diff_loss * joint_weights
+        
+        # Average over visible joints only
+        num_visible = visible_mask.sum().float()
+        eps = 1e-8
+        
+        if num_visible > 0:
+            loss = weighted_loss.sum() / (num_visible + eps) + eps
+        else:
+            # No visible joints - return small epsilon with gradients
+            loss = torch.tensor(eps, device=self.device, requires_grad=True)
+        
+        return loss
+    
+    def _compute_visibility_aware_joint_rotation_loss_batch(self, predicted_joint_rot, target_joint_rot, keypoint_data_list):
+        """
+        Compute batched visibility-aware joint rotation loss.
+        
+        Args:
+            predicted_joint_rot: Predicted joint rotations (batch_size, n_joints, rot_dim)
+            target_joint_rot: Target joint rotations (batch_size, n_joints, rot_dim)
+            keypoint_data_list: List of keypoint data dictionaries for each sample
+            
+        Returns:
+            Average visibility-aware joint rotation loss across valid samples
+        """
+        batch_size = predicted_joint_rot.shape[0]
+        total_loss = 0.0
+        valid_samples = 0
+        eps = 1e-8
+        
+        for i, keypoint_data in enumerate(keypoint_data_list):
+            if keypoint_data is None or i >= batch_size:
+                continue
+            
+            # Get visibility for this sample
+            visibility = safe_to_tensor(keypoint_data['keypoint_visibility'], device=self.device)
+            
+            # Ensure proper shape
+            if visibility.dim() == 1:
+                visibility = visibility  # Keep as is for this sample
+            
+            # Exclude root joint from visibility (first element) since joint rotations exclude root
+            # Root joint rotation is handled separately as global rotation
+            if visibility.shape[0] > 1:
+                visibility = visibility[1:]  # Remove root joint (first element)
+            else:
+                print(f"Warning: Visibility array too small - expected at least 2 joints, got {visibility.shape[0]}")
+                continue
+            
+            # Check dimension compatibility between joint rotations and visibility
+            n_joints_pred = predicted_joint_rot.shape[1]  # Number of joints in predictions
+            n_joints_vis = visibility.shape[0]  # Number of joints in visibility (after removing root)
+            
+            if n_joints_pred != n_joints_vis:
+                print(f"Warning: Joint count mismatch - predicted: {n_joints_pred}, visibility: {n_joints_vis}")
+                # Skip this sample if dimensions don't match
+                continue
+            
+            # Convert visibility to boolean mask
+            visible_mask = visibility.bool()
+            
+            # Handle different rotation representations
+            if self.rotation_representation == '6d':
+                # Convert 6D representations to rotation matrices for comparison
+                pred_matrices = rotation_6d_to_matrix(predicted_joint_rot[i:i+1])
+                target_matrices = rotation_6d_to_matrix(target_joint_rot[i:i+1])
+                
+                # Compute Frobenius norm of the difference for each joint
+                matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
+            else:
+                # Use MSE for axis-angle representation
+                matrix_diff_loss = torch.sum((predicted_joint_rot[i:i+1] - target_joint_rot[i:i+1]) ** 2, dim=-1)
+            
+            # Apply visibility mask - only compute loss for visible joints
+            joint_weights = visible_mask.float()  # Shape: (n_joints,)
+            weighted_loss = matrix_diff_loss.squeeze(0) * joint_weights  # Remove batch dim for multiplication
+            
+            # Average over visible joints only
+            num_visible = visible_mask.sum().float()
+            
+            if num_visible > 0:
+                sample_loss = weighted_loss.sum() / (num_visible + eps)
+                total_loss += sample_loss
+                valid_samples += 1
         
         if valid_samples > 0:
             return total_loss / valid_samples + eps
