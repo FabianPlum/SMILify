@@ -81,10 +81,6 @@ class Renderer(torch.nn.Module):
         if fov.dim() == 0:
             fov = fov.unsqueeze(0)  # Add batch dimension if scalar
         
-        # Debug: print shapes occasionally to understand the issue
-        if torch.rand(1).item() < 0.001:  # Only 0.1% of the time to avoid spam
-            print(f"DEBUG - Camera params: R={R.shape}, T={T.shape}, fov={fov.shape}")
-        
         self.cameras = FoVPerspectiveCameras(device=self.device, R=R, T=T, fov=fov)
         self.silhouette_renderer.rasterizer.cameras = self.cameras
         self.color_renderer.rasterizer.cameras = self.cameras
