@@ -5,6 +5,11 @@ This script demonstrates how to train the SMILImageRegressor network
 to predict SMIL parameters from input images.
 """
 
+# Set matplotlib backend BEFORE any other imports to prevent tkinter issues
+import matplotlib
+matplotlib.use('Agg')  # Use non-GUI backend to prevent tkinter issues in multiprocessing
+from matplotlib import pyplot as plt
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,10 +19,8 @@ import os
 import sys
 import random
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 import imageio
-import trimesh
 
 # Add the parent directories to the path to import modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -182,7 +185,7 @@ def custom_collate_fn(batch):
 
 def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_weights):
     """
-    Train the model for one epoch.
+    Train the model for one epoch using batch processing.
     
     Args:
         model: SMILImageRegressor model
@@ -206,87 +209,46 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
     pbar = tqdm(train_loader, desc=f'Epoch {epoch}')
     for batch_idx, (x_data_batch, y_data_batch) in enumerate(pbar):
         try:
-            # Process each sample in the batch
-            batch_loss = 0.0
-            batch_param_errors = {}
-            valid_samples = 0
-            accumulated_loss = None
-            
             # Zero gradients at the start of each batch
             optimizer.zero_grad()
             
-            for i, (x_data, y_data) in enumerate(zip(x_data_batch, y_data_batch)):
-                # Extract image data
-                if x_data['input_image_data'] is not None:
-                    image_data = x_data['input_image_data']
-                else:
-                    # Skip if no image data
-                    continue
-                
-                # Preprocess image (single image)
-                image_tensor = model.preprocess_image(image_data).to(device)
-                
-                # Extract target parameters
-                target_params = extract_target_parameters(y_data, device)
-                
-                # Forward pass
-                predicted_params = model(image_tensor)
-                
-                # Prepare keypoint data for loss computation
-                keypoint_data = None
-                if 'keypoints_2d' in y_data and 'keypoint_visibility' in y_data:
-                    keypoint_data = {
-                        'keypoints_2d': y_data['keypoints_2d'],
-                        'keypoint_visibility': y_data['keypoint_visibility']
-                    }
-                
-                # Prepare silhouette data for loss computation
-                silhouette_data = None
-                if x_data.get("input_image_mask") is not None:
-                    silhouette_data = x_data["input_image_mask"]
-                
-                # Compute loss with components (including keypoint and silhouette loss if data is available)
-                loss, loss_components = model.compute_prediction_loss(predicted_params, target_params, pose_data=keypoint_data, silhouette_data=silhouette_data, return_components=True, loss_weights=loss_weights)
-                batch_loss += loss.item()
-                valid_samples += 1
-                
-                # Accumulate gradients properly
-                # Scale loss by batch size for proper gradient averaging
-                scaled_loss = loss / len(x_data_batch)
-                if accumulated_loss is None:
-                    accumulated_loss = scaled_loss
-                else:
-                    accumulated_loss = accumulated_loss + scaled_loss
-                
-                # Accumulate parameter errors
-                for param_name, param_loss in loss_components.items():
-                    if param_name not in batch_param_errors:
-                        batch_param_errors[param_name] = 0.0
-                    batch_param_errors[param_name] += param_loss.item()
+            # Process batch
+            result = model.predict_from_batch(x_data_batch, y_data_batch)
             
-            if valid_samples > 0 and accumulated_loss is not None:
-                # Average parameter errors over valid samples
-                for param_name in batch_param_errors:
-                    batch_param_errors[param_name] /= valid_samples
-                    if param_name not in param_errors:
-                        param_errors[param_name] = 0.0
-                    param_errors[param_name] += batch_param_errors[param_name]
-                
-                # Backward pass on accumulated loss
-                accumulated_loss.backward()
-                
-                # Gradient clipping to prevent instability
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                
-                optimizer.step()
-                
-                # Average loss over valid samples
-                avg_loss = batch_loss / valid_samples
-                total_loss += avg_loss
-                num_batches += 1
-                
-                # Update progress bar
-                pbar.set_postfix({'Loss': f'{avg_loss:.6f}'})
+            if result[0] is None:  # No valid samples in batch
+                continue
+
+            # Extract results from batch
+            predicted_params, target_params_batch, auxiliary_data = result
+            
+            # Compute batch loss 
+            loss, loss_components = model.compute_batch_loss(
+                predicted_params, target_params_batch, auxiliary_data, 
+                return_components=True, loss_weights=loss_weights
+            )
+            
+            # Backward pass
+            loss.backward()
+            
+            # Gradient clipping to prevent instability
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
+            # Update parameters
+            optimizer.step()
+            
+            # Record loss and parameter errors
+            batch_loss = loss.item()
+            total_loss += batch_loss
+            num_batches += 1
+            
+            # Accumulate parameter errors
+            for param_name, param_loss in loss_components.items():
+                if param_name not in param_errors:
+                    param_errors[param_name] = 0.0
+                param_errors[param_name] += param_loss.item()
+            
+            # Update progress bar
+            pbar.set_postfix({'Loss': f'{batch_loss:.6f}'})
             
         except Exception as e:
             print(f"Error processing batch {batch_idx}: {e}")
@@ -304,7 +266,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
 
 def validate_epoch(model, val_loader, criterion, device, epoch, loss_weights):
     """
-    Validate the model for one epoch.
+    Validate the model for one epoch
     
     Args:
         model: SMILImageRegressor model
@@ -328,68 +290,33 @@ def validate_epoch(model, val_loader, criterion, device, epoch, loss_weights):
         pbar = tqdm(val_loader, desc=f'Validation {epoch}')
         for batch_idx, (x_data_batch, y_data_batch) in enumerate(pbar):
             try:
-                # Process each sample in the batch
-                batch_loss = 0.0
-                batch_param_errors = {}
-                valid_samples = 0
+                # Process batch
+                result = model.predict_from_batch(x_data_batch, y_data_batch)
                 
-                for i, (x_data, y_data) in enumerate(zip(x_data_batch, y_data_batch)):
-                    # Extract image data
-                    if x_data['input_image_data'] is not None:
-                        image_data = x_data['input_image_data']
-                    else:
-                        # Skip if no image data
-                        continue
+                if result[0] is None:  # No valid samples in batch
+                    continue
                     
-                    # Preprocess image (single image)
-                    image_tensor = model.preprocess_image(image_data).to(device)
-                    
-                    # Extract target parameters
-                    target_params = extract_target_parameters(y_data, device)
-                    
-                    # Forward pass
-                    predicted_params = model(image_tensor)
-                    
-                    # Prepare keypoint data for loss computation
-                    keypoint_data = None
-                    if 'keypoints_2d' in y_data and 'keypoint_visibility' in y_data:
-                        keypoint_data = {
-                            'keypoints_2d': y_data['keypoints_2d'],
-                            'keypoint_visibility': y_data['keypoint_visibility']
-                        }
-                    
-                    # Prepare silhouette data for loss computation
-                    silhouette_data = None
-                    if x_data.get("input_image_mask") is not None:
-                        silhouette_data = x_data["input_image_mask"]
-                    
-                    # Compute loss with components (including keypoint and silhouette loss if data is available)
-                    loss, loss_components = model.compute_prediction_loss(predicted_params, target_params, pose_data=keypoint_data, silhouette_data=silhouette_data, return_components=True, loss_weights=loss_weights)
-                    batch_loss += loss.item()
-                    valid_samples += 1
-                    
-                    # Accumulate parameter errors
-                    for param_name, param_loss in loss_components.items():
-                        if param_name not in batch_param_errors:
-                            batch_param_errors[param_name] = 0.0
-                        batch_param_errors[param_name] += param_loss.item()
+                predicted_params, target_params_batch, auxiliary_data = result
                 
-                if valid_samples > 0:
-                    # Average loss over valid samples
-                    avg_loss = batch_loss / valid_samples
-                    
-                    # Average parameter errors over valid samples
-                    for param_name in batch_param_errors:
-                        batch_param_errors[param_name] /= valid_samples
-                        if param_name not in param_errors:
-                            param_errors[param_name] = 0.0
-                        param_errors[param_name] += batch_param_errors[param_name]
-                    
-                    total_loss += avg_loss
-                    num_batches += 1
-                    
-                    # Update progress bar
-                    pbar.set_postfix({'Loss': f'{avg_loss:.6f}'})
+                # Compute batch loss
+                loss, loss_components = model.compute_batch_loss(
+                    predicted_params, target_params_batch, auxiliary_data, 
+                    return_components=True, loss_weights=loss_weights
+                )
+                
+                # Record loss and parameter errors
+                batch_loss = loss.item()
+                total_loss += batch_loss
+                num_batches += 1
+                
+                # Accumulate parameter errors
+                for param_name, param_loss in loss_components.items():
+                    if param_name not in param_errors:
+                        param_errors[param_name] = 0.0
+                    param_errors[param_name] += param_loss.item()
+                
+                # Update progress bar
+                pbar.set_postfix({'Loss': f'{batch_loss:.6f}'})
                 
             except Exception as e:
                 print(f"Error processing validation batch {batch_idx}: {e}")
@@ -844,10 +771,62 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     print(f"Validation set: {len(val_set)} samples")
     print(f"Test set: {len(test_set)} samples")
     
-    # Create data loaders (disable multiprocessing to avoid issues)
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=custom_collate_fn)
-    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=custom_collate_fn)
-    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=custom_collate_fn)
+    # Create data loaders with optimized multiprocessing
+    # Use configuration parameters for data loading optimization
+    num_workers = training_params.get('num_workers', min(8, os.cpu_count() or 4))
+    pin_memory = training_params.get('pin_memory', True)
+    prefetch_factor = training_params.get('prefetch_factor', 2)
+    
+    # Ensure matplotlib backend is set for multiprocessing safety
+    import matplotlib
+    matplotlib.use('Agg')
+    
+    print(f"Data loading configuration:")
+    print(f"  Workers: {num_workers}")
+    print(f"  Pin memory: {pin_memory}")
+    print(f"  Prefetch factor: {prefetch_factor}")
+    print(f"  Matplotlib backend: {matplotlib.get_backend()}")
+    
+    # Try to create data loaders with multiprocessing, fallback to single-threaded if issues
+    try:
+        train_loader = DataLoader(
+            train_set, 
+            batch_size=batch_size, 
+            shuffle=True, 
+            num_workers=num_workers, 
+            collate_fn=custom_collate_fn,
+            pin_memory=pin_memory,
+            persistent_workers=num_workers > 0,  # Only use persistent workers if multiprocessing
+            prefetch_factor=prefetch_factor
+        )
+        val_loader = DataLoader(
+            val_set, 
+            batch_size=batch_size, 
+            shuffle=False, 
+            num_workers=num_workers, 
+            collate_fn=custom_collate_fn,
+            pin_memory=pin_memory,
+            persistent_workers=num_workers > 0,
+            prefetch_factor=prefetch_factor
+        )
+        test_loader = DataLoader(
+            test_set, 
+            batch_size=batch_size, 
+            shuffle=False, 
+            num_workers=num_workers, 
+            collate_fn=custom_collate_fn,
+            pin_memory=pin_memory,
+            persistent_workers=num_workers > 0,
+            prefetch_factor=prefetch_factor
+        )
+        print(f"Successfully created data loaders with {num_workers} workers")
+    except Exception as e:
+        print(f"Warning: Failed to create multiprocessing data loaders: {e}")
+        print("Falling back to single-threaded data loading...")
+        num_workers = 0
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=custom_collate_fn)
+        val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=custom_collate_fn)
+        test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=custom_collate_fn)
     
     # Create placeholder data for SMALFitter initialization
     placeholder_data = create_placeholder_data_batch(batch_size)

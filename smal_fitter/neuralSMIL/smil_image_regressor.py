@@ -13,6 +13,7 @@ import torchvision.models as models
 import numpy as np
 import cv2
 from typing import Dict, Tuple, Optional
+from scipy.spatial.transform import Rotation
 
 # Import from parent modules
 import sys
@@ -228,12 +229,16 @@ class SMILImageRegressor(SMALFitter):
         
         Args:
             image_data: Input image as numpy array (H, W, C) with values in [0, 255]
+                       OR list of images for batch processing
             
         Returns:
-            Preprocessed image tensor (1, C, H, W) with values in [0, 1]
+            Preprocessed image tensor (1, C, H, W) or (B, C, H, W) with values in [0, 1]
         """
         # Handle different input types
-        if isinstance(image_data, torch.Tensor):
+        if isinstance(image_data, list):
+            # Batch processing mode
+            return self._preprocess_image_batch(image_data)
+        elif isinstance(image_data, torch.Tensor):
             # Convert tensor to numpy
             image_data = image_data.cpu().numpy()
         
@@ -291,6 +296,61 @@ class SMILImageRegressor(SMALFitter):
                 image_data = cv2.resize(image_data, (512, 512))
             # Convert to tensor and add batch dimension (H, W, C) -> (1, C, H, W)
             image_tensor = torch.from_numpy(image_data).permute(2, 0, 1).unsqueeze(0)
+        
+        return image_tensor
+    
+    def _preprocess_image_batch(self, image_list) -> torch.Tensor:
+        """
+        Efficiently preprocess a batch of images in parallel.
+        
+        Args:
+            image_list: List of image data (each as numpy array or tensor)
+            
+        Returns:
+            Batched image tensor (B, C, H, W) with values in [0, 1]
+        """
+        batch_images = []
+        
+        for image_data in image_list:
+            # Process each image individually for now (can be optimized further)
+            if isinstance(image_data, torch.Tensor):
+                image_data = image_data.cpu().numpy()
+            
+            if not isinstance(image_data, np.ndarray):
+                image_data = np.array(image_data)
+            
+            # Handle different image formats
+            if len(image_data.shape) == 3:
+                # Single RGB image (H, W, C)
+                if image_data.shape[2] == 3:
+                    pass  # Already in correct format
+                elif image_data.shape[0] == 3:
+                    # CHW format, convert to HWC
+                    image_data = image_data.transpose(1, 2, 0)
+            elif len(image_data.shape) == 2:
+                # Grayscale image, convert to RGB
+                image_data = np.stack([image_data] * 3, axis=2)
+            else:
+                raise ValueError(f"Unsupported image shape: {image_data.shape}")
+            
+            # Ensure the image has the right data type and range
+            if image_data.dtype == np.uint8:
+                image_data = image_data.astype(np.float32) / 255.0
+            elif image_data.dtype == np.float64:
+                image_data = image_data.astype(np.float32)
+            elif image_data.max() > 1.0:
+                # Assume values are in [0, 255] range
+                image_data = image_data.astype(np.float32) / 255.0
+            
+            # Resize to 512x512
+            if image_data.shape[:2] != (512, 512):
+                image_data = cv2.resize(image_data, (512, 512))
+            
+            batch_images.append(image_data)
+        
+        # Convert batch to tensor (B, H, W, C) -> (B, C, H, W)
+        batch_array = np.array(batch_images)
+        image_tensor = torch.from_numpy(batch_array).permute(0, 3, 1, 2)
         
         return image_tensor
     
@@ -355,6 +415,10 @@ class SMILImageRegressor(SMALFitter):
         params['fov'] = output[:, idx:idx + self.fov_dim]
         idx += self.fov_dim
         
+        # Debug: Check FOV shape occasionally
+        if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:
+            print(f"DEBUG - Network FOV output shape: {params['fov'].shape}")
+        
         # Camera rotation (in model space) - reshape to 3x3 matrix
         cam_rot_flat = output[:, idx:idx + self.cam_rot_dim]
         params['cam_rot'] = cam_rot_flat.view(batch_size, 3, 3)
@@ -379,6 +443,123 @@ class SMILImageRegressor(SMALFitter):
             idx += self.joint_trans_dim
         
         return params
+    
+    def predict_from_batch(self, x_data_batch, y_data_batch) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], Dict]:
+        """
+        Process an entire batch efficiently for training/validation.
+        
+        Args:
+            x_data_batch: List of x_data dictionaries (one per sample)
+            y_data_batch: List of y_data dictionaries (one per sample)
+            
+        Returns:
+            Tuple of (predicted_params, target_params_batch, auxiliary_data)
+        """
+        # Extract image data from all samples
+        batch_images = []
+        batch_target_params = []
+        batch_auxiliary_data = {'keypoint_data': [], 'silhouette_data': []}
+        
+        for x_data, y_data in zip(x_data_batch, y_data_batch):
+            # Skip samples without image data
+            if x_data['input_image_data'] is None:
+                continue
+                
+            batch_images.append(x_data['input_image_data'])
+            
+            # Extract target parameters for this sample
+            target_params = self._extract_target_parameters_single(y_data)
+            batch_target_params.append(target_params)
+            
+            # Extract auxiliary data for loss computation
+            keypoint_data = None
+            if 'keypoints_2d' in y_data and 'keypoint_visibility' in y_data:
+                keypoint_data = {
+                    'keypoints_2d': y_data['keypoints_2d'],
+                    'keypoint_visibility': y_data['keypoint_visibility']
+                }
+            batch_auxiliary_data['keypoint_data'].append(keypoint_data)
+            
+            silhouette_data = x_data.get("input_image_mask")
+            batch_auxiliary_data['silhouette_data'].append(silhouette_data)
+        
+        if not batch_images:
+            # No valid samples in batch
+            return None, None, None
+        
+        # Preprocess all images at once
+        image_tensor = self.preprocess_image(batch_images).to(self.device)
+        
+        # Forward pass on entire batch
+        predicted_params = self.forward(image_tensor)
+        
+        # Combine target parameters into batched format
+        target_params_batch = self._combine_target_parameters_batch(batch_target_params)
+        
+        return predicted_params, target_params_batch, batch_auxiliary_data
+    
+    def _extract_target_parameters_single(self, y_data):
+        """Extract target parameters from a single sample (helper method)."""
+        # This is the original extract_target_parameters logic for a single sample
+        targets = {}
+        
+        # Global rotation (root rotation)
+        targets['global_rot'] = safe_to_tensor(y_data['root_rot'], device=self.device)
+        
+        # Joint rotations (excluding root joint)
+        joint_angles = safe_to_tensor(y_data['joint_angles'], device=self.device)
+        targets['joint_rot'] = joint_angles[1:]  # Exclude root joint
+        
+        # Shape parameters
+        targets['betas'] = safe_to_tensor(y_data['shape_betas'], device=self.device)
+        
+        # Translation (root location)
+        targets['trans'] = safe_to_tensor(y_data['root_loc'], device=self.device)
+        
+        # Camera FOV
+        fov_value = y_data['cam_fov']
+        if isinstance(fov_value, list):
+            fov_value = fov_value[0]  # Take first element if it's a list
+        targets['fov'] = torch.tensor([fov_value], dtype=torch.float32).to(self.device)
+        
+        # Camera rotation and translation (same logic as original)
+        cam_rot_matrix = y_data['cam_rot']
+        if hasattr(cam_rot_matrix, 'shape') and len(cam_rot_matrix.shape) == 2 and cam_rot_matrix.shape == (3, 3):
+            targets['cam_rot'] = safe_to_tensor(cam_rot_matrix, device=self.device)
+        else:
+            if hasattr(cam_rot_matrix, 'shape') and cam_rot_matrix.shape == (3,):
+                r = Rotation.from_rotvec(cam_rot_matrix)
+                cam_rot_matrix = r.as_matrix()
+                targets['cam_rot'] = safe_to_tensor(cam_rot_matrix, device=self.device)
+            else:
+                targets['cam_rot'] = safe_to_tensor(cam_rot_matrix, device=self.device)
+        
+        targets['cam_trans'] = safe_to_tensor(y_data['cam_trans'], device=self.device)
+        
+        # Joint scales and translations (if available)
+        if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
+            n_joints = config.N_POSE + 1
+            targets['log_beta_scales'] = torch.zeros(n_joints, 3).to(self.device)
+            targets['betas_trans'] = torch.zeros(n_joints, 3).to(self.device)
+        
+        return targets
+    
+    def _combine_target_parameters_batch(self, target_params_list):
+        """Combine list of target parameters into batched tensors."""
+        if not target_params_list:
+            return {}
+        
+        batch_targets = {}
+        
+        # Get all parameter names from first sample
+        param_names = target_params_list[0].keys()
+        
+        for param_name in param_names:
+            # Stack parameters from all samples
+            param_tensors = [targets[param_name] for targets in target_params_list]
+            batch_targets[param_name] = torch.stack(param_tensors, dim=0)
+        
+        return batch_targets
     
     def predict_from_image(self, image_data: np.ndarray) -> Dict[str, torch.Tensor]:
         """
@@ -431,6 +612,180 @@ class SMILImageRegressor(SMALFitter):
         if 'betas_trans' in params and hasattr(self, 'betas_trans'):
             self.betas_trans[batch_idx] = params['betas_trans'][batch_idx]
     
+    def compute_batch_loss(self, predicted_params: Dict[str, torch.Tensor], 
+                          target_params_batch: Dict[str, torch.Tensor], 
+                          auxiliary_data: Dict = None, return_components=False,
+                          loss_weights: Dict[str, float] = None) -> torch.Tensor:
+        """
+        Compute loss for an entire batch efficiently.
+        
+        Args:
+            predicted_params: Dictionary containing predicted parameters (batch tensors)
+            target_params_batch: Dictionary containing target parameters (batch tensors)
+            auxiliary_data: Dictionary containing keypoint and silhouette data for the batch
+            return_components: If True, return both total loss and individual components
+            loss_weights: Dictionary of loss weights for different components
+            
+        Returns:
+            Total loss as a scalar tensor, or (total_loss, loss_components) if return_components=True
+        """
+        total_loss = 0.0
+        loss_components = {}
+        
+        if loss_weights is None:
+            # Define loss weights for different parameter types
+            loss_weights = {
+                'global_rot': 0.02,
+                'joint_rot': 0.02,
+                'betas': 0.01,
+                'trans': 0.001,
+                'fov': 0.001,
+                'cam_rot': 0.01,
+                'cam_trans': 0.001,
+                'log_beta_scales': 0.1,
+                'betas_trans': 0.1,
+                'keypoint_2d': 0.0,
+                'silhouette': 0.0
+            }
+        
+        batch_size = predicted_params['global_rot'].shape[0]
+        
+        # Process keypoint and silhouette losses efficiently for the whole batch
+        need_keypoint_loss = (auxiliary_data is not None and 'keypoint_data' in auxiliary_data and 
+                             loss_weights['keypoint_2d'] > 0)
+        need_silhouette_loss = (auxiliary_data is not None and 'silhouette_data' in auxiliary_data and 
+                               loss_weights['silhouette'] > 0)
+        
+        # Single rendering pass for both keypoint and silhouette losses if needed
+        rendered_joints = None
+        rendered_silhouette = None
+        if need_keypoint_loss or need_silhouette_loss:
+            try:
+                rendered_joints, rendered_silhouette = self._compute_rendered_outputs(
+                    predicted_params, compute_joints=need_keypoint_loss, compute_silhouette=need_silhouette_loss
+                )
+            except Exception as e:
+                print(f"Warning: Failed to compute rendered outputs for batch: {e}")
+                # Continue without rendered outputs
+                rendered_joints = None
+                rendered_silhouette = None
+        
+        # Basic parameter losses (these are already batched and efficient)
+        
+        # Global rotation loss
+        if 'global_rot' in target_params_batch:
+            if self.rotation_representation == '6d':
+                pred_global_matrix = rotation_6d_to_matrix(predicted_params['global_rot'])
+                target_global_matrix = rotation_6d_to_matrix(target_params_batch['global_rot'])
+                matrix_diff_loss = torch.norm(pred_global_matrix - target_global_matrix, p='fro', dim=(-2, -1))
+                loss = matrix_diff_loss.mean()
+            else:
+                loss = F.mse_loss(predicted_params['global_rot'], target_params_batch['global_rot'])
+            
+            loss_components['global_rot'] = loss
+            total_loss += loss_weights['global_rot'] * loss
+        
+        # Joint rotation loss
+        if 'joint_rot' in target_params_batch:
+            if self.rotation_representation == '6d':
+                pred_matrices = rotation_6d_to_matrix(predicted_params['joint_rot'])
+                target_matrices = rotation_6d_to_matrix(target_params_batch['joint_rot'])
+                matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
+                loss = matrix_diff_loss.mean()
+            else:
+                loss = F.mse_loss(predicted_params['joint_rot'], target_params_batch['joint_rot'])
+            
+            loss_components['joint_rot'] = loss
+            total_loss += loss_weights['joint_rot'] * loss
+        
+        # Shape parameter loss
+        if 'betas' in target_params_batch:
+            loss = F.mse_loss(predicted_params['betas'], target_params_batch['betas'])
+            loss_components['betas'] = loss
+            total_loss += loss_weights['betas'] * loss
+        
+        # Translation loss
+        if 'trans' in target_params_batch:
+            loss = F.mse_loss(predicted_params['trans'], target_params_batch['trans'])
+            loss_components['trans'] = loss
+            total_loss += loss_weights['trans'] * loss
+        
+        # FOV loss
+        if 'fov' in target_params_batch:
+            pred_fov = predicted_params['fov']
+            target_fov = target_params_batch['fov']
+            
+            # Handle shape mismatch
+            if pred_fov.shape != target_fov.shape:
+                if len(pred_fov.shape) != len(target_fov.shape):
+                    if len(pred_fov.shape) > len(target_fov.shape):
+                        target_fov = target_fov.unsqueeze(-1)
+                    else:
+                        pred_fov = pred_fov.unsqueeze(-1)
+            
+            loss = F.mse_loss(pred_fov, target_fov)
+            loss_components['fov'] = loss
+            total_loss += loss_weights['fov'] * loss
+        
+        # Camera rotation loss
+        if 'cam_rot' in target_params_batch:
+            loss = F.mse_loss(predicted_params['cam_rot'], target_params_batch['cam_rot'])
+            loss_components['cam_rot'] = loss
+            total_loss += loss_weights['cam_rot'] * loss
+        
+        # Camera translation loss
+        if 'cam_trans' in target_params_batch:
+            loss = F.mse_loss(predicted_params['cam_trans'], target_params_batch['cam_trans'])
+            loss_components['cam_trans'] = loss
+            total_loss += loss_weights['cam_trans'] * loss
+        
+        # Joint scales loss (if available)
+        if 'log_beta_scales' in target_params_batch and 'log_beta_scales' in predicted_params:
+            loss = F.mse_loss(predicted_params['log_beta_scales'], target_params_batch['log_beta_scales'])
+            loss_components['log_beta_scales'] = loss
+            total_loss += loss_weights['log_beta_scales'] * loss
+        
+        # Joint translations loss (if available)
+        if 'betas_trans' in target_params_batch and 'betas_trans' in predicted_params:
+            loss = F.mse_loss(predicted_params['betas_trans'], target_params_batch['betas_trans'])
+            loss_components['betas_trans'] = loss
+            total_loss += loss_weights['betas_trans'] * loss
+        
+        # Batched 2D keypoint loss
+        if need_keypoint_loss and rendered_joints is not None and auxiliary_data['keypoint_data']:
+            try:
+                loss = self._compute_batch_keypoint_loss(rendered_joints, auxiliary_data['keypoint_data'])
+                if torch.isfinite(loss):
+                    loss_components['keypoint_2d'] = loss
+                    total_loss += loss_weights['keypoint_2d'] * loss
+                else:
+                    loss_components['keypoint_2d'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+            except Exception as e:
+                print(f"Warning: Failed to compute batch keypoint loss: {e}")
+                loss_components['keypoint_2d'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+        
+        # Batched silhouette loss
+        if need_silhouette_loss and rendered_silhouette is not None and auxiliary_data['silhouette_data']:
+            try:
+                loss = self._compute_batch_silhouette_loss(rendered_silhouette, auxiliary_data['silhouette_data'])
+                if torch.isfinite(loss):
+                    loss_components['silhouette'] = loss
+                    total_loss += loss_weights['silhouette'] * loss
+                else:
+                    loss_components['silhouette'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+            except Exception as e:
+                print(f"Warning: Failed to compute batch silhouette loss: {e}")
+                loss_components['silhouette'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+        
+        # Final safety check for total loss
+        if not torch.isfinite(total_loss):
+            print(f"Warning: Non-finite total loss detected: {total_loss.item()}, replacing with small epsilon")
+            total_loss = torch.tensor(1e-6, device=self.device, requires_grad=True)
+        
+        if return_components:
+            return total_loss, loss_components
+        return total_loss
+
     def compute_prediction_loss(self, predicted_params: Dict[str, torch.Tensor], 
                                target_params: Dict[str, torch.Tensor], pose_data=None, silhouette_data=None, return_components=False,
                                loss_weights: Dict[str, float] = None) -> torch.Tensor:
@@ -583,10 +938,41 @@ class SMILImageRegressor(SMALFitter):
                 
                 # Ensure batch dimensions match
                 batch_size = predicted_params['global_rot'].shape[0]
+                
+                # Debug: Check rendered_joints shape to understand the issue
+                if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:
+                    print(f"DEBUG - Initial shapes: rendered_joints={rendered_joints.shape}, target_keypoints={target_keypoints.shape}, visibility={visibility.shape}")
+                    print(f"DEBUG - Expected batch_size={batch_size}")
+                
+                # Handle target_keypoints dimensions safely
                 if target_keypoints.dim() == 2:  # Shape (n_joints, 2)
-                    target_keypoints = target_keypoints.unsqueeze(0).expand(batch_size, -1, -1)  # (batch_size, n_joints, 2)
+                    # Only expand if batch size is different than 1
+                    if batch_size > 1:
+                        target_keypoints = target_keypoints.unsqueeze(0).expand(batch_size, -1, -1)  # (batch_size, n_joints, 2)
+                    else:
+                        target_keypoints = target_keypoints.unsqueeze(0)  # (1, n_joints, 2)
+                elif target_keypoints.dim() == 3 and target_keypoints.shape[0] != batch_size:
+                    # If already 3D but wrong batch size, take first sample and expand
+                    target_keypoints = target_keypoints[0:1].expand(batch_size, -1, -1)
+                
+                # Handle visibility dimensions safely  
                 if visibility.dim() == 1:  # Shape (n_joints,)
-                    visibility = visibility.unsqueeze(0).expand(batch_size, -1)  # (batch_size, n_joints)
+                    if batch_size > 1:
+                        visibility = visibility.unsqueeze(0).expand(batch_size, -1)  # (batch_size, n_joints)
+                    else:
+                        visibility = visibility.unsqueeze(0)  # (1, n_joints)
+                elif visibility.dim() == 2 and visibility.shape[0] != batch_size:
+                    # If already 2D but wrong batch size, take first sample and expand
+                    visibility = visibility[0:1].expand(batch_size, -1)
+                
+                # Final safety check: ensure rendered_joints and target_keypoints have compatible shapes
+                if rendered_joints.shape[0] != target_keypoints.shape[0]:
+                    print(f"Warning: Batch size mismatch in keypoint loss - rendered: {rendered_joints.shape}, target: {target_keypoints.shape}")
+                    # Use minimum batch size to avoid errors
+                    min_batch = min(rendered_joints.shape[0], target_keypoints.shape[0])
+                    rendered_joints = rendered_joints[:min_batch]
+                    target_keypoints = target_keypoints[:min_batch]
+                    visibility = visibility[:min_batch]
                 
                 # Debug: Print shapes to understand the issue (only occasionally)
                 if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # Only 1% of the time
@@ -678,13 +1064,33 @@ class SMILImageRegressor(SMALFitter):
                 
                 # Ensure batch dimensions match
                 batch_size = predicted_params['global_rot'].shape[0]
+                
+                # Debug: Check rendered_silhouette shape to understand the issue
+                if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:
+                    print(f"DEBUG - Silhouette shapes: rendered={rendered_silhouette.shape}, target={target_silhouette.shape}")
+                    print(f"DEBUG - Expected batch_size={batch_size}")
+                
                 if target_silhouette.dim() == 3:  # Shape (height, width, channels) or (channels, height, width)
                     if target_silhouette.shape[0] != batch_size:
                         # Assume it's (height, width, channels) - add batch dimension
-                        target_silhouette = target_silhouette.unsqueeze(0).expand(batch_size, -1, -1, -1)
+                        if batch_size > 1:
+                            target_silhouette = target_silhouette.unsqueeze(0).expand(batch_size, -1, -1, -1)
+                        else:
+                            target_silhouette = target_silhouette.unsqueeze(0)
                 elif target_silhouette.dim() == 2:  # Shape (height, width)
                     # Add batch and channel dimensions
-                    target_silhouette = target_silhouette.unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
+                    if batch_size > 1:
+                        target_silhouette = target_silhouette.unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
+                    else:
+                        target_silhouette = target_silhouette.unsqueeze(0).unsqueeze(0)
+                
+                # Final safety check: ensure rendered_silhouette and target_silhouette have compatible shapes
+                if rendered_silhouette.shape[0] != target_silhouette.shape[0]:
+                    print(f"Warning: Batch size mismatch in silhouette loss - rendered: {rendered_silhouette.shape}, target: {target_silhouette.shape}")
+                    # Use minimum batch size to avoid errors
+                    min_batch = min(rendered_silhouette.shape[0], target_silhouette.shape[0])
+                    rendered_silhouette = rendered_silhouette[:min_batch]
+                    target_silhouette = target_silhouette[:min_batch]
                 
                 # Ensure target silhouette has the same shape as rendered silhouette
                 if target_silhouette.shape != rendered_silhouette.shape:
@@ -818,21 +1224,28 @@ class SMILImageRegressor(SMALFitter):
         # Get canonical model joints
         canonical_model_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
         
-        # Set camera parameters from predicted values if available
-        if 'cam_rot' in predicted_params and 'cam_trans' in predicted_params:
-            self.renderer.set_camera_parameters(
-                R=predicted_params['cam_rot'],
-                T=predicted_params['cam_trans'],
-                fov=predicted_params['fov']
-            )
-        else:
-            # Use default camera FOV
-            self.renderer.cameras.fov = batch_params['fov']
+        # Set camera parameters from predicted values
+        self.renderer.set_camera_parameters(
+            R=predicted_params['cam_rot'],
+            T=predicted_params['cam_trans'],
+            fov=predicted_params['fov']
+        )
         
         # Single renderer call to get both silhouette and joints
+        # Ensure faces tensor is correctly shaped for batch
+        faces_tensor = self.smal_model.faces
+        if faces_tensor.dim() == 2:
+            # Add batch dimension and expand to match vertex batch size
+            faces_batch = faces_tensor.unsqueeze(0).expand(verts.shape[0], -1, -1)
+        else:
+            faces_batch = faces_tensor
+        
+        # Debug: print tensor shapes occasionally
+        if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:
+            print(f"DEBUG - Renderer input shapes: verts={verts.shape}, canonical_joints={canonical_model_joints.shape}, faces={faces_batch.shape}")
+        
         rendered_silhouettes, rendered_joints_raw = self.renderer(
-            verts, canonical_model_joints,
-            self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1))
+            verts, canonical_model_joints, faces_batch)
         
         
         # Process rendered joints if requested
@@ -873,6 +1286,126 @@ class SMILImageRegressor(SMALFitter):
             rendered_silhouette = rendered_silhouettes
         
         return rendered_joints, rendered_silhouette
+    
+    def _compute_batch_keypoint_loss(self, rendered_joints: torch.Tensor, keypoint_data_list: list) -> torch.Tensor:
+        """
+        Compute batched 2D keypoint loss efficiently.
+        
+        Args:
+            rendered_joints: Tensor of shape (batch_size, n_joints, 2)
+            keypoint_data_list: List of keypoint data dictionaries for each sample
+            
+        Returns:
+            Average keypoint loss across valid samples in the batch
+        """
+        batch_size = rendered_joints.shape[0]
+        total_loss = 0.0
+        valid_samples = 0
+        eps = 1e-8
+        
+        for i, keypoint_data in enumerate(keypoint_data_list):
+            if keypoint_data is None or i >= batch_size:
+                continue
+                
+            # Get target keypoints and visibility for this sample
+            target_keypoints = safe_to_tensor(keypoint_data['keypoints_2d'], device=self.device)
+            visibility = safe_to_tensor(keypoint_data['keypoint_visibility'], device=self.device)
+            
+            # Ensure proper shapes
+            if target_keypoints.dim() == 2:  # Shape (n_joints, 2)
+                target_keypoints = target_keypoints  # Keep as is for this sample
+            if visibility.dim() == 1:  # Shape (n_joints,)
+                visibility = visibility  # Keep as is for this sample
+            
+            # Apply visibility mask and bounds checking
+            visible_mask = visibility.bool()
+            gt_in_bounds_mask = (target_keypoints >= 0.0) & (target_keypoints <= 1.0)
+            gt_in_bounds_mask = gt_in_bounds_mask.all(dim=-1)
+            finite_mask = torch.isfinite(rendered_joints[i]).all(dim=-1)
+            valid_mask = visible_mask & gt_in_bounds_mask & finite_mask
+            
+            if valid_mask.any():
+                # Compute loss for this sample using masking
+                joint_weights = valid_mask.float().unsqueeze(-1)  # Shape: (n_joints, 1)
+                diff_squared = (rendered_joints[i] - target_keypoints) ** 2
+                weighted_diff = diff_squared * joint_weights
+                
+                num_valid = valid_mask.sum().float()
+                if num_valid > 0:
+                    sample_loss = weighted_diff.sum() / (num_valid * 2 + eps)
+                    total_loss += sample_loss
+                    valid_samples += 1
+        
+        if valid_samples > 0:
+            return total_loss / valid_samples + eps
+        else:
+            return torch.tensor(eps, device=self.device, requires_grad=True)
+    
+    def _compute_batch_silhouette_loss(self, rendered_silhouette: torch.Tensor, silhouette_data_list: list) -> torch.Tensor:
+        """
+        Compute batched silhouette loss efficiently.
+        
+        Args:
+            rendered_silhouette: Tensor of shape (batch_size, 1, height, width)
+            silhouette_data_list: List of silhouette data for each sample
+            
+        Returns:
+            Average silhouette loss across valid samples in the batch
+        """
+        batch_size = rendered_silhouette.shape[0]
+        total_loss = 0.0
+        valid_samples = 0
+        eps = 1e-8
+        
+        for i, silhouette_data in enumerate(silhouette_data_list):
+            if silhouette_data is None or i >= batch_size:
+                continue
+                
+            # Get target silhouette for this sample
+            target_silhouette = safe_to_tensor(silhouette_data, device=self.device)
+            
+            # Ensure proper format - add batch and channel dimensions if needed
+            if target_silhouette.dim() == 2:  # Shape (height, width)
+                target_silhouette = target_silhouette.unsqueeze(0).unsqueeze(0)  # (1, 1, height, width)
+            elif target_silhouette.dim() == 3:  # Shape (height, width, channels) or (channels, height, width)
+                if target_silhouette.shape[0] != 1:
+                    # Assume it's (height, width, channels)
+                    target_silhouette = target_silhouette.unsqueeze(0).permute(0, 3, 1, 2)
+                else:
+                    # Already has batch dimension
+                    if target_silhouette.shape[1] > target_silhouette.shape[0]:
+                        # Likely (1, height, width) - add channel dimension
+                        target_silhouette = target_silhouette.unsqueeze(1)
+            
+            # Resize if necessary
+            if target_silhouette.shape[-2:] != rendered_silhouette.shape[-2:]:
+                target_silhouette = F.interpolate(
+                    target_silhouette, 
+                    size=rendered_silhouette.shape[-2:], 
+                    mode='bilinear', 
+                    align_corners=False
+                )
+            
+            # Handle multi-channel targets
+            if target_silhouette.shape[1] > 1:
+                target_silhouette = target_silhouette.mean(dim=1, keepdim=True)
+            
+            # Normalize if necessary
+            if target_silhouette.max() > 1.0:
+                target_silhouette = target_silhouette / 255.0
+            
+            # Clamp values and compute L1 loss for this sample
+            rendered_sample = torch.clamp(rendered_silhouette[i:i+1], 0.0, 1.0)
+            target_sample = torch.clamp(target_silhouette, 0.0, 1.0)
+            
+            sample_loss = F.l1_loss(rendered_sample, target_sample)
+            total_loss += sample_loss + eps
+            valid_samples += 1
+        
+        if valid_samples > 0:
+            return total_loss / valid_samples
+        else:
+            return torch.tensor(eps, device=self.device, requires_grad=True)
 
     
     def enable_debug(self, enable=True):
