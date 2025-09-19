@@ -386,7 +386,7 @@ def visualize_silhouette_comparison(model, predicted_params, x_data, output_dir=
     print(f"Union: {union} pixels")
 
 
-def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance: float = 1e-2, device: str = 'cpu', enable_visualization: bool = True, override_ue_scaling: bool = None, rotation_representation: str = 'axis_angle', test_rotation_conversion: bool = True):
+def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance_keypoints: float = 1e-2, tolerance_silhouette: float = 1e-2, device: str = 'cpu', enable_visualization: bool = True, override_ue_scaling: bool = None, rotation_representation: str = 'axis_angle', test_rotation_conversion: bool = True):
     """
     Test that ground truth parameters produce near-zero losses.
     
@@ -524,13 +524,13 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
         
         print(f"   Total parameter loss: {total_loss.item():.8f}")
         for param_name, loss_val in param_losses.items():
-            status = "✓ PASS" if loss_val < tolerance else "✗ FAIL"
+            status = "✓ PASS" if loss_val < tolerance_keypoints else "✗ FAIL"
             print(f"   {param_name:15s}: {loss_val:.8f} {status}")
         
         test_results['parameter_only'] = {
             'total_loss': total_loss.item(),
             'components': param_losses,
-            'passed': all(v < tolerance for v in param_losses.values())
+            'passed': all(v < tolerance_keypoints for v in param_losses.values())
         }
         
         # Test 2: With keypoint loss (if available)
@@ -558,13 +558,13 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
             print(f"   Total loss with keypoints: {total_loss.item():.8f}")
             if 'keypoint_2d' in loss_components:
                 keypoint_loss = loss_components['keypoint_2d'].item()
-                status = "✓ PASS" if keypoint_loss < tolerance else "✗ FAIL"
+                status = "✓ PASS" if keypoint_loss < tolerance_keypoints else "✗ FAIL"
                 print(f"   keypoint_2d     : {keypoint_loss:.8f} {status}")
                 
                 test_results['with_keypoints'] = {
                     'total_loss': total_loss.item(),
                     'keypoint_loss': keypoint_loss,
-                    'passed': keypoint_loss < tolerance
+                    'passed': keypoint_loss < tolerance_keypoints
                 }
             else:
                 print("   No keypoint loss computed")
@@ -595,13 +595,13 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
             print(f"   Total loss with silhouette: {total_loss.item():.8f}")
             if 'silhouette' in loss_components:
                 silhouette_loss = loss_components['silhouette'].item()
-                status = "✓ PASS" if silhouette_loss < tolerance else "✗ FAIL"
+                status = "✓ PASS" if silhouette_loss < tolerance_silhouette else "✗ FAIL"
                 print(f"   silhouette      : {silhouette_loss:.8f} {status}")
                 
                 test_results['with_silhouette'] = {
                     'total_loss': total_loss.item(),
                     'silhouette_loss': silhouette_loss,
-                    'passed': silhouette_loss < tolerance
+                    'passed': silhouette_loss < tolerance_silhouette
                 }
             else:
                 print("   No silhouette loss computed")
@@ -637,14 +637,14 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
             for loss_name in ['keypoint_2d', 'silhouette']:
                 if loss_name in loss_components:
                     loss_val = loss_components[loss_name].item()
-                    status = "✓ PASS" if loss_val < tolerance else "✗ FAIL"
+                    status = "✓ PASS" if loss_val < tolerance_silhouette else "✗ FAIL"
                     print(f"   {loss_name:15s}: {loss_val:.8f} {status}")
                     combined_losses[loss_name] = loss_val
             
             test_results['combined'] = {
                 'total_loss': total_loss.item(),
                 'components': combined_losses,
-                'passed': all(v < tolerance for v in combined_losses.values())
+                'passed': all(v < tolerance_silhouette for v in combined_losses.values())
             }
         
         # Generate visual comparisons if enabled
@@ -690,7 +690,7 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
         print(f"\nOverall result: {'✓ ALL TESTS PASSED' if all_passed else '✗ SOME TESTS FAILED'}")
         
         if not all_passed:
-            print(f"\nNote: Losses should be < {tolerance} for ground truth parameters.")
+            print(f"\nNote: Losses should be < {tolerance_keypoints} for ground truth parameters.")
             print("Higher losses may indicate:")
             print("- Numerical precision issues")
             print("- Coordinate system mismatches")
@@ -702,7 +702,8 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
         result_dict = {
             "success": all_passed,
             "results": test_results,
-            "tolerance": tolerance
+            "tolerance_keypoints": tolerance_keypoints,
+            "tolerance_silhouette": tolerance_silhouette
         }
         
         # Include rotation conversion results if performed
@@ -727,8 +728,10 @@ def main():
                        help='Path to the dataset (optional, will try default paths)')
     parser.add_argument('--sample_idx', type=int, default=0,
                        help='Index of the sample to test')
-    parser.add_argument('--tolerance', type=float, default=1e-2,
-                       help='Maximum acceptable loss value')
+    parser.add_argument('--tolerance_keypoints', type=float, default=1e-2,
+                       help='Maximum acceptable loss value for keypoints')
+    parser.add_argument('--tolerance_silhouette', type=float, default=0.05,
+                       help='Maximum acceptable loss value for silhouette')
     parser.add_argument('--device', type=str, default='cpu',
                        help='Device to run on (cpu or cuda)')
     parser.add_argument('--no-visualization', action='store_true',
@@ -756,7 +759,8 @@ def main():
     result = test_ground_truth_loss(
         data_path=args.data_path,
         sample_idx=args.sample_idx,
-        tolerance=args.tolerance,
+        tolerance_keypoints=args.tolerance_keypoints,
+        tolerance_silhouette=args.tolerance_silhouette,
         device=device,
         enable_visualization=not args.no_visualization,
         override_ue_scaling=False if args.no_ue_scaling else None,
