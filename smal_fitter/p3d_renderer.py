@@ -74,6 +74,17 @@ class Renderer(torch.nn.Module):
             T (torch.Tensor): Translation vector of the camera.
             fov (torch.Tensor): Field of view of the camera.
         """
+        # Ensure FOV has the correct shape for FoVPerspectiveCameras
+        # FoVPerspectiveCameras expects fov to be 1D tensor of shape (batch_size,)
+        if fov.dim() > 1:
+            fov = fov.squeeze(-1)  # Remove trailing dimensions
+        if fov.dim() == 0:
+            fov = fov.unsqueeze(0)  # Add batch dimension if scalar
+        
+        # Debug: print shapes occasionally to understand the issue
+        if torch.rand(1).item() < 0.001:  # Only 0.1% of the time to avoid spam
+            print(f"DEBUG - Camera params: R={R.shape}, T={T.shape}, fov={fov.shape}")
+        
         self.cameras = FoVPerspectiveCameras(device=self.device, R=R, T=T, fov=fov)
         self.silhouette_renderer.rasterizer.cameras = self.cameras
         self.color_renderer.rasterizer.cameras = self.cameras
