@@ -13,10 +13,12 @@ class TrainingConfig:
     """Configuration class for SMIL training."""
     
     # Dataset configuration
+    # TODO: remove all that were used for debugging only during development
     DATA_PATHS = {
         'masked_simple': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Masked-Simple",
         'pose_only_simple': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-PoseOnly-Simple",
-        'test_textured': "data/replicAnt_trials/replicAnt-x-SMIL-TEX"
+        'test_textured': "data/replicAnt_trials/replicAnt-x-SMIL-TEX",
+        'full_dataset': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Masked"
     }
     
     # Default dataset to use
@@ -31,12 +33,15 @@ class TrainingConfig:
     
     # Training hyperparameters
     TRAINING_PARAMS = {
-        'batch_size': 32,
+        'batch_size': 8,
         'num_epochs': 500,
         'learning_rate': 0.0001,
         'seed': 0,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': None,  # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': "checkpoints/best_model.pth",  # Path to checkpoint file to resume training from (None for training from scratch)
+        'num_workers': 24,  # Number of data loading workers (reduced to prevent tkinter issues)
+        'pin_memory': True,  # Faster GPU transfer
+        'prefetch_factor': 8,  # Prefetch batches
     }
     
     # Model configuration
@@ -54,7 +59,7 @@ class TrainingConfig:
             'global_rot': 0.02,
             'joint_rot': 0.02,
             'betas': 0.01,
-            'trans': 0.001,
+            'trans': 0.0001,
             'fov': 0.001,
             'cam_rot': 0.01,
             'cam_trans': 0.001,
@@ -87,9 +92,9 @@ class TrainingConfig:
             
             # Stage 4: High keypoint weight for fine-tuning
             (50, {
-                'keypoint_2d': 0.2,
+                'keypoint_2d': 0.1,
                 'joint_rot': 0.01,      # Keep reduced
-                'silhouette': 0.01
+                'silhouette': 0.001
             })
         ]
     }
