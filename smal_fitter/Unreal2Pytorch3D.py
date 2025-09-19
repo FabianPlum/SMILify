@@ -650,6 +650,45 @@ def create_sphere_meshes_at_points(
     return spheres_mesh
 
 
+def compute_keypoint_visibility(keypoints_2d, mask, image_width, image_height):
+    """
+    Compute keypoint visibility based on mask and image bounds.
+    
+    Args:
+        keypoints_2d (np.array): Normalized 2D keypoint coordinates [0, 1]
+        mask (np.array): Binary mask of the object (None if not available, already dilated when loaded)
+        image_width (int): Image width in pixels
+        image_height (int): Image height in pixels
+        
+    Returns:
+        np.array: Visibility array (1 for visible, 0 for not visible)
+    """
+    num_keypoints = len(keypoints_2d)
+    visibility = np.ones(num_keypoints)
+    
+    # Convert normalized coordinates to pixel coordinates
+    pixel_coords = keypoints_2d.copy()
+    pixel_coords[:, 0] *= image_height  # x coordinate
+    pixel_coords[:, 1] *= image_width   # y coordinate
+    
+    # Check if keypoints are outside image bounds
+    for i, (x, y) in enumerate(pixel_coords):
+        if x < 0 or x >= image_height or y < 0 or y >= image_width:
+            visibility[i] = 0
+    
+    # If mask is available, check visibility within mask
+    if mask is not None:
+        # Mask is already dilated when loaded, so use it directly
+        for i, (x, y) in enumerate(pixel_coords):
+            if visibility[i] == 1:  # Only check if not already outside bounds
+                x_int, y_int = int(round(x)), int(round(y))
+                if 0 <= x_int < image_height and 0 <= y_int < image_width:
+                    if mask[x_int, y_int] == 0:
+                        visibility[i] = 0
+    
+    return visibility
+
+
 def load_SMIL_Unreal_sample(json_file_path, 
                         plot_tests=False, 
                         propagate_scaling=True, 
@@ -726,6 +765,11 @@ def load_SMIL_Unreal_sample(json_file_path,
         # Extract single channel if multi-channel
         if len(input_image_mask.shape) > 2:
             input_image_mask = input_image_mask[:, :, 0]
+        
+        # Dilate the mask to improve quality (Unreal generated masks are very thin)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        input_image_mask = cv2.dilate(input_image_mask, kernel, iterations=2)
+        
         x_output["input_image_mask"] = input_image_mask
     except FileNotFoundError:
         input_image_mask = None
@@ -902,7 +946,26 @@ def load_SMIL_Unreal_sample(json_file_path,
                 mapped_keypoints_2d[o] = keypoints_2d[m]  # Assign normalized 2D coordinates
     
     y_output["keypoints_2d"] = mapped_keypoints_2d  # Normalized 2D coordinates [0, 1]
-    y_output["keypoint_visibility"] = np.ones(len(config.dd["J_names"]))  # All joints are treated as visible in synthetic data
+
+    # Compute keypoint visibility based on mask and image bounds
+    # Only compute when image and mask are loaded to ensure efficiency
+    if load_image and x_output["input_image_mask"] is not None:
+        # Compute visibility using the loaded mask and image dimensions
+        y_output["keypoint_visibility"] = compute_keypoint_visibility(
+            mapped_keypoints_2d, 
+            x_output["input_image_mask"], 
+            image_width, 
+            image_height
+        )
+    else:
+        # Fallback: only check image bounds, treat all joints as visible if within bounds
+        visibility = np.ones(len(config.dd["J_names"]))
+        for i, (norm_x, norm_y) in enumerate(mapped_keypoints_2d):
+            pixel_x = norm_x * image_height
+            pixel_y = norm_y * image_width
+            if pixel_x < 0 or pixel_x >= image_height or pixel_y < 0 or pixel_y >= image_width:
+                visibility[i] = 0
+        y_output["keypoint_visibility"] = visibility
 
     # --- Re-parameterize scene: place model at origin with zero rotation ---
     # PyTorch3D uses row-vector convention: X_cam = X_world R + T
