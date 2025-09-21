@@ -62,6 +62,42 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
 
         # sort the data json paths so when iterating over the dataset, the order is consistent
         self.data_json_paths.sort()
+        
+        # Detect input resolution from batch data file
+        self.input_resolution = self._detect_input_resolution()
+
+    def _detect_input_resolution(self):
+        """Detect the input resolution from the batch data file."""
+        import json
+        import os
+        
+        # Look for batch data file
+        batch_files = [f for f in os.listdir(self.data_path) if f.startswith('_BatchData') and f.endswith('.json')]
+        
+        if batch_files:
+            batch_file_path = os.path.join(self.data_path, batch_files[0])
+            try:
+                with open(batch_file_path, 'r') as f:
+                    batch_data = json.load(f)
+                
+                if 'Image Resolution' in batch_data:
+                    resolution = batch_data['Image Resolution']
+                    # Return the resolution (assuming square images, take x or y)
+                    return resolution.get('x', resolution.get('y', 512))
+            except Exception as e:
+                print(f"Warning: Could not load batch data file {batch_file_path}: {e}")
+        
+        # Fallback to default resolution
+        print("Warning: Could not detect input resolution, using default 512")
+        return 512
+
+    def get_input_resolution(self):
+        """Get the detected input resolution."""
+        return self.input_resolution
+    
+    def get_ue_scaling_flag(self):
+        """Get the UE scaling flag."""
+        return self.use_ue_scaling
 
     def __getitem__(self, idx):
         # Use optimized loading with reduced I/O operations
