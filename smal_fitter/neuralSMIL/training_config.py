@@ -40,7 +40,7 @@ class TrainingConfig:
         'learning_rate': 0.0001,
         'seed': 0,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': "checkpoints/checkpoint_epoch_119.pth",  # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': None,  # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 32,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 16,  # Prefetch batches
