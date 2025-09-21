@@ -97,7 +97,7 @@ class SMILImageRegressor(SMALFitter):
     
     def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior, 
                  rgb_only=True, freeze_backbone=True, hidden_dim=512, use_ue_scaling=True, 
-                 rotation_representation='axis_angle'):
+                 rotation_representation='axis_angle', input_resolution=512):
         """
         Initialize the SMIL Image Regressor.
         
@@ -112,6 +112,7 @@ class SMILImageRegressor(SMALFitter):
             hidden_dim: Hidden dimension for fully connected layers
             use_ue_scaling: Whether to apply 10x UE scaling (default True for replicAnt data)
             rotation_representation: '6d' or 'axis_angle' for joint rotations (default: 'axis_angle')
+            input_resolution: Input image resolution (default: 512, should match dataset resolution)
         """
         # For rgb_only=True, SMALFitter expects data_batch to be just the RGB tensor
         if rgb_only and isinstance(data_batch, tuple):
@@ -129,6 +130,7 @@ class SMILImageRegressor(SMALFitter):
         self.hidden_dim = hidden_dim
         self.use_ue_scaling = use_ue_scaling
         self.rotation_representation = rotation_representation
+        self.input_resolution = input_resolution
         
         # Enable scaling propagation for SMIL models (matches Unreal2Pytorch3D behavior)
         self.propagate_scaling = True
@@ -276,14 +278,15 @@ class SMILImageRegressor(SMALFitter):
             # Assume values are in [0, 255] range
             image_data = image_data.astype(np.float32) / 255.0
         
-        # Resize to 512x512
+        # Resize to input_resolution x input_resolution
+        target_size = (self.input_resolution, self.input_resolution)
         if len(image_data.shape) == 4:
             # Batch of images
             batch_size = image_data.shape[0]
             resized_batch = []
             for i in range(batch_size):
-                if image_data[i].shape[:2] != (512, 512):
-                    resized_img = cv2.resize(image_data[i], (512, 512))
+                if image_data[i].shape[:2] != target_size:
+                    resized_img = cv2.resize(image_data[i], target_size)
                 else:
                     resized_img = image_data[i]
                 resized_batch.append(resized_img)
@@ -292,12 +295,58 @@ class SMILImageRegressor(SMALFitter):
             image_tensor = torch.from_numpy(image_data).permute(0, 3, 1, 2)
         else:
             # Single image
-            if image_data.shape[:2] != (512, 512):
-                image_data = cv2.resize(image_data, (512, 512))
+            if image_data.shape[:2] != target_size:
+                image_data = cv2.resize(image_data, target_size)
             # Convert to tensor and add batch dimension (H, W, C) -> (1, C, H, W)
             image_tensor = torch.from_numpy(image_data).permute(2, 0, 1).unsqueeze(0)
         
         return image_tensor
+    
+    def scale_keypoint_coordinates(self, keypoints, original_size, target_size=None):
+        """
+        Scale keypoint coordinates when image is resized.
+        
+        Args:
+            keypoints: Keypoint coordinates in normalized [0,1] format (n_joints, 2)
+            original_size: Original image size (width, height) or (height, width)
+            target_size: Target image size (width, height) or (height, width). If None, uses self.input_resolution
+            
+        Returns:
+            Scaled keypoint coordinates in normalized [0,1] format
+        """
+        if target_size is None:
+            target_size = (self.input_resolution, self.input_resolution)
+        
+        # Handle different input formats
+        if isinstance(original_size, (int, float)):
+            # Single value - assume square image
+            orig_w, orig_h = original_size, original_size
+        elif len(original_size) == 2:
+            # (width, height) or (height, width) - need to determine which
+            # For now, assume it's (width, height) as that's more common
+            orig_w, orig_h = original_size
+        else:
+            raise ValueError(f"Unsupported original_size format: {original_size}")
+        
+        if isinstance(target_size, (int, float)):
+            # Single value - assume square image
+            target_w, target_h = target_size, target_size
+        elif len(target_size) == 2:
+            target_w, target_h = target_size
+        else:
+            raise ValueError(f"Unsupported target_size format: {target_size}")
+        
+        # Calculate scaling factors
+        scale_x = target_w / orig_w
+        scale_y = target_h / orig_h
+        
+        # Scale the keypoint coordinates
+        # Note: keypoints are in [y_norm, x_norm] format (normalized coordinates)
+        scaled_keypoints = keypoints.copy()
+        scaled_keypoints[:, 0] = scaled_keypoints[:, 0] * scale_y  # y coordinates
+        scaled_keypoints[:, 1] = scaled_keypoints[:, 1] * scale_x  # x coordinates
+        
+        return scaled_keypoints
     
     def _preprocess_image_batch(self, image_list) -> torch.Tensor:
         """
@@ -342,9 +391,10 @@ class SMILImageRegressor(SMALFitter):
                 # Assume values are in [0, 255] range
                 image_data = image_data.astype(np.float32) / 255.0
             
-            # Resize to 512x512
-            if image_data.shape[:2] != (512, 512):
-                image_data = cv2.resize(image_data, (512, 512))
+            # Resize to input_resolution x input_resolution
+            target_size = (self.input_resolution, self.input_resolution)
+            if image_data.shape[:2] != target_size:
+                image_data = cv2.resize(image_data, target_size)
             
             batch_images.append(image_data)
         
@@ -1365,11 +1415,14 @@ class SMILImageRegressor(SMALFitter):
         Args:
             predicted_joint_rot: Predicted joint rotations (batch_size, n_joints, rot_dim)
             target_joint_rot: Target joint rotations (batch_size, n_joints, rot_dim)
-            visibility: Joint visibility (batch_size, n_joints) or (n_joints,)
+            visibility: Joint visibility (batch_size, n_joints) or (n_joints,) - can be numpy array or tensor
             
         Returns:
             Visibility-aware joint rotation loss
         """
+        # Convert visibility to tensor if it's a numpy array
+        visibility = safe_to_tensor(visibility, device=self.device)
+        
         # Ensure visibility has correct dimensions
         if visibility.dim() == 1:
             # Single sample case - expand to batch dimension
