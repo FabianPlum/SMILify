@@ -606,6 +606,12 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         print("Optimizer state loaded successfully")
         
+        # Update learning rate to match curriculum for the resumed epoch
+        resumed_lr = TrainingConfig.get_learning_rate_for_epoch(start_epoch)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = resumed_lr
+        print(f"Learning rate set to {resumed_lr} for resumed epoch {start_epoch}")
+        
         # Get epoch information
         start_epoch = checkpoint.get('epoch', 0) + 1  # Resume from next epoch
         
@@ -843,14 +849,19 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         freeze_backbone=model_config['freeze_backbone'],
         hidden_dim=model_config['hidden_dim'],
         use_ue_scaling=dataset.get_ue_scaling_flag(),
-        rotation_representation=rotation_representation
+        rotation_representation=rotation_representation,
+        input_resolution=dataset.get_input_resolution()
     ).to(device)
     
     print(f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     
     # Initialize optimizer and loss function
-    optimizer = optim.Adam(model.get_trainable_parameters(), lr=learning_rate)
+    # Use the learning rate from curriculum (base learning rate for epoch 0)
+    initial_lr = TrainingConfig.get_learning_rate_for_epoch(0)
+    optimizer = optim.Adam(model.get_trainable_parameters(), lr=initial_lr)
     criterion = nn.MSELoss()
+    
+    print(f"Initial learning rate set to: {initial_lr}")
     
     # Create output directories
     os.makedirs(output_config['checkpoint_dir'], exist_ok=True)
@@ -878,8 +889,15 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         print("Training from scratch")
     
     for epoch in range(start_epoch, num_epochs):
-        # Get loss weights for current epoch from configuration
+        # Get loss weights and learning rate for current epoch from configuration
         loss_weights = TrainingConfig.get_loss_weights_for_epoch(epoch)
+        current_lr = TrainingConfig.get_learning_rate_for_epoch(epoch)
+        
+        # Update learning rate if it has changed
+        for param_group in optimizer.param_groups:
+            if param_group['lr'] != current_lr:
+                param_group['lr'] = current_lr
+                print(f"Learning rate updated to {current_lr} at epoch {epoch}")
         
         # Train
         train_loss, train_param_err = train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_weights)
@@ -893,7 +911,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         
         # Print epoch summary with parameter errors
         print(f'\nEpoch {epoch}:')
-        print(f'  Train Loss = {train_loss:.6f}, Val Loss = {val_loss:.6f}')
+        print(f'  Train Loss = {train_loss:.6f}, Val Loss = {val_loss:.6f}, LR = {current_lr:.2e}')
         print('  Parameter Errors (Train / Val):')
         
         # Get all parameter names from both train and val
