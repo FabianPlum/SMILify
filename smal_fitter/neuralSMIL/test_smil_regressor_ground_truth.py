@@ -334,6 +334,10 @@ def visualize_silhouette_comparison(model, predicted_params, x_data, output_dir=
     if rendered_silhouette is not None:
         rendered_sil_np = rendered_silhouette[0, 0].cpu().numpy()  # First batch, first channel
         rendered_sil_np = (rendered_sil_np * 255).astype(np.uint8)
+        
+        # Resize rendered silhouette to match ground truth size
+        if rendered_sil_np.shape != target_silhouette.shape[:2]:
+            rendered_sil_np = cv2.resize(rendered_sil_np, (width, height))
     else:
         print("ERROR: No rendered silhouette returned!")
         return
@@ -468,7 +472,8 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
             freeze_backbone=True,
             hidden_dim=512,
             use_ue_scaling=use_ue_scaling,
-            rotation_representation=rotation_representation
+            rotation_representation=rotation_representation,
+            input_resolution=dataset.get_input_resolution()
         ).to(device)
         
         model.eval()  # Set to evaluation mode
