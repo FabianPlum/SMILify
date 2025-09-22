@@ -231,6 +231,10 @@ def visualize_keypoints_comparison(model, predicted_params, y_data, x_data, outp
             image = (image * 255).astype(np.uint8)
         else:
             image = image.astype(np.uint8)
+        
+        # Convert from BGR to RGB for proper color display
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     else:
         image = np.zeros((512, 512, 3), dtype=np.uint8)
     
