@@ -43,7 +43,7 @@ def axis_angle_to_rotation_6d(axis_angle):
     return rotation_6d
 
 class replicAntSMILDataset(torch.utils.data.Dataset):    
-    def __init__(self, data_path, use_ue_scaling=True, rotation_representation='axis_angle'):
+    def __init__(self, data_path, use_ue_scaling=True, rotation_representation='axis_angle', backbone_name='resnet152'):
         """
         Initialize replicAnt SMIL Dataset.
         
@@ -51,10 +51,12 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
             data_path: Path to the dataset directory
             use_ue_scaling: Whether this dataset expects UE scaling (default True for replicAnt data)
             rotation_representation: '6d' or 'axis_angle' for joint rotations (default: 'axis_angle')
+            backbone_name: Backbone name to determine keypoint scaling (default: 'resnet152')
         """
         self.data_path = data_path
         self.use_ue_scaling = use_ue_scaling
         self.rotation_representation = rotation_representation
+        self.backbone_name = backbone_name
         self.data_json_paths = []
         for file in os.listdir(self.data_path):
             if file.endswith('.json') and not file.startswith('_BatchData'):
@@ -64,7 +66,13 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
         self.data_json_paths.sort()
         
         # Detect input resolution from batch data file
-        self.input_resolution = self._detect_input_resolution()
+        self.original_resolution = self._detect_input_resolution()
+        
+        # Determine target resolution based on backbone
+        if backbone_name.startswith('vit'):
+            self.target_resolution = 224  # ViT expects 224x224
+        else:
+            self.target_resolution = self.original_resolution  # ResNet can handle original resolution
 
     def _detect_input_resolution(self):
         """Detect the input resolution from the batch data file."""
@@ -93,7 +101,11 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
 
     def get_input_resolution(self):
         """Get the detected input resolution."""
-        return self.input_resolution
+        return self.original_resolution
+    
+    def get_target_resolution(self):
+        """Get the target resolution based on backbone."""
+        return self.target_resolution
     
     def get_ue_scaling_flag(self):
         """Get the UE scaling flag."""
