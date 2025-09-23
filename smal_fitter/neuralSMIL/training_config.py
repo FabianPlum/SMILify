@@ -20,11 +20,12 @@ class TrainingConfig:
         'test_textured': "data/replicAnt_trials/replicAnt-x-SMIL-TEX",
         'full_dataset': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Masked",
         'SHAPE-n-POSE': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-SHAPE-n-POSE",
-        'simple': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Simple"
+        'simple': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Simple",
+        'simple100k': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Simple100k-noScale"
     }
     
     # Default dataset to use
-    DEFAULT_DATASET = 'simple'
+    DEFAULT_DATASET = 'simple100k'
     
     # Training split configuration
     SPLIT_CONFIG = {
@@ -36,11 +37,11 @@ class TrainingConfig:
     # Training hyperparameters
     TRAINING_PARAMS = {
         'batch_size': 8,
-        'num_epochs': 200,
+        'num_epochs': 100,
         'learning_rate': 0.0001,
         'seed': 0,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': None,  # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': None, # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 32,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 16,  # Prefetch batches
@@ -48,8 +49,9 @@ class TrainingConfig:
     
     # Model configuration
     MODEL_CONFIG = {
+        'backbone_name': 'vit_large_patch16_224',  # 'resnet152', 'vit_base_patch16_224', etc.
         'freeze_backbone': True,
-        'hidden_dim': 2048,
+        'hidden_dim': 1024,  # Deprecated, Will be adjusted based on backbone
         'rgb_only': False,
         'use_unity_prior': False,
     }
@@ -74,20 +76,20 @@ class TrainingConfig:
         # Curriculum stages: (epoch_threshold, weight_updates)
         'curriculum_stages': [
             # Stage 1: Introduce keypoint and silhouette losses gradually
-            (20, {
+            (5, {
                 'keypoint_2d': 0.001,
                 'silhouette': 0.0001
             }),
             
             # Stage 2: Increase keypoint and silhouette weights
-            (25, {
+            (8, {
                 'betas': 0.02,
                 'keypoint_2d': 0.01,
                 'silhouette': 0.001
             }),
             
             # Stage 3: Further increase and start reducing joint rotation influence
-            (30, {
+            (12, {
                 'betas': 0.1,
                 'keypoint_2d': 0.05,
                 'joint_rot': 0.01,      # Reduce to favor keypoint loss
@@ -95,7 +97,7 @@ class TrainingConfig:
             }),
             
             # Stage 4: High keypoint weight for fine-tuning
-            (50, {
+            (15, {
                 'betas': 0.2,
                 'keypoint_2d': 0.1,
                 'joint_rot': 0.02,      # Keep reduced
@@ -103,7 +105,7 @@ class TrainingConfig:
             }),
             
             # Stage 5: Increase log_beta_scales and betas_trans weights to fine tune their influence
-            (100, {
+            (20, {
                 'betas': 0.2,
                 'keypoint_2d': 0.1,
                 'joint_rot': 0.02,
@@ -122,13 +124,13 @@ class TrainingConfig:
         # Learning rate stages: (epoch_threshold, learning_rate)
         'lr_stages': [
             # Stage 1: Reduce learning rate for fine-tuning
-            (50, 0.00005),   # 5e-5
+            (10, 0.00005),   # 5e-5
             
             # Stage 2: Further reduce for final fine-tuning
-            (100, 0.000001),  # 1e-6
+            (20, 0.000001),  # 1e-6
             
             # Stage 3: Very low learning rate for final convergence
-            (150, 0.0000005), # 5e-7
+            (30, 0.0000005), # 5e-7
         ]
     }
     
@@ -234,15 +236,27 @@ class TrainingConfig:
         Returns:
             Dictionary containing all configuration parameters
         """
-        return {
+        config = {
             'data_path': cls.get_data_path(dataset_name),
             'split_config': cls.SPLIT_CONFIG,
             'training_params': cls.TRAINING_PARAMS,
-            'model_config': cls.MODEL_CONFIG,
+            'model_config': cls.MODEL_CONFIG.copy(),  # Make a copy to avoid modifying the original
             'loss_curriculum': cls.LOSS_CURRICULUM,
             'learning_rate_curriculum': cls.LEARNING_RATE_CURRICULUM,
             'output_config': cls.OUTPUT_CONFIG,
         }
+        
+        # Adjust hidden_dim based on backbone
+        backbone_name = config['model_config']['backbone_name']
+        if backbone_name.startswith('vit'):
+            if 'base' in backbone_name:
+                config['model_config']['hidden_dim'] = 768
+            elif 'large' in backbone_name:
+                config['model_config']['hidden_dim'] = 1024
+        elif backbone_name.startswith('resnet'):
+            config['model_config']['hidden_dim'] = 2048
+        
+        return config
     
     @classmethod
     def print_config_summary(cls, dataset_name: Optional[str] = None):
@@ -265,6 +279,11 @@ class TrainingConfig:
         print("Model Configuration:")
         for key, value in config['model_config'].items():
             print(f"  {key}: {value}")
+        
+        # Print backbone-specific information
+        backbone_name = config['model_config']['backbone_name']
+        print(f"  Backbone type: {'Vision Transformer' if backbone_name.startswith('vit') else 'ResNet'}")
+        print(f"  Feature dimension: {config['model_config']['hidden_dim']}")
         print()
         
         print("Loss Curriculum:")
