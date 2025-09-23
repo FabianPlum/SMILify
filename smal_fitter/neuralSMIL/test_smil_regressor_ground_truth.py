@@ -210,7 +210,7 @@ def test_rotation_conversion_roundtrip(y_data: Dict[str, Any], device: str = 'cp
     }
 
 
-def visualize_keypoints_comparison(model, predicted_params, y_data, x_data, output_dir="visualizations"):
+def visualize_keypoints_comparison(model, predicted_params, y_data, x_data, backbone_name, dataset, output_dir="visualizations"):
     """
     Visualize ground truth vs rendered keypoints side by side.
     
@@ -394,7 +394,15 @@ def visualize_silhouette_comparison(model, predicted_params, x_data, output_dir=
     print(f"Union: {union} pixels")
 
 
-def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance_keypoints: float = 1e-2, tolerance_silhouette: float = 1e-2, device: str = 'cpu', enable_visualization: bool = True, override_ue_scaling: bool = None, rotation_representation: str = 'axis_angle', test_rotation_conversion: bool = True):
+def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, 
+                           tolerance_keypoints: float = 1e-2, 
+                           tolerance_silhouette: float = 1e-2, 
+                           device: str = 'cpu', 
+                           enable_visualization: bool = True, 
+                           override_ue_scaling: bool = None, 
+                           rotation_representation: str = 'axis_angle', 
+                           test_rotation_conversion: bool = True, 
+                           backbone_name: str = 'resnet152'):
     """
     Test that ground truth parameters produce near-zero losses.
     
@@ -407,6 +415,7 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
         override_ue_scaling: Override dataset UE scaling setting (None uses dataset default)
         rotation_representation: '6d' or 'axis_angle' for joint rotations (default: 'axis_angle')
         test_rotation_conversion: Whether to test rotation conversion round-trip (default: True)
+        backbone_name: Backbone name for keypoint scaling ('resnet152', 'vit_base_patch16_224', etc.)
     
     Returns:
         Dict with test results
@@ -437,7 +446,7 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
     try:
         # Load dataset with specified rotation representation
         print(f"Loading dataset with rotation representation: {rotation_representation}")
-        dataset = replicAntSMILDataset(data_path, rotation_representation=rotation_representation)
+        dataset = replicAntSMILDataset(data_path, rotation_representation=rotation_representation, backbone_name=backbone_name)
         if len(dataset) == 0:
             print("ERROR: Dataset is empty")
             return {"success": False, "error": "Empty dataset"}
@@ -477,7 +486,7 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
             hidden_dim=512,
             use_ue_scaling=use_ue_scaling,
             rotation_representation=rotation_representation,
-            input_resolution=dataset.get_input_resolution()
+            input_resolution=224 if backbone_name.startswith('vit') else dataset.get_input_resolution()
         ).to(device)
         
         model.eval()  # Set to evaluation mode
@@ -666,7 +675,7 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, tolerance
             
             # Generate keypoint visualization if keypoint data is available
             if 'keypoints_2d' in y_data and 'keypoint_visibility' in y_data:
-                visualize_keypoints_comparison(model, predicted_params, y_data, x_data, output_dir)
+                visualize_keypoints_comparison(model, predicted_params, y_data, x_data, backbone_name, dataset, output_dir)
             
             # Generate silhouette visualization if silhouette data is available
             if x_data.get("input_image_mask") is not None:
@@ -751,6 +760,9 @@ def main():
                        help='Rotation representation for joint rotations (default: axis_angle)')
     parser.add_argument('--no-rotation-test', action='store_true',
                        help='Disable rotation conversion round-trip test')
+    parser.add_argument('--backbone', type=str, default='resnet152',
+                       choices=['resnet50', 'resnet101', 'resnet152', 'vit_base_patch16_224', 'vit_large_patch16_224'],
+                       help='Backbone network to use (default: resnet152)')
     
     args = parser.parse_args()
     
@@ -774,7 +786,8 @@ def main():
         enable_visualization=not args.no_visualization,
         override_ue_scaling=False if args.no_ue_scaling else None,
         rotation_representation=args.rotation_representation,
-        test_rotation_conversion=not args.no_rotation_test
+        test_rotation_conversion=not args.no_rotation_test,
+        backbone_name=args.backbone
     )
     
     # Exit with appropriate code
