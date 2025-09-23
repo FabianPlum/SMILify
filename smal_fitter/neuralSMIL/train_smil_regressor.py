@@ -32,6 +32,7 @@ from smal_fitter import SMALFitter
 from Unreal2Pytorch3D import return_placeholder_data
 import config
 from training_config import TrainingConfig
+from memory_optimization import MemoryOptimizer, recommend_training_config, MixedPrecisionTrainer
 
 
 def set_random_seeds(seed=0):
@@ -351,7 +352,7 @@ def plot_training_history(train_losses, val_losses, save_path='training_history.
     plt.close()
 
 
-def visualize_training_progress(model, val_loader, device, epoch, output_dir='visualizations', num_samples=5):
+def visualize_training_progress(model, val_loader, device, epoch, model_config, dataset, output_dir='visualizations', num_samples=5):
     """
     Visualize training progress by rendering the first few validation samples.
     
@@ -426,17 +427,19 @@ def visualize_training_progress(model, val_loader, device, epoch, output_dir='vi
                 # Set proper target joints and visibility for visualization
                 # Convert normalized keypoints back to pixel coordinates for visualization
                 if 'keypoints_2d' in y_data and 'keypoint_visibility' in y_data:
-                    # Get image dimensions (assuming square image matching the tensor size)
-                    image_height, image_width = image_tensor.shape[-2:]
+                    # Use the rendered image size (512x512) for keypoint conversion
+                    # Both ground truth and rendered keypoints are normalized by 512x512
+                    target_height, target_width = 512, 512  # Renderer always outputs 512x512
                     
                     # Convert normalized [0,1] coordinates to pixel coordinates
                     keypoints_2d = y_data['keypoints_2d']  # Shape: (num_joints, 2), already in [y_norm, x_norm] format
                     keypoint_visibility = y_data['keypoint_visibility']  # Shape: (num_joints,)
                     
-                    # Convert to pixel coordinates (already in [y, x] format expected by draw_joints)
+                    # Convert to pixel coordinates using rendered image size
+                    # Note: keypoints are normalized [0,1] and need to be scaled to rendered resolution
                     pixel_coords = keypoints_2d.copy()
-                    pixel_coords[:, 0] = pixel_coords[:, 0] * image_height  # y to pixels
-                    pixel_coords[:, 1] = pixel_coords[:, 1] * image_width   # x to pixels
+                    pixel_coords[:, 0] = pixel_coords[:, 0] * target_height  # y to pixels
+                    pixel_coords[:, 1] = pixel_coords[:, 1] * target_width   # x to pixels
                     
                     temp_fitter.target_joints = torch.tensor(pixel_coords, dtype=torch.float32, device=device).unsqueeze(0)
                     temp_fitter.target_visibility = torch.tensor(keypoint_visibility, dtype=torch.float32, device=device).unsqueeze(0)
@@ -606,14 +609,14 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         print("Optimizer state loaded successfully")
         
+        # Get epoch information first
+        start_epoch = checkpoint.get('epoch', 0) + 1  # Resume from next epoch
+        
         # Update learning rate to match curriculum for the resumed epoch
         resumed_lr = TrainingConfig.get_learning_rate_for_epoch(start_epoch)
         for param_group in optimizer.param_groups:
             param_group['lr'] = resumed_lr
         print(f"Learning rate set to {resumed_lr} for resumed epoch {start_epoch}")
-        
-        # Get epoch information
-        start_epoch = checkpoint.get('epoch', 0) + 1  # Resume from next epoch
         
         # Initialize training history lists
         train_losses = []
@@ -763,8 +766,15 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     # Create dataset
     print("Loading dataset...")
     print(f"Using rotation representation: {rotation_representation}")
-    dataset = replicAntSMILDataset(data_path, rotation_representation=rotation_representation)
+    print(f"Using backbone: {model_config['backbone_name']}")
+    dataset = replicAntSMILDataset(
+        data_path, 
+        rotation_representation=rotation_representation,
+        backbone_name=model_config['backbone_name']
+    )
     print(f"Dataset size: {len(dataset)}")
+    print(f"Original resolution: {dataset.get_input_resolution()}")
+    print(f"Target resolution: {dataset.get_target_resolution()}")
     
     # Split dataset using configuration
     train_amount, val_amount, test_amount = TrainingConfig.get_train_val_test_sizes(len(dataset))
@@ -837,8 +847,31 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     # Create placeholder data for SMALFitter initialization
     placeholder_data = create_placeholder_data_batch(batch_size)
     
+    # Memory optimization setup
+    memory_optimizer = MemoryOptimizer(device=device, target_memory_gb=20.0)
+    memory_optimizer.monitor.print_memory_status("Before model initialization")
+    
+    # Get memory recommendations
+    memory_config = recommend_training_config(model_config['backbone_name'], 24.0)
+    print(f"Memory recommendations for {model_config['backbone_name']}:")
+    for key, value in memory_config.items():
+        if key != 'memory_optimizations':
+            print(f"  {key}: {value}")
+    
     # Initialize model
     print("Initializing model...")
+    print(f"Using backbone: {model_config['backbone_name']}")
+    
+    # Determine appropriate input resolution based on backbone
+    if model_config['backbone_name'].startswith('vit'):
+        # Vision Transformers expect 224x224 input
+        input_resolution = 224
+        print(f"Using ViT input resolution: {input_resolution}x{input_resolution}")
+    else:
+        # ResNet can handle higher resolutions
+        input_resolution = dataset.get_input_resolution()
+        print(f"Using ResNet input resolution: {input_resolution}x{input_resolution}")
+    
     model = SMILImageRegressor(
         device=device,
         data_batch=placeholder_data,
@@ -850,8 +883,18 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         hidden_dim=model_config['hidden_dim'],
         use_ue_scaling=dataset.get_ue_scaling_flag(),
         rotation_representation=rotation_representation,
-        input_resolution=dataset.get_input_resolution()
+        input_resolution=input_resolution,
+        backbone_name=model_config['backbone_name']
     ).to(device)
+    
+    # Apply memory optimizations
+    memory_optimizer.optimize_model_for_memory(
+        model, model_config['backbone_name'], batch_size,
+        use_mixed_precision=memory_config['use_mixed_precision'],
+        use_gradient_checkpointing=memory_config['use_gradient_checkpointing']
+    )
+    
+    memory_optimizer.monitor.print_memory_status("After model initialization")
     
     print(f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     
@@ -946,7 +989,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         
         # Generate visualizations
         if (epoch + 1) % output_config['generate_visualizations_every'] == 0:
-            visualize_training_progress(model, val_loader, device, epoch, 
+            visualize_training_progress(model, val_loader, device, epoch, model_config, dataset,
                                       output_dir=output_config['visualizations_dir'], 
                                       num_samples=output_config['num_visualization_samples'])
         
@@ -998,12 +1041,15 @@ if __name__ == "__main__":
                        help='Learning rate (overrides config default)')
     parser.add_argument('--num-epochs', type=int, default=None,
                        help='Number of epochs (overrides config default)')
+    parser.add_argument('--backbone', type=str, default=None,
+                       choices=['resnet50', 'resnet101', 'resnet152', 'vit_base_patch16_224', 'vit_large_patch16_224'],
+                       help='Backbone network to use (overrides config default)')
     args = parser.parse_args()
     
     # Create config override dictionary for any provided arguments
     config_override = {}
     if args.seed is not None or args.rotation_representation is not None or \
-       args.batch_size is not None or args.learning_rate is not None or args.num_epochs is not None:
+       args.batch_size is not None or args.learning_rate is not None or args.num_epochs is not None or args.backbone is not None:
         config_override['training_params'] = {}
         if args.seed is not None:
             config_override['training_params']['seed'] = args.seed
@@ -1015,5 +1061,7 @@ if __name__ == "__main__":
             config_override['training_params']['learning_rate'] = args.learning_rate
         if args.num_epochs is not None:
             config_override['training_params']['num_epochs'] = args.num_epochs
+        if args.backbone is not None:
+            config_override['model_config'] = {'backbone_name': args.backbone}
     
     main(dataset_name=args.dataset, checkpoint_path=args.checkpoint, config_override=config_override or None)
