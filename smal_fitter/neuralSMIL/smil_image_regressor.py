@@ -23,6 +23,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from smal_fitter import SMALFitter
 import config
+from backbone_factory import BackboneFactory, BackboneInterface
 
 # Import rotation utilities from PyTorch3D
 from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, rotation_6d_to_matrix, matrix_to_rotation_6d
@@ -97,7 +98,7 @@ class SMILImageRegressor(SMALFitter):
     
     def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior, 
                  rgb_only=True, freeze_backbone=True, hidden_dim=512, use_ue_scaling=True, 
-                 rotation_representation='axis_angle', input_resolution=512):
+                 rotation_representation='axis_angle', input_resolution=512, backbone_name='resnet152'):
         """
         Initialize the SMIL Image Regressor.
         
@@ -108,11 +109,12 @@ class SMILImageRegressor(SMALFitter):
             shape_family: Shape family ID for SMIL model
             use_unity_prior: Whether to use unity prior
             rgb_only: Whether to use only RGB images (no silhouettes/keypoints)
-            freeze_backbone: Whether to freeze ResNet152 backbone weights
+            freeze_backbone: Whether to freeze backbone weights
             hidden_dim: Hidden dimension for fully connected layers
             use_ue_scaling: Whether to apply 10x UE scaling (default True for replicAnt data)
             rotation_representation: '6d' or 'axis_angle' for joint rotations (default: 'axis_angle')
             input_resolution: Input image resolution (default: 512, should match dataset resolution)
+            backbone_name: Backbone network name ('resnet152', 'vit_base_patch16_224', etc.)
         """
         # For rgb_only=True, SMALFitter expects data_batch to be just the RGB tensor
         if rgb_only and isinstance(data_batch, tuple):
@@ -131,23 +133,20 @@ class SMILImageRegressor(SMALFitter):
         self.use_ue_scaling = use_ue_scaling
         self.rotation_representation = rotation_representation
         self.input_resolution = input_resolution
+        self.backbone_name = backbone_name
         
         # Enable scaling propagation for SMIL models (matches Unreal2Pytorch3D behavior)
         self.propagate_scaling = True
         
-        # Load pre-trained ResNet152 backbone
-        self.backbone = models.resnet152(weights=models.ResNet152_Weights.DEFAULT)
+        # Create backbone using factory
+        self.backbone = BackboneFactory.create_backbone(
+            backbone_name, 
+            pretrained=True, 
+            freeze=freeze_backbone
+        ).to(device)
         
-        # Remove the final classification layer
-        self.backbone = nn.Sequential(*list(self.backbone.children())[:-1])
-        
-        # Freeze backbone weights if requested
-        if self.freeze_backbone:
-            for param in self.backbone.parameters():
-                param.requires_grad = False
-        
-        # Get the feature dimension from ResNet152 (2048)
-        self.feature_dim = 2048
+        # Get the feature dimension from backbone
+        self.feature_dim = self.backbone.get_feature_dim()
         
         # Calculate output dimensions for SMIL parameters
         self._calculate_output_dims()
@@ -206,22 +205,30 @@ class SMILImageRegressor(SMALFitter):
         # Second fully connected layer
         self.fc2 = nn.Linear(self.hidden_dim, self.hidden_dim // 2)
         self.ln2 = nn.LayerNorm(self.hidden_dim // 2)
+
+        # Third fully connected layer
+        self.fc3 = nn.Linear(self.hidden_dim // 2, self.hidden_dim // 4)
+        self.ln3 = nn.LayerNorm(self.hidden_dim // 4)
         
         # Final regression layer
-        self.regressor = nn.Linear(self.hidden_dim // 2, self.total_output_dim)
+        self.regressor = nn.Linear(self.hidden_dim // 4, self.total_output_dim)
         
         # Dropout for regularization
         self.dropout = nn.Dropout(p=0.3)
     
     def _initialize_parameters(self):
         """Initialize the regression head parameters."""
-        # Initialize with small random values
-        nn.init.xavier_uniform_(self.fc1.weight)
+        # Use He initialization for ReLU layers (more appropriate for ReLU activations)
+        nn.init.kaiming_uniform_(self.fc1.weight, nonlinearity='relu')
         nn.init.constant_(self.fc1.bias, 0)
         
-        nn.init.xavier_uniform_(self.fc2.weight)
+        nn.init.kaiming_uniform_(self.fc2.weight, nonlinearity='relu')
         nn.init.constant_(self.fc2.bias, 0)
         
+        nn.init.kaiming_uniform_(self.fc3.weight, nonlinearity='relu')
+        nn.init.constant_(self.fc3.bias, 0)
+
+        # Use Xavier initialization for final layer (no activation function)
         nn.init.xavier_uniform_(self.regressor.weight)
         nn.init.constant_(self.regressor.bias, 0)
     
@@ -278,8 +285,13 @@ class SMILImageRegressor(SMALFitter):
             # Assume values are in [0, 255] range
             image_data = image_data.astype(np.float32) / 255.0
         
-        # Resize to input_resolution x input_resolution
-        target_size = (self.input_resolution, self.input_resolution)
+        # Resize to appropriate resolution based on backbone type
+        if self.backbone_name.startswith('vit'):
+            # Vision Transformers expect 224x224 input
+            target_size = (224, 224)
+        else:
+            # ResNet can handle higher resolutions
+            target_size = (self.input_resolution, self.input_resolution)
         if len(image_data.shape) == 4:
             # Batch of images
             batch_size = image_data.shape[0]
@@ -309,13 +321,18 @@ class SMILImageRegressor(SMALFitter):
         Args:
             keypoints: Keypoint coordinates in normalized [0,1] format (n_joints, 2)
             original_size: Original image size (width, height) or (height, width)
-            target_size: Target image size (width, height) or (height, width). If None, uses self.input_resolution
+            target_size: Target image size (width, height) or (height, width). If None, uses backbone-appropriate resolution
             
         Returns:
             Scaled keypoint coordinates in normalized [0,1] format
         """
         if target_size is None:
-            target_size = (self.input_resolution, self.input_resolution)
+            if self.backbone_name.startswith('vit'):
+                # Vision Transformers expect 224x224 input
+                target_size = (224, 224)
+            else:
+                # ResNet can handle higher resolutions
+                target_size = (self.input_resolution, self.input_resolution)
         
         # Handle different input formats
         if isinstance(original_size, (int, float)):
@@ -391,8 +408,13 @@ class SMILImageRegressor(SMALFitter):
                 # Assume values are in [0, 255] range
                 image_data = image_data.astype(np.float32) / 255.0
             
-            # Resize to input_resolution x input_resolution
-            target_size = (self.input_resolution, self.input_resolution)
+            # Resize to appropriate resolution based on backbone type
+            if self.backbone_name.startswith('vit'):
+                # Vision Transformers expect 224x224 input
+                target_size = (224, 224)
+            else:
+                # ResNet can handle higher resolutions
+                target_size = (self.input_resolution, self.input_resolution)
             if image_data.shape[:2] != target_size:
                 image_data = cv2.resize(image_data, target_size)
             
@@ -409,7 +431,7 @@ class SMILImageRegressor(SMALFitter):
         Forward pass of the network.
         
         Args:
-            images: Input images tensor of shape (batch_size, 3, 512, 512)
+            images: Input images tensor of shape (batch_size, 3, height, width)
             
         Returns:
             Dictionary containing predicted SMIL parameters:
@@ -423,15 +445,17 @@ class SMILImageRegressor(SMALFitter):
         """
         batch_size = images.size(0)
         
-        # Extract features using ResNet152 backbone
-        features = self.backbone(images)  # (batch_size, 2048, 1, 1)
-        features = features.view(batch_size, -1)  # (batch_size, 2048)
+        # Extract features using backbone (ResNet or ViT)
+        features = self.backbone(images)  # (batch_size, feature_dim)
         
         # Pass through regression head
         x = F.relu(self.ln1(self.fc1(features)))
         x = self.dropout(x)
         
         x = F.relu(self.ln2(self.fc2(x)))
+        x = self.dropout(x)
+
+        x = F.relu(self.ln3(self.fc3(x)))
         x = self.dropout(x)
         
         # Final regression
@@ -1324,10 +1348,13 @@ class SMILImageRegressor(SMALFitter):
             image_size = self.renderer.image_size
             
             # rendered_joints_raw is already in [y_pixel, x_pixel] format due to renderer swap
-            # Just normalize to [0, 1] range to match ground truth format
-            # Add small epsilon to prevent division by zero issues
+            # Normalize to [0, 1] range using the rendered image size (512x512)
+            # This ensures consistency with the target keypoints which are normalized by the original image size (512x512)
+            # The renderer always outputs 512x512 images, so we normalize by that size
             eps = 1e-8
-            rendered_joints_final = rendered_joints_raw / (image_size + eps)
+            rendered_image_size = 512  # The renderer always outputs 512x512 images
+            
+            rendered_joints_final = rendered_joints_raw / (rendered_image_size + eps)
             
             # Clamp to reasonable range to prevent extreme values
             rendered_joints_final = torch.clamp(rendered_joints_final, -10.0, 10.0)
@@ -1335,9 +1362,10 @@ class SMILImageRegressor(SMALFitter):
             # Debug: Check if normalization produces reasonable values (only occasionally)
             if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # Only 1% of the time
                 print(f"DEBUG - Raw rendered_joints range: [{rendered_joints_raw.min():.3f}, {rendered_joints_raw.max():.3f}]")
-                print(f"DEBUG - Image size: {image_size}")
+                print(f"DEBUG - Renderer image size: {image_size}")
+                print(f"DEBUG - Normalization size: {rendered_image_size}")
                 print(f"DEBUG - Final normalized range: [{rendered_joints_final.min():.3f}, {rendered_joints_final.max():.3f}]")
-                print(f"DEBUG - Coordinate mapping: [y_pixel, x_pixel] -> [y_norm, x_norm]")
+                print(f"DEBUG - Coordinate mapping: [y_pixel, x_pixel] -> [y_norm, x_norm] (normalized by {rendered_image_size}x{rendered_image_size})")
                 
                 # Check for out-of-bounds joints in pixel space
                 in_bounds = (rendered_joints_raw >= 0) & (rendered_joints_raw <= image_size)
@@ -1636,15 +1664,23 @@ class SMILImageRegressor(SMALFitter):
         Returns:
             List of trainable parameter groups
         """
-        if self.freeze_backbone:
-            # Only return parameters from the regression head
-            return [
-                {'params': self.fc1.parameters()},
-                {'params': self.fc2.parameters()},
-                {'params': self.regressor.parameters()},
-                {'params': self.ln1.parameters()},
-                {'params': self.ln2.parameters()},
-            ]
-        else:
-            # Return all parameters
-            return self.parameters()
+        trainable_params = []
+        
+        # Add backbone parameters if not frozen
+        if not self.freeze_backbone:
+            backbone_params = self.backbone.get_trainable_parameters()
+            if backbone_params:
+                trainable_params.append({'params': backbone_params, 'lr': 1e-5})  # Lower LR for backbone
+        
+        # Always add regression head parameters
+        trainable_params.extend([
+            {'params': self.fc1.parameters()},
+            {'params': self.fc2.parameters()},
+            {'params': self.fc3.parameters()},
+            {'params': self.regressor.parameters()},
+            {'params': self.ln1.parameters()},
+            {'params': self.ln2.parameters()},
+            {'params': self.ln3.parameters()},
+        ])
+        
+        return trainable_params
