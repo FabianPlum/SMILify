@@ -24,6 +24,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from smal_fitter import SMALFitter
 import config
 from backbone_factory import BackboneFactory, BackboneInterface
+from transformer_decoder import build_smil_transformer_decoder_head
 
 # Import rotation utilities from PyTorch3D
 from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, rotation_6d_to_matrix, matrix_to_rotation_6d
@@ -98,7 +99,8 @@ class SMILImageRegressor(SMALFitter):
     
     def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior, 
                  rgb_only=True, freeze_backbone=True, hidden_dim=512, use_ue_scaling=True, 
-                 rotation_representation='axis_angle', input_resolution=512, backbone_name='resnet152'):
+                 rotation_representation='axis_angle', input_resolution=512, backbone_name='resnet152',
+                 head_type='mlp', transformer_config=None):
         """
         Initialize the SMIL Image Regressor.
         
@@ -115,6 +117,8 @@ class SMILImageRegressor(SMALFitter):
             rotation_representation: '6d' or 'axis_angle' for joint rotations (default: 'axis_angle')
             input_resolution: Input image resolution (default: 512, should match dataset resolution)
             backbone_name: Backbone network name ('resnet152', 'vit_base_patch16_224', etc.)
+            head_type: Type of regression head ('mlp' or 'transformer_decoder')
+            transformer_config: Configuration dict for transformer decoder (only used if head_type='transformer_decoder')
         """
         # For rgb_only=True, SMALFitter expects data_batch to be just the RGB tensor
         if rgb_only and isinstance(data_batch, tuple):
@@ -134,6 +138,8 @@ class SMILImageRegressor(SMALFitter):
         self.rotation_representation = rotation_representation
         self.input_resolution = input_resolution
         self.backbone_name = backbone_name
+        self.head_type = head_type
+        self.transformer_config = transformer_config or {}
         
         # Enable scaling propagation for SMIL models (matches Unreal2Pytorch3D behavior)
         self.propagate_scaling = True
@@ -151,11 +157,14 @@ class SMILImageRegressor(SMALFitter):
         # Calculate output dimensions for SMIL parameters
         self._calculate_output_dims()
         
-        # Create regression head
-        self._create_regression_head()
-        
-        # Initialize parameters for the regression head
-        self._initialize_parameters()
+        # Create regression head based on type
+        if self.head_type == 'mlp':
+            self._create_mlp_regression_head()
+            self._initialize_mlp_parameters()
+        elif self.head_type == 'transformer_decoder':
+            self._create_transformer_decoder_head()
+        else:
+            raise ValueError(f"Unsupported head_type: {self.head_type}. Must be 'mlp' or 'transformer_decoder'")
     
     def _calculate_output_dims(self):
         """Calculate the output dimensions for each SMIL parameter group."""
@@ -196,7 +205,7 @@ class SMILImageRegressor(SMALFitter):
                                 self.cam_rot_dim + self.cam_trans_dim +
                                 self.scales_dim + self.joint_trans_dim)
     
-    def _create_regression_head(self):
+    def _create_mlp_regression_head(self):
         """Create the regression head with fully connected layers."""
         # First fully connected layer (using LayerNorm instead of BatchNorm for stability)
         self.fc1 = nn.Linear(self.feature_dim, self.hidden_dim)
@@ -216,7 +225,7 @@ class SMILImageRegressor(SMALFitter):
         # Dropout for regularization
         self.dropout = nn.Dropout(p=0.3)
     
-    def _initialize_parameters(self):
+    def _initialize_mlp_parameters(self):
         """Initialize the regression head parameters."""
         # Use He initialization for ReLU layers (more appropriate for ReLU activations)
         nn.init.kaiming_uniform_(self.fc1.weight, nonlinearity='relu')
@@ -231,6 +240,45 @@ class SMILImageRegressor(SMALFitter):
         # Use Xavier initialization for final layer (no activation function)
         nn.init.xavier_uniform_(self.regressor.weight)
         nn.init.constant_(self.regressor.bias, 0)
+    
+    def _create_transformer_decoder_head(self):
+        """Create the transformer decoder regression head."""
+        # Default transformer configuration
+        default_config = {
+            'hidden_dim': 1024,
+            'depth': 6,
+            'heads': 8,
+            'dim_head': 64,
+            'mlp_dim': 1024,
+            'dropout': 0.0,
+            'ief_iters': 3,
+        }
+        
+        # Merge with user-provided config
+        config = {**default_config, **self.transformer_config}
+        
+        # For ViT backbones, we can use spatial features
+        if self.backbone_name.startswith('vit'):
+            context_dim = self.feature_dim  # Same as feature dim for ViT
+        else:
+            # For ResNet, we don't have spatial features, so use global features as context
+            context_dim = self.feature_dim
+        
+        # Create transformer decoder head
+        self.transformer_head = build_smil_transformer_decoder_head(
+            feature_dim=self.feature_dim,
+            context_dim=context_dim,
+            hidden_dim=config['hidden_dim'],
+            depth=config['depth'],
+            heads=config['heads'],
+            dim_head=config['dim_head'],
+            mlp_dim=config['mlp_dim'],
+            dropout=config['dropout'],
+            ief_iters=config['ief_iters'],
+            rotation_representation=self.rotation_representation,
+            scales_scale_factor=config.get('scales_scale_factor', 0.01),
+            trans_scale_factor=config.get('trans_scale_factor', 0.01)
+        ).to(self.device)
     
     def preprocess_image(self, image_data) -> torch.Tensor:
         """
@@ -445,6 +493,15 @@ class SMILImageRegressor(SMALFitter):
         """
         batch_size = images.size(0)
         
+        if self.head_type == 'mlp':
+            return self._forward_mlp(images, batch_size)
+        elif self.head_type == 'transformer_decoder':
+            return self._forward_transformer_decoder(images, batch_size)
+        else:
+            raise ValueError(f"Unsupported head_type: {self.head_type}")
+    
+    def _forward_mlp(self, images: torch.Tensor, batch_size: int) -> Dict[str, torch.Tensor]:
+        """Forward pass for MLP regression head."""
         # Extract features using backbone (ResNet or ViT)
         features = self.backbone(images)  # (batch_size, feature_dim)
         
@@ -515,6 +572,22 @@ class SMILImageRegressor(SMALFitter):
             n_joints = self.joint_trans_dim // 3
             params['betas_trans'] = trans_flat.view(batch_size, n_joints, 3)
             idx += self.joint_trans_dim
+        
+        return params
+    
+    def _forward_transformer_decoder(self, images: torch.Tensor, batch_size: int) -> Dict[str, torch.Tensor]:
+        """Forward pass for transformer decoder regression head."""
+        # Extract features using backbone
+        if self.backbone_name.startswith('vit'):
+            # For ViT, get both global and spatial features
+            global_features, spatial_features = self.backbone.forward_with_spatial(images)
+        else:
+            # For ResNet, only global features available
+            global_features = self.backbone(images)
+            spatial_features = None
+        
+        # Pass through transformer decoder head
+        params = self.transformer_head(global_features, spatial_features)
         
         return params
     
@@ -1271,8 +1344,37 @@ class SMILImageRegressor(SMALFitter):
         
         # Convert rotations to axis-angle format for SMAL model (which expects axis-angle)
         if self.rotation_representation == '6d':
-            global_rot_aa = rotation_6d_to_axis_angle(predicted_params['global_rot'])
-            joint_rot_aa = rotation_6d_to_axis_angle(predicted_params['joint_rot'])
+            # Check for NaN or infinite values in 6D rotations
+            if not torch.isfinite(predicted_params['global_rot']).all():
+                print(f"Warning: Non-finite values in global_rot: {predicted_params['global_rot']}")
+                # Replace with identity rotation
+                predicted_params['global_rot'] = torch.tensor([[1.0, 0.0, 0.0, 0.0, 1.0, 0.0]], 
+                                                             device=predicted_params['global_rot'].device, 
+                                                             dtype=predicted_params['global_rot'].dtype).expand_as(predicted_params['global_rot'])
+            
+            if not torch.isfinite(predicted_params['joint_rot']).all():
+                print(f"Warning: Non-finite values in joint_rot: {predicted_params['joint_rot']}")
+                # Replace with identity rotations
+                predicted_params['joint_rot'] = torch.zeros_like(predicted_params['joint_rot'])
+            
+            try:
+                global_rot_aa = rotation_6d_to_axis_angle(predicted_params['global_rot'])
+                joint_rot_aa = rotation_6d_to_axis_angle(predicted_params['joint_rot'])
+                
+                # Check for NaN in converted rotations
+                if not torch.isfinite(global_rot_aa).all():
+                    print(f"Warning: Non-finite values in converted global_rot_aa: {global_rot_aa}")
+                    global_rot_aa = torch.zeros_like(global_rot_aa)
+                
+                if not torch.isfinite(joint_rot_aa).all():
+                    print(f"Warning: Non-finite values in converted joint_rot_aa: {joint_rot_aa}")
+                    joint_rot_aa = torch.zeros_like(joint_rot_aa)
+                    
+            except Exception as e:
+                print(f"Error converting 6D rotations to axis-angle: {e}")
+                # Fallback to zero rotations
+                global_rot_aa = torch.zeros_like(predicted_params['global_rot'][:, :3])
+                joint_rot_aa = torch.zeros_like(predicted_params['joint_rot'][:, :, :3])
         else:
             global_rot_aa = predicted_params['global_rot']
             joint_rot_aa = predicted_params['joint_rot']
@@ -1672,15 +1774,18 @@ class SMILImageRegressor(SMALFitter):
             if backbone_params:
                 trainable_params.append({'params': backbone_params, 'lr': 1e-5})  # Lower LR for backbone
         
-        # Always add regression head parameters
-        trainable_params.extend([
-            {'params': self.fc1.parameters()},
-            {'params': self.fc2.parameters()},
-            {'params': self.fc3.parameters()},
-            {'params': self.regressor.parameters()},
-            {'params': self.ln1.parameters()},
-            {'params': self.ln2.parameters()},
-            {'params': self.ln3.parameters()},
-        ])
+        # Add regression head parameters based on type
+        if self.head_type == 'mlp':
+            trainable_params.extend([
+                {'params': self.fc1.parameters()},
+                {'params': self.fc2.parameters()},
+                {'params': self.fc3.parameters()},
+                {'params': self.regressor.parameters()},
+                {'params': self.ln1.parameters()},
+                {'params': self.ln2.parameters()},
+                {'params': self.ln3.parameters()},
+            ])
+        elif self.head_type == 'transformer_decoder':
+            trainable_params.append({'params': self.transformer_head.parameters()})
         
         return trainable_params
