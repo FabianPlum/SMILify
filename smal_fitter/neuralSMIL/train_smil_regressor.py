@@ -232,7 +232,9 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
             loss.backward()
             
             # Gradient clipping to prevent instability
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            # Use more aggressive clipping for transformer decoder
+            max_norm = 0.5 if model.head_type == 'transformer_decoder' else 1.0
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
             
             # Update parameters
             optimizer.step()
@@ -884,8 +886,19 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         use_ue_scaling=dataset.get_ue_scaling_flag(),
         rotation_representation=rotation_representation,
         input_resolution=input_resolution,
-        backbone_name=model_config['backbone_name']
+        backbone_name=model_config['backbone_name'],
+        head_type=model_config.get('head_type', 'mlp'),
+        transformer_config=model_config.get('transformer_config', {})
     ).to(device)
+    
+    # Print model configuration
+    print(f"Model created with head type: {model.head_type}")
+    if model.head_type == 'transformer_decoder':
+        print(f"Transformer decoder config: {model.transformer_config}")
+        if 'scales_scale_factor' in model.transformer_config:
+            print(f"  Scales scale factor: {model.transformer_config['scales_scale_factor']}")
+        if 'trans_scale_factor' in model.transformer_config:
+            print(f"  Trans scale factor: {model.transformer_config['trans_scale_factor']}")
     
     # Apply memory optimizations
     memory_optimizer.optimize_model_for_memory(
@@ -896,12 +909,50 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     
     memory_optimizer.monitor.print_memory_status("After model initialization")
     
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model parameters: {total_params:,}")
+    
+    # Print parameter breakdown by component
+    if model.head_type == 'transformer_decoder':
+        backbone_params = sum(p.numel() for p in model.backbone.parameters() if p.requires_grad)
+        head_params = sum(p.numel() for p in model.transformer_head.parameters() if p.requires_grad)
+        print(f"  Backbone parameters: {backbone_params:,}")
+        print(f"  Transformer decoder parameters: {head_params:,}")
+    else:
+        backbone_params = sum(p.numel() for p in model.backbone.parameters() if p.requires_grad)
+        head_params = sum(p.numel() for p in [model.fc1, model.fc2, model.fc3, model.regressor, model.ln1, model.ln2, model.ln3] for p in p.parameters() if p.requires_grad)
+        print(f"  Backbone parameters: {backbone_params:,}")
+        print(f"  MLP head parameters: {head_params:,}")
     
     # Initialize optimizer and loss function
     # Use the learning rate from curriculum (base learning rate for epoch 0)
     initial_lr = TrainingConfig.get_learning_rate_for_epoch(0)
-    optimizer = optim.Adam(model.get_trainable_parameters(), lr=initial_lr)
+    
+    # Get trainable parameters with different learning rates for different components
+    trainable_params = model.get_trainable_parameters()
+    
+    # For transformer decoder, use a more conservative learning rate
+    if model.head_type == 'transformer_decoder':
+        # Use lower learning rate for transformer decoder head
+        transformer_lr = initial_lr * 0.1  # 10x smaller learning rate
+        print(f"Using conservative learning rate for transformer decoder: {transformer_lr}")
+        
+        # Create separate parameter groups with different learning rates
+        backbone_params = []
+        transformer_params = []
+        
+        for param_group in trainable_params:
+            if 'transformer_head' in str(param_group.get('params', [])):
+                # Lower learning rate for transformer head
+                transformer_params.append({'params': param_group['params'], 'lr': transformer_lr})
+            else:
+                # Normal learning rate for backbone
+                backbone_params.append(param_group)
+        
+        # Combine parameter groups
+        trainable_params = backbone_params + transformer_params
+    
+    optimizer = optim.Adam(trainable_params, lr=initial_lr)
     criterion = nn.MSELoss()
     
     print(f"Initial learning rate set to: {initial_lr}")
