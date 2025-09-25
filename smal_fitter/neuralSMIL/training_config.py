@@ -41,7 +41,7 @@ class TrainingConfig:
         'learning_rate': 0.0001,
         'seed': 0,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': None, # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': 'checkpoints/best_model.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 32,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 16,  # Prefetch batches
@@ -54,6 +54,18 @@ class TrainingConfig:
         'hidden_dim': 1024,  # Deprecated, Will be adjusted based on backbone
         'rgb_only': False,
         'use_unity_prior': False,
+        'head_type': 'transformer_decoder',  # 'mlp' or 'transformer_decoder'
+        'transformer_config': {
+            'hidden_dim': 1024,
+            'depth': 6,
+            'heads': 8,
+            'dim_head': 64,
+            'mlp_dim': 1024,
+            'dropout': 0.1,  # Add some dropout for stability
+            'ief_iters': 3,
+            'scales_scale_factor': 0.001,  # Scale factor for log_beta_scales (encourages values close to zero)
+            'trans_scale_factor': 0.001,   # Scale factor for betas_trans (encourages values close to zero)
+        }
     }
     
     # Loss curriculum configuration
@@ -76,28 +88,30 @@ class TrainingConfig:
         # Curriculum stages: (epoch_threshold, weight_updates)
         'curriculum_stages': [
             # Stage 1: Introduce keypoint and silhouette losses gradually
-            (5, {
-                'keypoint_2d': 0.001,
-                'silhouette': 0.0001
+            (10, {
+                'keypoint_2d': 0.01,
+                'silhouette': 0.001,
+                'betas_trans': 0.5,
+                'log_beta_scales': 0.5,
             }),
             
             # Stage 2: Increase keypoint and silhouette weights
-            (8, {
+            (15, {
                 'betas': 0.02,
-                'keypoint_2d': 0.01,
+                'keypoint_2d': 0.05,
                 'silhouette': 0.001
             }),
             
             # Stage 3: Further increase and start reducing joint rotation influence
-            (12, {
+            (20, {
                 'betas': 0.1,
-                'keypoint_2d': 0.05,
-                'joint_rot': 0.01,      # Reduce to favor keypoint loss
+                'keypoint_2d': 0.1,
+                'joint_rot': 0.02,      # Reduce to favor keypoint loss
                 'silhouette': 0.001
             }),
             
             # Stage 4: High keypoint weight for fine-tuning
-            (15, {
+            (30, {
                 'betas': 0.2,
                 'keypoint_2d': 0.1,
                 'joint_rot': 0.02,      # Keep reduced
@@ -105,13 +119,11 @@ class TrainingConfig:
             }),
             
             # Stage 5: Increase log_beta_scales and betas_trans weights to fine tune their influence
-            (20, {
+            (40, {
                 'betas': 0.2,
                 'keypoint_2d': 0.1,
-                'joint_rot': 0.02,
-                'silhouette': 0.01,
-                'log_beta_scales': 0.5,
-                'betas_trans': 0.5
+                'joint_rot': 0.1,
+                'silhouette': 0.01
             })
         ]
     }
@@ -124,7 +136,7 @@ class TrainingConfig:
         # Learning rate stages: (epoch_threshold, learning_rate)
         'lr_stages': [
             # Stage 1: Reduce learning rate for fine-tuning
-            (10, 0.00005),   # 5e-5
+            (15, 0.00005),   # 5e-5
             
             # Stage 2: Further reduce for final fine-tuning
             (20, 0.000001),  # 1e-6
@@ -139,7 +151,7 @@ class TrainingConfig:
         'checkpoint_dir': 'checkpoints',
         'plots_dir': 'plots',
         'visualizations_dir': 'visualizations',
-        'save_checkpoint_every': 10,        # Save checkpoint every N epochs
+        'save_checkpoint_every': 2,        # Save checkpoint every N epochs
         'generate_visualizations_every': 1, # Generate visualizations every N epochs
         'plot_history_every': 10,          # Plot training history every N epochs
         'num_visualization_samples': 10,    # Number of samples to visualize
@@ -256,6 +268,22 @@ class TrainingConfig:
         elif backbone_name.startswith('resnet'):
             config['model_config']['hidden_dim'] = 2048
         
+        # Adjust transformer config based on backbone
+        if config['model_config']['head_type'] == 'transformer_decoder':
+            # For ViT backbones, use spatial features
+            if backbone_name.startswith('vit'):
+                # ViT provides spatial features, so we can use them as context
+                pass  # Keep default config
+            else:
+                # For ResNet, we don't have spatial features
+                # Adjust context_dim to match feature_dim
+                if 'base' in backbone_name:
+                    config['model_config']['transformer_config']['context_dim'] = 768
+                elif 'large' in backbone_name:
+                    config['model_config']['transformer_config']['context_dim'] = 1024
+                elif backbone_name.startswith('resnet'):
+                    config['model_config']['transformer_config']['context_dim'] = 2048
+        
         return config
     
     @classmethod
@@ -278,12 +306,21 @@ class TrainingConfig:
         
         print("Model Configuration:")
         for key, value in config['model_config'].items():
-            print(f"  {key}: {value}")
+            if key != 'transformer_config':  # Print transformer config separately
+                print(f"  {key}: {value}")
         
         # Print backbone-specific information
         backbone_name = config['model_config']['backbone_name']
         print(f"  Backbone type: {'Vision Transformer' if backbone_name.startswith('vit') else 'ResNet'}")
         print(f"  Feature dimension: {config['model_config']['hidden_dim']}")
+        
+        # Print head-specific information
+        head_type = config['model_config']['head_type']
+        print(f"  Regression head: {head_type}")
+        if head_type == 'transformer_decoder':
+            print("  Transformer decoder config:")
+            for key, value in config['model_config']['transformer_config'].items():
+                print(f"    {key}: {value}")
         print()
         
         print("Loss Curriculum:")
