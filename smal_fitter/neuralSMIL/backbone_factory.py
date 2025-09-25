@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 # Import timm with error handling
 try:
@@ -191,6 +191,27 @@ class ViTBackbone(BackboneInterface):
         cls_token = features[:, 0]  # (batch_size, 768, 1024 for large)
         
         return cls_token
+    
+    def forward_with_spatial(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass through ViT backbone returning both global and spatial features.
+        
+        Args:
+            x: Input tensor of shape (batch_size, 3, height, width)
+            
+        Returns:
+            Tuple of (global_features, spatial_features)
+            - global_features: CLS token (batch_size, feature_dim)
+            - spatial_features: Patch tokens (batch_size, num_patches, feature_dim)
+        """
+        # ViT outputs (batch_size, num_patches + 1, feature_dim) where +1 is for CLS token
+        features = self.backbone.forward_features(x)  # (batch_size, 197, 768) for 224x224 input
+        
+        # Split CLS token and patch tokens
+        cls_token = features[:, 0]  # (batch_size, feature_dim)
+        patch_tokens = features[:, 1:]  # (batch_size, num_patches, feature_dim)
+        
+        return cls_token, patch_tokens
     
     def get_feature_dim(self) -> int:
         """Get ViT feature dimension."""
