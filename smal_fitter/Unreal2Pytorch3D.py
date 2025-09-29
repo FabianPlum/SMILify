@@ -967,6 +967,26 @@ def load_SMIL_Unreal_sample(json_file_path,
                 visibility[i] = 0
         y_output["keypoint_visibility"] = visibility
 
+    # Extract 3D keypoints from pose_data before transformation
+    keypoints_3d = []
+    keypoint_names_3d = []
+    for key in pose_data.keys():
+        keypoint_names_3d.append(key)
+        # Apply Unreal to PyTorch3D coordinate transformation (mirror x-axis)
+        x_ue = pose_data[key]["3DPos"]["x"]
+        y_ue = pose_data[key]["3DPos"]["y"] 
+        z_ue = pose_data[key]["3DPos"]["z"]
+        keypoints_3d.append([-x_ue, y_ue, z_ue])  # Mirror x-axis for Unreal to PyTorch3D
+    
+    # Map 3D keypoints to SMIL joint order
+    mapped_keypoints_3d = np.zeros((len(config.dd["J_names"]), 3), float)
+    for o, orig_joint in enumerate(config.dd["J_names"]):
+        for m, mapped_joint in enumerate(keypoint_names_3d):
+            if orig_joint == mapped_joint:
+                mapped_keypoints_3d[o] = keypoints_3d[m]
+    
+    y_output["keypoints_3d_original"] = mapped_keypoints_3d.copy()  # Store original for debugging
+
     # --- Re-parameterize scene: place model at origin with zero rotation ---
     # PyTorch3D uses row-vector convention: X_cam = X_world R + T
     # With X_world = X_model R_model + t_model, the equivalent camera extrinsics are:
@@ -1008,6 +1028,28 @@ def load_SMIL_Unreal_sample(json_file_path,
     y_output["cam_trans"] = torch.tensor(T_cam_new, dtype=torch.float32)
     y_output["root_loc"] = np.zeros_like(t_model_p3d, dtype=np.float32)
     y_output["root_rot"] = np.zeros(3, dtype=np.float32)
+    
+    # Transform 3D keypoints to match the model transformation
+    # Apply the inverse transformation to move keypoints from world coordinates 
+    # to model-centered coordinates (same transformation applied to the model)
+    # X_model_centered = (X_world - t_model) @ R_model^T @ Rz^T
+    # where Rz is the -180° yaw correction
+    
+    # First, apply the inverse yaw correction (transpose of Rz)
+    Rz_inv = Rz.T
+    
+    # Transform keypoints: translate by -t_model, then rotate by inverse of R_model, then apply inverse yaw correction
+    keypoints_3d_transformed = []
+    for kp_3d in mapped_keypoints_3d:
+        # Translate to model origin
+        kp_translated = kp_3d - t_model_p3d
+        # Apply inverse model rotation (R_model^T)
+        kp_rotated = kp_translated @ R_model_p3d.T
+        # Apply inverse yaw correction  
+        kp_final = kp_rotated @ Rz_inv
+        keypoints_3d_transformed.append(kp_final)
+    
+    y_output["keypoints_3d"] = np.array(keypoints_3d_transformed, dtype=np.float32)
 
     if verbose:
         print("\nINFO: Sucessfully loaded data from", json_file_path)
