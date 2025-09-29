@@ -21,11 +21,12 @@ class TrainingConfig:
         'full_dataset': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Masked",
         'SHAPE-n-POSE': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-SHAPE-n-POSE",
         'simple': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Simple",
-        'simple100k': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Simple100k-noScale"
+        'simple100k': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Simple100k-noScale",
+        'simple100k_local': "/home/fabi/DATA_LOCAL/replicAnt-x-SMIL-OmniAnt-Simple100k-noScale"
     }
     
     # Default dataset to use
-    DEFAULT_DATASET = 'simple100k'
+    DEFAULT_DATASET = 'simple100k_local'
     
     # Training split configuration
     SPLIT_CONFIG = {
@@ -34,17 +35,18 @@ class TrainingConfig:
         # Training size is automatically: 1 - test_size - val_size = 0.85 (85%)
     }
     
-    # Training hyperparameters
+    # Training hyperparameters (AniMer-style conservative settings)
     TRAINING_PARAMS = {
         'batch_size': 8,
         'num_epochs': 100,
-        'learning_rate': 0.0001,
-        'seed': 0,
+        'learning_rate': 1.25e-6,  # AniMer-style very conservative learning rate
+        'weight_decay': 1e-4,  # Add weight decay for AdamW
+        'seed': 13,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': 'checkpoints/best_model.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
-        'num_workers': 32,  # Number of data loading workers (reduced to prevent tkinter issues)
+        'resume_checkpoint': 'checkpoints/checkpoint_epoch_19.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
+        'num_workers': 16,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
-        'prefetch_factor': 16,  # Prefetch batches
+        'prefetch_factor': 8,  # Prefetch batches
     }
     
     # Model configuration
@@ -68,81 +70,75 @@ class TrainingConfig:
         }
     }
     
-    # Loss curriculum configuration
+    # Joint visibility configuration for preprocessing
+    # Joints that should be ignored during training due to mesh vs. training data misalignment
+    IGNORED_JOINTS_CONFIG = {
+        # List of joint names to ignore (set visibility to 0) during preprocessing
+        # These joints often have misalignment between the parametric model and ground truth
+        'ignored_joint_names': [
+            # Add joint names here that should be ignored
+            # Example: 'head_tip', 'antenna_tip', etc.
+            "b_a_5"
+        ],
+        
+        # Whether to print information about ignored joints during preprocessing
+        'verbose_ignored_joints': True,
+    }
+    
+    # Loss curriculum configuration (AniMer-style conservative weights)
     LOSS_CURRICULUM = {
-        # Base loss weights (applied throughout training)
+        # Base loss weights (applied throughout training) - AniMer-style conservative
         'base_weights': {
-            'global_rot': 0.02,
-            'joint_rot': 0.02,
-            'betas': 0.1,
-            'trans': 0.001,
+            'global_rot': 0.001,     # AniMer: 0.001
+            'joint_rot': 0.001,      # AniMer: 0.001  
+            'betas': 0.0005,         # AniMer: 0.0005
+            'trans': 0.0005,         # AniMer: 0.0005
             'fov': 0.001,
             'cam_rot': 0.01,
             'cam_trans': 0.001,
-            'log_beta_scales': 0.1,
-            'betas_trans': 0.1,
-            'keypoint_2d': 0.0,      # Start at zero
-            'silhouette': 0.0        # Start at zero
+            'log_beta_scales': 0.0005,  # Conservative
+            'betas_trans': 0.0005,      # Conservative
+            'keypoint_2d': 0.0,        # AniMer: 0.01
+            'keypoint_3d': 0.0,        # 3D keypoint loss - start at zero
+            'silhouette': 0.0           # Start at zero
         },
         
-        # Curriculum stages: (epoch_threshold, weight_updates)
+        # Curriculum stages: (epoch_threshold, weight_updates) - AniMer-style conservative
         'curriculum_stages': [
-            # Stage 1: Introduce keypoint and silhouette losses gradually
+            # Stage 1: Introduce keypoint losses gradually (AniMer-style)
             (10, {
-                'keypoint_2d': 0.01,
-                'silhouette': 0.001,
-                'betas_trans': 0.5,
-                'log_beta_scales': 0.5,
+                'betas': 0.001, 
+                'joint_rot': 0.001,
+                'keypoint_2d': 0.01,    # AniMer: 0.01
+                'keypoint_3d': 0.02,   # Conservative start for 3D loss
+                'silhouette': 0.01,
             }),
             
-            # Stage 2: Increase keypoint and silhouette weights
-            (15, {
-                'betas': 0.02,
-                'keypoint_2d': 0.05,
-                'silhouette': 0.001
-            }),
-            
-            # Stage 3: Further increase and start reducing joint rotation influence
-            (20, {
-                'betas': 0.1,
-                'keypoint_2d': 0.1,
-                'joint_rot': 0.02,      # Reduce to favor keypoint loss
-                'silhouette': 0.001
-            }),
-            
-            # Stage 4: High keypoint weight for fine-tuning
+            # Stage 2: Slight increase in keypoint weights
             (30, {
-                'betas': 0.2,
-                'keypoint_2d': 0.1,
-                'joint_rot': 0.02,      # Keep reduced
-                'silhouette': 0.001
-            }),
-            
-            # Stage 5: Increase log_beta_scales and betas_trans weights to fine tune their influence
-            (40, {
-                'betas': 0.2,
-                'keypoint_2d': 0.1,
-                'joint_rot': 0.1,
+                'betas': 0.001, 
+                'keypoint_2d': 0.02,    # Still conservative
+                'keypoint_3d': 0.05,   # Gradual increase
                 'silhouette': 0.01
             })
         ]
     }
     
-    # Learning rate curriculum configuration
+    # Learning rate curriculum configuration (AniMer-style conservative)
     LEARNING_RATE_CURRICULUM = {
-        # Base learning rate (applied at epoch 0)
-        'base_learning_rate': 0.0001,
+        # Base learning rate (applied at epoch 0) - AniMer-style
+        'base_learning_rate': 1.25e-6,
         
-        # Learning rate stages: (epoch_threshold, learning_rate)
+        # Learning rate stages: (epoch_threshold, learning_rate) - Very conservative
         'lr_stages': [
-            # Stage 1: Reduce learning rate for fine-tuning
-            (15, 0.00005),   # 5e-5
+            # Stage 1: Slight reduction for fine-tuning
+            (40, 1e-6),      # 1e-6
             
             # Stage 2: Further reduce for final fine-tuning
-            (20, 0.000001),  # 1e-6
+            (60, 5e-7),      # 5e-7
             
             # Stage 3: Very low learning rate for final convergence
-            (30, 0.0000005), # 5e-7
+            (80, 1e-7),      # 1e-7
         ]
     }
     
@@ -253,6 +249,7 @@ class TrainingConfig:
             'split_config': cls.SPLIT_CONFIG,
             'training_params': cls.TRAINING_PARAMS,
             'model_config': cls.MODEL_CONFIG.copy(),  # Make a copy to avoid modifying the original
+            'ignored_joints_config': cls.IGNORED_JOINTS_CONFIG,
             'loss_curriculum': cls.LOSS_CURRICULUM,
             'learning_rate_curriculum': cls.LEARNING_RATE_CURRICULUM,
             'output_config': cls.OUTPUT_CONFIG,
