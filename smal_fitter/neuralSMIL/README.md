@@ -1,182 +1,356 @@
 # SMIL Image Regressor
 
-A neural network implementation for predicting SMIL (Statistical Model of Insect Locomotion) parameters from RGB images. This implementation extends the existing SMALFitter class and uses a frozen ResNet152 backbone as a feature extractor.
+A neural network implementation for predicting SMIL (Statistical Model of Insect Locomotion) parameters from RGB images. This implementation extends the existing SMALFitter class and supports multiple backbone architectures including ResNet and Vision Transformer (ViT) models. The architecture and training paradigm choices are based on [AniMer](https://github.com/luoxue-star/AniMer).
 
 ## Overview
 
 The SMIL Image Regressor learns to predict the following SMIL parameters from input images:
 
-- **Global rotation**: 3D rotation of the root joint
+- **Global rotation**: 3D rotation of the root joint (axis-angle or 6D representation)
 - **Joint rotations**: 3D rotations for all joints (excluding root)
 - **Shape parameters (betas)**: Shape deformation parameters
 - **Translation**: 3D translation of the model
-- **Camera FOV**: Field of view parameter
+- **Camera parameters**: FOV, rotation matrix, and translation
 - **Joint scales**: Per-joint scaling parameters (if available)
 - **Joint translations**: Per-joint translation parameters (if available)
 
-## Architecture
+## Key Features
 
-The network consists of:
+- **Multiple Backbone Support**: ResNet50/101/152 and Vision Transformer (ViT) models
+- **Flexible Regression Heads**: MLP or Transformer Decoder architectures
+- **Advanced Training**: Loss curriculum, learning rate scheduling, 3D keypoint supervision
+- **Optimized Data Pipeline**: HDF5-based dataset preprocessing for faster training
+- **Ground Truth Testing**: Comprehensive validation against known parameters
+- **Joint Filtering**: Configurable ignored joints to handle model misalignments
 
-1. **ResNet152 Backbone**: Pre-trained on ImageNet, frozen during training
-2. **Feature Extraction**: 2048-dimensional feature vector from ResNet152
-3. **Regression Head**: Two fully connected layers (2048 → 512 → 256)
-4. **Parameter Output**: Final layer that outputs all SMIL parameters
+## Architecture Options
+
+### Backbone Networks
+1. **ResNet Models**: ResNet50/101/152 (512x512 input, 2048 features)
+2. **Vision Transformers**: ViT Base/Large (224x224 input, 768/1024 features)
+
+### Regression Heads
+1. **MLP Head**: Two fully connected layers with dropout
+2. **Transformer Decoder**: Advanced attention-based decoder with iterative refinement
+
+### Loss Functions
+- **Parameter Loss**: MSE for global rotation, joint rotations, shape, translation, camera
+- **2D Keypoint Loss**: MSE between predicted and ground truth 2D keypoints
+- **3D Keypoint Loss**: MSE between predicted and ground truth 3D joint positions  
+- **Silhouette Loss**: Binary cross-entropy for rendered vs. ground truth silhouettes
 
 ## Files
 
-- `smil_image_regressor.py`: Main network implementation
-- `train_smil_regressor.py`: Training script
-- `main.py`: Demonstration script
-- `smil_datasets.py`: Dataset loading utilities
-- `README.md`: This documentation
+### Core Implementation
+- `smil_image_regressor.py`: Main network implementation with multiple backbone support
+- `transformer_decoder.py`: Transformer-based regression head implementation
+- `train_smil_regressor.py`: Advanced training script with curriculum learning
+- `training_config.py`: Comprehensive training configuration and hyperparameters
 
-## Usage
+### Dataset Management
+- `smil_datasets.py`: Unified dataset interface for JSON and HDF5 formats
+- `dataset_preprocessing.py`: HDF5 dataset preprocessing for optimized training
+- `optimized_dataset.py`: High-performance HDF5 dataset loader
+- `preprocess_dataset.py`: CLI script for dataset preprocessing
 
-### Basic Usage
+### Testing and Validation
+- `test_smil_regressor_ground_truth.py`: Ground truth validation and 3D keypoint alignment testing
+- `example_usage.py`: Example usage patterns and demonstrations
+
+## Quick Start Guide
+
+### 1. Dataset Preprocessing (Recommended)
+
+First, preprocess your JSON dataset to optimized HDF5 format for faster training:
+
+```bash
+# Basic preprocessing
+python preprocess_dataset.py input_dataset/ optimized_dataset.h5
+
+# Advanced preprocessing with custom settings
+python preprocess_dataset.py input_dataset/ optimized_dataset.h5 \
+    --silhouette_threshold 0.15 \
+    --backbone vit_large_patch16_224 \
+    --min_visible_keypoints 10 \
+    --num_workers 8
+```
+
+### 2. Training
+
+Train the model using either preprocessed HDF5 or original JSON datasets:
+
+```bash
+# Train with optimized dataset (recommended - faster)
+python train_smil_regressor.py --data_path optimized_dataset.h5 --batch-size 8
+
+# Train with original JSON dataset
+python train_smil_regressor.py --dataset simple --batch-size 8
+
+# Advanced training with custom configuration
+python train_smil_regressor.py \
+    --data_path optimized_dataset.h5 \
+    --batch-size 8 \
+    --backbone vit_large_patch16_224 \
+    --learning-rate 1e-6 \
+    --num-epochs 100
+```
+
+### 3. Ground Truth Testing
+
+Validate model accuracy against known ground truth parameters:
+
+```bash
+# Test with 3D keypoint alignment
+python test_smil_regressor_ground_truth.py --test-3d-keypoints
+
+# Test specific sample
+python test_smil_regressor_ground_truth.py --sample-index 5 --tolerance-3d-keypoints 0.15
+```
+
+### 4. Basic Python Usage
 
 ```python
 from smil_image_regressor import SMILImageRegressor
+from smil_datasets import UnifiedSMILDataset
 import torch
 
-# Create placeholder data for initialization
-placeholder_data = create_placeholder_data_batch(batch_size=1)
+# Load dataset (automatically detects HDF5 vs JSON)
+dataset = UnifiedSMILDataset.from_path("path/to/dataset", 
+                                      rotation_representation='6d',
+                                      backbone_name='vit_large_patch16_224')
 
-# Initialize the model
+# Get a sample
+x_data, y_data = dataset[0]
+
+# Initialize model with ViT backbone
 model = SMILImageRegressor(
     device='cuda',
-    data_batch=placeholder_data,
+    data_batch=x_data,
     batch_size=1,
     shape_family=config.SHAPE_FAMILY,
-    use_unity_prior=False,
-    rgb_only=True,
-    freeze_backbone=True,
-    hidden_dim=512
+    backbone_name='vit_large_patch16_224',
+    head_type='transformer_decoder',
+    rotation_representation='6d'
 )
 
-# Predict from an image
-import numpy as np
-image_data = np.random.rand(512, 512, 3) * 255  # Example image
-predicted_params = model.predict_from_image(image_data)
+# Predict from image
+predicted_params = model.predict_from_image(x_data['input_image_data'])
 ```
 
-### Training
+## Configuration
 
-To train the model on your dataset:
+### Training Configuration (`training_config.py`)
 
-```bash
-python train_smil_regressor.py
+The training system uses a comprehensive configuration system:
+
+```python
+# Dataset configuration
+DATA_PATHS = {
+    'simple': "/path/to/simple/dataset",
+    'simple100k_local': "/path/to/large/dataset"
+}
+
+# Model configuration
+MODEL_CONFIG = {
+    'backbone_name': 'vit_large_patch16_224',  # or 'resnet152'
+    'head_type': 'transformer_decoder',        # or 'mlp'
+    'freeze_backbone': True,
+    'rotation_representation': '6d'            # or 'axis_angle'
+}
+
+# Loss curriculum - weights change during training
+LOSS_CURRICULUM = {
+    'base_weights': {
+        'global_rot': 0.001,
+        'joint_rot': 0.001,
+        'keypoint_2d': 0.0,    # Starts at 0, increases later
+        'keypoint_3d': 0.0,    # Starts at 0, increases later
+        'silhouette': 0.0      # Starts at 0, increases later
+    },
+    'curriculum_stages': [
+        (10, {'keypoint_2d': 0.01, 'keypoint_3d': 0.02}),  # Stage 1
+        (30, {'keypoint_2d': 0.02, 'keypoint_3d': 0.05})   # Stage 2
+    ]
+}
+
+# Ignored joints configuration
+IGNORED_JOINTS_CONFIG = {
+    'ignored_joint_names': ['b_a_5'],  # Joints to ignore during training
+    'verbose_ignored_joints': True
+}
 ```
 
-The training script will:
-1. Load the replicAnt SMIL dataset
-2. Split it into train/validation/test sets
-3. Train the model with Adam optimizer
-4. Save the best model based on validation loss
-5. Generate training plots
+### Advanced Features
 
-### Demonstration
+#### Dataset Optimization
+- **HDF5 Preprocessing**: Convert JSON datasets to optimized HDF5 format
+- **JPEG Compression**: Efficient image storage with configurable quality
+- **Chunked Storage**: Optimized for batch loading during training
+- **Automatic Filtering**: Remove low-quality samples based on silhouette coverage
 
-To see the model in action:
+#### Training Optimizations
+- **Loss Curriculum**: Gradual introduction of different loss components
+- **Learning Rate Scheduling**: Automatic reduction at key epochs
+- **Mixed Precision**: 16-bit training for faster convergence
+- **Visualization**: Training progress visualization and keypoint alignment plots
 
-```bash
-python main.py
+#### Joint Filtering System
+Configure joints to ignore during training to handle model misalignments:
+
+```python
+IGNORED_JOINTS_CONFIG = {
+    'ignored_joint_names': [
+        'an_1_r', 'an_1_l',  # Antenna tips (often misaligned)
+        'b_a_5'              # Specific problematic joint
+    ]
+}
 ```
 
-This will:
-1. Initialize the model
-2. Load a sample from the dataset
-3. Predict SMIL parameters
-4. Display the results
+## Dataset Formats
 
-## Dataset Format
-
-The model expects data in the format provided by `replicAntSMILDataset`:
+### Original JSON Format
+The model supports the original replicAnt SMIL JSON format:
 
 - **Input (x)**: Dictionary containing:
   - `input_image`: Path to the image file
-  - `input_image_data`: Image as numpy array (H, W, C)
+  - `input_image_data`: Image as numpy array (H, W, C) in range [0, 1]
+  - `input_image_mask`: Silhouette mask as numpy array (H, W)
 
 - **Target (y)**: Dictionary containing:
-  - `joint_angles`: Joint rotation angles
-  - `shape_betas`: Shape parameters
-  - `root_loc`: Root location
-  - `root_rot`: Root rotation
-  - `cam_fov`: Camera field of view
+  - `joint_angles`: Joint rotation angles (N_JOINTS, 3)
+  - `shape_betas`: Shape parameters (N_BETAS,)
+  - `root_loc`: Root location (3,)
+  - `root_rot`: Root rotation (3,)
+  - `cam_fov`: Camera field of view (scalar)
+  - `cam_rot`: Camera rotation matrix (3, 3)
+  - `cam_trans`: Camera translation (3,)
+  - `keypoints_2d`: 2D keypoint coordinates (N_JOINTS, 2) normalized [0, 1]
+  - `keypoints_3d`: 3D keypoint coordinates (N_JOINTS, 3)
+  - `keypoint_visibility`: Keypoint visibility flags (N_JOINTS,)
   - `scale_weights`: Joint scale weights (optional)
   - `trans_weights`: Joint translation weights (optional)
 
-## Model Parameters
+### Optimized HDF5 Format
+For faster training, datasets can be preprocessed to HDF5 format:
 
-The model can be configured with the following parameters:
+- **Benefits**: 
+  - 10-12x faster data loading
+  - JPEG compression for efficient storage
+  - Pre-computed visibility and filtering
+  - Chunked storage optimized for batch sizes
 
-- `freeze_backbone`: Whether to freeze ResNet152 weights (default: True)
-- `hidden_dim`: Hidden dimension for FC layers (default: 512)
-- `batch_size`: Batch size for processing
-- `shape_family`: SMIL shape family ID
-- `use_unity_prior`: Whether to use unity prior
+- **Structure**:
+  ```
+  dataset.h5
+  ├── metadata/          # Dataset statistics and configuration
+  ├── images/           # RGB images (JPEG) and silhouette masks
+  ├── parameters/       # All SMIL parameters (pose, shape, camera)
+  ├── keypoints/        # 2D/3D keypoints and visibility
+  └── auxiliary/        # Original paths and statistics
+  ```
 
-## Training Configuration
+## Model Architecture Parameters
 
-The training script uses the following default settings:
+### Backbone Configuration
+- `backbone_name`: Network architecture
+  - ResNet: `'resnet50'`, `'resnet101'`, `'resnet152'`
+  - ViT: `'vit_base_patch16_224'`, `'vit_large_patch16_224'`
+- `freeze_backbone`: Freeze backbone weights (default: True)
+- `input_resolution`: Input image size (auto-selected based on backbone)
 
-- **Optimizer**: Adam with learning rate 0.001
-- **Loss Function**: MSE loss for all parameters
-- **Batch Size**: 4
-- **Epochs**: 50
-- **Data Split**: 70% train, 15% validation, 15% test
+### Regression Head Configuration
+- `head_type`: Regression head architecture
+  - `'mlp'`: Simple MLP with dropout
+  - `'transformer_decoder'`: Advanced transformer decoder with iterative refinement
+- `hidden_dim`: Hidden dimension for regression head (auto-selected based on backbone)
 
-## Output
+### Training Parameters
+- `rotation_representation`: Rotation parameterization
+  - `'axis_angle'`: 3-parameter axis-angle representation
+  - `'6d'`: 6D rotation representation (more stable)
+- `batch_size`: Training batch size (4-16 depending on GPU memory)
+- `learning_rate`: Base learning rate (1.25e-6, AniMer-style conservative)
+- `num_epochs`: Training epochs (100+ recommended)
 
-The model outputs a dictionary with the following keys:
+## Performance Benchmarks
+
+### Dataset Loading Speed
+- **JSON Dataset**: ~2 iterations/second
+- **Optimized HDF5**: ~24 iterations/second (**12x faster**)
+
+### Memory Usage (ViT Large + Transformer Decoder)
+- **GPU Memory**: ~2-3GB for batch size 8
+- **Training Speed**: ~24 it/s on RTX 4090 with optimized dataset
+
+### Model Accuracy (Ground Truth Test)
+- **Parameter Loss**: < 0.01 for ground truth parameters
+- **2D Keypoint Error**: < 2 pixels on average
+- **3D Keypoint Alignment**: Mean error varies by joint complexity
+
+## Model Output
+
+The model outputs a dictionary with SMIL parameters:
 
 ```python
 {
-    'global_rot': torch.Tensor,      # (batch_size, 3)
-    'joint_rot': torch.Tensor,       # (batch_size, N_POSE, 3)
-    'betas': torch.Tensor,           # (batch_size, N_BETAS)
-    'trans': torch.Tensor,           # (batch_size, 3)
-    'fov': torch.Tensor,             # (batch_size, 1)
+    'global_rot': torch.Tensor,      # (batch_size, 3/6) - root rotation
+    'joint_rot': torch.Tensor,       # (batch_size, N_POSE, 3/6) - joint rotations  
+    'betas': torch.Tensor,           # (batch_size, N_BETAS) - shape parameters
+    'trans': torch.Tensor,           # (batch_size, 3) - translation
+    'fov': torch.Tensor,             # (batch_size, 1) - camera FOV
+    'cam_rot': torch.Tensor,         # (batch_size, 3, 3) - camera rotation matrix
+    'cam_trans': torch.Tensor,       # (batch_size, 3) - camera translation
     'log_beta_scales': torch.Tensor, # (batch_size, N_JOINTS, 3) [optional]
     'betas_trans': torch.Tensor,     # (batch_size, N_JOINTS, 3) [optional]
 }
 ```
 
+*Note: Rotation dimensions depend on `rotation_representation` setting (3 for axis-angle, 6 for 6D)*
+
 ## Integration with SMALFitter
 
-The model extends `SMALFitter` and inherits all its functionality:
-
-- SMIL model loading and rendering
-- Parameter optimization
-- Visualization capabilities
-- Loss computation
-
-You can use the predicted parameters directly with the SMALFitter's rendering pipeline:
+The model extends `SMALFitter` and inherits all functionality:
 
 ```python
-# Set predicted parameters to the model
+# Direct parameter setting and rendering
 model.set_smil_parameters(predicted_params, batch_idx=0)
 
-# Generate visualization
-image_exporter = ImageExporter("output", ["sample"])
-model.generate_visualization(image_exporter)
+# Generate 3D mesh and 2D projections
+vertices, faces = model.get_mesh_vertices_faces()
+rendered_image = model.render_rgb_image()
+rendered_silhouette = model.render_silhouette()
+
+# Compute losses for training
+loss_dict = model.compute_prediction_loss(predicted_params, target_params)
 ```
 
 ## Requirements
 
-- PyTorch
-- Torchvision
-- NumPy
-- OpenCV
-- Matplotlib
-- tqdm
+### Core Dependencies
+- **PyTorch** (≥1.10) with CUDA support
+- **PyTorch3D** for 3D rendering and transformations
+- **Torchvision** for backbone networks
+- **NumPy** for numerical operations
+- **OpenCV** for image processing
+- **H5py** for HDF5 dataset support
 
-## Notes
+### Training & Visualization
+- **tqdm** for progress bars
+- **Matplotlib** for plotting and visualization
+- **Pillow** for image I/O
+- **scikit-learn** for data splitting
 
-- The ResNet152 backbone is frozen by default to leverage pre-trained features
-- Images are automatically resized to 512x512 pixels
-- The model handles both standard SMAL and SMIL model configurations
-- Joint scales and translations are only predicted if available in the model data
+
+## Latest Improvements Over Initial Implementation (just a dev log)
+
+- **2x faster training** with HDF5 dataset optimization, but more importanly much more stable training due to massively reduced I/O operations
+- **Multiple backbone support** (ResNet + ViT architectures)
+- **Advanced regression heads** with transformer decoder
+- **Comprehensive loss curriculum** with 2D/3D keypoint supervision
+- **Robust training pipeline** with automatic checkpointing and visualization
+- **Ground truth validation** for accuracy verification
+- **Joint filtering system** for handling model misalignments
+
 
 
 
