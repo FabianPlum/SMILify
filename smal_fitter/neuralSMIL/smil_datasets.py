@@ -150,11 +150,106 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
         return self.use_ue_scaling
 
 
+class UnifiedSMILDataset:
+    """
+    Factory class that can load either HDF5 optimized datasets or original JSON datasets.
+    
+    This provides a unified interface for loading SMIL datasets regardless of format,
+    enabling seamless transition between original and optimized datasets without
+    changing existing training code.
+    """
+    
+    @staticmethod
+    def from_path(data_path: str, **kwargs):
+        """
+        Create appropriate dataset instance based on file path.
+        
+        Args:
+            data_path: Path to dataset (directory for JSON format, .h5/.hdf5 file for optimized format)
+            **kwargs: Additional arguments passed to dataset constructor
+            
+        Returns:
+            Dataset instance (OptimizedSMILDataset or replicAntSMILDataset)
+        """
+        if data_path.endswith('.h5') or data_path.endswith('.hdf5'):
+            # Load optimized HDF5 dataset
+            from optimized_dataset import OptimizedSMILDataset
+            return OptimizedSMILDataset(data_path, **kwargs)
+        else:
+            # Load original JSON dataset
+            return replicAntSMILDataset(data_path, **kwargs)
+    
+    @staticmethod
+    def preprocess_dataset(input_dir: str, 
+                          output_path: str,
+                          silhouette_threshold: float = 0.1,
+                          target_resolution: int = 224,
+                          backbone_name: str = 'vit_large_patch16_224',
+                          rotation_representation: str = '6d',
+                          min_visible_keypoints: int = 5,
+                          chunk_size: int = 8,
+                          num_workers: int = 4,
+                          jpeg_quality: int = 95,
+                          ignored_joints_config: dict = None,
+                          verbose: bool = True):
+        """
+        Preprocess a JSON dataset into optimized HDF5 format.
+        
+        Args:
+            input_dir: Input directory containing JSON files
+            output_path: Output HDF5 file path
+            silhouette_threshold: Minimum silhouette coverage (0.0-1.0)
+            target_resolution: Target image resolution
+            backbone_name: Backbone name for resolution selection
+            rotation_representation: '6d' or 'axis_angle'
+            min_visible_keypoints: Minimum visible keypoints required
+            chunk_size: HDF5 chunk size (batch size)
+            num_workers: Number of parallel workers
+            jpeg_quality: JPEG compression quality (1-100)
+            ignored_joints_config: Configuration for ignored joints (from TrainingConfig)
+            verbose: Whether to print progress information
+            
+        Returns:
+            Dictionary containing preprocessing statistics
+        """
+        from dataset_preprocessing import DatasetPreprocessor, print_statistics
+        
+        # Create preprocessor
+        preprocessor = DatasetPreprocessor(
+            silhouette_threshold=silhouette_threshold,
+            target_resolution=target_resolution,
+            backbone_name=backbone_name,
+            rotation_representation=rotation_representation,
+            min_visible_keypoints=min_visible_keypoints,
+            chunk_size=chunk_size,
+            jpeg_quality=jpeg_quality,
+            ignored_joints_config=ignored_joints_config
+        )
+        
+        # Process dataset
+        stats = preprocessor.process_dataset(
+            input_dir=input_dir,
+            output_path=output_path,
+            num_workers=num_workers
+        )
+        
+        if verbose:
+            print_statistics(stats)
+        
+        return stats
+
+
 if __name__ == "__main__":
     # provide path to a replicAnt SMIL dataset
     data_path = "data/replicAnt_trials/replicAnt-x-SMIL-TEX"
+    
+    # Test original dataset
     synthDataset = replicAntSMILDataset(data_path)
     print("Number of samples in the dataset: ", len(synthDataset))
+    
+    # Test unified dataset factory
+    unified_dataset = UnifiedSMILDataset.from_path(data_path)
+    print("Unified dataset samples: ", len(unified_dataset))
 
     # access a sample from the dataset
     # structure: Dataset [sample_idx] -> [0] for x or [1] for y -> ["key"]
