@@ -307,6 +307,326 @@ def visualize_keypoints_comparison(model, predicted_params, y_data, x_data, back
             print(f"{i:<5} {gt_y:<8.4f} {gt_x:<8.4f} {rend_y:<8.4f} {rend_x:<8.4f} {diff_y:<8.4f} {diff_x:<8.4f} {magnitude:<10.4f}")
 
 
+def test_3d_keypoint_alignment(model, predicted_params, y_data, device, tolerance=0.1):
+    """
+    Test 3D keypoint alignment between ground truth transformed keypoints and SMAL model joints.
+    
+    Args:
+        model: SMILImageRegressor model
+        predicted_params: Dictionary containing predicted SMIL parameters (ground truth values)
+        y_data: Ground truth data containing transformed 3D keypoints
+        device: PyTorch device
+        tolerance: Maximum acceptable distance between keypoints (in model units)
+        
+    Returns:
+        Dict with test results including per-joint errors and statistics
+    """
+    print("\nTesting 3D keypoint alignment...")
+    print("-" * 50)
+    
+    if 'keypoints_3d' not in y_data:
+        return {
+            'success': False,
+            'error': 'No transformed 3D keypoints available',
+            'note': 'Ensure you are using the updated load_SMIL_Unreal_sample function'
+        }
+    
+    # Get ground truth transformed 3D keypoints
+    gt_keypoints_3d = y_data['keypoints_3d']  # Already transformed to model-centered coordinates
+    
+    # Compute SMAL model 3D joint positions from predicted parameters
+    # Convert rotations to axis-angle format for SMAL model (which expects axis-angle)
+    if model.rotation_representation == '6d':
+        from pytorch3d.transforms import rotation_6d_to_axis_angle
+        global_rot_aa = rotation_6d_to_axis_angle(predicted_params['global_rot'])
+        joint_rot_aa = rotation_6d_to_axis_angle(predicted_params['joint_rot'])
+    else:
+        global_rot_aa = predicted_params['global_rot']
+        joint_rot_aa = predicted_params['joint_rot']
+    
+    # Create batch parameters for SMAL model
+    batch_params = {
+        'global_rotation': global_rot_aa,
+        'joint_rotations': joint_rot_aa,
+        'betas': predicted_params['betas'],
+        'trans': predicted_params['trans'],
+    }
+    
+    # Add joint scales and translations if available
+    if 'log_beta_scales' in predicted_params:
+        batch_params['log_betascale'] = predicted_params['log_beta_scales']
+    if 'betas_trans' in predicted_params:
+        batch_params['betas_trans'] = predicted_params['betas_trans']
+    
+    # Run SMAL model to get joint positions
+    with torch.no_grad():
+        verts, joints, Rs, v_shaped = model.smal_model(
+            batch_params['betas'],
+            torch.cat([
+                batch_params['global_rotation'].unsqueeze(1),
+                batch_params['joint_rotations']], dim=1),
+            betas_logscale=batch_params.get('log_betascale', None),
+            betas_trans=batch_params.get('betas_trans', None),
+            propagate_scaling=model.propagate_scaling)
+    
+        # Apply the same transformation as in the renderer
+    if model.use_ue_scaling:
+        # Apply UE transform (10x scale) - needed to match replicAnt model size
+            # This aligns the model at the root joint and scales it to the replicAnt model size
+        joints = (joints - joints[:, 0, :].unsqueeze(1)) * 10 + batch_params['trans'].unsqueeze(1)
+    else:
+        # Standard transformation without UE scaling
+        joints = joints + batch_params['trans'].unsqueeze(1)
+    
+    # Extract model joint positions (first batch)
+    model_joints_3d = joints[0].cpu().numpy()  # Shape: (num_joints, 3)
+    
+    # Compare ground truth keypoints with model joints
+    # Note: There might be slight differences due to different joint computation methods
+    num_joints = min(len(gt_keypoints_3d), len(model_joints_3d))
+    
+    joint_errors = []
+    joint_distances = []
+    valid_joints = 0
+    
+    print(f"Comparing {num_joints} joints:")
+    print(f"{'Joint':<5} {'GT X':<8} {'GT Y':<8} {'GT Z':<8} {'Model X':<8} {'Model Y':<8} {'Model Z':<8} {'Distance':<10} {'Status':<8}")
+    print("-" * 95)
+    
+    for i in range(num_joints):
+        gt_joint = gt_keypoints_3d[i]
+        model_joint = model_joints_3d[i]
+        
+        # Skip joints that are at origin (likely unmapped joints)
+        if np.allclose(gt_joint, [0, 0, 0], atol=1e-6):
+            continue
+            
+        # Compute Euclidean distance
+        distance = np.linalg.norm(gt_joint - model_joint)
+        joint_errors.append(distance)
+        joint_distances.append(distance)
+        valid_joints += 1
+        
+        status = "✓ PASS" if distance < tolerance else "✗ FAIL"
+        
+        # Print first 10 joints for inspection
+        if i < 10:
+            print(f"{i:<5} {gt_joint[0]:<8.3f} {gt_joint[1]:<8.3f} {gt_joint[2]:<8.3f} "
+                  f"{model_joint[0]:<8.3f} {model_joint[1]:<8.3f} {model_joint[2]:<8.3f} "
+                  f"{distance:<10.3f} {status:<8}")
+    
+    if len(joint_errors) == 0:
+        return {
+            'success': False,
+            'error': 'No valid joints found for comparison',
+            'note': 'All ground truth keypoints appear to be at origin'
+        }
+    
+    # Compute statistics
+    mean_error = np.mean(joint_errors)
+    max_error = np.max(joint_errors)
+    min_error = np.min(joint_errors)
+    std_error = np.std(joint_errors)
+    
+    # Check if alignment is within tolerance
+    passed_joints = sum(1 for err in joint_errors if err < tolerance)
+    pass_rate = passed_joints / len(joint_errors) if joint_errors else 0
+    
+    print(f"\n3D Keypoint Alignment Statistics:")
+    print(f"Valid joints compared: {valid_joints}")
+    print(f"Mean error: {mean_error:.4f}")
+    print(f"Max error: {max_error:.4f}")
+    print(f"Min error: {min_error:.4f}")
+    print(f"Std deviation: {std_error:.4f}")
+    print(f"Joints within tolerance ({tolerance}): {passed_joints}/{len(joint_errors)} ({pass_rate*100:.1f}%)")
+    
+    # Consider test passed if most joints are within tolerance
+    success = pass_rate >= 0.8  # 80% of joints should be within tolerance
+    
+    if success:
+        print(f"✓ 3D keypoint alignment test: PASSED")
+    else:
+        print(f"✗ 3D keypoint alignment test: FAILED")
+        print(f"Note: Some misalignment is expected due to different joint computation methods")
+        print(f"      in the parametric model vs. ground truth keypoints")
+    
+    return {   
+        'success': success,
+        'valid_joints': valid_joints,
+        'mean_error': mean_error,
+        'max_error': max_error,
+        'min_error': min_error,
+        'std_error': std_error,
+        'pass_rate': pass_rate,
+        'tolerance': tolerance,
+        'joint_errors': joint_errors,
+        'gt_keypoints_3d': gt_keypoints_3d,
+        'model_joints_3d': model_joints_3d
+    }
+
+
+def visualize_3d_keypoint_alignment(gt_keypoints_3d, model_joints_3d, joint_errors, output_dir="test_visualizations", tolerance=0.1):
+    """
+    Create a 3D plot comparing ground truth keypoints with SMAL model joints.
+    
+    Args:
+        gt_keypoints_3d: Ground truth 3D keypoints (N, 3)
+        model_joints_3d: SMAL model 3D joint positions (N, 3)
+        joint_errors: List of per-joint errors for color coding
+        output_dir: Directory to save the visualization
+        tolerance: Tolerance for color coding (red = above tolerance, green = within tolerance)
+    """
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Filter out zero keypoints (unmapped joints)
+    valid_indices = []
+    gt_valid = []
+    model_valid = []
+    errors_valid = []
+    
+    for i, (gt_joint, model_joint) in enumerate(zip(gt_keypoints_3d, model_joints_3d)):
+        if not np.allclose(gt_joint, [0, 0, 0], atol=1e-6):
+            valid_indices.append(i)
+            gt_valid.append(gt_joint)
+            model_valid.append(model_joint)
+            if i < len(joint_errors):
+                errors_valid.append(joint_errors[i])
+            else:
+                errors_valid.append(0.0)
+    
+    if len(gt_valid) == 0:
+        print("No valid keypoints found for 3D visualization")
+        return
+    
+    gt_valid = np.array(gt_valid)
+    model_valid = np.array(model_valid)
+    errors_valid = np.array(errors_valid)
+    
+    # Create figure with two subplots
+    fig = plt.figure(figsize=(20, 8))
+    
+    # Subplot 1: Side-by-side comparison
+    ax1 = fig.add_subplot(121, projection='3d')
+    
+    # Plot ground truth keypoints in blue
+    ax1.scatter(gt_valid[:, 0], gt_valid[:, 1], gt_valid[:, 2], 
+               c='blue', s=50, alpha=0.7, label='Ground Truth', marker='o')
+    
+    # Plot model joints in red
+    ax1.scatter(model_valid[:, 0], model_valid[:, 1], model_valid[:, 2], 
+               c='red', s=50, alpha=0.7, label='SMAL Model', marker='^')
+    
+    # Draw lines connecting corresponding points
+    for i in range(len(gt_valid)):
+        ax1.plot([gt_valid[i, 0], model_valid[i, 0]], 
+                [gt_valid[i, 1], model_valid[i, 1]], 
+                [gt_valid[i, 2], model_valid[i, 2]], 
+                'gray', alpha=0.3, linewidth=0.5)
+    
+    ax1.set_xlabel('X')
+    ax1.set_ylabel('Y')
+    ax1.set_zlabel('Z')
+    ax1.set_title('3D Keypoint Alignment Comparison')
+    ax1.legend()
+    
+    # Set equal aspect ratio
+    max_range = np.array([gt_valid.max()-gt_valid.min(), model_valid.max()-model_valid.min()]).max() / 2.0
+    mid_x = (gt_valid[:, 0].max()+gt_valid[:, 0].min()) * 0.5
+    mid_y = (gt_valid[:, 1].max()+gt_valid[:, 1].min()) * 0.5
+    mid_z = (gt_valid[:, 2].max()+gt_valid[:, 2].min()) * 0.5
+    ax1.set_xlim(mid_x - max_range, mid_x + max_range)
+    ax1.set_ylim(mid_y - max_range, mid_y + max_range)
+    ax1.set_zlim(mid_z - max_range, mid_z + max_range)
+    
+    # Subplot 2: Error visualization
+    ax2 = fig.add_subplot(122, projection='3d')
+    
+    # Color code points by error magnitude
+    colors = ['green' if err < tolerance else 'red' for err in errors_valid]
+    sizes = [30 + min(err * 100, 70) for err in errors_valid]  # Size based on error magnitude
+    
+    # Plot ground truth points colored by error
+    scatter = ax2.scatter(gt_valid[:, 0], gt_valid[:, 1], gt_valid[:, 2], 
+                         c=errors_valid, s=sizes, alpha=0.8, cmap='RdYlGn_r', 
+                         vmin=0, vmax=tolerance*2)
+    
+    # Add colorbar
+    plt.colorbar(scatter, ax=ax2, shrink=0.8, label='Joint Error (model units)')
+    
+    ax2.set_xlabel('X')
+    ax2.set_ylabel('Y')
+    ax2.set_zlabel('Z')
+    ax2.set_title(f'Ground Truth Keypoints\n(Color = Error, Size = Error Magnitude)')
+    
+    # Set equal aspect ratio for second plot
+    ax2.set_xlim(mid_x - max_range, mid_x + max_range)
+    ax2.set_ylim(mid_y - max_range, mid_y + max_range)
+    ax2.set_zlim(mid_z - max_range, mid_z + max_range)
+    
+    # Add text with statistics
+    mean_error = np.mean(errors_valid)
+    max_error = np.max(errors_valid)
+    within_tolerance = np.sum(errors_valid < tolerance)
+    total_joints = len(errors_valid)
+    
+    stats_text = f'Statistics:\nMean Error: {mean_error:.3f}\nMax Error: {max_error:.3f}\nWithin Tolerance: {within_tolerance}/{total_joints} ({within_tolerance/total_joints*100:.1f}%)'
+    fig.text(0.02, 0.02, stats_text, fontsize=10, verticalalignment='bottom',
+             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    plt.tight_layout()
+    
+    # Save the plot
+    output_path = os.path.join(output_dir, "3d_keypoint_alignment.png")
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    print(f"3D keypoint alignment visualization saved to: {os.path.abspath(output_path)}")
+    
+    # Also save a rotated view
+    fig2 = plt.figure(figsize=(12, 8))
+    ax3 = fig2.add_subplot(111, projection='3d')
+    
+    # Plot with different viewing angle
+    ax3.scatter(gt_valid[:, 0], gt_valid[:, 1], gt_valid[:, 2], 
+               c='blue', s=50, alpha=0.7, label='Ground Truth', marker='o')
+    ax3.scatter(model_valid[:, 0], model_valid[:, 1], model_valid[:, 2], 
+               c='red', s=50, alpha=0.7, label='SMAL Model', marker='^')
+    
+    # Draw lines connecting corresponding points
+    for i in range(len(gt_valid)):
+        color = 'green' if errors_valid[i] < tolerance else 'red'
+        alpha = 0.8 if errors_valid[i] < tolerance else 0.4
+        ax3.plot([gt_valid[i, 0], model_valid[i, 0]], 
+                [gt_valid[i, 1], model_valid[i, 1]], 
+                [gt_valid[i, 2], model_valid[i, 2]], 
+                color, alpha=alpha, linewidth=2)
+    
+    ax3.set_xlabel('X')
+    ax3.set_ylabel('Y')
+    ax3.set_zlabel('Z')
+    ax3.set_title('3D Keypoint Alignment - Alternative View\n(Green lines = within tolerance, Red lines = above tolerance)')
+    ax3.legend()
+    
+    # Set different viewing angle
+    ax3.view_init(elev=20, azim=45)
+    
+    # Set equal aspect ratio
+    ax3.set_xlim(mid_x - max_range, mid_x + max_range)
+    ax3.set_ylim(mid_y - max_range, mid_y + max_range)
+    ax3.set_zlim(mid_z - max_range, mid_z + max_range)
+    
+    plt.tight_layout()
+    
+    # Save the alternative view
+    output_path2 = os.path.join(output_dir, "3d_keypoint_alignment_alt_view.png")
+    plt.savefig(output_path2, dpi=150, bbox_inches='tight')
+    print(f"3D keypoint alignment (alternative view) saved to: {os.path.abspath(output_path2)}")
+    
+    plt.close('all')
+
+
 def visualize_silhouette_comparison(model, predicted_params, x_data, output_dir="visualizations"):
     """
     Visualize ground truth vs rendered silhouettes side by side.
@@ -397,11 +717,13 @@ def visualize_silhouette_comparison(model, predicted_params, x_data, output_dir=
 def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0, 
                            tolerance_keypoints: float = 1e-2, 
                            tolerance_silhouette: float = 1e-2, 
+                           tolerance_3d_keypoints: float = 1.0,
                            device: str = 'cpu', 
                            enable_visualization: bool = True, 
                            override_ue_scaling: bool = None, 
                            rotation_representation: str = 'axis_angle', 
                            test_rotation_conversion: bool = True, 
+                           test_3d_keypoints: bool = True,
                            backbone_name: str = 'resnet152'):
     """
     Test that ground truth parameters produce near-zero losses.
@@ -409,12 +731,15 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0,
     Args:
         data_path: Path to the dataset (if None, tries default paths)
         sample_idx: Index of the sample to test
-        tolerance: Maximum acceptable loss value
+        tolerance_keypoints: Maximum acceptable loss value for 2D keypoints
+        tolerance_silhouette: Maximum acceptable loss value for silhouette
+        tolerance_3d_keypoints: Maximum acceptable distance for 3D keypoint alignment (model units)
         device: Device to run on ('cpu' or 'cuda')
         enable_visualization: Whether to generate visual comparisons
         override_ue_scaling: Override dataset UE scaling setting (None uses dataset default)
         rotation_representation: '6d' or 'axis_angle' for joint rotations (default: 'axis_angle')
         test_rotation_conversion: Whether to test rotation conversion round-trip (default: True)
+        test_3d_keypoints: Whether to test 3D keypoint alignment (default: True)
         backbone_name: Backbone name for keypoint scaling ('resnet152', 'vit_base_patch16_224', etc.)
     
     Returns:
@@ -427,9 +752,7 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0,
     # Note that not all datasets have silhoutte masks, thus not all tests may be ran.
     if data_path is None:
         possible_paths = [
-            "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Masked",
-            "data/replicAnt_trials/replicAnt-x-SMIL-TEX",
-            "data/replicAnt_trials/replicAnt-x-SMIL-demo"
+            "data/replicAnt_trials/replicAnt-x-SMIL-OmniAnt-Simple100k-noScale"
         ]
         
         for path in possible_paths:
@@ -665,6 +988,18 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0,
                 'passed': all(v < tolerance_silhouette for v in combined_losses.values())
             }
         
+        # Test 5: 3D keypoint alignment (if available and enabled)
+        if test_3d_keypoints:
+            print("\n5. Testing 3D keypoint alignment...")
+            try:
+                keypoint_3d_result = test_3d_keypoint_alignment(
+                    model, predicted_params, y_data, device, tolerance=tolerance_3d_keypoints
+                )
+                test_results['3d_keypoints'] = keypoint_3d_result
+            except Exception as e:
+                print(f"   3D keypoint test failed: {e}")
+                test_results['3d_keypoints'] = {'passed': False, 'error': str(e)}
+        
         # Generate visual comparisons if enabled
         if enable_visualization:
             print("\n" + "=" * 60)
@@ -680,6 +1015,26 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0,
             # Generate silhouette visualization if silhouette data is available
             if x_data.get("input_image_mask") is not None:
                 visualize_silhouette_comparison(model, predicted_params, x_data, output_dir)
+            
+            # Generate 3D keypoint visualization if 3D keypoint test was performed
+            if test_3d_keypoints and '3d_keypoints' in test_results:
+                try:
+                    keypoint_3d_result = test_results['3d_keypoints']
+                    # Check if we have the necessary data for visualization
+                    if ('gt_keypoints_3d' in keypoint_3d_result and 
+                        'model_joints_3d' in keypoint_3d_result and 
+                        'joint_errors' in keypoint_3d_result):
+                        visualize_3d_keypoint_alignment(
+                            keypoint_3d_result['gt_keypoints_3d'],
+                            keypoint_3d_result['model_joints_3d'],
+                            keypoint_3d_result['joint_errors'],
+                            output_dir,
+                            tolerance=tolerance_3d_keypoints
+                        )
+                    else:
+                        print("Skipping 3D keypoint visualization: test data incomplete")
+                except Exception as e:
+                    print(f"Failed to generate 3D keypoint visualization: {e}")
         
         # Summary
         print("\n" + "=" * 60)
@@ -696,7 +1051,21 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0,
                 print(f"✗ {'rotation_conversion':20s}: FAILED")
                 all_passed = False
         
+        # Include 3D keypoint test in summary if performed
+        if test_3d_keypoints and '3d_keypoints' in test_results:
+            if test_results['3d_keypoints'].get('success', False):
+                print(f"✓ {'3d_keypoints':20s}: PASSED")
+            else:
+                print(f"✗ {'3d_keypoints':20s}: FAILED")
+                if 'error' in test_results['3d_keypoints']:
+                    print(f"  Error: {test_results['3d_keypoints']['error']}")
+                all_passed = False
+        
         for test_name, result in test_results.items():
+            # Skip 3d_keypoints as it's handled separately above
+            if test_name == '3d_keypoints':
+                continue
+                
             if result.get('passed', False):
                 print(f"✓ {test_name:20s}: PASSED")
             else:
@@ -721,7 +1090,8 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0,
             "success": all_passed,
             "results": test_results,
             "tolerance_keypoints": tolerance_keypoints,
-            "tolerance_silhouette": tolerance_silhouette
+            "tolerance_silhouette": tolerance_silhouette,
+            "tolerance_3d_keypoints": tolerance_3d_keypoints
         }
         
         # Include rotation conversion results if performed
@@ -750,6 +1120,8 @@ def main():
                        help='Maximum acceptable loss value for keypoints')
     parser.add_argument('--tolerance_silhouette', type=float, default=0.05,
                        help='Maximum acceptable loss value for silhouette')
+    parser.add_argument('--tolerance_3d_keypoints', type=float, default=1,
+                       help='Maximum acceptable distance for 3D keypoint alignment (model units)')
     parser.add_argument('--device', type=str, default='cpu',
                        help='Device to run on (cpu or cuda)')
     parser.add_argument('--no-visualization', action='store_true',
@@ -760,6 +1132,8 @@ def main():
                        help='Rotation representation for joint rotations (default: axis_angle)')
     parser.add_argument('--no-rotation-test', action='store_true',
                        help='Disable rotation conversion round-trip test')
+    parser.add_argument('--no-3d-keypoint-test', action='store_true',
+                       help='Disable 3D keypoint alignment test')
     parser.add_argument('--backbone', type=str, default='resnet152',
                        choices=['resnet50', 'resnet101', 'resnet152', 'vit_base_patch16_224', 'vit_large_patch16_224'],
                        help='Backbone network to use (default: resnet152)')
@@ -782,11 +1156,13 @@ def main():
         sample_idx=args.sample_idx,
         tolerance_keypoints=args.tolerance_keypoints,
         tolerance_silhouette=args.tolerance_silhouette,
+        tolerance_3d_keypoints=args.tolerance_3d_keypoints,
         device=device,
         enable_visualization=not args.no_visualization,
         override_ue_scaling=False if args.no_ue_scaling else None,
         rotation_representation=args.rotation_representation,
         test_rotation_conversion=not args.no_rotation_test,
+        test_3d_keypoints=not args.no_3d_keypoint_test,
         backbone_name=args.backbone
     )
     
