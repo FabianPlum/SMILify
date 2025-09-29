@@ -625,6 +625,9 @@ class SMILImageRegressor(SMALFitter):
                     'keypoints_2d': y_data['keypoints_2d'],
                     'keypoint_visibility': y_data['keypoint_visibility']
                 }
+                # Add 3D keypoints if available
+                if 'keypoints_3d' in y_data:
+                    keypoint_data['keypoints_3d'] = y_data['keypoints_3d']
             batch_auxiliary_data['keypoint_data'].append(keypoint_data)
             
             silhouette_data = x_data.get("input_image_mask")
@@ -792,83 +795,187 @@ class SMILImageRegressor(SMALFitter):
                 'log_beta_scales': 0.1,
                 'betas_trans': 0.1,
                 'keypoint_2d': 0.0,
+                'keypoint_3d': 0.0,
                 'silhouette': 0.0
             }
         
         batch_size = predicted_params['global_rot'].shape[0]
+        
+        # Validate sample visibility before computing any losses
+        # This prevents the model from being penalized for things it cannot possibly know
+        sample_validity_mask = torch.ones(batch_size, dtype=torch.bool, device=self.device)
+        filtered_samples_count = 0
+        
+        if auxiliary_data is not None:
+            keypoint_data_list = auxiliary_data.get('keypoint_data', [])
+            silhouette_data_list = auxiliary_data.get('silhouette_data', [])
+            
+            for i in range(batch_size):
+                # Get keypoint and silhouette data for this sample
+                keypoint_data = keypoint_data_list[i] if i < len(keypoint_data_list) else None
+                silhouette_data = silhouette_data_list[i] if i < len(silhouette_data_list) else None
+                
+                # Validate sample visibility
+                is_valid = self._validate_sample_visibility(
+                    keypoint_data=keypoint_data,
+                    silhouette_data=silhouette_data,
+                    min_visible_keypoints=5,
+                    min_pixel_coverage=0.05
+                )
+                
+                if not is_valid:
+                    sample_validity_mask[i] = False
+                    filtered_samples_count += 1
+        
+        # Log filtering statistics (occasionally to avoid spam)
+        if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # 1% of the time
+            print(f"DEBUG - Sample filtering: {filtered_samples_count}/{batch_size} samples filtered out")
+            if filtered_samples_count > 0:
+                print(f"DEBUG - Filtering rate: {filtered_samples_count/batch_size*100:.1f}%")
+        
+        # Track filtering statistics for monitoring
+        if not hasattr(self, '_filtering_stats'):
+            self._filtering_stats = {
+                'total_batches': 0,
+                'total_samples': 0,
+                'filtered_samples': 0,
+                'batches_with_filtering': 0
+            }
+        
+        self._filtering_stats['total_batches'] += 1
+        self._filtering_stats['total_samples'] += batch_size
+        self._filtering_stats['filtered_samples'] += filtered_samples_count
+        if filtered_samples_count > 0:
+            self._filtering_stats['batches_with_filtering'] += 1
+        
+        # If all samples are invalid, return zero loss
+        if not sample_validity_mask.any():
+            eps = 1e-8
+            zero_loss = torch.tensor(eps, device=self.device, requires_grad=True)
+            if return_components:
+                # Return zero for all loss components
+                loss_components = {
+                    'global_rot': zero_loss,
+                    'joint_rot': zero_loss,
+                    'betas': zero_loss,
+                    'trans': zero_loss,
+                    'fov': zero_loss,
+                    'cam_rot': zero_loss,
+                    'cam_trans': zero_loss,
+                    'log_beta_scales': zero_loss,
+                    'betas_trans': zero_loss,
+                    'keypoint_2d': zero_loss,
+                    'silhouette': zero_loss
+                }
+                return zero_loss, loss_components
+            return zero_loss
         
         # Process keypoint and silhouette losses efficiently for the whole batch
         need_keypoint_loss = (auxiliary_data is not None and 'keypoint_data' in auxiliary_data and 
                              loss_weights['keypoint_2d'] > 0)
         need_silhouette_loss = (auxiliary_data is not None and 'silhouette_data' in auxiliary_data and 
                                loss_weights['silhouette'] > 0)
+        need_keypoint_3d_loss = (auxiliary_data is not None and 'keypoint_data' in auxiliary_data and 
+                                loss_weights['keypoint_3d'] > 0)
         
-        # Single rendering pass for both keypoint and silhouette losses if needed
+        # Single rendering pass for 2D keypoints, silhouette, and 3D keypoints if needed
         rendered_joints = None
         rendered_silhouette = None
-        if need_keypoint_loss or need_silhouette_loss:
+        joints_3d = None
+        if need_keypoint_loss or need_silhouette_loss or need_keypoint_3d_loss:
             try:
-                rendered_joints, rendered_silhouette = self._compute_rendered_outputs(
-                    predicted_params, compute_joints=need_keypoint_loss, compute_silhouette=need_silhouette_loss
+                rendered_joints, rendered_silhouette, joints_3d = self._compute_rendered_outputs(
+                    predicted_params, compute_joints=need_keypoint_loss, 
+                    compute_silhouette=need_silhouette_loss, compute_joints_3d=need_keypoint_3d_loss
                 )
             except Exception as e:
                 print(f"Warning: Failed to compute rendered outputs for batch: {e}")
                 # Continue without rendered outputs
                 rendered_joints = None
                 rendered_silhouette = None
+                joints_3d = None
         
-        # Basic parameter losses (these are already batched and efficient)
+        # Apply validity mask to parameters for loss computation
+        # Only compute losses for valid samples to prevent penalizing the model for impossible predictions
+        valid_predicted_params = {}
+        valid_target_params = {}
+        
+        for key in predicted_params:
+            if key in target_params_batch:
+                # Apply validity mask to both predicted and target parameters
+                valid_predicted_params[key] = predicted_params[key][sample_validity_mask]
+                valid_target_params[key] = target_params_batch[key][sample_validity_mask]
+        
+        # Get number of valid samples for proper averaging
+        num_valid_samples = sample_validity_mask.sum().item()
+        eps = 1e-8
+        
+        # Basic parameter losses (only for valid samples)
         
         # Global rotation loss
-        if 'global_rot' in target_params_batch:
+        if 'global_rot' in valid_target_params and num_valid_samples > 0:
             if self.rotation_representation == '6d':
-                pred_global_matrix = rotation_6d_to_matrix(predicted_params['global_rot'])
-                target_global_matrix = rotation_6d_to_matrix(target_params_batch['global_rot'])
+                pred_global_matrix = rotation_6d_to_matrix(valid_predicted_params['global_rot'])
+                target_global_matrix = rotation_6d_to_matrix(valid_target_params['global_rot'])
                 matrix_diff_loss = torch.norm(pred_global_matrix - target_global_matrix, p='fro', dim=(-2, -1))
                 loss = matrix_diff_loss.mean()
             else:
-                loss = F.mse_loss(predicted_params['global_rot'], target_params_batch['global_rot'])
+                loss = F.mse_loss(valid_predicted_params['global_rot'], valid_target_params['global_rot'])
             
             loss_components['global_rot'] = loss
             total_loss += loss_weights['global_rot'] * loss
+        else:
+            # No valid samples or no global rotation data
+            loss_components['global_rot'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Joint rotation loss (with visibility awareness)
-        if 'joint_rot' in target_params_batch:
+        if 'joint_rot' in valid_target_params and num_valid_samples > 0:
             # Check if we have visibility information for joint-specific loss
             if auxiliary_data is not None and 'keypoint_data' in auxiliary_data and auxiliary_data['keypoint_data']:
+                # Filter keypoint data to only include valid samples
+                valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
+                                     if sample_validity_mask[i]]
+                
                 # Use visibility-aware joint rotation loss
                 loss = self._compute_visibility_aware_joint_rotation_loss_batch(
-                    predicted_params['joint_rot'], target_params_batch['joint_rot'], auxiliary_data['keypoint_data']
+                    valid_predicted_params['joint_rot'], valid_target_params['joint_rot'], valid_keypoint_data
                 )
             else:
                 # Fallback to standard joint rotation loss if no visibility data
                 if self.rotation_representation == '6d':
-                    pred_matrices = rotation_6d_to_matrix(predicted_params['joint_rot'])
-                    target_matrices = rotation_6d_to_matrix(target_params_batch['joint_rot'])
+                    pred_matrices = rotation_6d_to_matrix(valid_predicted_params['joint_rot'])
+                    target_matrices = rotation_6d_to_matrix(valid_target_params['joint_rot'])
                     matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
                     loss = matrix_diff_loss.mean()
                 else:
-                    loss = F.mse_loss(predicted_params['joint_rot'], target_params_batch['joint_rot'])
+                    loss = F.mse_loss(valid_predicted_params['joint_rot'], valid_target_params['joint_rot'])
             
             loss_components['joint_rot'] = loss
             total_loss += loss_weights['joint_rot'] * loss
+        else:
+            # No valid samples or no joint rotation data
+            loss_components['joint_rot'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Shape parameter loss
-        if 'betas' in target_params_batch:
-            loss = F.mse_loss(predicted_params['betas'], target_params_batch['betas'])
+        if 'betas' in valid_target_params and num_valid_samples > 0:
+            loss = F.mse_loss(valid_predicted_params['betas'], valid_target_params['betas'])
             loss_components['betas'] = loss
             total_loss += loss_weights['betas'] * loss
+        else:
+            loss_components['betas'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Translation loss
-        if 'trans' in target_params_batch:
-            loss = F.mse_loss(predicted_params['trans'], target_params_batch['trans'])
+        if 'trans' in valid_target_params and num_valid_samples > 0:
+            loss = F.mse_loss(valid_predicted_params['trans'], valid_target_params['trans'])
             loss_components['trans'] = loss
             total_loss += loss_weights['trans'] * loss
+        else:
+            loss_components['trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # FOV loss
-        if 'fov' in target_params_batch:
-            pred_fov = predicted_params['fov']
-            target_fov = target_params_batch['fov']
+        if 'fov' in valid_target_params and num_valid_samples > 0:
+            pred_fov = valid_predicted_params['fov']
+            target_fov = valid_target_params['fov']
             
             # Handle shape mismatch
             if pred_fov.shape != target_fov.shape:
@@ -881,56 +988,100 @@ class SMILImageRegressor(SMALFitter):
             loss = F.mse_loss(pred_fov, target_fov)
             loss_components['fov'] = loss
             total_loss += loss_weights['fov'] * loss
+        else:
+            loss_components['fov'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Camera rotation loss
-        if 'cam_rot' in target_params_batch:
-            loss = F.mse_loss(predicted_params['cam_rot'], target_params_batch['cam_rot'])
+        if 'cam_rot' in valid_target_params and num_valid_samples > 0:
+            loss = F.mse_loss(valid_predicted_params['cam_rot'], valid_target_params['cam_rot'])
             loss_components['cam_rot'] = loss
             total_loss += loss_weights['cam_rot'] * loss
+        else:
+            loss_components['cam_rot'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Camera translation loss
-        if 'cam_trans' in target_params_batch:
-            loss = F.mse_loss(predicted_params['cam_trans'], target_params_batch['cam_trans'])
+        if 'cam_trans' in valid_target_params and num_valid_samples > 0:
+            loss = F.mse_loss(valid_predicted_params['cam_trans'], valid_target_params['cam_trans'])
             loss_components['cam_trans'] = loss
             total_loss += loss_weights['cam_trans'] * loss
+        else:
+            loss_components['cam_trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Joint scales loss (if available)
-        if 'log_beta_scales' in target_params_batch and 'log_beta_scales' in predicted_params:
-            loss = F.mse_loss(predicted_params['log_beta_scales'], target_params_batch['log_beta_scales'])
+        if 'log_beta_scales' in valid_target_params and 'log_beta_scales' in valid_predicted_params and num_valid_samples > 0:
+            loss = F.mse_loss(valid_predicted_params['log_beta_scales'], valid_target_params['log_beta_scales'])
             loss_components['log_beta_scales'] = loss
             total_loss += loss_weights['log_beta_scales'] * loss
+        else:
+            loss_components['log_beta_scales'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Joint translations loss (if available)
-        if 'betas_trans' in target_params_batch and 'betas_trans' in predicted_params:
-            loss = F.mse_loss(predicted_params['betas_trans'], target_params_batch['betas_trans'])
+        if 'betas_trans' in valid_target_params and 'betas_trans' in valid_predicted_params and num_valid_samples > 0:
+            loss = F.mse_loss(valid_predicted_params['betas_trans'], valid_target_params['betas_trans'])
             loss_components['betas_trans'] = loss
             total_loss += loss_weights['betas_trans'] * loss
+        else:
+            loss_components['betas_trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
-        # Batched 2D keypoint loss
-        if need_keypoint_loss and rendered_joints is not None and auxiliary_data['keypoint_data']:
+        # Batched 2D keypoint loss (only for valid samples)
+        if need_keypoint_loss and rendered_joints is not None and auxiliary_data['keypoint_data'] and num_valid_samples > 0:
             try:
-                loss = self._compute_batch_keypoint_loss(rendered_joints, auxiliary_data['keypoint_data'])
+                # Filter rendered joints and keypoint data to only include valid samples
+                valid_rendered_joints = rendered_joints[sample_validity_mask]
+                valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
+                                     if sample_validity_mask[i]]
+                
+                loss = self._compute_batch_keypoint_loss(valid_rendered_joints, valid_keypoint_data)
                 if torch.isfinite(loss):
                     loss_components['keypoint_2d'] = loss
                     total_loss += loss_weights['keypoint_2d'] * loss
                 else:
-                    loss_components['keypoint_2d'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+                    loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
             except Exception as e:
                 print(f"Warning: Failed to compute batch keypoint loss: {e}")
-                loss_components['keypoint_2d'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+                loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+        else:
+            loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
-        # Batched silhouette loss
-        if need_silhouette_loss and rendered_silhouette is not None and auxiliary_data['silhouette_data']:
+        # Batched silhouette loss (only for valid samples)
+        if need_silhouette_loss and rendered_silhouette is not None and auxiliary_data['silhouette_data'] and num_valid_samples > 0:
             try:
-                loss = self._compute_batch_silhouette_loss(rendered_silhouette, auxiliary_data['silhouette_data'])
+                # Filter rendered silhouette and silhouette data to only include valid samples
+                valid_rendered_silhouette = rendered_silhouette[sample_validity_mask]
+                valid_silhouette_data = [auxiliary_data['silhouette_data'][i] for i in range(len(auxiliary_data['silhouette_data'])) 
+                                       if sample_validity_mask[i]]
+                
+                loss = self._compute_batch_silhouette_loss(valid_rendered_silhouette, valid_silhouette_data)
                 if torch.isfinite(loss):
                     loss_components['silhouette'] = loss
                     total_loss += loss_weights['silhouette'] * loss
                 else:
-                    loss_components['silhouette'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+                    loss_components['silhouette'] = torch.tensor(eps, device=self.device, requires_grad=True)
             except Exception as e:
                 print(f"Warning: Failed to compute batch silhouette loss: {e}")
-                loss_components['silhouette'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+                loss_components['silhouette'] = torch.tensor(eps, device=self.device, requires_grad=True)
+        else:
+            loss_components['silhouette'] = torch.tensor(eps, device=self.device, requires_grad=True)
+        
+        # Batched 3D keypoint loss (only for valid samples)
+        if need_keypoint_3d_loss and joints_3d is not None and auxiliary_data['keypoint_data'] and num_valid_samples > 0:
+            try:
+                # Filter 3D joints and keypoint data to only include valid samples
+                valid_joints_3d = joints_3d[sample_validity_mask]
+                valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
+                                     if sample_validity_mask[i]]
+                
+                loss = self._compute_batch_keypoint_3d_loss(valid_joints_3d, valid_keypoint_data)
+                if torch.isfinite(loss):
+                    loss_components['keypoint_3d'] = loss
+                    total_loss += loss_weights['keypoint_3d'] * loss
+                else:
+                    loss_components['keypoint_3d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+            except Exception as e:
+                print(f"Warning: Failed to compute batch 3D keypoint loss: {e}")
+                loss_components['keypoint_3d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+        else:
+            loss_components['keypoint_3d'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Final safety check for total loss
         if not torch.isfinite(total_loss):
@@ -973,6 +1124,7 @@ class SMILImageRegressor(SMALFitter):
                 'log_beta_scales': 0.1,
                 'betas_trans': 0.1,
                 'keypoint_2d': 0.0,  # 2D keypoint loss weight (higher since normalized coordinates are small)
+                'keypoint_3d': 0.0,  # 3D keypoint loss weight
                 'silhouette': 0.0     # Silhouette loss weight - disabled due to gradient instability
             }
         
@@ -980,14 +1132,18 @@ class SMILImageRegressor(SMALFitter):
         need_keypoint_loss = (pose_data is not None and 'keypoints_2d' in pose_data and 
                              'keypoint_visibility' in pose_data and loss_weights['keypoint_2d'] > 0)
         need_silhouette_loss = (silhouette_data is not None and loss_weights['silhouette'] > 0)
+        need_keypoint_3d_loss = (pose_data is not None and 'keypoints_3d' in pose_data and 
+                                'keypoint_visibility' in pose_data and loss_weights['keypoint_3d'] > 0)
         
-        # Single rendering pass for both keypoint and silhouette losses if needed
+        # Single rendering pass for 2D keypoints, silhouette, and 3D keypoints if needed
         rendered_joints = None
         rendered_silhouette = None
-        if need_keypoint_loss or need_silhouette_loss:
+        joints_3d = None
+        if need_keypoint_loss or need_silhouette_loss or need_keypoint_3d_loss:
             try:
-                rendered_joints, rendered_silhouette = self._compute_rendered_outputs(
-                    predicted_params, compute_joints=need_keypoint_loss, compute_silhouette=need_silhouette_loss
+                rendered_joints, rendered_silhouette, joints_3d = self._compute_rendered_outputs(
+                    predicted_params, compute_joints=need_keypoint_loss, 
+                    compute_silhouette=need_silhouette_loss, compute_joints_3d=need_keypoint_3d_loss
                 )
             except Exception as e:
                 print(f"Warning: Failed to compute rendered outputs: {e}")
@@ -1312,6 +1468,99 @@ class SMILImageRegressor(SMALFitter):
                 traceback.print_exc()
                 loss_components['silhouette'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
         
+        # 3D keypoint loss (if available and computed)
+        if need_keypoint_3d_loss and joints_3d is not None:
+            try:
+                # Get target 3D keypoints and visibility
+                target_keypoints_3d = safe_to_tensor(pose_data['keypoints_3d'], device=self.device)
+                visibility = safe_to_tensor(pose_data['keypoint_visibility'], device=self.device)
+                
+                # Ensure batch dimensions match
+                batch_size = predicted_params['global_rot'].shape[0]
+                
+                # Handle target_keypoints_3d dimensions safely
+                if target_keypoints_3d.dim() == 2:  # Shape (n_joints, 3)
+                    # Only expand if batch size is different than 1
+                    if batch_size > 1:
+                        target_keypoints_3d = target_keypoints_3d.unsqueeze(0).expand(batch_size, -1, -1)  # (batch_size, n_joints, 3)
+                    else:
+                        target_keypoints_3d = target_keypoints_3d.unsqueeze(0)  # (1, n_joints, 3)
+                elif target_keypoints_3d.dim() == 3 and target_keypoints_3d.shape[0] != batch_size:
+                    # If already 3D but wrong batch size, take first sample and expand
+                    target_keypoints_3d = target_keypoints_3d[0:1].expand(batch_size, -1, -1)
+                
+                # Handle visibility dimensions safely  
+                if visibility.dim() == 1:  # Shape (n_joints,)
+                    if batch_size > 1:
+                        visibility = visibility.unsqueeze(0).expand(batch_size, -1)  # (batch_size, n_joints)
+                    else:
+                        visibility = visibility.unsqueeze(0)  # (1, n_joints)
+                elif visibility.dim() == 2 and visibility.shape[0] != batch_size:
+                    # If already 2D but wrong batch size, take first sample and expand
+                    visibility = visibility[0:1].expand(batch_size, -1)
+                
+                # Final safety check: ensure joints_3d and target_keypoints_3d have compatible shapes
+                if joints_3d.shape[0] != target_keypoints_3d.shape[0]:
+                    print(f"Warning: Batch size mismatch in 3D keypoint loss - predicted: {joints_3d.shape}, target: {target_keypoints_3d.shape}")
+                    # Use minimum batch size to avoid errors
+                    min_batch = min(joints_3d.shape[0], target_keypoints_3d.shape[0])
+                    joints_3d = joints_3d[:min_batch]
+                    target_keypoints_3d = target_keypoints_3d[:min_batch]
+                    visibility = visibility[:min_batch]
+                
+                # Apply visibility mask - only compute loss for visible joints
+                visible_mask = visibility.bool()
+                
+                # Additional safety check for finite 3D joints (prevent NaN/inf in loss)
+                finite_mask = torch.isfinite(joints_3d).all(dim=-1) & torch.isfinite(target_keypoints_3d).all(dim=-1)
+                
+                # Only keep joints that are visible AND finite
+                valid_mask = visible_mask & finite_mask
+                
+                if valid_mask.any():
+                    # Use masking that preserves gradients - multiply by mask weights instead of indexing
+                    # Convert boolean mask to float weights (1.0 for valid, 0.0 for invalid)
+                    joint_weights = valid_mask.float().unsqueeze(-1)  # Shape: (batch_size, n_joints, 1)
+                    
+                    # Compute weighted MSE loss that preserves gradients
+                    # Only valid joints contribute to loss (invalid ones get weight 0)
+                    diff_squared = (joints_3d - target_keypoints_3d) ** 2
+                    weighted_diff = diff_squared * joint_weights
+                    
+                    # Average over all valid joints with numerical stability
+                    num_valid = valid_mask.sum().float()
+                    eps = 1e-8  # Small epsilon for numerical stability
+                    
+                    if num_valid > 0:
+                        # Compute loss only for valid joints, preserving gradients
+                        # Sum over all joints (weighted by visibility) and divide by number of valid joints
+                        loss = weighted_diff.sum() / (num_valid * 3 + eps)  # Divide by 3 for x,y,z coordinates
+                        # Add small epsilon to prevent very small losses that can cause numerical issues
+                        loss = loss + eps
+                    else:
+                        # No valid joints - return small epsilon with gradients
+                        loss = torch.tensor(eps, device=self.device, requires_grad=True)
+                    
+                    # Check for NaN/inf in loss before proceeding
+                    if torch.isfinite(loss):
+                        loss_components['keypoint_3d'] = loss
+                        total_loss += loss_weights['keypoint_3d'] * loss
+                    else:
+                        print(f"Warning: Non-finite 3D keypoint loss detected: {loss.item()}, skipping")
+                        loss_components['keypoint_3d'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+                else:
+                    # No valid joints, set loss to small epsilon but still add it to components
+                    eps = 1e-8
+                    loss = torch.tensor(eps, device=self.device, requires_grad=True)
+                    loss_components['keypoint_3d'] = loss
+                    
+            except Exception as e:
+                # If 3D keypoint loss computation fails, continue without it
+                print(f"Warning: Failed to compute 3D keypoint loss: {e}")
+                import traceback
+                traceback.print_exc()
+                loss_components['keypoint_3d'] = torch.tensor(1e-8, device=self.device, requires_grad=True)
+        
         # Final safety check for total loss
         if not torch.isfinite(total_loss):
             print(f"Warning: Non-finite total loss detected: {total_loss.item()}, replacing with small epsilon")
@@ -1322,7 +1571,8 @@ class SMILImageRegressor(SMALFitter):
         return total_loss
     
     def _compute_rendered_outputs(self, predicted_params: Dict[str, torch.Tensor], 
-                                 compute_joints: bool = True, compute_silhouette: bool = True) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+                                 compute_joints: bool = True, compute_silhouette: bool = True, 
+                                 compute_joints_3d: bool = False) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
         """
         Compute rendered outputs (joints and/or silhouette) from predicted SMIL parameters in a single efficient pass.
         
@@ -1330,14 +1580,16 @@ class SMILImageRegressor(SMALFitter):
             predicted_params: Dictionary containing predicted SMIL parameters
             compute_joints: Whether to compute and return rendered 2D joint positions
             compute_silhouette: Whether to compute and return rendered silhouette
+            compute_joints_3d: Whether to compute and return 3D joint positions
             
         Returns:
-            Tuple of (rendered_joints, rendered_silhouette)
+            Tuple of (rendered_joints, rendered_silhouette, joints_3d)
             - rendered_joints: 2D joint positions as tensor of shape (batch_size, n_joints, 2) or None
             - rendered_silhouette: Silhouette tensor of shape (batch_size, 1, height, width) or None
+            - joints_3d: 3D joint positions as tensor of shape (batch_size, n_joints, 3) or None
         """
-        if not compute_joints and not compute_silhouette:
-            return None, None
+        if not compute_joints and not compute_silhouette and not compute_joints_3d:
+            return None, None, None
             
         # Create batch parameters for SMAL model
         batch_size = predicted_params['global_rot'].shape[0]
@@ -1394,14 +1646,28 @@ class SMILImageRegressor(SMALFitter):
             batch_params['betas_trans'] = predicted_params['betas_trans']
         
         # Run SMAL model to get vertices and joints (single pass)
-        verts, joints, Rs, v_shaped = self.smal_model(
-            batch_params['betas'],
-            torch.cat([
-                batch_params['global_rotation'].unsqueeze(1),
-                batch_params['joint_rotations']], dim=1),
-            betas_logscale=batch_params.get('log_betascale', None),
-            betas_trans=batch_params.get('betas_trans', None),
-            propagate_scaling=self.propagate_scaling)
+        # Use torch.no_grad() for intermediate computations when only 3D joints are needed
+        if compute_joints_3d and not compute_joints and not compute_silhouette:
+            # Optimization: if we only need 3D joints, we can skip some gradient computations
+            with torch.cuda.amp.autocast(enabled=False):  # Disable autocast for SMAL to prevent precision issues
+                verts, joints, Rs, v_shaped = self.smal_model(
+                    batch_params['betas'],
+                    torch.cat([
+                        batch_params['global_rotation'].unsqueeze(1),
+                        batch_params['joint_rotations']], dim=1),
+                    betas_logscale=batch_params.get('log_betascale', None),
+                    betas_trans=batch_params.get('betas_trans', None),
+                    propagate_scaling=self.propagate_scaling)
+        else:
+            # Standard computation for rendering
+            verts, joints, Rs, v_shaped = self.smal_model(
+                batch_params['betas'],
+                torch.cat([
+                    batch_params['global_rotation'].unsqueeze(1),
+                    batch_params['joint_rotations']], dim=1),
+                betas_logscale=batch_params.get('log_betascale', None),
+                betas_trans=batch_params.get('betas_trans', None),
+                propagate_scaling=self.propagate_scaling)
         
         # Apply transformation based on scaling configuration
         if self.use_ue_scaling:
@@ -1482,8 +1748,123 @@ class SMILImageRegressor(SMALFitter):
         if compute_silhouette:
             rendered_silhouette = rendered_silhouettes
         
-        return rendered_joints, rendered_silhouette
+        # Process 3D joints if requested
+        joints_3d = None
+        if compute_joints_3d:
+            # Extract 3D joint positions (already transformed appropriately above)
+            joints_3d = joints  # Shape: (batch_size, n_joints, 3)
+        
+        return rendered_joints, rendered_silhouette, joints_3d
     
+    def _validate_sample_visibility(self, keypoint_data: dict, silhouette_data=None, 
+                                   min_visible_keypoints: int = 5, min_pixel_coverage: float = 0.05) -> bool:
+        """
+        Validate if a sample has sufficient visibility for training.
+        
+        This method checks if the sample has enough visible keypoints and/or sufficient
+        pixel coverage in the silhouette to be useful for training. Samples that fail
+        these checks should have all losses set to zero to prevent the model from
+        being penalized for things it cannot possibly know.
+        
+        Args:
+            keypoint_data: Dictionary containing 'keypoints_2d' and 'keypoint_visibility'
+            silhouette_data: Optional silhouette mask tensor for pixel coverage calculation
+            min_visible_keypoints: Minimum number of visible keypoints required (default: 5)
+            min_pixel_coverage: Minimum pixel coverage percentage required (default: 0.05 = 5%)
+            
+        Returns:
+            bool: True if sample is valid for training, False otherwise
+        """
+        if keypoint_data is None:
+            return False
+            
+        # Check keypoint visibility
+        visibility = safe_to_tensor(keypoint_data['keypoint_visibility'], device=self.device)
+        target_keypoints = safe_to_tensor(keypoint_data['keypoints_2d'], device=self.device)
+        
+        # Apply the same visibility logic as in the existing keypoint loss computation
+        visible_mask = visibility.bool()
+        
+        # Check if ground truth keypoints are within reasonable image bounds [0, 1]
+        gt_in_bounds_mask = (target_keypoints >= 0.0) & (target_keypoints <= 1.0)
+        gt_in_bounds_mask = gt_in_bounds_mask.all(dim=-1)  # Both x and y must be in bounds
+        
+        # Only keep joints that are visible AND have ground truth within bounds
+        valid_keypoint_mask = visible_mask & gt_in_bounds_mask
+        num_valid_keypoints = valid_keypoint_mask.sum().item()
+        
+        # Check keypoint threshold
+        keypoint_valid = num_valid_keypoints >= min_visible_keypoints
+        
+        # Check pixel coverage if silhouette data is available
+        pixel_coverage_valid = True  # Default to True if no silhouette data
+        if silhouette_data is not None:
+            try:
+                target_silhouette = safe_to_tensor(silhouette_data, device=self.device)
+                
+                # Ensure proper format for pixel counting
+                if target_silhouette.dim() == 2:  # Shape (height, width)
+                    silhouette_2d = target_silhouette
+                elif target_silhouette.dim() == 3:  # Shape (height, width, channels) or (channels, height, width)
+                    if target_silhouette.shape[0] > target_silhouette.shape[-1]:
+                        # Likely (channels, height, width) - take first channel
+                        silhouette_2d = target_silhouette[0]
+                    else:
+                        # Likely (height, width, channels) - take first channel
+                        silhouette_2d = target_silhouette[:, :, 0]
+                else:
+                    # Unexpected format, assume invalid
+                    pixel_coverage_valid = False
+                
+                if pixel_coverage_valid:
+                    # Calculate pixel coverage percentage
+                    total_pixels = silhouette_2d.numel()
+                    animal_pixels = (silhouette_2d > 0.5).sum().item()  # Pixels with value > 0.5
+                    coverage_percentage = animal_pixels / total_pixels if total_pixels > 0 else 0.0
+                    pixel_coverage_valid = coverage_percentage >= min_pixel_coverage
+                    
+            except Exception as e:
+                # If silhouette processing fails, assume invalid
+                pixel_coverage_valid = False
+        
+        # Sample is valid if it passes both keypoint and pixel coverage checks
+        return keypoint_valid and pixel_coverage_valid
+
+    def get_filtering_statistics(self) -> dict:
+        """
+        Get statistics about sample filtering during training.
+        
+        Returns:
+            Dictionary containing filtering statistics
+        """
+        if not hasattr(self, '_filtering_stats'):
+            return {
+                'total_batches': 0,
+                'total_samples': 0,
+                'filtered_samples': 0,
+                'batches_with_filtering': 0,
+                'filtering_rate': 0.0,
+                'batch_filtering_rate': 0.0
+            }
+        
+        stats = self._filtering_stats.copy()
+        if stats['total_samples'] > 0:
+            stats['filtering_rate'] = stats['filtered_samples'] / stats['total_samples']
+        if stats['total_batches'] > 0:
+            stats['batch_filtering_rate'] = stats['batches_with_filtering'] / stats['total_batches']
+        
+        return stats
+
+    def reset_filtering_statistics(self):
+        """Reset the filtering statistics."""
+        if hasattr(self, '_filtering_stats'):
+            self._filtering_stats = {
+                'total_batches': 0,
+                'total_samples': 0,
+                'filtered_samples': 0,
+                'batches_with_filtering': 0
+            }
+
     def _compute_batch_keypoint_loss(self, rendered_joints: torch.Tensor, keypoint_data_list: list) -> torch.Tensor:
         """
         Compute batched 2D keypoint loss efficiently.
@@ -1750,6 +2131,64 @@ class SMILImageRegressor(SMALFitter):
         else:
             return torch.tensor(eps, device=self.device, requires_grad=True)
 
+    def _compute_batch_keypoint_3d_loss(self, joints_3d: torch.Tensor, keypoint_data_list: list) -> torch.Tensor:
+        """
+        Compute batched 3D keypoint loss efficiently with visibility awareness.
+        
+        Args:
+            joints_3d: Predicted 3D joint positions tensor of shape (batch_size, n_joints, 3)
+            keypoint_data_list: List of keypoint data dictionaries for each sample
+            
+        Returns:
+            Average 3D keypoint loss across valid samples in the batch
+        """
+        batch_size = joints_3d.shape[0]
+        total_loss = 0.0
+        valid_samples = 0
+        eps = 1e-8
+        
+        for i, keypoint_data in enumerate(keypoint_data_list):
+            if keypoint_data is None or i >= batch_size:
+                continue
+            
+            # Check if 3D keypoints are available in the keypoint data
+            if 'keypoints_3d' not in keypoint_data:
+                continue
+                
+            # Get target 3D keypoints and visibility for this sample
+            target_keypoints_3d = safe_to_tensor(keypoint_data['keypoints_3d'], device=self.device)
+            visibility = safe_to_tensor(keypoint_data['keypoint_visibility'], device=self.device)
+            
+            # Ensure proper shapes
+            if target_keypoints_3d.dim() == 2:  # Shape (n_joints, 3)
+                target_keypoints_3d = target_keypoints_3d  # Keep as is for this sample
+            if visibility.dim() == 1:  # Shape (n_joints,)
+                visibility = visibility  # Keep as is for this sample
+            
+            # Apply visibility mask - only compute loss for visible joints
+            visible_mask = visibility.bool()
+            finite_mask = torch.isfinite(joints_3d[i]).all(dim=-1) & torch.isfinite(target_keypoints_3d).all(dim=-1)
+            valid_mask = visible_mask & finite_mask
+            
+            if valid_mask.any():
+                # Compute loss for this sample using masking (same approach as 2D keypoints)
+                joint_weights = valid_mask.float().unsqueeze(-1)  # Shape: (n_joints, 1)
+                
+                # Compute 3D distance loss (MSE in 3D space)
+                diff_squared = (joints_3d[i] - target_keypoints_3d) ** 2
+                weighted_diff = diff_squared * joint_weights
+                
+                num_valid = valid_mask.sum().float()
+                if num_valid > 0:
+                    # Average over valid joints and 3D coordinates (x, y, z)
+                    sample_loss = weighted_diff.sum() / (num_valid * 3 + eps)
+                    total_loss += sample_loss
+                    valid_samples += 1
+        
+        if valid_samples > 0:
+            return total_loss / valid_samples + eps
+        else:
+            return torch.tensor(eps, device=self.device, requires_grad=True)
     
     def enable_debug(self, enable=True):
         """Enable debug output for keypoint loss computation."""

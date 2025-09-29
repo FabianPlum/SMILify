@@ -27,7 +27,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
-from smil_datasets import replicAntSMILDataset
+from smil_datasets import UnifiedSMILDataset
+from optimized_dataset import OptimizedSMILDataset
 from smal_fitter import SMALFitter
 from Unreal2Pytorch3D import return_placeholder_data
 import config
@@ -232,8 +233,8 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
             loss.backward()
             
             # Gradient clipping to prevent instability
-            # Use more aggressive clipping for transformer decoder
-            max_norm = 0.5 if model.head_type == 'transformer_decoder' else 1.0
+            # Use very aggressive clipping for transformer decoder to prevent gradient explosion
+            max_norm = 0.1 if model.head_type == 'transformer_decoder' else 1.0
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
             
             # Update parameters
@@ -398,16 +399,59 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                 predicted_params = model(image_tensor)
                 
                 # Create placeholder data for SMALFitter
-                rgb = image_tensor.cpu()
+                # For visualization, we need the original image data, not the preprocessed tensor
+                
+                if isinstance(dataset, OptimizedSMILDataset):
+                    # For optimized dataset, use the original image data and correct image size
+                    original_image = x_data['input_image_data']  # This is already in RGB format [0,1]
+                    
+                    # Convert RGB to BGR for visualization compatibility
+                    if isinstance(original_image, np.ndarray):
+                        # Swap RGB to BGR channels
+                        original_image_bgr = original_image[:, :, [2, 1, 0]]  # RGB -> BGR
+                        rgb = torch.from_numpy(original_image_bgr).permute(2, 0, 1).unsqueeze(0)
+                    else:
+                        # Swap RGB to BGR channels for tensor
+                        original_image_bgr = original_image[:, :, [2, 1, 0]]  # RGB -> BGR
+                        rgb = original_image_bgr.permute(2, 0, 1).unsqueeze(0) if len(original_image_bgr.shape) == 3 else original_image_bgr
+                    
+                    # Get the actual image size from the original image
+                    image_height, image_width = original_image.shape[:2]
+                else:
+                    # For original dataset, use preprocessed tensor (no channel swap needed)
+                    rgb = image_tensor.cpu()
+                    # Image size will be determined by return_placeholder_data from the file
 
                 if x_data["input_image_mask"] is not None:
-                    temp_batch, filenames = return_placeholder_data(
-                        input_image=x_data["input_image"],
-                        num_joints=len(y_data["joint_angles"]),
-                        keypoints_2d=y_data["keypoints_2d"],
-                        keypoint_visibility=y_data["keypoint_visibility"],
-                        silhouette=x_data["input_image_mask"]
-                    )
+                    if isinstance(dataset, OptimizedSMILDataset):
+                        # Optimized dataset - manually create placeholder data with correct image size
+                        # Create silhouette tensor
+                        sil = torch.FloatTensor(x_data["input_image_mask"])[None, None, ...]
+                        
+                        # Convert keypoints to pixel coordinates using backbone image size
+                        if model_config['backbone_name'].startswith('vit'):
+                            target_size = 224
+                        else:
+                            target_size = 512
+                            
+                        pixel_coords = y_data["keypoints_2d"].copy()
+                        pixel_coords[:, 0] = pixel_coords[:, 0] * target_size  # y coordinates  
+                        pixel_coords[:, 1] = pixel_coords[:, 1] * target_size  # x coordinates
+                        
+                        joints = torch.tensor(pixel_coords.reshape(1, len(y_data["joint_angles"]), 2), dtype=torch.float32)
+                        visibility = torch.tensor(y_data["keypoint_visibility"].reshape(1, len(y_data["joint_angles"])), dtype=torch.float32)
+                        
+                        temp_batch = (rgb, sil, joints, visibility)
+                        filenames = [f"optimized_sample_{i}"]
+                    else:
+                        # Original dataset - use file path
+                        temp_batch, filenames = return_placeholder_data(
+                            input_image=x_data["input_image"],
+                            num_joints=len(y_data["joint_angles"]),
+                            keypoints_2d=y_data["keypoints_2d"],
+                            keypoint_visibility=y_data["keypoint_visibility"],
+                            silhouette=x_data["input_image_mask"]
+                        )
                     temp_fitter = SMALFitter(
                         device=device,
                         data_batch=temp_batch,  # For rgb_only=False, use the temp_batch
@@ -429,9 +473,11 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                 # Set proper target joints and visibility for visualization
                 # Convert normalized keypoints back to pixel coordinates for visualization
                 if 'keypoints_2d' in y_data and 'keypoint_visibility' in y_data:
-                    # Use the rendered image size (512x512) for keypoint conversion
-                    # Both ground truth and rendered keypoints are normalized by 512x512
-                    target_height, target_width = 512, 512  # Renderer always outputs 512x512
+                    # Use backbone-specific image size for keypoint conversion
+                    if model_config['backbone_name'].startswith('vit'):
+                        target_height, target_width = 224, 224  # ViT uses 224x224
+                    else:
+                        target_height, target_width = 512, 512  # ResNet uses 512x512
                     
                     # Convert normalized [0,1] coordinates to pixel coordinates
                     keypoints_2d = y_data['keypoints_2d']  # Shape: (num_joints, 2), already in [y_norm, x_norm] format
@@ -769,7 +815,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     print("Loading dataset...")
     print(f"Using rotation representation: {rotation_representation}")
     print(f"Using backbone: {model_config['backbone_name']}")
-    dataset = replicAntSMILDataset(
+    dataset = UnifiedSMILDataset.from_path(
         data_path, 
         rotation_representation=rotation_representation,
         backbone_name=model_config['backbone_name']
@@ -924,17 +970,18 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         print(f"  Backbone parameters: {backbone_params:,}")
         print(f"  MLP head parameters: {head_params:,}")
     
-    # Initialize optimizer and loss function
+    # Initialize optimizer and loss function (AniMer-style AdamW)
     # Use the learning rate from curriculum (base learning rate for epoch 0)
     initial_lr = TrainingConfig.get_learning_rate_for_epoch(0)
+    weight_decay = training_params.get('weight_decay', 1e-4)
     
     # Get trainable parameters with different learning rates for different components
     trainable_params = model.get_trainable_parameters()
     
     # For transformer decoder, use a more conservative learning rate
     if model.head_type == 'transformer_decoder':
-        # Use lower learning rate for transformer decoder head
-        transformer_lr = initial_lr * 0.1  # 10x smaller learning rate
+        # Use much lower learning rate for transformer decoder head (AniMer-style)
+        transformer_lr = initial_lr * 0.01  # 100x smaller learning rate to prevent gradient explosion
         print(f"Using conservative learning rate for transformer decoder: {transformer_lr}")
         
         # Create separate parameter groups with different learning rates
@@ -944,15 +991,20 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         for param_group in trainable_params:
             if 'transformer_head' in str(param_group.get('params', [])):
                 # Lower learning rate for transformer head
-                transformer_params.append({'params': param_group['params'], 'lr': transformer_lr})
+                transformer_params.append({'params': param_group['params'], 'lr': transformer_lr, 'weight_decay': weight_decay})
             else:
                 # Normal learning rate for backbone
-                backbone_params.append(param_group)
+                backbone_params.append({'params': param_group['params'], 'lr': initial_lr, 'weight_decay': weight_decay})
         
         # Combine parameter groups
         trainable_params = backbone_params + transformer_params
+    else:
+        # For MLP head, add weight decay to all parameters
+        trainable_params = [{'params': param_group['params'], 'lr': initial_lr, 'weight_decay': weight_decay} 
+                           for param_group in trainable_params]
     
-    optimizer = optim.Adam(trainable_params, lr=initial_lr)
+    # Use AdamW optimizer (AniMer-style)
+    optimizer = optim.AdamW(trainable_params, lr=initial_lr, weight_decay=weight_decay)
     criterion = nn.MSELoss()
     
     print(f"Initial learning rate set to: {initial_lr}")
@@ -1077,7 +1129,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Train SMIL Image Regressor')
     parser.add_argument('--dataset', type=str, default=None, 
-                       choices=['masked_simple', 'pose_only_simple', 'test_textured'],
+                       choices=['masked_simple', 'pose_only_simple', 'test_textured', 'simple'],
                        help='Dataset to use (default: uses TrainingConfig.DEFAULT_DATASET)')
     parser.add_argument('--checkpoint', type=str, default=None,
                        help='Path to checkpoint file to resume training from (overrides config setting, default: None)')
@@ -1095,12 +1147,15 @@ if __name__ == "__main__":
     parser.add_argument('--backbone', type=str, default=None,
                        choices=['resnet50', 'resnet101', 'resnet152', 'vit_base_patch16_224', 'vit_large_patch16_224'],
                        help='Backbone network to use (overrides config default)')
+    parser.add_argument('--data_path', type=str, default=None,
+                       help='Path to dataset (overrides config default). Can be a directory or HDF5 file.')
     args = parser.parse_args()
     
     # Create config override dictionary for any provided arguments
     config_override = {}
     if args.seed is not None or args.rotation_representation is not None or \
-       args.batch_size is not None or args.learning_rate is not None or args.num_epochs is not None or args.backbone is not None:
+       args.batch_size is not None or args.learning_rate is not None or args.num_epochs is not None or args.backbone is not None or \
+       args.data_path is not None:
         config_override['training_params'] = {}
         if args.seed is not None:
             config_override['training_params']['seed'] = args.seed
@@ -1114,5 +1169,7 @@ if __name__ == "__main__":
             config_override['training_params']['num_epochs'] = args.num_epochs
         if args.backbone is not None:
             config_override['model_config'] = {'backbone_name': args.backbone}
+        if args.data_path is not None:
+            config_override['data_path'] = args.data_path
     
     main(dataset_name=args.dataset, checkpoint_path=args.checkpoint, config_override=config_override or None)
