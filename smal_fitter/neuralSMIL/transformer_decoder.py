@@ -226,9 +226,12 @@ class SMILTransformerDecoderHead(nn.Module):
         self.register_buffer('init_pose', torch.zeros(1, total_pose_dim))
         self.register_buffer('init_betas', torch.zeros(1, self.betas_dim))
         self.register_buffer('init_trans', torch.zeros(1, self.trans_dim))
-        self.register_buffer('init_fov', torch.tensor([[0.9]]))  # Reasonable FOV start
+        # Initialize FOV with reasonable value based on ground truth (typically around 8 degrees)
+        self.register_buffer('init_fov', torch.tensor([[8.0]]))
         self.register_buffer('init_cam_rot', torch.eye(3).flatten().unsqueeze(0))
-        self.register_buffer('init_cam_trans', torch.zeros(1, self.cam_trans_dim))
+        # Initialize camera translation with reasonable values based on ground truth range
+        # Ground truth camera translation is typically around [0, 0, 100-150]
+        self.register_buffer('init_cam_trans', torch.tensor([[0.0, 0.0, 100.0]]))
         
         if self.scales_dim > 0:
             self.register_buffer('init_scales', torch.zeros(1, self.scales_dim))
