@@ -1,7 +1,7 @@
 bl_info = {
     "name": "SMIL Model Importer",
     "author": "Fabian Plum",
-    "version": (1, 1, 0),
+    "version": (1, 2, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Tool Shelf",
     "description": "Import, configure, and export SMPL / SMIL models",
@@ -620,12 +620,15 @@ def load_pkl_file(filepath):
                     print(len(data_de_chumpied[key]))
         print("Loaded .pkl file successfully.")
         
-        # Check for new morph PCA entries
-        if "scaledirs" in data_de_chumpied:
-            print(f"Found scaledirs with shape: {data_de_chumpied['scaledirs'].shape}")
-        if "transdirs" in data_de_chumpied:
-            print(f"Found transdirs with shape: {data_de_chumpied['transdirs'].shape}")
-            
+        try:
+            # Check for new morph PCA entries
+            if "scaledirs" in data_de_chumpied:
+                print(f"Found scaledirs with shape: {data_de_chumpied['scaledirs'].shape}")
+            if "transdirs" in data_de_chumpied:
+                print(f"Found transdirs with shape: {data_de_chumpied['transdirs'].shape}")
+        except:
+            print("No valid scaledirs or transdirs found.")
+
         return data_de_chumpied
     except Exception as e:
         print(f"Failed to load .pkl file: {e}")
@@ -970,6 +973,309 @@ def apply_pca_and_create_shapekeys(
     return cov_out, mean_betas
 
 
+def apply_entangled_pca_and_create_shapekeys(
+    scans,
+    scale_data,
+    translation_data,
+    obj,
+    num_components=10,
+    overwrite_mesh=False,
+    std_range=1,
+    labels=None,
+    output_dir=None,
+):
+    import csv
+    """
+    Apply PCA to combined shape, scale, and translation features, then create shape keys.
+    
+    Args:
+        scans: Vertex data (n, v, 3)
+        scale_data: Scale data (n, j) - single scale factor per joint
+        translation_data: Translation data (n, j, 3)
+        obj: Blender mesh object
+        num_components: Number of PCA components
+        overwrite_mesh: Whether to overwrite mesh with mean shape
+        std_range: Standard deviation range for shape keys
+        labels: Labels for each sample
+        output_dir: Output directory for CSV files
+    
+    Returns:
+        tuple: (cov_out, mean_betas, scaledirs, transdirs)
+    """
+    n, v, _ = scans.shape
+    n_joints = scale_data.shape[1]
+    
+    # Reshape vertex data to (n, v*3)
+    vertex_features = scans.reshape(n, v * 3)
+    
+    # Reshape translation data to (n, j*3)
+    translation_features = translation_data.reshape(n, n_joints * 3)
+    
+    # Combine all features: [vertex_features, scale_features, translation_features]
+    combined_features = np.concatenate([vertex_features, scale_data, translation_features], axis=1)
+    
+    # Debug: Check each feature type separately with detailed statistics
+    print(f"=== FEATURE RANGES BEFORE NORMALIZATION ===")
+    print(f"Vertex features:")
+    print(f"  Shape: {vertex_features.shape}")
+    print(f"  Range: {np.min(vertex_features):.6f} to {np.max(vertex_features):.6f}")
+    print(f"  Mean: {np.mean(vertex_features):.6f}, Std: {np.std(vertex_features):.6f}")
+    print(f"  Min abs: {np.min(np.abs(vertex_features)):.6f}, Max abs: {np.max(np.abs(vertex_features)):.6f}")
+    
+    print(f"Scale data:")
+    print(f"  Shape: {scale_data.shape}")
+    print(f"  Range: {np.min(scale_data):.6f} to {np.max(scale_data):.6f}")
+    print(f"  Mean: {np.mean(scale_data):.6f}, Std: {np.std(scale_data):.6f}")
+    print(f"  Min abs: {np.min(np.abs(scale_data)):.6f}, Max abs: {np.max(np.abs(scale_data)):.6f}")
+    
+    print(f"Translation features:")
+    print(f"  Shape: {translation_features.shape}")
+    print(f"  Range: {np.min(translation_features):.6f} to {np.max(translation_features):.6f}")
+    print(f"  Mean: {np.mean(translation_features):.6f}, Std: {np.std(translation_features):.6f}")
+    print(f"  Min abs: {np.min(np.abs(translation_features)):.6f}, Max abs: {np.max(np.abs(translation_features)):.6f}")
+    
+    # Check for extreme values in each feature type
+    vertex_extreme = np.sum(np.abs(vertex_features) > 1e6)
+    scale_extreme = np.sum(np.abs(scale_data) > 1e6)
+    translation_extreme = np.sum(np.abs(translation_features) > 1e6)
+    
+    if vertex_extreme > 0:
+        print(f"Warning: Extreme vertex values found: {vertex_extreme} values")
+    if scale_extreme > 0:
+        print(f"Warning: Extreme scale values found: {scale_extreme} values")
+    if translation_extreme > 0:
+        print(f"Warning: Extreme translation values found: {translation_extreme} values")
+    
+    # Check if normalization is needed by comparing feature magnitudes
+    vertex_magnitude = np.std(vertex_features)
+    scale_magnitude = np.std(scale_data)
+    translation_magnitude = np.std(translation_features)
+    
+    print(f"=== NORMALIZATION ASSESSMENT ===")
+    print(f"Feature standard deviations:")
+    print(f"  Vertex: {vertex_magnitude:.6f}")
+    print(f"  Scale: {scale_magnitude:.6f}")
+    print(f"  Translation: {translation_magnitude:.6f}")
+    
+    max_magnitude = max(vertex_magnitude, scale_magnitude, translation_magnitude)
+    min_magnitude = min(vertex_magnitude, scale_magnitude, translation_magnitude)
+    magnitude_ratio = max_magnitude / min_magnitude if min_magnitude > 0 else float('inf')
+    
+    print(f"Magnitude ratio (max/min): {magnitude_ratio:.2f}")
+    if magnitude_ratio > 100:
+        print("Normalization is RECOMMENDED - large magnitude differences detected")
+    elif magnitude_ratio > 10:
+        print("Normalization is ADVISABLE - moderate magnitude differences detected")
+    else:
+        print("Normalization may not be necessary - similar magnitudes")
+    print(f"=== END FEATURE ANALYSIS ===")
+    
+    # Check for NaN values and handle them
+    nan_mask = np.isnan(combined_features)
+    if np.any(nan_mask):
+        print(f"Warning: Found {np.sum(nan_mask)} NaN values in combined features")
+        print(f"NaN locations: {np.where(nan_mask)}")
+        # Replace NaN values with 0 (or could use mean imputation)
+        combined_features = np.nan_to_num(combined_features, nan=0.0)
+        print("Replaced NaN values with 0.0")
+    
+    # Skip normalization since feature magnitudes are similar (ratio: 5.60)
+    print(f"Combined features shape: {combined_features.shape}")
+    print(f"Combined features range: {np.min(combined_features):.6f} to {np.max(combined_features):.6f}")
+    print("Skipping normalization - feature magnitudes are similar")
+    
+    # Perform PCA on normalized features
+    pca = PCA(n_components=num_components)
+    pca.fit(combined_features)
+    
+    # Since we didn't normalize, the PCA components are already in the original scale
+    original_mean = pca.mean_  # This is the mean of the original data
+    
+    # Components are already in the correct scale since no normalization was applied
+    pca_components_denorm = pca.components_
+    
+    # Debug: Check the magnitude of components
+    print(f"PCA components magnitude range: {np.min(np.abs(pca_components_denorm)):.6f} to {np.max(np.abs(pca_components_denorm)):.6f}")
+    
+    # Separate the original mean into shape, scale, and translation parts
+    vertex_mean = original_mean[:v*3].reshape(v, 3)
+    # the scale and translation mean are already used to compute the mean mesh so they don't get re-applied.
+    scale_mean = original_mean[v*3:v*3+n_joints]
+    translation_mean = original_mean[v*3+n_joints:].reshape(n_joints, 3)
+    
+    # Get covariance matrix from transformed data
+    transformed_betas = pca.transform(combined_features)
+    
+    # Debug: Check transformed_betas
+    print(f"transformed_betas shape: {transformed_betas.shape}")
+    print(f"transformed_betas range: {np.min(transformed_betas):.6f} to {np.max(transformed_betas):.6f}")
+    print(f"transformed_betas sample values: {transformed_betas[0, :5] if transformed_betas.shape[1] > 5 else transformed_betas[0, :]}")
+    
+    COV = EmpiricalCovariance(assume_centered=False).fit(transformed_betas)
+    cov_out = COV.covariance_
+    mean_betas = COV.location_
+    
+    # Update mesh with mean shape
+    if overwrite_mesh:
+        for vert_index, vert in enumerate(vertex_mean):
+            obj.data.vertices[vert_index].co = vert
+        if not obj.data.shape_keys:
+            obj.shape_key_add(name="Basis")
+    else:
+        if not obj.data.shape_keys:
+            obj.shape_key_add(name="Basis")
+        shape_key = obj.data.shape_keys.key_blocks["Basis"]
+        for vert_index, vert in enumerate(vertex_mean):
+            shape_key.data[vert_index].co = vert
+    
+    # Separate PCA components into shape, scale, and translation parts
+    shape_components = pca_components_denorm[:, :v*3].reshape(num_components, v, 3)
+    scale_components = pca_components_denorm[:, v*3:v*3+n_joints]  # (num_components, n_joints)
+    translation_components = pca_components_denorm[:, v*3+n_joints:].reshape(num_components, n_joints, 3)
+    
+    # Create shape keys from shape components
+    std_devs = np.sqrt(pca.explained_variance_)
+    
+    for i, (shapekey, std_dev) in enumerate(zip(shape_components, std_devs)):
+        shape_key_name = f"PC_{i + 1}"
+        shape_key = obj.shape_key_add(name=shape_key_name)
+        
+        min_range = -std_range * std_dev
+        max_range = std_range * std_dev
+        
+        for j, vertex in enumerate(shapekey):
+            shape_key.data[j].co = vertex_mean[j] + vertex
+        
+        shape_key.slider_min = min_range
+        shape_key.slider_max = max_range
+    
+    print(f"Created {num_components} entangled PCA shapekeys with custom min and max ranges based on standard deviations.")
+    
+    # Prepare scaledirs and transdirs for export
+    # Scale components: tile single values to 3D for compatibility
+    scaledirs = np.tile(scale_components[:, :, np.newaxis], (1, 1, 3))  # (num_components, n_joints, 3)
+    transdirs = translation_components  # (num_components, n_joints, 3)
+    
+    # Export XY coordinates and PCA stats if output_dir is provided
+    try:
+        if output_dir is not None:
+            if labels is None or len(labels) != scans.shape[0]:
+                labels = [f"sample_{i}" for i in range(scans.shape[0])]
+            
+            # XY coordinates for first two PCs
+            pc_xy_path = os.path.join(output_dir, "smil_entangled_PC_xy.csv")
+            
+            # Debug: Check what we're about to write
+            print(f"About to write PC XY data:")
+            print(f"  Number of labels: {len(labels)}")
+            print(f"  transformed_betas shape: {transformed_betas.shape}")
+            print(f"  First few PC1 values: {transformed_betas[:3, 0] if transformed_betas.shape[1] > 0 else 'No PC1'}")
+            print(f"  First few PC2 values: {transformed_betas[:3, 1] if transformed_betas.shape[1] > 1 else 'No PC2'}")
+            
+            with open(pc_xy_path, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["label", "PC1", "PC2"]) 
+                for i, lab in enumerate(labels):
+                    pc1 = transformed_betas[i, 0] if transformed_betas.shape[1] > 0 else 0.0
+                    pc2 = transformed_betas[i, 1] if transformed_betas.shape[1] > 1 else 0.0
+                    writer.writerow([lab, pc1, pc2])
+                    print(f"  Writing: {lab}, {pc1}, {pc2}")
+            
+            # PCA stats
+            stats_path = os.path.join(output_dir, "smil_entangled_PCA_stats.txt")
+            with open(stats_path, "w") as f:
+                f.write("PCA stats for entangled (shape+scale+translation) PCs\n")
+                f.write(f"n_samples: {combined_features.shape[0]}\n")
+                f.write(f"n_features: {combined_features.shape[1]}\n")
+                f.write(f"n_components: {num_components}\n")
+                f.write(f"explained_variance_ratio: {pca.explained_variance_ratio_.tolist()}\n")
+                f.write(f"explained_variance: {pca.explained_variance_.tolist()}\n")
+                f.write(f"singular_values: {pca.singular_values_.tolist()}\n")
+                f.write(f"mean_l2_norm: {float(np.linalg.norm(original_mean))}\n")
+                f.write("\npc_weights_per_shape (scores):\n")
+                header = ",".join(["label"] + [f"PC{i+1}" for i in range(min(num_components, transformed_betas.shape[1]))])
+                f.write(header + "\n")
+                for i, lab in enumerate(labels):
+                    weights = transformed_betas[i, : num_components]
+                    weights_str = ",".join([f"{w}" for w in weights.tolist()])
+                    f.write(f"{lab},{weights_str}\n")
+            print(f"Entangled PCA XY exported to {pc_xy_path}; stats to {stats_path}")
+    except Exception as e:
+        print(f"Failed exporting entangled PCA XY/stats: {e}")
+    
+    # --- Export entangled morph data to CSV ---
+    try:
+        entangled_output_path = os.path.join(output_dir, "smil_morph_PC_data_entangled.csv")
+        
+        # Get joint names from the object's stored data
+        joint_names = None
+        
+        # Try multiple methods to get joint names
+        try:
+            # Method 1: Check if object has J_names stored as custom property
+            if hasattr(obj, 'get') and 'J_names' in obj:
+                joint_names = obj['J_names']
+                print(f"Retrieved joint names from object custom property: {len(joint_names)} names")
+            
+            # Method 2: Try to get from armature
+            if joint_names is None:
+                armature = obj.find_armature()
+                if armature and hasattr(armature, 'data') and hasattr(armature.data, 'bones'):
+                    joint_names = [bone.name for bone in armature.data.bones]
+                    print(f"Retrieved joint names from armature: {len(joint_names)} names")
+            
+            # Method 3: Try to get from stored SMIL data
+            if joint_names is None and hasattr(obj, 'get') and 'smpl_data' in obj:
+                smpl_data = obj['smpl_data']
+                if hasattr(smpl_data, 'get') and 'J_names' in smpl_data:
+                    joint_names = smpl_data['J_names']
+                    print(f"Retrieved joint names from SMIL data: {len(joint_names)} names")
+        
+        except Exception as e:
+            print(f"Error retrieving joint names: {e}")
+        
+        # Fallback to generic names if we can't get proper joint names
+        if joint_names is None or len(joint_names) != n_joints:
+            joint_names = [f"joint_{j}" for j in range(n_joints)]
+            print(f"Warning: Using generic joint names for entangled morph data export (expected {n_joints}, got {len(joint_names) if joint_names else 0})")
+        else:
+            print(f"Successfully retrieved {len(joint_names)} joint names for entangled morph data export")
+        
+        with open(entangled_output_path, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            # Header: joint_name, then for each PC six columns matching the original naming pattern
+            header_entangled = ["joint_name"]
+            for k in range(num_components):
+                pc_label = f"PC_{k+1}"
+                header_entangled.extend(
+                    [
+                        f"{pc_label}_scale_x",
+                        f"{pc_label}_scale_y", 
+                        f"{pc_label}_scale_z",
+                        f"{pc_label}_translation_x",
+                        f"{pc_label}_translation_y",
+                        f"{pc_label}_translation_z",
+                    ]
+                )
+            writer.writerow(header_entangled)
+            
+            # Data rows: one per joint, with PCA component values
+            for j in range(n_joints):
+                row = [joint_names[j]]
+                for k in range(num_components):
+                    # Add scale components (3 values)
+                    row.extend(scaledirs[k, j, :].tolist())
+                    # Add translation components (3 values)  
+                    row.extend(transdirs[k, j, :].tolist())
+                writer.writerow(row)
+        
+        print(f"Entangled morph data exported to {entangled_output_path}")
+    except Exception as e:
+        print(f"Failed exporting entangled morph data: {e}")
+    
+    return cov_out, mean_betas, scaledirs, transdirs
+
+
 def recalculate_joint_positions(vertex_positions, J_regressor):
     """
     Recalculate the positions of joints based on vertex positions and joint regressor weights.
@@ -1287,6 +1593,8 @@ def export_smpl_model(obj, export_path, pkl_data=None):
     pkl_data["J"], pkl_data["J_names"] = export_joint_locations_to_npy(
         armature_obj, joint_locations_npy_path
     )[1:]
+    # Get the selected J_regressor method from the scene
+    smpl_tool = bpy.context.scene.smpl_tool
     pkl_data["J_regressor"] = export_J_regressor_to_npy(
         obj,
         armature_obj,
@@ -1294,7 +1602,7 @@ def export_smpl_model(obj, export_path, pkl_data=None):
         j_regressor_npy_path,
         weights=pkl_data["weights"],
         kintree_table=pkl_data["kintree_table"],
-        influence_type="boundary_weights",
+        influence_type=smpl_tool.j_regressor_method,
     )
 
     # Update "shapedirs" with the content of the shapekeys
@@ -1319,10 +1627,15 @@ def export_smpl_model(obj, export_path, pkl_data=None):
     print(shapedirs.shape)
 
     # Check if scaledirs and transdirs exist and include them in export
-    if "scaledirs" in pkl_data:
-        print(f"Including scaledirs in export with shape: {pkl_data['scaledirs'].shape}")
-    if "transdirs" in pkl_data:
-        print(f"Including transdirs in export with shape: {pkl_data['transdirs'].shape}")
+    # These will fail when a model is exported from a mesh for the first time, which is fine we just need to catch the error and continue
+    try:
+        if "scaledirs" in pkl_data:
+            print(f"Including scaledirs in export with shape: {pkl_data['scaledirs'].shape}")
+        if "transdirs" in pkl_data:
+            print(f"Including transdirs in export with shape: {pkl_data['transdirs'].shape}")
+    except:
+        print("No scaledirs or transdirs found.")
+        
 
     # Write out the new pkl file to the same location as the input pkl file with the user-specified name
     output_path = os.path.join(
@@ -1367,8 +1680,10 @@ class SMPL_PT_Panel(bpy.types.Panel):
         # Add section for pose correctives
         layout.separator()
         layout.label(text="Advanced processing options:")
+        layout.prop(smpl_tool, "j_regressor_method")
         layout.operator("smpl.recompute_joint_positions", text="Recompute joint positions")
         layout.operator("smpl.load_all_unposed_meshes", text="Load all unposed registered meshes")
+        layout.prop(smpl_tool, "separate_pcas")
         layout.operator("smpl.generate_from_unposed", text="Generate SMIL model from unposed meshes")
         
         # Add morph PCA status indicator
@@ -1473,12 +1788,18 @@ def export_joint_distances(context, filepath):
     # Get joint names from armature
     joint_names = [bone.name for bone in armature.data.bones]
 
-    # Recalculate J_regressor for current mesh state
+    # Recalculate J_regressor for current mesh state using selected method
     # This ensures it works even if mesh topology has changed
-    J_regressor = export_J_regressor_to_npy(mesh_obj, armature, 10)
+    # Uses the 10 nearest vertices, consider exposing this as a parameter
+    smpl_tool = context.scene.smpl_tool
+    J_regressor = export_J_regressor_to_npy(
+        mesh_obj, 
+        armature, 
+        10, 
+        influence_type=smpl_tool.j_regressor_method
+    )
 
     # Check if reference measurements are available
-    smpl_tool = context.scene.smpl_tool
     reference_measurements = {}
     reference_joint_pair = []
 
@@ -1758,8 +2079,14 @@ def export_mesh_measurements(context, filepath):
             # If we have reference measurements, we need to calculate joint distances
             joint_distances = {}
             if reference_joint_pair and reference_measurements and armature:
-                # Recalculate J_regressor for current mesh state
-                J_regressor = export_J_regressor_to_npy(obj, armature, 10)
+                # Recalculate J_regressor for current mesh state using selected method
+                smpl_tool = context.scene.smpl_tool
+                J_regressor = export_J_regressor_to_npy(
+                    obj, 
+                    armature, 
+                    10, 
+                    influence_type=smpl_tool.j_regressor_method
+                )
                 joint_names = [bone.name for bone in armature.data.bones]
 
                 # Get indices of reference joints
@@ -2178,14 +2505,103 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
 
             if smpl_tool.shapekeys_from_PCA:
                 output_dir = os.path.dirname(pkl_filepath)
-                cov, mean_betas = apply_pca_and_create_shapekeys(
-                    verts_data,
-                    obj,
-                    smpl_tool.number_of_PC,
-                    overwrite_mesh=True,
-                    labels=labels_list,
-                    output_dir=output_dir,
-                )
+                
+                if smpl_tool.separate_pcas:
+                    # Use separate PCAs (original behavior)
+                    cov, mean_betas = apply_pca_and_create_shapekeys(
+                        verts_data,
+                        obj,
+                        smpl_tool.number_of_PC,
+                        overwrite_mesh=True,
+                        labels=labels_list,
+                        output_dir=output_dir,
+                    )
+                else:
+                    # Use entangled PCA (new behavior)
+                    # Collect scale and translation data from unposed meshes
+                    scale_data_list = []
+                    translation_data_list = []
+                    
+                    for unposed_obj in unposed_meshes:
+                        if "scale_data" in unposed_obj and "translation_data" in unposed_obj:
+                            # Reconstruct scale data
+                            scale_data = np.array(unposed_obj["scale_data"], dtype=np.float32)
+                            
+                            # Debug: Check scale data
+                            print(f"Scale data for {unposed_obj.name}: shape={scale_data.shape}, values={scale_data[:10]}...")
+                            
+                            # Validate scale data shape
+                            if len(scale_data) != 55:
+                                print(f"ERROR: Expected 55 joints but got {len(scale_data)} scale values for {unposed_obj.name}")
+                                print("This suggests the scale data was stored incorrectly.")
+                                # Skip this mesh
+                                continue
+                            
+                            # Reconstruct translation data
+                            translation_data = np.array(unposed_obj["translation_data"], dtype=np.float32)
+                            num_joints = len(scale_data)
+                            
+                            # Debug: Check what we retrieved
+                            print(f"Retrieved translation data length: {len(translation_data)} for {unposed_obj.name}")
+                            print(f"Expected length: {num_joints * 3} = {num_joints * 3}")
+                            
+                            # Validate translation data shape
+                            expected_translation_size = num_joints * 3
+                            if len(translation_data) != expected_translation_size:
+                                print(f"ERROR: Expected {expected_translation_size} translation values but got {len(translation_data)} for {unposed_obj.name}")
+                                print("This suggests the translation data was stored incorrectly.")
+                                # Skip this mesh
+                                continue
+                                
+                            translation_data = translation_data.reshape(num_joints, 3)
+                            
+                            # Debug: Check translation data
+                            print(f"Translation data for {unposed_obj.name}: shape={translation_data.shape}")
+                            if np.any(np.isnan(translation_data)) or np.any(np.isinf(translation_data)):
+                                print(f"Warning: NaN or Inf values in translation data for {unposed_obj.name}")
+                                print(f"Translation data range: {np.min(translation_data)} to {np.max(translation_data)}")
+                            
+                            scale_data_list.append(scale_data)
+                            translation_data_list.append(translation_data)
+                        else:
+                            self.report({"WARNING"}, f"No scale/translation data found for {unposed_obj.name}. Using separate PCAs instead.")
+                            # Fall back to separate PCAs
+                            cov, mean_betas = apply_pca_and_create_shapekeys(
+                                verts_data,
+                                obj,
+                                smpl_tool.number_of_PC,
+                                overwrite_mesh=True,
+                                labels=labels_list,
+                                output_dir=output_dir,
+                            )
+                            break
+                    else:
+                        # All meshes have scale/translation data, proceed with entangled PCA
+                        scale_data = np.array(scale_data_list)
+                        translation_data = np.array(translation_data_list)
+                        
+                        # Debug: Check for NaN values in scale data
+                        if np.any(np.isnan(scale_data)):
+                            print(f"Warning: NaN values found in scale_data array")
+                        if np.any(np.isnan(translation_data)):
+                            print(f"Warning: NaN values found in translation_data array")
+                        if np.any(np.isnan(verts_data)):
+                            print(f"Warning: NaN values found in verts_data array")
+                        
+                        cov, mean_betas, scaledirs, transdirs = apply_entangled_pca_and_create_shapekeys(
+                            verts_data,
+                            scale_data,
+                            translation_data,
+                            obj,
+                            smpl_tool.number_of_PC,
+                            overwrite_mesh=True,
+                            labels=labels_list,
+                            output_dir=output_dir,
+                        )
+                        
+                        # Store the entangled PCA components
+                        data["scaledirs"] = scaledirs
+                        data["transdirs"] = transdirs
             else:
                 cov, mean_betas = create_shapekeys(npz_data, obj)
 
@@ -2195,25 +2611,27 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
             store_smpl_data(context, data, obj=obj)
 
             # Check if Transformation PCA components are available from LoadAllUnposedMeshes
-            global computed_scaledirs, computed_transdirs
-            if computed_scaledirs is not None and computed_transdirs is not None:
-                # Additional safety check for array shapes
-                if (isinstance(computed_scaledirs, np.ndarray) and 
-                    isinstance(computed_transdirs, np.ndarray) and
-                    len(computed_scaledirs.shape) == 3 and 
-                    len(computed_transdirs.shape) == 3):
-                    
-                    data["scaledirs"] = computed_scaledirs
-                    data["transdirs"] = computed_transdirs
-                    print(f"Added Transformation PCA components to generated model:")
-                    print(f"  scaledirs shape: {computed_scaledirs.shape}")
-                    print(f"  transdirs shape: {computed_transdirs.shape}")
-                    # Update the stored data with the morph PCA info
-                    store_smpl_data(context, data, obj=obj)
+            # Only use global variables when separate PCAs are enabled
+            if smpl_tool.separate_pcas:
+                global computed_scaledirs, computed_transdirs
+                if computed_scaledirs is not None and computed_transdirs is not None:
+                    # Additional safety check for array shapes
+                    if (isinstance(computed_scaledirs, np.ndarray) and 
+                        isinstance(computed_transdirs, np.ndarray) and
+                        len(computed_scaledirs.shape) == 3 and 
+                        len(computed_transdirs.shape) == 3):
+                        
+                        data["scaledirs"] = computed_scaledirs
+                        data["transdirs"] = computed_transdirs
+                        print(f"Added Transformation PCA components to generated model:")
+                        print(f"  scaledirs shape: {computed_scaledirs.shape}")
+                        print(f"  transdirs shape: {computed_transdirs.shape}")
+                        # Update the stored data with the morph PCA info
+                        store_smpl_data(context, data, obj=obj)
+                    else:
+                        print("Transformation PCA components found but with invalid shapes. Run 'Load all unposed registered meshes' again.")
                 else:
-                    print("Transformation PCA components found but with invalid shapes. Run 'Load all unposed registered meshes' again.")
-            else:
-                print("No Transformation PCA components found. Run 'Load all unposed registered meshes' first to compute them.")
+                    print("No Transformation PCA components found. Run 'Load all unposed registered meshes' first to compute them.")
 
             if smpl_tool.symmetrise:
                 make_symmetrical(obj, data)
@@ -2460,6 +2878,28 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                         final_scales.reshape(-1, 1), (1, 3)
                     )
                     
+                    # Store scale data in mesh object for later use in entangled PCA
+                    # Handle zero scales by setting them to 1.0
+                    final_scales_clean = final_scales.copy()
+                    zero_mask = (final_scales_clean == 0) | np.isnan(final_scales_clean) | np.isinf(final_scales_clean)
+                    if np.any(zero_mask):
+                        print(f"Warning: Found {np.sum(zero_mask)} zero/invalid scale values for {labels[i]}, setting to 1.0")
+                        final_scales_clean[zero_mask] = 1.0
+                    
+                    # Debug: Check what we're about to store
+                    print(f"About to store scale data for {labels[i]}: shape={final_scales_clean.shape}, values={final_scales_clean[:10]}...")
+                    print(f"final_scales range: {np.min(final_scales_clean)} to {np.max(final_scales_clean)}")
+                    print(f"final_scales has NaN: {np.any(np.isnan(final_scales_clean))}")
+                    print(f"final_scales has Inf: {np.any(np.isinf(final_scales_clean))}")
+                    
+                    # Store scale data as a list to avoid byte conversion issues
+                    obj["scale_data"] = final_scales_clean.tolist()
+                    
+                    # Verify what was stored
+                    stored_data = np.array(obj["scale_data"], dtype=np.float32)
+                    print(f"Verification - stored data shape: {stored_data.shape}, values: {stored_data[:10]}...")
+                    print(f"Stored data matches original: {np.array_equal(stored_data, final_scales_clean)}")
+                    
                     bpy.ops.object.mode_set(mode="POSE")
                     
                 # --- END PER-BONE LENGTH NORMALIZATION (HIERARCHICAL) ---
@@ -2560,15 +3000,42 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 trans_col_start = i * 6 + 3
                 transform_data[0, trans_col_start : trans_col_start + 3] = translation
                 
+                # Initialize translation data array for this mesh
+                mesh_translation_data = np.zeros((num_joints, 3))
+                mesh_translation_data[0] = translation
+                
                 for j in range(1, num_joints): # Skip root bone
                     parent_idx = parent_lookup.get(j)
+                    # Calculate translation for all joints, not just those with siblings
+                    translation = mean_joints[j] - mesh_joints[j]
+                    mesh_translation_data[j] = translation
+                    
+                    # Only create snap targets for joints with siblings
                     if parent_idx is not None and len(children[parent_idx]) > 1:
                         bone_name = joint_names[j]
                         snap_target_data[bone_name] = Vector(mean_joints[j]) + armature_offset
-                        # Calculate and store translation for joints with siblings
-                        translation = mean_joints[j] - mesh_joints[j]
                         trans_col_start = i * 6 + 3
                         transform_data[j, trans_col_start : trans_col_start + 3] = translation
+                
+                # Store translation data in mesh object for later use in entangled PCA
+                # Debug: Check for NaN values in translation data
+                if np.any(np.isnan(mesh_translation_data)):
+                    print(f"Warning: NaN values found in mesh_translation_data for {labels[i]}")
+                    print(f"Translation data shape: {mesh_translation_data.shape}")
+                    print(f"Translation data: {mesh_translation_data}")
+                    # Replace NaN with 0.0 (no translation)
+                    mesh_translation_data = np.nan_to_num(mesh_translation_data, nan=0.0)
+                
+                print(f"About to store translation data for {labels[i]}: shape={mesh_translation_data.shape}")
+                print(f"Translation data range: {np.min(mesh_translation_data)} to {np.max(mesh_translation_data)}")
+                
+                # Store translation data as a flat list to avoid reshaping issues
+                flat_translation_data = mesh_translation_data.flatten()
+                obj["translation_data"] = flat_translation_data.tolist()
+                
+                # Debug: Verify the storage
+                print(f"Stored translation data length: {len(obj['translation_data'])} (should be {55 * 3} = 165)")
+                print(f"Original shape: {mesh_translation_data.shape}, Flattened length: {len(flat_translation_data)}")
                         
                 # D. Batch-create snap targets and constraints
                 if snap_target_data:
@@ -2751,8 +3218,14 @@ class SMPL_OT_RecomputeJointPositions(bpy.types.Operator):
         if not armature:
             self.report({'ERROR'}, 'Selected mesh has no armature.')
             return {'CANCELLED'}
-        # Recompute J_regressor for this mesh+armature
-        J_regressor = export_J_regressor_to_npy(obj, armature, 10)
+        # Recompute J_regressor for this mesh+armature using selected method
+        smpl_tool = context.scene.smpl_tool
+        J_regressor = export_J_regressor_to_npy(
+            obj, 
+            armature, 
+            10, 
+            influence_type=smpl_tool.j_regressor_method
+        )
         vertex_positions = np.array([np.array(v.co) for v in obj.data.vertices])
         joint_positions = np.matmul(J_regressor, vertex_positions)
         bpy.context.view_layer.objects.active = armature
@@ -2821,6 +3294,24 @@ class SMPLProperties(bpy.types.PropertyGroup):
 
     symmetrise: bpy.props.BoolProperty(
         name="Symmetrise", description="Symmetrise the model", default=True
+    )
+
+    # Add property for separate PCAs
+    separate_pcas: bpy.props.BoolProperty(
+        name="Perform separate PCAs for shape, scale, and translation",
+        description="When enabled, performs separate PCAs for shape, scale, and translation. When disabled, performs entangled PCA combining all three.",
+        default=True,
+    )
+    
+    # Add property for J_regressor computation method
+    j_regressor_method: bpy.props.EnumProperty(
+        name="J_regressor Computation Method",
+        description="Choose the method for computing joint regressor weights",
+        items=[
+            ("inverse_distance", "Inverse Distance", "Use inverse distance weighting to nearest vertices"),
+            ("boundary_weights", "Boundary Weights", "Use boundary weights based on parent-child joint relationships"),
+        ],
+        default="inverse_distance",
     )
 
     # Add properties to store SMPL data
