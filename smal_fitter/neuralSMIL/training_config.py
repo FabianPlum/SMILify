@@ -38,12 +38,12 @@ class TrainingConfig:
     # Training hyperparameters (AniMer-style conservative settings)
     TRAINING_PARAMS = {
         'batch_size': 8,
-        'num_epochs': 100,
+        'num_epochs': 200,
         'learning_rate': 1.25e-6,  # AniMer-style very conservative learning rate
         'weight_decay': 1e-4,  # Add weight decay for AdamW
-        'seed': 13,
+        'seed': 1234,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': 'checkpoints/checkpoint_epoch_19.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': None, # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 16,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 8,  # Prefetch batches
@@ -107,19 +107,23 @@ class TrainingConfig:
         'curriculum_stages': [
             # Stage 1: Introduce keypoint losses gradually (AniMer-style)
             (10, {
-                'betas': 0.001, 
+                'cam_trans': 0.00001, # decrease cam_trans once suitable extrinsics are found otherwise the error is overpowering
+                'joint_rot': 0.002,
+            }),
+            # Stage 2: Introduce keypoint losses gradually (AniMer-style)
+            (20, {
+                'cam_trans': 0.00001,
                 'joint_rot': 0.001,
                 'keypoint_2d': 0.01,    # AniMer: 0.01
-                'keypoint_3d': 0.02,   # Conservative start for 3D loss
+                'keypoint_3d': 0.005,   # 
                 'silhouette': 0.01,
             }),
-            
-            # Stage 2: Slight increase in keypoint weights
-            (30, {
-                'betas': 0.001, 
-                'keypoint_2d': 0.02,    # Still conservative
-                'keypoint_3d': 0.05,   # Gradual increase
-                'silhouette': 0.01
+            (100, {
+                'cam_trans': 0.0001,
+                'joint_rot': 0.01,
+                'keypoint_2d': 0.01,    # AniMer: 0.01
+                'keypoint_3d': 0.005,   # 
+                'silhouette': 0.1,
             })
         ]
     }
@@ -134,7 +138,7 @@ class TrainingConfig:
             # Stage 1: Slight reduction for fine-tuning
             (40, 1e-6),      # 1e-6
             
-            # Stage 2: Further reduce for final fine-tuning
+            # Stage 2: Further reduce
             (60, 5e-7),      # 5e-7
             
             # Stage 3: Very low learning rate for final convergence
