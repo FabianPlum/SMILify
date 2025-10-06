@@ -142,7 +142,13 @@ class SMAL(nn.Module):
             print("No symmetry axis vertices provided - using default values!")
             symmetry_axis_vertices = None
 
-        if config.ignore_hardcoded_body:
+        if config.ignore_sym:
+            # Skip symmetry alignment entirely when ignore_sym is True
+            v_sym = v_template
+            self.left_inds = np.array([])
+            self.right_inds = np.array([])
+            self.center_inds = np.array([])
+        elif config.ignore_hardcoded_body:
             v_sym, self.left_inds, self.right_inds, self.center_inds = align_smal_template_to_symmetry_axis(
                 v_template,
                 sym_file=None,
