@@ -112,9 +112,11 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
     # Initialize scaling factors as identity
     scaling_factors = torch.ones(N, parent.shape[0], 3).to(Rs.device)
 
-    if torch.sum(betas_logscale) == 0 or config.ALLOW_LIMB_SCALING == False:
+    if config.ALLOW_LIMB_SCALING == False:
         betas_logscale = None
         # not sure where this broke, but if left unchecked this causes the optimise_to_joints code to fail
+        # previously: torch.sum(betas_logscale) == 0 or config.ALLOW_LIMB_SCALING == False
+        # which causes part-scaling to be disabled entirely when running fitter3d/optimise.py with new models that have no scaling parameters yet
 
     if betas_logscale is not None:
         # Convert from log space to regular scaling factors
