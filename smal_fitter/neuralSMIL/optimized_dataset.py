@@ -50,13 +50,18 @@ class OptimizedSMILDataset(torch.utils.data.Dataset):
         if not os.path.exists(hdf5_path):
             raise FileNotFoundError(f"HDF5 file not found: {hdf5_path}")
         
-        self.hdf5_file = h5py.File(hdf5_path, 'r')
+        # Initialize HDF5 file handle as None for lazy loading
+        self.hdf5_file = None
+        self._worker_id = None
         
-        # Load metadata
-        self.metadata = dict(self.hdf5_file['metadata'].attrs)
-        self.target_resolution = self.metadata['target_resolution']
-        self.original_backbone = self.metadata['backbone_name']
-        self.original_rotation_repr = self.metadata['rotation_representation']
+        # Load metadata once to get basic info
+        with h5py.File(hdf5_path, 'r') as temp_file:
+            self.metadata = dict(temp_file['metadata'].attrs)
+            self.target_resolution = self.metadata['target_resolution']
+            self.original_backbone = self.metadata['backbone_name']
+            self.original_rotation_repr = self.metadata['rotation_representation']
+            # Get number of samples
+            self.num_samples = self.metadata['total_samples']
         
         # Validate compatibility
         if self.rotation_representation != self.original_rotation_repr:
@@ -65,21 +70,42 @@ class OptimizedSMILDataset(torch.utils.data.Dataset):
                   f"Using preprocessed representation.")
             self.rotation_representation = self.original_rotation_repr
         
-        # Get dataset size
-        self.num_samples = self.metadata['total_samples']
-        
-        # Access to data groups
-        self.images = self.hdf5_file['images']
-        self.parameters = self.hdf5_file['parameters']
-        self.keypoints = self.hdf5_file['keypoints']
-        self.auxiliary = self.hdf5_file['auxiliary']
-        
-        # Thread safety for HDF5 access
-        self._lock = threading.Lock()
+        # Data groups will be initialized on first access in worker processes
+        self.images = None
+        self.parameters = None
+        self.keypoints = None
+        self.auxiliary = None
         
         print(f"Loaded optimized dataset: {self.num_samples} samples, "
               f"resolution {self.target_resolution}x{self.target_resolution}, "
               f"rotation: {self.rotation_representation}")
+    
+    def __del__(self):
+        """Cleanup HDF5 file handle when dataset is destroyed."""
+        if hasattr(self, 'hdf5_file') and self.hdf5_file is not None:
+            self.hdf5_file.close()
+    
+    def _ensure_file_open(self):
+        """Ensure HDF5 file is open in current worker process."""
+        import torch.utils.data
+        worker_info = torch.utils.data.get_worker_info()
+        current_worker_id = worker_info.id if worker_info is not None else None
+        
+        # Check if we need to open/reopen the file
+        if self.hdf5_file is None or self._worker_id != current_worker_id:
+            # Close existing file if it exists
+            if self.hdf5_file is not None:
+                self.hdf5_file.close()
+            
+            # Open new file handle for this worker
+            self.hdf5_file = h5py.File(self.hdf5_path, 'r')
+            self._worker_id = current_worker_id
+            
+            # Set up data group references
+            self.images = self.hdf5_file['images']
+            self.parameters = self.hdf5_file['parameters']
+            self.keypoints = self.hdf5_file['keypoints']
+            self.auxiliary = self.hdf5_file['auxiliary']
     
     def __len__(self) -> int:
         """Return the number of samples in the dataset."""
@@ -98,29 +124,31 @@ class OptimizedSMILDataset(torch.utils.data.Dataset):
         if idx >= self.num_samples:
             raise IndexError(f"Index {idx} out of range for dataset size {self.num_samples}")
         
-        with self._lock:
-            # Load image data
-            jpeg_bytes = self.images['rgb_jpeg'][idx]
-            silhouette_mask = self.images['silhouette_masks'][idx]
-            
-            # Load parameters
-            global_rot = self.parameters['global_rot'][idx]
-            joint_rot = self.parameters['joint_rot'][idx]
-            betas = self.parameters['betas'][idx]
-            trans = self.parameters['trans'][idx]
-            fov = self.parameters['fov'][idx]
-            cam_rot = self.parameters['cam_rot'][idx]
-            cam_trans = self.parameters['cam_trans'][idx]
-            log_beta_scales = self.parameters['log_beta_scales'][idx]
-            betas_trans = self.parameters['betas_trans'][idx]
-            
-            # Load keypoints
-            keypoints_2d = self.keypoints['keypoints_2d'][idx]
-            keypoints_3d = self.keypoints['keypoints_3d'][idx]
-            keypoint_visibility = self.keypoints['keypoint_visibility'][idx]
-            
-            # Load auxiliary data
-            original_path = self.auxiliary['original_paths'][idx]
+        # Ensure HDF5 file is open in current worker process
+        self._ensure_file_open()
+        
+        # Load image data
+        jpeg_bytes = self.images['rgb_jpeg'][idx]
+        silhouette_mask = self.images['silhouette_masks'][idx]
+        
+        # Load parameters
+        global_rot = self.parameters['global_rot'][idx]
+        joint_rot = self.parameters['joint_rot'][idx]
+        betas = self.parameters['betas'][idx]
+        trans = self.parameters['trans'][idx]
+        fov = self.parameters['fov'][idx]
+        cam_rot = self.parameters['cam_rot'][idx]
+        cam_trans = self.parameters['cam_trans'][idx]
+        log_beta_scales = self.parameters['log_beta_scales'][idx]
+        betas_trans = self.parameters['betas_trans'][idx]
+        
+        # Load keypoints
+        keypoints_2d = self.keypoints['keypoints_2d'][idx]
+        keypoints_3d = self.keypoints['keypoints_3d'][idx]
+        keypoint_visibility = self.keypoints['keypoint_visibility'][idx]
+        
+        # Load auxiliary data
+        original_path = self.auxiliary['original_paths'][idx]
         
         # Decode JPEG image
         rgb_image = self._decode_jpeg_image(jpeg_bytes)
