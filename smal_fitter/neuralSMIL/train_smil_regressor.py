@@ -14,6 +14,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 import numpy as np
 import os
 import sys
@@ -53,6 +57,85 @@ def set_random_seeds(seed=0):
     # For deterministic behavior (may impact performance)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def setup_ddp(rank, world_size, port=None):
+    """
+    Initialize DDP environment.
+    
+    Args:
+        rank: Current process rank
+        world_size: Total number of processes
+        port: Master port for communication (default: 12355)
+    """
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = port or '12355'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+
+
+def cleanup_ddp():
+    """Clean up DDP environment."""
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def gather_validation_metrics(val_loss, param_errors, world_size):
+    """
+    Gather validation metrics from all processes for accurate reporting.
+    
+    Args:
+        val_loss: Validation loss from current process
+        param_errors: Parameter errors dict from current process  
+        world_size: Total number of processes
+        
+    Returns:
+        Tuple of (averaged validation loss, averaged parameter errors)
+    """
+    if world_size > 1 and dist.is_initialized():
+        # Gather losses from all GPUs
+        loss_tensor = torch.tensor(val_loss, device=torch.cuda.current_device())
+        dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
+        avg_val_loss = loss_tensor.item() / world_size
+        
+        # Gather parameter errors
+        averaged_param_errors = {}
+        for param_name, error_value in param_errors.items():
+            error_tensor = torch.tensor(error_value, device=torch.cuda.current_device())
+            dist.all_reduce(error_tensor, op=dist.ReduceOp.SUM)
+            averaged_param_errors[param_name] = error_tensor.item() / world_size
+            
+        return avg_val_loss, averaged_param_errors
+    else:
+        return val_loss, param_errors
+
+
+def ddp_main(rank, world_size, dataset_name, checkpoint_path, config_override, master_port):
+    """
+    DDP wrapper around existing main() function.
+    
+    Args:
+        rank: Current process rank
+        world_size: Total number of processes
+        dataset_name: Dataset name to use
+        checkpoint_path: Path to checkpoint file
+        config_override: Configuration overrides
+        master_port: Master port for DDP communication
+    """
+    setup_ddp(rank, world_size, master_port)
+    
+    # Modify config for distributed training
+    config_override = config_override or {}
+    config_override['device_override'] = f"cuda:{rank}"
+    config_override['is_distributed'] = True
+    config_override['rank'] = rank
+    config_override['world_size'] = world_size
+    
+    try:
+        # Call existing main() with minimal modifications
+        main(dataset_name, checkpoint_path, config_override)
+    finally:
+        cleanup_ddp()
 
 
 class ImageExporter():
@@ -185,7 +268,7 @@ def custom_collate_fn(batch):
     return x_data_batch, y_data_batch
 
 
-def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_weights):
+def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_weights, is_distributed=False, rank=0):
     """
     Train the model for one epoch using batch processing.
     
@@ -208,14 +291,20 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
     # Track parameter-specific errors
     param_errors = {}
     
-    pbar = tqdm(train_loader, desc=f'Epoch {epoch}')
+    # Only show progress bar on main process to avoid conflicts
+    if is_distributed and rank != 0:
+        pbar = train_loader  # No progress bar for non-main processes
+    else:
+        pbar = tqdm(train_loader, desc=f'Epoch {epoch}')
+    
     for batch_idx, (x_data_batch, y_data_batch) in enumerate(pbar):
         try:
             # Zero gradients at the start of each batch
             optimizer.zero_grad()
             
-            # Process batch
-            result = model.predict_from_batch(x_data_batch, y_data_batch)
+            # Process batch (handle DDP model)
+            base_model = model.module if is_distributed else model
+            result = base_model.predict_from_batch(x_data_batch, y_data_batch)
             
             if result[0] is None:  # No valid samples in batch
                 continue
@@ -223,8 +312,8 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
             # Extract results from batch
             predicted_params, target_params_batch, auxiliary_data = result
             
-            # Compute batch loss 
-            loss, loss_components = model.compute_batch_loss(
+            # Compute batch loss (handle DDP model)
+            loss, loss_components = base_model.compute_batch_loss(
                 predicted_params, target_params_batch, auxiliary_data, 
                 return_components=True, loss_weights=loss_weights
             )
@@ -234,11 +323,16 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
             
             # Gradient clipping to prevent instability
             # Use very aggressive clipping for transformer decoder to prevent gradient explosion
-            max_norm = 0.1 if model.head_type == 'transformer_decoder' else 1.0
+            head_type = base_model.head_type if is_distributed else model.head_type
+            max_norm = 0.1 if head_type == 'transformer_decoder' else 1.0
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
             
             # Update parameters
             optimizer.step()
+            
+            # Ensure all processes are synchronized after each step in DDP
+            if is_distributed:
+                torch.distributed.barrier()
             
             # Record loss and parameter errors
             batch_loss = loss.item()
@@ -251,8 +345,9 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
                     param_errors[param_name] = 0.0
                 param_errors[param_name] += param_loss.item()
             
-            # Update progress bar
-            pbar.set_postfix({'Loss': f'{batch_loss:.6f}'})
+            # Update progress bar (only on main process)
+            if not (is_distributed and rank != 0):
+                pbar.set_postfix({'Loss': f'{batch_loss:.6f}'})
             
         except Exception as e:
             print(f"Error processing batch {batch_idx}: {e}")
@@ -268,7 +363,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
     return total_loss / max(num_batches, 1), avg_param_errors
 
 
-def validate_epoch(model, val_loader, criterion, device, epoch, loss_weights):
+def validate_epoch(model, val_loader, criterion, device, epoch, loss_weights, is_distributed=False, rank=0):
     """
     Validate the model for one epoch
     
@@ -291,19 +386,25 @@ def validate_epoch(model, val_loader, criterion, device, epoch, loss_weights):
     param_errors = {}
     
     with torch.no_grad():
-        pbar = tqdm(val_loader, desc=f'Validation {epoch}')
+        # Only show progress bar on main process to avoid conflicts
+        if is_distributed and rank != 0:
+            pbar = val_loader  # No progress bar for non-main processes
+        else:
+            pbar = tqdm(val_loader, desc=f'Validation {epoch}')
+        
         for batch_idx, (x_data_batch, y_data_batch) in enumerate(pbar):
             try:
-                # Process batch
-                result = model.predict_from_batch(x_data_batch, y_data_batch)
+                # Process batch (handle DDP model)
+                base_model = model.module if is_distributed else model
+                result = base_model.predict_from_batch(x_data_batch, y_data_batch)
                 
                 if result[0] is None:  # No valid samples in batch
                     continue
                     
                 predicted_params, target_params_batch, auxiliary_data = result
                 
-                # Compute batch loss
-                loss, loss_components = model.compute_batch_loss(
+                # Compute batch loss (handle DDP model)
+                loss, loss_components = base_model.compute_batch_loss(
                     predicted_params, target_params_batch, auxiliary_data, 
                     return_components=True, loss_weights=loss_weights
                 )
@@ -319,8 +420,9 @@ def validate_epoch(model, val_loader, criterion, device, epoch, loss_weights):
                         param_errors[param_name] = 0.0
                     param_errors[param_name] += param_loss.item()
                 
-                # Update progress bar
-                pbar.set_postfix({'Loss': f'{batch_loss:.6f}'})
+                # Update progress bar (only on main process)
+                if not (is_distributed and rank != 0):
+                    pbar.set_postfix({'Loss': f'{batch_loss:.6f}'})
                 
             except Exception as e:
                 print(f"Error processing validation batch {batch_idx}: {e}")
@@ -641,16 +743,47 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
     Returns:
         Tuple of (start_epoch, train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss)
     """
-    if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+    if not checkpoint_path or not os.path.exists(checkpoint_path):
+        if checkpoint_path:  # Only raise error if a path was actually provided
+            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+        else:
+            # No checkpoint provided, return default values
+            return 0, [], [], [], [], float('inf')
     
     print(f"Loading checkpoint from: {checkpoint_path}")
     
     try:
         checkpoint = torch.load(checkpoint_path, map_location=device)
         
-        # Load model state
-        model.load_state_dict(checkpoint['model_state_dict'])
+        # Load model state (handle DDP compatibility)
+        model_state_dict = checkpoint['model_state_dict']
+        
+        # Check if we're loading a DDP checkpoint into a non-DDP model or vice versa
+        model_keys = set(model.state_dict().keys())
+        checkpoint_keys = set(model_state_dict.keys())
+        
+        # Check if checkpoint has 'module.' prefix but model doesn't (loading DDP checkpoint into non-DDP model)
+        if any(key.startswith('module.') for key in checkpoint_keys) and not any(key.startswith('module.') for key in model_keys):
+            print("Converting DDP checkpoint to non-DDP model...")
+            new_state_dict = {}
+            for key, value in model_state_dict.items():
+                if key.startswith('module.'):
+                    new_key = key[7:]  # Remove 'module.' prefix
+                    new_state_dict[new_key] = value
+                else:
+                    new_state_dict[key] = value
+            model_state_dict = new_state_dict
+        
+        # Check if model has 'module.' prefix but checkpoint doesn't (loading non-DDP checkpoint into DDP model)
+        elif any(key.startswith('module.') for key in model_keys) and not any(key.startswith('module.') for key in checkpoint_keys):
+            print("Converting non-DDP checkpoint to DDP model...")
+            new_state_dict = {}
+            for key, value in model_state_dict.items():
+                new_key = f'module.{key}'  # Add 'module.' prefix
+                new_state_dict[new_key] = value
+            model_state_dict = new_state_dict
+        
+        model.load_state_dict(model_state_dict, strict=False)
         print("Model state loaded successfully")
         
         # Load optimizer state
@@ -758,17 +891,27 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     # Load training configuration
     training_config = TrainingConfig.get_all_config(dataset_name)
     
+    # Extract DDP configuration from config_override
+    is_distributed = config_override.get('is_distributed', False) if config_override else False
+    rank = config_override.get('rank', 0) if config_override else 0
+    world_size = config_override.get('world_size', 1) if config_override else 1
+    device_override = config_override.get('device_override') if config_override else None
+    
     # Apply any config overrides
     if config_override:
         for key, value in config_override.items():
+            # Skip DDP-specific keys that aren't part of training config
+            if key in ['is_distributed', 'rank', 'world_size', 'device_override']:
+                continue
             if key in training_config:
                 if isinstance(training_config[key], dict):
                     training_config[key].update(value)
                 else:
                     training_config[key] = value
     
-    # Print configuration summary
-    TrainingConfig.print_config_summary(dataset_name)
+    # Print configuration summary (only on main process to avoid duplicate output)
+    if not is_distributed or rank == 0:
+        TrainingConfig.print_config_summary(dataset_name)
     
     # Extract configuration values
     data_path = training_config['data_path']
@@ -799,11 +942,17 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     set_random_seeds(seed)
     print(f"Random seed set to: {seed}")
     
-    # Set device
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
+    # Set device (use device_override for distributed training)
+    if device_override:
+        device = device_override
+        if not is_distributed or rank == 0:
+            print(f"Using device override: {device}")
+    else:
+        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if not is_distributed or rank == 0:
+            print(f"Using device: {device}")
     
     # Dataset parameters
     batch_size = training_params['batch_size']
@@ -851,12 +1000,32 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     print(f"  Prefetch factor: {prefetch_factor}")
     print(f"  Matplotlib backend: {matplotlib.get_backend()}")
     
+    # Create data loaders with distributed samplers if using DDP
+    if is_distributed:
+        # Create distributed samplers
+        train_sampler = DistributedSampler(train_set, rank=rank, num_replicas=world_size, shuffle=True)
+        val_sampler = DistributedSampler(val_set, rank=rank, num_replicas=world_size, shuffle=False)
+        test_sampler = DistributedSampler(test_set, rank=rank, num_replicas=world_size, shuffle=False)
+        
+        if not is_distributed or rank == 0:
+            print(f"Using distributed samplers for {world_size} GPUs")
+            print(f"Effective batch size per GPU: {batch_size}")
+            print(f"Total effective batch size: {batch_size * world_size}")
+            
+        # Debug: Print sampler information for each process
+        if is_distributed:
+            print(f"Rank {rank}: Train sampler size: {len(train_sampler)}, Val sampler size: {len(val_sampler)}")
+            print(f"Rank {rank}: Train sampler epoch: {train_sampler.epoch}, Val sampler epoch: {val_sampler.epoch}")
+    else:
+        train_sampler = val_sampler = test_sampler = None
+    
     # Try to create data loaders with multiprocessing, fallback to single-threaded if issues
     try:
         train_loader = DataLoader(
             train_set, 
             batch_size=batch_size, 
-            shuffle=True, 
+            shuffle=(not is_distributed),  # Don't shuffle when using distributed sampler
+            sampler=train_sampler,
             num_workers=num_workers, 
             collate_fn=custom_collate_fn,
             pin_memory=pin_memory,
@@ -866,7 +1035,8 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         val_loader = DataLoader(
             val_set, 
             batch_size=batch_size, 
-            shuffle=False, 
+            shuffle=False,  # Never shuffle validation
+            sampler=val_sampler,
             num_workers=num_workers, 
             collate_fn=custom_collate_fn,
             pin_memory=pin_memory,
@@ -876,21 +1046,24 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         test_loader = DataLoader(
             test_set, 
             batch_size=batch_size, 
-            shuffle=False, 
+            shuffle=False,  # Never shuffle test
+            sampler=test_sampler,
             num_workers=num_workers, 
             collate_fn=custom_collate_fn,
             pin_memory=pin_memory,
             persistent_workers=num_workers > 0,
             prefetch_factor=prefetch_factor
         )
-        print(f"Successfully created data loaders with {num_workers} workers")
+        if not is_distributed or rank == 0:
+            print(f"Successfully created data loaders with {num_workers} workers")
     except Exception as e:
-        print(f"Warning: Failed to create multiprocessing data loaders: {e}")
-        print("Falling back to single-threaded data loading...")
+        if not is_distributed or rank == 0:
+            print(f"Warning: Failed to create multiprocessing data loaders: {e}")
+            print("Falling back to single-threaded data loading...")
         num_workers = 0
-        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=custom_collate_fn)
-        val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=custom_collate_fn)
-        test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=custom_collate_fn)
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=(not is_distributed), sampler=train_sampler, num_workers=0, collate_fn=custom_collate_fn)
+        val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, sampler=val_sampler, num_workers=0, collate_fn=custom_collate_fn)
+        test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, sampler=test_sampler, num_workers=0, collate_fn=custom_collate_fn)
     
     # Create placeholder data for SMALFitter initialization
     placeholder_data = create_placeholder_data_batch(batch_size)
@@ -955,20 +1128,33 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     
     memory_optimizer.monitor.print_memory_status("After model initialization")
     
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model parameters: {total_params:,}")
+    # Wrap model with DDP if using distributed training
+    if is_distributed:
+        # find_unused_parameters=True needed due to complex SMAL model structure
+        # where some parameters might not be used in every forward pass
+        model = DDP(model, device_ids=[rank], find_unused_parameters=True)
+        if rank == 0:
+            print(f"Model wrapped with DistributedDataParallel on {world_size} GPUs")
     
-    # Print parameter breakdown by component
-    if model.head_type == 'transformer_decoder':
-        backbone_params = sum(p.numel() for p in model.backbone.parameters() if p.requires_grad)
-        head_params = sum(p.numel() for p in model.transformer_head.parameters() if p.requires_grad)
-        print(f"  Backbone parameters: {backbone_params:,}")
-        print(f"  Transformer decoder parameters: {head_params:,}")
-    else:
-        backbone_params = sum(p.numel() for p in model.backbone.parameters() if p.requires_grad)
-        head_params = sum(p.numel() for p in [model.fc1, model.fc2, model.fc3, model.regressor, model.ln1, model.ln2, model.ln3] for p in p.parameters() if p.requires_grad)
-        print(f"  Backbone parameters: {backbone_params:,}")
-        print(f"  MLP head parameters: {head_params:,}")
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    if not is_distributed or rank == 0:
+        print(f"Model parameters: {total_params:,}")
+    
+    # Print parameter breakdown by component (only on main process)
+    if not is_distributed or rank == 0:
+        # Access the underlying model for DDP
+        base_model = model.module if is_distributed else model
+        
+        if base_model.head_type == 'transformer_decoder':
+            backbone_params = sum(p.numel() for p in base_model.backbone.parameters() if p.requires_grad)
+            head_params = sum(p.numel() for p in base_model.transformer_head.parameters() if p.requires_grad)
+            print(f"  Backbone parameters: {backbone_params:,}")
+            print(f"  Transformer decoder parameters: {head_params:,}")
+        else:
+            backbone_params = sum(p.numel() for p in base_model.backbone.parameters() if p.requires_grad)
+            head_params = sum(p.numel() for p in [base_model.fc1, base_model.fc2, base_model.fc3, base_model.regressor, base_model.ln1, base_model.ln2, base_model.ln3] for p in p.parameters() if p.requires_grad)
+            print(f"  Backbone parameters: {backbone_params:,}")
+            print(f"  MLP head parameters: {head_params:,}")
     
     # Initialize optimizer and loss function (AniMer-style AdamW)
     # Use the learning rate from curriculum (base learning rate for epoch 0)
@@ -976,10 +1162,12 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     weight_decay = training_params.get('weight_decay', 1e-4)
     
     # Get trainable parameters with different learning rates for different components
-    trainable_params = model.get_trainable_parameters()
+    # Access the underlying model for DDP
+    base_model = model.module if is_distributed else model
+    trainable_params = base_model.get_trainable_parameters()
     
     # For transformer decoder, use a more conservative learning rate
-    if model.head_type == 'transformer_decoder':
+    if base_model.head_type == 'transformer_decoder':
         # Use much lower learning rate for transformer decoder head (AniMer-style)
         transformer_lr = initial_lr * 0.01  # 100x smaller learning rate to prevent gradient explosion
         print(f"Using conservative learning rate for transformer decoder: {transformer_lr}")
@@ -1035,6 +1223,10 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         print("Training from scratch")
     
     for epoch in range(start_epoch, num_epochs):
+        # Set epoch for distributed sampler (important for proper shuffling)
+        if is_distributed and hasattr(train_loader.sampler, 'set_epoch'):
+            train_loader.sampler.set_epoch(epoch)
+        
         # Get loss weights and learning rate for current epoch from configuration
         loss_weights = TrainingConfig.get_loss_weights_for_epoch(epoch)
         current_lr = TrainingConfig.get_learning_rate_for_epoch(epoch)
@@ -1043,81 +1235,107 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         for param_group in optimizer.param_groups:
             if param_group['lr'] != current_lr:
                 param_group['lr'] = current_lr
-                print(f"Learning rate updated to {current_lr} at epoch {epoch}")
+                if not is_distributed or rank == 0:
+                    print(f"Learning rate updated to {current_lr} at epoch {epoch}")
         
         # Train
-        train_loss, train_param_err = train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_weights)
+        train_loss, train_param_err = train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_weights, is_distributed, rank)
         train_losses.append(train_loss)
         train_param_errors.append(train_param_err)
         
         # Validate
-        val_loss, val_param_err = validate_epoch(model, val_loader, criterion, device, epoch, loss_weights)
+        val_loss, val_param_err = validate_epoch(model, val_loader, criterion, device, epoch, loss_weights, is_distributed, rank)
+        
+        # Gather validation metrics from all processes for accurate reporting
+        if is_distributed:
+            val_loss, val_param_err = gather_validation_metrics(val_loss, val_param_err, world_size)
+            # Ensure all processes complete validation before proceeding
+            torch.distributed.barrier()
+        
         val_losses.append(val_loss)
         val_param_errors.append(val_param_err)
         
-        # Print epoch summary with parameter errors
-        print(f'\nEpoch {epoch}:')
-        print(f'  Train Loss = {train_loss:.6f}, Val Loss = {val_loss:.6f}, LR = {current_lr:.2e}')
-        print('  Parameter Errors (Train / Val):')
+        # Print epoch summary with parameter errors (only on main process)
+        if not is_distributed or rank == 0:
+            print(f'\nEpoch {epoch}:')
+            print(f'  Train Loss = {train_loss:.6f}, Val Loss = {val_loss:.6f}, LR = {current_lr:.2e}')
+            print('  Parameter Errors (Train / Val):')
+            
+            # Get all parameter names from both train and val
+            all_params = set(train_param_err.keys()) | set(val_param_err.keys())
+            for param_name in sorted(all_params):
+                train_err = train_param_err.get(param_name, 0.0)
+                val_err = val_param_err.get(param_name, 0.0)
+                print(f'    {param_name:15s}: {train_err:.6f} / {val_err:.6f}')
         
-        # Get all parameter names from both train and val
-        all_params = set(train_param_err.keys()) | set(val_param_err.keys())
-        for param_name in sorted(all_params):
-            train_err = train_param_err.get(param_name, 0.0)
-            val_err = val_param_err.get(param_name, 0.0)
-            print(f'    {param_name:15s}: {train_err:.6f} / {val_err:.6f}')
-        
-        # Save best model (unless in test mode)
+        # Save best model (unless in test mode) - only on main process
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            if not is_test_mode:
+            if (not is_distributed or rank == 0) and not is_test_mode:
                 best_model_path = os.path.join(output_config['checkpoint_dir'], 'best_model.pth')
-                save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
+                # For DDP, save the underlying model state
+                model_to_save = model.module if is_distributed else model
+                save_checkpoint(epoch, model_to_save, optimizer, train_loss, val_loss, train_param_err, val_param_err,
                               train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
                               best_model_path)
                 print(f'  New best model saved with validation loss: {val_loss:.6f}')
-            else:
+            elif not is_distributed or rank == 0:
                 print(f'  New best validation loss: {val_loss:.6f} (checkpoint saving disabled in test mode)')
         
-        # Save regular checkpoint (unless in test mode)
-        if (epoch + 1) % output_config['save_checkpoint_every'] == 0:
+        # Save regular checkpoint (unless in test mode) - only on main process
+        if ((epoch + 1) % output_config['save_checkpoint_every'] == 0) and (not is_distributed or rank == 0):
             if not is_test_mode:
                 checkpoint_path_save = os.path.join(output_config['checkpoint_dir'], f'checkpoint_epoch_{epoch}.pth')
-                save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
+                # For DDP, save the underlying model state
+                model_to_save = model.module if is_distributed else model
+                save_checkpoint(epoch, model_to_save, optimizer, train_loss, val_loss, train_param_err, val_param_err,
                               train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
                               checkpoint_path_save)
                 print(f'  Checkpoint saved at epoch {epoch}')
             else:
                 print(f'  Checkpoint saving disabled in test mode (epoch {epoch})')
         
-        # Generate visualizations
-        if (epoch + 1) % output_config['generate_visualizations_every'] == 0:
-            visualize_training_progress(model, val_loader, device, epoch, model_config, dataset,
+        # Generate visualizations - only on main process
+        if ((epoch + 1) % output_config['generate_visualizations_every'] == 0) and (not is_distributed or rank == 0):
+            # For DDP, pass the underlying model for visualization
+            model_for_viz = model.module if is_distributed else model
+            visualize_training_progress(model_for_viz, val_loader, device, epoch, model_config, dataset,
                                       output_dir=output_config['visualizations_dir'], 
                                       num_samples=output_config['num_visualization_samples'])
         
-        # Plot training history (unless in test mode)
-        if (epoch + 1) % output_config['plot_history_every'] == 0:
+        # Plot training history (unless in test mode) - only on main process
+        if ((epoch + 1) % output_config['plot_history_every'] == 0) and (not is_distributed or rank == 0):
             if not is_test_mode:
                 history_path = os.path.join(output_config['plots_dir'], f'training_history_epoch_{epoch}.png')
                 param_errors_path = os.path.join(output_config['plots_dir'], f'parameter_errors_epoch_{epoch}.png')
                 plot_training_history(train_losses, val_losses, history_path)
                 plot_parameter_errors(train_param_errors, val_param_errors, param_errors_path)
     
-    print("Training completed!")
+    if not is_distributed or rank == 0:
+        print("Training completed!")
     
     # Final evaluation on test set
-    print("Evaluating on test set...")
+    if not is_distributed or rank == 0:
+        print("Evaluating on test set...")
     # Use final epoch loss weights for test evaluation
     final_loss_weights = TrainingConfig.get_loss_weights_for_epoch(num_epochs - 1)
-    test_loss, test_param_err = validate_epoch(model, test_loader, criterion, device, 'test', final_loss_weights)
-    print(f'Test Loss: {test_loss:.6f}')
-    print('Test Parameter Errors:')
-    for param_name, param_err in sorted(test_param_err.items()):
-        print(f'  {param_name:15s}: {param_err:.6f}')
+    # For DDP, pass the wrapped model for evaluation (validate_epoch handles unwrapping internally)
+    test_loss, test_param_err = validate_epoch(model, test_loader, criterion, device, 'test', final_loss_weights, is_distributed, rank)
     
-    # Save final training history (unless in test mode)
-    if not is_test_mode:
+    # Gather test metrics from all processes
+    if is_distributed:
+        test_loss, test_param_err = gather_validation_metrics(test_loss, test_param_err, world_size)
+        # Ensure all processes complete test evaluation before proceeding
+        torch.distributed.barrier()
+    
+    if not is_distributed or rank == 0:
+        print(f'Test Loss: {test_loss:.6f}')
+        print('Test Parameter Errors:')
+        for param_name, param_err in sorted(test_param_err.items()):
+            print(f'  {param_name:15s}: {param_err:.6f}')
+    
+    # Save final training history (unless in test mode) - only on main process
+    if (not is_distributed or rank == 0) and not is_test_mode:
         final_history_path = os.path.join(output_config['plots_dir'], 'final_training_history.png')
         final_param_errors_path = os.path.join(output_config['plots_dir'], 'final_parameter_errors.png')
         plot_training_history(train_losses, val_losses, final_history_path)
@@ -1149,6 +1367,10 @@ if __name__ == "__main__":
                        help='Backbone network to use (overrides config default)')
     parser.add_argument('--data_path', type=str, default=None,
                        help='Path to dataset (overrides config default). Can be a directory or HDF5 file.')
+    parser.add_argument('--num-gpus', type=int, default=1,
+                       help='Number of GPUs to use for training (default: 1)')
+    parser.add_argument('--master-port', type=str, default='12355',
+                       help='Master port for distributed training (default: 12355)')
     args = parser.parse_args()
     
     # Create config override dictionary for any provided arguments
@@ -1172,4 +1394,27 @@ if __name__ == "__main__":
         if args.data_path is not None:
             config_override['data_path'] = args.data_path
     
-    main(dataset_name=args.dataset, checkpoint_path=args.checkpoint, config_override=config_override or None)
+    # Launch training (single-GPU or multi-GPU)
+    if args.num_gpus > 1:
+        if not torch.cuda.is_available():
+            print("ERROR: Multi-GPU training requested but CUDA is not available!")
+            exit(1)
+        available_gpus = torch.cuda.device_count()
+        if args.num_gpus > available_gpus:
+            print(f"ERROR: Requested {args.num_gpus} GPUs but only {available_gpus} available!")
+            exit(1)
+            
+        print(f"Launching multi-GPU training on {args.num_gpus} GPUs...")
+        print(f"Master port: {args.master_port}")
+        print(f"Batch size per GPU: {args.batch_size if args.batch_size else 'from config'}")
+        print(f"Total effective batch size: {args.batch_size * args.num_gpus if args.batch_size else 'config_batch_size * num_gpus'}")
+        
+        # Launch multi-GPU training using spawn
+        mp.spawn(ddp_main, 
+                args=(args.num_gpus, args.dataset, args.checkpoint, config_override or None, args.master_port),
+                nprocs=args.num_gpus,
+                join=True)
+    else:
+        # Single GPU training (existing path)
+        print("Launching single-GPU training...")
+        main(dataset_name=args.dataset, checkpoint_path=args.checkpoint, config_override=config_override or None)
