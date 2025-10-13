@@ -22,11 +22,12 @@ class TrainingConfig:
         'SHAPE-n-POSE': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-SHAPE-n-POSE",
         'simple': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Simple",
         'simple100k': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Simple100k-noScale",
-        'simple100k_local': "/home/fabi/DATA_LOCAL/replicAnt-x-SMIL-OmniAnt-Simple100k-noScale"
+        'simple100k_local': "/home/fabi/DATA_LOCAL/replicAnt-x-SMIL-OmniAnt-Simple100k-noScale",
+        'SMILySTICK_precomp': "/home/fabi/dev/SMILify/SMILySTICK100k.h5"
     }
     
     # Default dataset to use
-    DEFAULT_DATASET = 'simple100k_local'
+    DEFAULT_DATASET = 'SMILySTICK_precomp'
     
     # Training split configuration
     SPLIT_CONFIG = {
@@ -43,7 +44,7 @@ class TrainingConfig:
         'weight_decay': 1e-4,  # Add weight decay for AdamW
         'seed': 1234,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': None, # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': None, #'checkpoints/checkpoint_epoch_69.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 16,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 8,  # Prefetch batches
@@ -65,8 +66,7 @@ class TrainingConfig:
             'mlp_dim': 1024,
             'dropout': 0.1,  # Add some dropout for stability
             'ief_iters': 3,
-            'scales_scale_factor': 0.001,  # Scale factor for log_beta_scales (encourages values close to zero)
-            'trans_scale_factor': 0.001,   # Scale factor for betas_trans (encourages values close to zero)
+            'trans_scale_factor': 1,   # Scale factor for betas_trans (encourages values close to zero)
         }
     }
     
@@ -83,6 +83,41 @@ class TrainingConfig:
         
         # Whether to print information about ignored joints during preprocessing
         'verbose_ignored_joints': True,
+    }
+    
+    # Scale and Translation Beta Handling Configuration
+    SCALE_TRANS_BETA_CONFIG = {
+        'mode': 'entangled_with_betas',  # Options: 'ignore', 'separate', 'entangled_with_betas'
+        
+        # Mode-specific configurations
+        'ignore': {
+            'use_zero_scales': True,
+            'use_zero_trans': True,
+            'loss_weights': {
+                'log_beta_scales': 0.0,
+                'betas_trans': 0.0
+            }
+        },
+        
+        'separate': {
+            'use_pca_transformation': True,
+            'transformer_scale_factors': {
+                'trans_scale_factor': 0.01
+            },
+            'loss_weights': {
+                'log_beta_scales': 0.0005,
+                'betas_trans': 0.0005
+            }
+        },
+        
+        'entangled_with_betas': {
+            'use_unified_betas': True,  # Same betas for shape, scale, and trans
+            'loss_weights': {
+                'betas': 0.0005,  # Single weight for all three components
+                'log_beta_scales': 0.0,  # Disabled
+                'betas_trans': 0.0       # Disabled
+            }
+        }
     }
     
     # Loss curriculum configuration (AniMer-style conservative weights)
@@ -119,7 +154,7 @@ class TrainingConfig:
                 'silhouette': 0.01,
             }),
             (100, {
-                'cam_trans': 0.0001,
+                'cam_trans': 0.00001,
                 'joint_rot': 0.01,
                 'keypoint_2d': 0.01,    # AniMer: 0.01
                 'keypoint_3d': 0.005,   # 
@@ -151,6 +186,7 @@ class TrainingConfig:
         'checkpoint_dir': 'checkpoints',
         'plots_dir': 'plots',
         'visualizations_dir': 'visualizations',
+        'train_visualizations_dir': 'visualizations_train',
         'save_checkpoint_every': 2,        # Save checkpoint every N epochs
         'generate_visualizations_every': 1, # Generate visualizations every N epochs
         'plot_history_every': 10,          # Plot training history every N epochs
@@ -213,6 +249,12 @@ class TrainingConfig:
         for epoch_threshold, weight_updates in cls.LOSS_CURRICULUM['curriculum_stages']:
             if epoch >= epoch_threshold:
                 weights.update(weight_updates)
+        
+        # Apply scale/trans mode specific weights
+        scale_trans_config = cls.get_scale_trans_config()
+        mode = scale_trans_config['mode']
+        if mode in scale_trans_config and 'loss_weights' in scale_trans_config[mode]:
+            weights.update(scale_trans_config[mode]['loss_weights'])
         
         return weights
     
@@ -286,6 +328,16 @@ class TrainingConfig:
                     config['model_config']['transformer_config']['context_dim'] = 2048
         
         return config
+    
+    @classmethod
+    def get_scale_trans_config(cls):
+        """Get scale and translation beta configuration."""
+        return cls.SCALE_TRANS_BETA_CONFIG
+
+    @classmethod
+    def get_scale_trans_mode(cls):
+        """Get current scale and translation mode."""
+        return cls.SCALE_TRANS_BETA_CONFIG['mode']
     
     @classmethod
     def print_config_summary(cls, dataset_name: Optional[str] = None):
