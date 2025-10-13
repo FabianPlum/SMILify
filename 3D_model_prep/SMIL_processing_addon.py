@@ -554,9 +554,21 @@ def export_J_regressor_to_npy(
             J_regressor[i, nearest_indices[i]] = nearest_weights[i]
 
     elif influence_type == "boundary_weights":
-        J_regressor = J_regressor_from_boundary_weights(
-            vertices, joint_locations, n, kintree_table, weights
-        )
+        # Check if required parameters are available
+        if kintree_table is None or weights is None:
+            print("Warning: boundary_weights method requires kintree_table and weights parameters.")
+            print("Falling back to inverse_distance method.")
+            # Fall back to inverse_distance method
+            nearest_indices, nearest_weights = find_nearest_neighbors(
+                vertices, joint_locations, n
+            )
+            J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
+            for i in range(len(joints)):
+                J_regressor[i, nearest_indices[i]] = nearest_weights[i]
+        else:
+            J_regressor = J_regressor_from_boundary_weights(
+                vertices, joint_locations, n, kintree_table, weights
+            )
     else:
         J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
         raise ValueError(f"Invalid influence type: {influence_type}")
@@ -3220,11 +3232,35 @@ class SMPL_OT_RecomputeJointPositions(bpy.types.Operator):
             return {'CANCELLED'}
         # Recompute J_regressor for this mesh+armature using selected method
         smpl_tool = context.scene.smpl_tool
+        
+        # For boundary_weights method, try to get required data
+        kintree_table = None
+        weights = None
+        if smpl_tool.j_regressor_method == "boundary_weights":
+            # Try to get kintree_table and weights from stored data
+            if hasattr(obj, 'get'):
+                if 'kintree_table' in obj:
+                    kintree_table = obj['kintree_table']
+                if 'weights' in obj:
+                    weights = obj['weights']
+            
+            # If not found in object, try to get from SMIL data
+            if kintree_table is None or weights is None:
+                try:
+                    data = load_smpl_data(context, obj=obj)
+                    if data:
+                        kintree_table = data.get('kintree_table')
+                        weights = data.get('weights')
+                except:
+                    pass
+        
         J_regressor = export_J_regressor_to_npy(
             obj, 
             armature, 
             10, 
-            influence_type=smpl_tool.j_regressor_method
+            influence_type=smpl_tool.j_regressor_method,
+            weights=weights,
+            kintree_table=kintree_table
         )
         vertex_positions = np.array([np.array(v.co) for v in obj.data.vertices])
         joint_positions = np.matmul(J_regressor, vertex_positions)
