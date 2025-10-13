@@ -100,7 +100,7 @@ class SMILImageRegressor(SMALFitter):
     def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior, 
                  rgb_only=True, freeze_backbone=True, hidden_dim=512, use_ue_scaling=True, 
                  rotation_representation='axis_angle', input_resolution=512, backbone_name='resnet152',
-                 head_type='mlp', transformer_config=None):
+                 head_type='mlp', transformer_config=None, scale_trans_mode='separate'):
         """
         Initialize the SMIL Image Regressor.
         
@@ -140,6 +140,7 @@ class SMILImageRegressor(SMALFitter):
         self.backbone_name = backbone_name
         self.head_type = head_type
         self.transformer_config = transformer_config or {}
+        self.scale_trans_mode = scale_trans_mode
         
         # Enable scaling propagation for SMIL models (matches Unreal2Pytorch3D behavior)
         self.propagate_scaling = True
@@ -189,15 +190,16 @@ class SMILImageRegressor(SMALFitter):
         self.cam_rot_dim = 9  # 9 for 3x3 rotation matrix (flattened)
         self.cam_trans_dim = 3
         
-        # Optional: Joint scales and translations (if available in model)
-        self.scales_dim = 0
-        self.joint_trans_dim = 0
-        
-        if config.ignore_hardcoded_body:
-            # For SMIL model, we have per-joint scales and translations
-            n_joints = config.N_POSE + 1  # +1 for root joint
-            self.scales_dim = n_joints * 3
-            self.joint_trans_dim = n_joints * 3
+        # Handle scale and trans dimensions based on mode
+        if self.scale_trans_mode == 'entangled_with_betas':
+            # No separate outputs needed - betas handle everything
+            self.scales_dim = 0
+            self.joint_trans_dim = 0
+        else:
+            # Separate outputs for scales and translations
+            # These are PCA weights, so same dimension as betas
+            self.scales_dim = config.N_BETAS  # PCA components for scaling
+            self.joint_trans_dim = config.N_BETAS  # PCA components for translation
         
         # Total output dimension
         self.total_output_dim = (self.global_rot_dim + self.joint_rot_dim + 
@@ -276,7 +278,7 @@ class SMILImageRegressor(SMALFitter):
             dropout=config['dropout'],
             ief_iters=config['ief_iters'],
             rotation_representation=self.rotation_representation,
-            scales_scale_factor=config.get('scales_scale_factor', 0.01),
+            scales_scale_factor=config.get('scales_scale_factor', 1),
             trans_scale_factor=config.get('trans_scale_factor', 0.01)
         ).to(self.device)
     
@@ -589,6 +591,18 @@ class SMILImageRegressor(SMALFitter):
         # Pass through transformer decoder head
         params = self.transformer_head(global_features, spatial_features)
         
+        # Handle different modes by transforming PCA weights to per-joint values
+        if self.scale_trans_mode == 'entangled_with_betas':
+            if 'betas' in params:
+                log_beta_scales, betas_trans = self._transform_betas_to_joint_values(params['betas'])
+                params['log_beta_scales'] = log_beta_scales
+                params['betas_trans'] = betas_trans
+        elif self.scale_trans_mode == 'separate':
+            # In separate mode, keep the PCA weights as-is for loss computation
+            # The transformer decoder outputs PCA weights directly
+            # We'll compute loss on these PCA weights, not on derived per-joint values
+            pass
+        
         return params
     
     def predict_from_batch(self, x_data_batch, y_data_batch) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], Dict]:
@@ -686,11 +700,45 @@ class SMILImageRegressor(SMALFitter):
         
         targets['cam_trans'] = safe_to_tensor(y_data['cam_trans'], device=self.device)
         
-        # Joint scales and translations (if available)
-        if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
-            n_joints = config.N_POSE + 1
-            targets['log_beta_scales'] = torch.zeros(n_joints, 3).to(self.device)
-            targets['betas_trans'] = torch.zeros(n_joints, 3).to(self.device)
+        # Handle scale and translation parameters based on mode
+        if self.scale_trans_mode == 'ignore':
+            # Set to zeros - no scaling or translation
+            # Use PCA weights (5 parameters) set to zero to match predicted dimensions
+            targets['log_beta_scales'] = torch.zeros(config.N_BETAS).to(self.device)
+            targets['betas_trans'] = torch.zeros(config.N_BETAS).to(self.device)
+            
+        elif self.scale_trans_mode == 'separate':
+            # In separate mode, use PCA weights directly as targets
+            if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
+                # Use the PCA weights directly (5 parameters each)
+                targets['log_beta_scales'] = torch.from_numpy(y_data['scale_weights']).float().to(self.device)
+                targets['betas_trans'] = torch.from_numpy(y_data['trans_weights']).float().to(self.device)
+            else:
+                # No PCA weights available, use zeros
+                targets['log_beta_scales'] = torch.zeros(config.N_BETAS).to(self.device)
+                targets['betas_trans'] = torch.zeros(config.N_BETAS).to(self.device)
+                
+        elif self.scale_trans_mode == 'entangled_with_betas':
+            # For entangled mode, we still need to compute the per-joint values
+            # but we'll use the same betas for all three PCA spaces
+            if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
+                from Unreal2Pytorch3D import sample_pca_transforms_from_dirs
+                translation_out, scale_out = sample_pca_transforms_from_dirs(
+                    config.dd, y_data['scale_weights'], y_data['trans_weights']
+                )
+                # Check for NaN or infinite values in PCA results
+                if not np.isfinite(scale_out).all():
+                    print(f"Warning: Non-finite values in scale_out, replacing with ones")
+                    scale_out = np.nan_to_num(scale_out, nan=1.0, posinf=1.0, neginf=1.0)
+                if not np.isfinite(translation_out).all():
+                    print(f"Warning: Non-finite values in translation_out, replacing with zeros")
+                    translation_out = np.nan_to_num(translation_out, nan=0.0, posinf=0.0, neginf=0.0)
+                targets['log_beta_scales'] = torch.from_numpy(np.log(np.maximum(scale_out, 1e-8))).float().to(self.device)
+                targets['betas_trans'] = torch.from_numpy(translation_out * y_data['translation_factor']).float().to(self.device)
+            else:
+                n_joints = len(config.dd["J_names"])
+                targets['log_beta_scales'] = torch.zeros(n_joints, 3).to(self.device)
+                targets['betas_trans'] = torch.zeros(n_joints, 3).to(self.device)
         
         return targets
     
@@ -710,6 +758,119 @@ class SMILImageRegressor(SMALFitter):
             batch_targets[param_name] = torch.stack(param_tensors, dim=0)
         
         return batch_targets
+    
+    def _transform_betas_to_joint_values(self, betas, translation_factor=0.01):
+        """
+        Transform betas through PCA spaces to get per-joint scale and translation values.
+        
+        Args:
+            betas: Tensor of shape (batch_size, num_betas) - PCA weights
+            translation_factor: Factor to apply to translation values
+            
+        Returns:
+            tuple: (log_beta_scales, betas_trans) both of shape (batch_size, num_joints, 3)
+        """
+        if not hasattr(config.dd, 'scaledirs') or not hasattr(config.dd, 'transdirs'):
+            # No PCA data available, return zeros
+            n_joints = len(config.dd["J_names"])
+            batch_size = betas.shape[0]
+            log_beta_scales = torch.zeros(batch_size, n_joints, 3, device=betas.device)
+            betas_trans = torch.zeros(batch_size, n_joints, 3, device=betas.device)
+            return log_beta_scales, betas_trans
+        
+        # Convert betas to numpy for PCA transformation
+        betas_np = betas.detach().cpu().numpy()
+        batch_size = betas_np.shape[0]
+        
+        # Check for NaN or infinite values in betas
+        if not np.isfinite(betas_np).all():
+            print(f"Warning: Non-finite values in betas, replacing with zeros")
+            betas_np = np.nan_to_num(betas_np, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        log_beta_scales_list = []
+        betas_trans_list = []
+        
+        for i in range(batch_size):
+            # Use the same betas for both scale and translation PCA spaces
+            scale_weights = betas_np[i]
+            trans_weights = betas_np[i]
+            
+            from Unreal2Pytorch3D import sample_pca_transforms_from_dirs
+            translation_out, scale_out = sample_pca_transforms_from_dirs(
+                config.dd, scale_weights, trans_weights
+            )
+            
+            # Check for NaN or infinite values in PCA results
+            if not np.isfinite(scale_out).all():
+                print(f"Warning: Non-finite values in scale_out, replacing with ones")
+                scale_out = np.nan_to_num(scale_out, nan=1.0, posinf=1.0, neginf=1.0)
+            if not np.isfinite(translation_out).all():
+                print(f"Warning: Non-finite values in translation_out, replacing with zeros")
+                translation_out = np.nan_to_num(translation_out, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            log_beta_scales_list.append(np.log(np.maximum(scale_out, 1e-8)))
+            betas_trans_list.append(translation_out * translation_factor)
+        
+        # Convert back to tensors
+        log_beta_scales = torch.from_numpy(np.stack(log_beta_scales_list)).float().to(betas.device)
+        betas_trans = torch.from_numpy(np.stack(betas_trans_list)).float().to(betas.device)
+        
+        return log_beta_scales, betas_trans
+    
+    def _transform_separate_pca_weights_to_joint_values(self, scale_weights, trans_weights, translation_factor=0.01):
+        """
+        Transform separate PCA weights for scales and translations to per-joint values.
+        
+        Args:
+            scale_weights: Tensor of shape (batch_size, num_betas) - PCA weights for scaling
+            trans_weights: Tensor of shape (batch_size, num_betas) - PCA weights for translation
+            translation_factor: Factor to apply to translation values
+            
+        Returns:
+            tuple: (log_beta_scales, betas_trans) both of shape (batch_size, num_joints, 3)
+        """
+        if not hasattr(config.dd, 'scaledirs') or not hasattr(config.dd, 'transdirs'):
+            # No PCA data available, return zeros
+            n_joints = len(config.dd["J_names"])
+            batch_size = scale_weights.shape[0]
+            log_beta_scales = torch.zeros(batch_size, n_joints, 3, device=scale_weights.device)
+            betas_trans = torch.zeros(batch_size, n_joints, 3, device=scale_weights.device)
+            return log_beta_scales, betas_trans
+        
+        # Convert to numpy for PCA transformation
+        scale_weights_np = scale_weights.detach().cpu().numpy()
+        trans_weights_np = trans_weights.detach().cpu().numpy()
+        batch_size = scale_weights_np.shape[0]
+        
+        log_beta_scales_list = []
+        betas_trans_list = []
+        
+        for i in range(batch_size):
+            # Use separate weights for scale and translation PCA spaces
+            scale_weights_i = scale_weights_np[i]
+            trans_weights_i = trans_weights_np[i]
+            
+            from Unreal2Pytorch3D import sample_pca_transforms_from_dirs
+            translation_out, scale_out = sample_pca_transforms_from_dirs(
+                config.dd, scale_weights_i, trans_weights_i
+            )
+            
+            # Check for NaN or infinite values in PCA results
+            if not np.isfinite(scale_out).all():
+                print(f"Warning: Non-finite values in scale_out, replacing with ones")
+                scale_out = np.nan_to_num(scale_out, nan=1.0, posinf=1.0, neginf=1.0)
+            if not np.isfinite(translation_out).all():
+                print(f"Warning: Non-finite values in translation_out, replacing with zeros")
+                translation_out = np.nan_to_num(translation_out, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            log_beta_scales_list.append(np.log(np.maximum(scale_out, 1e-8)))
+            betas_trans_list.append(translation_out * translation_factor)
+        
+        # Convert back to tensors
+        log_beta_scales = torch.from_numpy(np.stack(log_beta_scales_list)).float().to(scale_weights.device)
+        betas_trans = torch.from_numpy(np.stack(betas_trans_list)).float().to(scale_weights.device)
+        
+        return log_beta_scales, betas_trans
     
     def predict_from_image(self, image_data: np.ndarray) -> Dict[str, torch.Tensor]:
         """
@@ -1007,21 +1168,29 @@ class SMILImageRegressor(SMALFitter):
         else:
             loss_components['cam_trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
-        # Joint scales loss (if available)
-        if 'log_beta_scales' in valid_target_params and 'log_beta_scales' in valid_predicted_params and num_valid_samples > 0:
-            loss = F.mse_loss(valid_predicted_params['log_beta_scales'], valid_target_params['log_beta_scales'])
-            loss_components['log_beta_scales'] = loss
-            total_loss += loss_weights['log_beta_scales'] * loss
-        else:
+        # Handle scale and translation losses based on mode
+        if self.scale_trans_mode == 'entangled_with_betas':
+            # In entangled mode, we only supervise the betas directly
+            # The scale and translation values are derived from betas, so no separate losses
             loss_components['log_beta_scales'] = torch.tensor(eps, device=self.device, requires_grad=True)
-        
-        # Joint translations loss (if available)
-        if 'betas_trans' in valid_target_params and 'betas_trans' in valid_predicted_params and num_valid_samples > 0:
-            loss = F.mse_loss(valid_predicted_params['betas_trans'], valid_target_params['betas_trans'])
-            loss_components['betas_trans'] = loss
-            total_loss += loss_weights['betas_trans'] * loss
-        else:
             loss_components['betas_trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
+        else:
+            # Original logic for separate/ignore modes
+            # Joint scales loss (if available)
+            if 'log_beta_scales' in valid_target_params and 'log_beta_scales' in valid_predicted_params and num_valid_samples > 0:
+                loss = F.mse_loss(valid_predicted_params['log_beta_scales'], valid_target_params['log_beta_scales'])
+                loss_components['log_beta_scales'] = loss
+                total_loss += loss_weights['log_beta_scales'] * loss
+            else:
+                loss_components['log_beta_scales'] = torch.tensor(eps, device=self.device, requires_grad=True)
+            
+            # Joint translations loss (if available)
+            if 'betas_trans' in valid_target_params and 'betas_trans' in valid_predicted_params and num_valid_samples > 0:
+                loss = F.mse_loss(valid_predicted_params['betas_trans'], valid_target_params['betas_trans'])
+                loss_components['betas_trans'] = loss
+                total_loss += loss_weights['betas_trans'] * loss
+            else:
+                loss_components['betas_trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Batched 2D keypoint loss (only for valid samples)
         if need_keypoint_loss and rendered_joints is not None and auxiliary_data['keypoint_data'] and num_valid_samples > 0:
