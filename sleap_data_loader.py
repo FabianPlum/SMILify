@@ -41,6 +41,8 @@ class SLEAPDataLoader:
         self.calibration_data = None
         self.camera_views = []
         self.keypoint_names = []
+        self.data_structure_type = None  # 'camera_dirs' or 'session_dirs'
+        self.session_name = None  # For session-based structure
         self._load_project_structure()
         
     def _load_project_structure(self):
@@ -55,15 +57,18 @@ class SLEAPDataLoader:
         else:
             print("Warning: No calibration.toml found")
             
-        # Identify camera views from directory structure
-        self.camera_views = []
-        for item in self.project_path.iterdir():
-            if item.is_dir() and not item.name.startswith('.'):
-                # Check if this directory contains SLEAP prediction files
-                slp_files = list(item.glob("*.slp"))
-                if slp_files:
-                    self.camera_views.append(item.name)
-                    
+        # Detect data structure type
+        self._detect_data_structure()
+        
+        # Identify camera views based on structure type
+        if self.data_structure_type == 'camera_dirs':
+            self._load_camera_dirs_structure()
+        elif self.data_structure_type == 'session_dirs':
+            self._load_session_dirs_structure()
+        else:
+            print("Warning: Could not determine data structure type")
+            self.camera_views = []
+            
         print(f"Found {len(self.camera_views)} camera views: {self.camera_views}")
         
         # Load 3D points if available
@@ -73,16 +78,104 @@ class SLEAPDataLoader:
         else:
             print("Warning: No points3d.h5 found")
             
+    def _detect_data_structure(self):
+        """Detect whether this is a camera_dirs or session_dirs structure."""
+        # Check for camera_dirs structure (original)
+        # Look for directories that contain .slp files
+        camera_dirs_found = 0
+        for item in self.project_path.iterdir():
+            if item.is_dir() and not item.name.startswith('.'):
+                slp_files = list(item.glob("*.slp"))
+                if slp_files:
+                    camera_dirs_found += 1
+                    
+        # Check for session_dirs structure (new)
+        # Look for directories that contain .h5 files and videos in main dir
+        session_dirs_found = 0
+        video_files_in_main = list(self.project_path.glob("*.mp4"))
+        
+        for item in self.project_path.iterdir():
+            if item.is_dir() and not item.name.startswith('.'):
+                h5_files = list(item.glob("*.h5"))
+                if h5_files and not list(item.glob("*.slp")):
+                    session_dirs_found += 1
+                    
+        # Determine structure type
+        if camera_dirs_found > 0 and session_dirs_found == 0:
+            self.data_structure_type = 'camera_dirs'
+            print(f"Detected camera_dirs structure with {camera_dirs_found} camera directories")
+        elif session_dirs_found > 0 and video_files_in_main:
+            self.data_structure_type = 'session_dirs'
+            print(f"Detected session_dirs structure with {session_dirs_found} session directories")
+            # Find the session name (assuming there's one main session)
+            for item in self.project_path.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    h5_files = list(item.glob("*.h5"))
+                    if h5_files and not list(item.glob("*.slp")):
+                        self.session_name = item.name
+                        break
+            print(f"Using session: {self.session_name}")
+        else:
+            print("Warning: Could not determine data structure type")
+            self.data_structure_type = None
+            
+    def _load_camera_dirs_structure(self):
+        """Load camera views for camera_dirs structure."""
+        self.camera_views = []
+        for item in self.project_path.iterdir():
+            if item.is_dir() and not item.name.startswith('.'):
+                # Check if this directory contains SLEAP prediction files
+                slp_files = list(item.glob("*.slp"))
+                if slp_files:
+                    self.camera_views.append(item.name)
+                    
+    def _load_session_dirs_structure(self):
+        """Load camera views for session_dirs structure."""
+        self.camera_views = []
+        if not self.session_name:
+            return
+            
+        session_dir = self.project_path / self.session_name
+        if not session_dir.exists():
+            return
+            
+        # Look for camera-specific .h5 files in the session directory
+        h5_files = list(session_dir.glob("*_cam*.h5"))
+        for h5_file in h5_files:
+            # Extract camera name from filename (e.g., "021_4th_camA.h5" -> "camA")
+            filename = h5_file.stem
+            if '_cam' in filename:
+                camera_name = filename.split('_cam')[-1]
+                self.camera_views.append(camera_name)
+                
+        # Also check for video files in main directory to get camera names
+        video_files = list(self.project_path.glob("*_cam*.mp4"))
+        for video_file in video_files:
+            filename = video_file.stem
+            if '_cam' in filename:
+                camera_name = filename.split('_cam')[-1]
+                if camera_name not in self.camera_views:
+                    self.camera_views.append(camera_name)
+                    
     def load_camera_data(self, camera_name: str) -> Dict[str, Any]:
         """
         Load data for a specific camera view.
         
         Args:
-            camera_name (str): Name of the camera view (e.g., 'back', 'side', 'top')
+            camera_name (str): Name of the camera view (e.g., 'back', 'side', 'top', 'camA')
             
         Returns:
             Dict containing camera data including keypoints, frames, and metadata
         """
+        if self.data_structure_type == 'camera_dirs':
+            return self._load_camera_dirs_data(camera_name)
+        elif self.data_structure_type == 'session_dirs':
+            return self._load_session_dirs_data(camera_name)
+        else:
+            raise ValueError("Unknown data structure type")
+            
+    def _load_camera_dirs_data(self, camera_name: str) -> Dict[str, Any]:
+        """Load data for camera_dirs structure."""
         camera_dir = self.project_path / camera_name
         
         if not camera_dir.exists():
@@ -126,18 +219,77 @@ class SLEAPDataLoader:
                 data['tracks'] = json.loads(tracks_json.item())
                 
         # Load calibration data for this camera
-        # Find the calibration entry that matches this camera name
-        calibration_entry = None
-        if self.calibration_data:
-            for key, value in self.calibration_data.items():
-                if key != 'metadata' and value.get('name') == camera_name:
-                    calibration_entry = value
-                    break
-                    
+        calibration_entry = self._get_calibration_entry(camera_name)
         if calibration_entry:
             data['calibration'] = calibration_entry
             
         return data
+        
+    def _load_session_dirs_data(self, camera_name: str) -> Dict[str, Any]:
+        """Load data for session_dirs structure."""
+        if not self.session_name:
+            raise ValueError("No session name available")
+            
+        session_dir = self.project_path / self.session_name
+        
+        # Find the camera-specific .h5 file
+        camera_h5_files = list(session_dir.glob(f"*_cam{camera_name}.h5"))
+        if not camera_h5_files:
+            raise ValueError(f"No .h5 file found for camera {camera_name} in {session_dir}")
+            
+        camera_h5_file = camera_h5_files[0]
+        print(f"Loading camera data from: {camera_h5_file}")
+        
+        # Load the camera data file
+        with h5py.File(camera_h5_file, 'r') as f:
+            data = {}
+            
+            # Load key data structures - session_dirs uses different format
+            if 'tracks' in f:
+                data['tracks'] = f['tracks'][:]
+                
+            if 'point_scores' in f:
+                data['point_scores'] = f['point_scores'][:]
+                
+            if 'instance_scores' in f:
+                data['instance_scores'] = f['instance_scores'][:]
+                
+            if 'track_occupancy' in f:
+                data['track_occupancy'] = f['track_occupancy'][:]
+                
+            if 'node_names' in f:
+                data['node_names'] = f['node_names'][:]
+                
+            if 'edge_inds' in f:
+                data['edge_inds'] = f['edge_inds'][:]
+                
+            if 'edge_names' in f:
+                data['edge_names'] = f['edge_names'][:]
+                
+            # Load metadata
+            if 'video_path' in f:
+                data['video_path'] = f['video_path'][()]
+                
+            if 'labels_path' in f:
+                data['labels_path'] = f['labels_path'][()]
+                
+        # Load calibration data for this camera
+        calibration_entry = self._get_calibration_entry(camera_name)
+        if calibration_entry:
+            data['calibration'] = calibration_entry
+            
+        return data
+        
+    def _get_calibration_entry(self, camera_name: str) -> Optional[Dict]:
+        """Get calibration data for a camera."""
+        if not self.calibration_data:
+            return None
+            
+        # Find the calibration entry that matches this camera name
+        for key, value in self.calibration_data.items():
+            if key != 'metadata' and value.get('name') == camera_name:
+                return value
+        return None
         
     def extract_2d_keypoints(self, camera_data: Dict[str, Any], frame_idx: int = 0) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -152,6 +304,16 @@ class SLEAPDataLoader:
             - keypoints_2d: (N, 2) array of 2D coordinates
             - visibility: (N,) boolean array indicating keypoint visibility
         """
+        if self.data_structure_type == 'camera_dirs':
+            return self._extract_2d_keypoints_camera_dirs(camera_data, frame_idx)
+        elif self.data_structure_type == 'session_dirs':
+            return self._extract_2d_keypoints_session_dirs(camera_data, frame_idx)
+        else:
+            print("Unknown data structure type")
+            return np.array([]), np.array([])
+            
+    def _extract_2d_keypoints_camera_dirs(self, camera_data: Dict[str, Any], frame_idx: int) -> Tuple[np.ndarray, np.ndarray]:
+        """Extract 2D keypoints for camera_dirs structure."""
         instances = camera_data['instances']
         frames = camera_data['frames']
         
@@ -188,6 +350,36 @@ class SLEAPDataLoader:
         keypoints_2d = np.column_stack([instance_points['x'], instance_points['y']])
         visibility = instance_points['visible']
         
+        return keypoints_2d, visibility
+        
+    def _extract_2d_keypoints_session_dirs(self, camera_data: Dict[str, Any], frame_idx: int) -> Tuple[np.ndarray, np.ndarray]:
+        """Extract 2D keypoints for session_dirs structure."""
+        if 'tracks' not in camera_data:
+            print("Warning: No tracks data available")
+            return np.array([]), np.array([])
+            
+        tracks = camera_data['tracks']  # Shape: (n_tracks, n_instances, n_keypoints, n_frames)
+        # Where instance 0 = x coordinates, instance 1 = y coordinates
+        
+        if frame_idx >= tracks.shape[3]:
+            print(f"Warning: Frame index {frame_idx} out of range (max: {tracks.shape[3]-1})")
+            return np.array([]), np.array([])
+            
+        # Get x and y coordinates from the first track
+        x_coords = tracks[0, 0, :, frame_idx]  # x coordinates for all keypoints
+        y_coords = tracks[0, 1, :, frame_idx]  # y coordinates for all keypoints
+        
+        # Combine x and y coordinates
+        keypoints_2d = np.column_stack([x_coords, y_coords])  # Shape: (n_keypoints, 2)
+        
+        # For visibility, we can use point scores if available
+        if 'point_scores' in camera_data:
+            point_scores = camera_data['point_scores']  # Shape: (n_tracks, n_keypoints, n_frames)
+            visibility = point_scores[0, :, frame_idx] > 0.5  # Threshold for visibility
+        else:
+            # Fallback: assume keypoints are visible if they have non-NaN coordinates
+            visibility = ~np.isnan(keypoints_2d).any(axis=1)
+            
         return keypoints_2d, visibility
         
     def load_3d_keypoints(self, frame_idx: int = 0) -> np.ndarray:
@@ -249,6 +441,16 @@ class SLEAPDataLoader:
         Returns:
             np.ndarray or None: Video frame as RGB image, or None if failed
         """
+        if self.data_structure_type == 'camera_dirs':
+            return self._load_video_frame_camera_dirs(camera_name, frame_idx)
+        elif self.data_structure_type == 'session_dirs':
+            return self._load_video_frame_session_dirs(camera_name, frame_idx)
+        else:
+            print("Unknown data structure type")
+            return None
+            
+    def _load_video_frame_camera_dirs(self, camera_name: str, frame_idx: int) -> Optional[np.ndarray]:
+        """Load video frame for camera_dirs structure."""
         camera_dir = self.project_path / camera_name
         
         # Find video file
@@ -258,7 +460,21 @@ class SLEAPDataLoader:
             return None
             
         video_file = video_files[0]
+        return self._read_video_frame(video_file, frame_idx)
         
+    def _load_video_frame_session_dirs(self, camera_name: str, frame_idx: int) -> Optional[np.ndarray]:
+        """Load video frame for session_dirs structure."""
+        # Find video file in main directory
+        video_files = list(self.project_path.glob(f"*_cam{camera_name}.mp4"))
+        if not video_files:
+            print(f"No video file found for camera {camera_name} in {self.project_path}")
+            return None
+            
+        video_file = video_files[0]
+        return self._read_video_frame(video_file, frame_idx)
+        
+    def _read_video_frame(self, video_file: Path, frame_idx: int) -> Optional[np.ndarray]:
+        """Read a frame from a video file."""
         # Open video file
         cap = cv2.VideoCapture(str(video_file))
         if not cap.isOpened():
@@ -472,13 +688,23 @@ class SLEAPDataLoader:
         # Try to find an analysis file to extract keypoint names
         analysis_file = None
         
-        # Look for analysis files in any camera directory
-        for camera_name in self.camera_views:
-            camera_dir = self.project_path / camera_name
-            analysis_files = list(camera_dir.glob("*.analysis.h5"))
-            if analysis_files:
-                analysis_file = analysis_files[0]
-                break
+        if self.data_structure_type == 'camera_dirs':
+            # Look for analysis files in any camera directory
+            for camera_name in self.camera_views:
+                camera_dir = self.project_path / camera_name
+                analysis_files = list(camera_dir.glob("*.analysis.h5"))
+                if analysis_files:
+                    analysis_file = analysis_files[0]
+                    break
+        elif self.data_structure_type == 'session_dirs':
+            # For session_dirs, keypoint names are stored in the camera .h5 files
+            if self.session_name and self.camera_views:
+                session_dir = self.project_path / self.session_name
+                # Use the first camera's .h5 file to get keypoint names
+                first_camera = self.camera_views[0]
+                camera_h5_files = list(session_dir.glob(f"*_cam{first_camera}.h5"))
+                if camera_h5_files:
+                    analysis_file = camera_h5_files[0]
                 
         if analysis_file is None:
             print("Warning: No analysis file found, using generic keypoint names")
@@ -516,13 +742,23 @@ class SLEAPDataLoader:
         # Try to find an analysis file to extract skeleton structure
         analysis_file = None
         
-        # Look for analysis files in any camera directory
-        for camera_name in self.camera_views:
-            camera_dir = self.project_path / camera_name
-            analysis_files = list(camera_dir.glob("*.analysis.h5"))
-            if analysis_files:
-                analysis_file = analysis_files[0]
-                break
+        if self.data_structure_type == 'camera_dirs':
+            # Look for analysis files in any camera directory
+            for camera_name in self.camera_views:
+                camera_dir = self.project_path / camera_name
+                analysis_files = list(camera_dir.glob("*.analysis.h5"))
+                if analysis_files:
+                    analysis_file = analysis_files[0]
+                    break
+        elif self.data_structure_type == 'session_dirs':
+            # For session_dirs, skeleton structure is stored in the camera .h5 files
+            if self.session_name and self.camera_views:
+                session_dir = self.project_path / self.session_name
+                # Use the first camera's .h5 file to get skeleton structure
+                first_camera = self.camera_views[0]
+                camera_h5_files = list(session_dir.glob(f"*_cam{first_camera}.h5"))
+                if camera_h5_files:
+                    analysis_file = camera_h5_files[0]
                 
         if analysis_file is None:
             print("Warning: No analysis file found for skeleton structure")
@@ -556,6 +792,9 @@ class SLEAPDataLoader:
         print("SLEAP DATA SUMMARY")
         print("="*50)
         print(f"Project path: {self.project_path}")
+        print(f"Data structure type: {self.data_structure_type}")
+        if self.session_name:
+            print(f"Session name: {self.session_name}")
         print(f"Number of camera views: {len(self.camera_views)}")
         print(f"Camera views: {self.camera_views}")
         
@@ -590,17 +829,32 @@ class SLEAPDataLoader:
 
 
 def main():
-    """Test the SLEAP data loader with the provided dataset."""
-    # Initialize the data loader
-    project_path = "/home/fabi/DATA_LOCAL/MICE/10072022120554"
-    loader = SLEAPDataLoader(project_path)
+    """Test the SLEAP data loader with both data structures."""
+    # Test with original structure (camera_dirs)
+    print("="*60)
+    print("TESTING CAMERA_DIRS STRUCTURE")
+    print("="*60)
+    project_path_1 = "/home/fabi/DATA_LOCAL/MICE/10072022120554"
+    if Path(project_path_1).exists():
+        loader1 = SLEAPDataLoader(project_path_1)
+        loader1.print_data_summary()
+        print("\nPlotting 2D keypoints for all cameras...")
+        loader1.plot_all_cameras(frame_idx=0, save_dir="sleap_validation_plots_camera_dirs")
+    else:
+        print(f"Path not found: {project_path_1}")
     
-    # Print data summary
-    loader.print_data_summary()
-    
-    # Plot keypoints for all cameras (first frame)
-    print("\nPlotting 2D keypoints for all cameras...")
-    loader.plot_all_cameras(frame_idx=0, save_dir="sleap_validation_plots")
+    # Test with new structure (session_dirs)
+    print("\n" + "="*60)
+    print("TESTING SESSION_DIRS STRUCTURE")
+    print("="*60)
+    project_path_2 = "/home/fabi/DATA_LOCAL/STICKS/SMILy_data_test/7th_instar"
+    if Path(project_path_2).exists():
+        loader2 = SLEAPDataLoader(project_path_2)
+        loader2.print_data_summary()
+        print("\nPlotting 2D keypoints for all cameras...")
+        loader2.plot_all_cameras(frame_idx=0, save_dir="sleap_validation_plots_session_dirs")
+    else:
+        print(f"Path not found: {project_path_2}")
     
     print("\nSLEAP data loader test completed!")
 
