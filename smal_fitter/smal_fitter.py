@@ -426,12 +426,15 @@ class SMALFitter(nn.Module):
 
                 overlay_image = (rendered_images * 0.5) + (rgb_imgs * 0.5)
 
-                target_vis = SMALJointDrawer.draw_joints(rgb_imgs, target_joints, visible=target_visibility)
+                # Get image size for resolution-aware keypoint scaling
+                image_size = rgb_imgs.shape[-1]  # Assuming square images, get height/width
+
+                target_vis = SMALJointDrawer.draw_joints(rgb_imgs, target_joints, visible=target_visibility, image_size=image_size)
                 rendered_images_vis = SMALJointDrawer.draw_joints(rendered_images, rendered_joints,
-                                                                  visible=target_visibility)
+                                                                  visible=target_visibility, image_size=image_size)
                 rendered_overlay_vis = SMALJointDrawer.draw_joints(overlay_image, rendered_joints,
-                                                                   visible=target_visibility)
-                rev_images_vis = SMALJointDrawer.draw_joints(rev_images, rev_joints, visible=target_visibility)
+                                                                   visible=target_visibility, image_size=image_size)
+                rev_images_vis = SMALJointDrawer.draw_joints(rev_images, rev_joints, visible=target_visibility, image_size=image_size)
 
                 silhouette_error = 1.0 - F.l1_loss(sil_imgs, rendered_silhouettes, reduction='none')
                 silhouette_error = silhouette_error.expand_as(rgb_imgs).data.cpu()
