@@ -29,6 +29,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from Unreal2Pytorch3D import load_SMIL_Unreal_sample, compute_keypoint_visibility
+import config
 
 
 class DatasetPreprocessor:
@@ -220,8 +221,8 @@ class DatasetPreprocessor:
                 'keypoint_visibility': visibility.astype(np.float32),
                 
                 # Optional parameters (if available)
-                'log_beta_scales': np.array(y_data.get('scale_weights', np.zeros((55, 3))), dtype=np.float32),
-                'betas_trans': np.array(y_data.get('trans_weights', np.zeros((55, 3))), dtype=np.float32),
+                'scale_weights': np.array(y_data.get('scale_weights', np.zeros(config.N_BETAS)), dtype=np.float32),
+                'trans_weights': np.array(y_data.get('trans_weights', np.zeros(config.N_BETAS)), dtype=np.float32),
                 
                 # Metadata
                 'original_path': json_path,
