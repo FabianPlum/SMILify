@@ -185,13 +185,14 @@ def safe_to_tensor(data, dtype=torch.float32, device='cpu'):
     else:
         return torch.tensor(data, dtype=dtype, device=device)
 
-def extract_target_parameters(y_data, device):
+def extract_target_parameters(y_data, device, scale_trans_mode='separate'):
     """
     Extract target SMIL parameters from dataset y_data.
     
     Args:
         y_data: Dictionary containing SMIL data from dataset
         device: PyTorch device
+        scale_trans_mode: Mode for handling scale and translation betas ('ignore', 'separate', 'entangled_with_betas')
         
     Returns:
         Dictionary containing target parameters as tensors
@@ -237,13 +238,45 @@ def extract_target_parameters(y_data, device):
     # Camera translation (in model space)
     targets['cam_trans'] = safe_to_tensor(y_data['cam_trans'], device=device).unsqueeze(0)
     
-    # Joint scales and translations (if available)
-    if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
-        # These would need to be converted from PCA weights to actual scales/translations
-        # For now, we'll use placeholder values
-        n_joints = config.N_POSE + 1
-        targets['log_beta_scales'] = torch.zeros(1, n_joints, 3).to(device)
-        targets['betas_trans'] = torch.zeros(1, n_joints, 3).to(device)
+    # Handle scale and translation parameters based on mode
+    if scale_trans_mode == 'ignore':
+        # Set to zeros - no scaling or translation
+        # Use PCA weights (5 parameters) set to zero to match predicted dimensions
+        targets['log_beta_scales'] = torch.zeros(1, config.N_BETAS).to(device)
+        targets['betas_trans'] = torch.zeros(1, config.N_BETAS).to(device)
+        
+    elif scale_trans_mode == 'separate':
+        # In separate mode, use PCA weights directly as targets
+        if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
+            # Use the PCA weights directly (5 parameters each)
+            targets['log_beta_scales'] = torch.from_numpy(y_data['scale_weights']).unsqueeze(0).float().to(device)
+            targets['betas_trans'] = torch.from_numpy(y_data['trans_weights']).unsqueeze(0).float().to(device)
+        else:
+            # No PCA weights available, use zeros
+            targets['log_beta_scales'] = torch.zeros(1, config.N_BETAS).to(device)
+            targets['betas_trans'] = torch.zeros(1, config.N_BETAS).to(device)
+            
+    elif scale_trans_mode == 'entangled_with_betas':
+        # For entangled mode, we still need to compute the per-joint values
+        # but we'll use the same betas for all three PCA spaces
+        if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
+            from Unreal2Pytorch3D import sample_pca_transforms_from_dirs
+            translation_out, scale_out = sample_pca_transforms_from_dirs(
+                config.dd, y_data['scale_weights'], y_data['trans_weights']
+            )
+            # Check for NaN or infinite values in PCA results
+            if not np.isfinite(scale_out).all():
+                print(f"Warning: Non-finite values in scale_out, replacing with ones")
+                scale_out = np.nan_to_num(scale_out, nan=1.0, posinf=1.0, neginf=1.0)
+            if not np.isfinite(translation_out).all():
+                print(f"Warning: Non-finite values in translation_out, replacing with zeros")
+                translation_out = np.nan_to_num(translation_out, nan=0.0, posinf=0.0, neginf=0.0)
+            targets['log_beta_scales'] = torch.from_numpy(np.log(np.maximum(scale_out, 1e-8))).unsqueeze(0).float().to(device)
+            targets['betas_trans'] = torch.from_numpy(translation_out * y_data['translation_factor']).unsqueeze(0).float().to(device)
+        else:
+            n_joints = len(config.dd["J_names"])
+            targets['log_beta_scales'] = torch.zeros(1, n_joints, 3).to(device)
+            targets['betas_trans'] = torch.zeros(1, n_joints, 3).to(device)
     
     return targets
 
@@ -616,10 +649,25 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                 temp_fitter.fov.data = predicted_params['fov'][0:1]
                 
                 # Set joint scales and translations if available
-                if 'log_beta_scales' in predicted_params:
-                    temp_fitter.log_beta_scales.data = predicted_params['log_beta_scales'][0:1]
-                if 'betas_trans' in predicted_params:
-                    temp_fitter.betas_trans.data = predicted_params['betas_trans'][0:1]
+                if 'log_beta_scales' in predicted_params and 'betas_trans' in predicted_params:
+                    # Transform PCA weights to per-joint values for visualization
+                    if model.scale_trans_mode in ['separate', 'ignore']:
+                        # In separate/ignore modes, predicted_params contain PCA weights (5 parameters each)
+                        # Transform them to per-joint values for the SMALFitter
+                        scale_weights = predicted_params['log_beta_scales'][0:1]  # (1, 5)
+                        trans_weights = predicted_params['betas_trans'][0:1]      # (1, 5)
+                        
+                        # Transform to per-joint values using the helper method
+                        log_beta_scales_joint, betas_trans_joint = model._transform_separate_pca_weights_to_joint_values(
+                            scale_weights, trans_weights
+                        )
+                        
+                        temp_fitter.log_beta_scales.data = log_beta_scales_joint
+                        temp_fitter.betas_trans.data = betas_trans_joint
+                    else:
+                        # In other modes, the values are already per-joint
+                        temp_fitter.log_beta_scales.data = predicted_params['log_beta_scales'][0:1]
+                        temp_fitter.betas_trans.data = predicted_params['betas_trans'][0:1]
                 
                 # Set camera parameters from ground truth
                 if 'cam_rot' in y_data and 'cam_trans' in y_data:
@@ -1107,15 +1155,15 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         input_resolution=input_resolution,
         backbone_name=model_config['backbone_name'],
         head_type=model_config.get('head_type', 'mlp'),
-        transformer_config=model_config.get('transformer_config', {})
+        transformer_config=model_config.get('transformer_config', {}),
+        scale_trans_mode=TrainingConfig.get_scale_trans_mode()
     ).to(device)
     
     # Print model configuration
     print(f"Model created with head type: {model.head_type}")
+    print(f"Scale/Translation mode: {TrainingConfig.get_scale_trans_mode()}")
     if model.head_type == 'transformer_decoder':
         print(f"Transformer decoder config: {model.transformer_config}")
-        if 'scales_scale_factor' in model.transformer_config:
-            print(f"  Scales scale factor: {model.transformer_config['scales_scale_factor']}")
         if 'trans_scale_factor' in model.transformer_config:
             print(f"  Trans scale factor: {model.transformer_config['trans_scale_factor']}")
     
@@ -1301,6 +1349,10 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             model_for_viz = model.module if is_distributed else model
             visualize_training_progress(model_for_viz, val_loader, device, epoch, model_config, dataset,
                                       output_dir=output_config['visualizations_dir'], 
+                                      num_samples=output_config['num_visualization_samples'])
+            # Also visualize the train set to see if the model is overfitting
+            visualize_training_progress(model_for_viz, train_loader, device, epoch, model_config, dataset,
+                                      output_dir=output_config['train_visualizations_dir'], 
                                       num_samples=output_config['num_visualization_samples'])
         
         # Plot training history (unless in test mode) - only on main process
