@@ -879,6 +879,66 @@ def create_shapekeys(data, obj):
     return cov, mean_betas
 
 
+def create_shapekeys_from_pkl_shapedirs(data, obj):
+    """
+    Create shapekeys from shapedirs stored in pkl data.
+    
+    Args:
+    - data (dict): Dictionary containing pkl data with 'shapedirs'
+    - obj (bpy.types.Object): The mesh object
+    
+    Returns:
+    - tuple: (cov, mean_betas) covariance matrix and mean betas
+    """
+    if "shapedirs" not in data:
+        print("No 'shapedirs' key found in the pkl file.")
+        return None, None
+    
+    shapedirs = data["shapedirs"]
+    
+    # shapedirs has shape (num_vertices, 3, num_shapekeys)
+    # Check if shapedirs is not empty
+    if shapedirs.size == 0:
+        print("shapedirs is empty.")
+        return None, None
+    
+    if len(shapedirs.shape) != 3:
+        print(f"Unexpected shapedirs shape: {shapedirs.shape}. Expected (V, 3, K).")
+        return None, None
+    
+    num_vertices, _, num_shapekeys = shapedirs.shape
+    
+    # Get base vertex positions
+    base_vertices = np.array([np.array(v.co) for v in obj.data.vertices])
+    
+    # Verify vertex count matches
+    if base_vertices.shape[0] != num_vertices:
+        print(f"Vertex count mismatch: mesh has {base_vertices.shape[0]} vertices, shapedirs expects {num_vertices}.")
+        return None, None
+    
+    # Create basis shape key if it doesn't exist
+    if not obj.data.shape_keys:
+        obj.shape_key_add(name="Basis")
+    
+    # Create shapekeys from shapedirs
+    for i in range(num_shapekeys):
+        shape_key_name = f"Shape_{i}"
+        shape_key = obj.shape_key_add(name=shape_key_name)
+        
+        # Apply displacements from shapedirs
+        for vert_index in range(num_vertices):
+            displacement = shapedirs[vert_index, :, i]
+            shape_key.data[vert_index].co = base_vertices[vert_index] + displacement
+    
+    # Create covariance matrix and mean betas
+    # For independent shapekeys, use identity matrix
+    cov = np.eye(num_shapekeys)
+    mean_betas = np.ones(num_shapekeys) / num_shapekeys
+    
+    print(f"Created {num_shapekeys} shapekeys from pkl shapedirs.")
+    return cov, mean_betas
+
+
 def apply_pca_and_create_shapekeys(
     scans,
     obj,
@@ -2368,44 +2428,56 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                     store_smpl_data(context, data, obj=obj)
 
                     create_armature_and_weights(data, obj)
-                    if not smpl_tool.npz_filepath:
-                        self.report(
-                            {"INFO"},
-                            "No .npz file provided, skipping shapekey creation.",
-                        )
-                        return {"FINISHED"}
+                    
+                    # Check if npz file is provided and exists
+                    npz_filepath = bpy.path.abspath(smpl_tool.npz_filepath) if smpl_tool.npz_filepath else None
+                    npz_exists = npz_filepath and os.path.exists(npz_filepath)
+                    
+                    if npz_exists:
+                        # Load from npz file (existing behavior with PCA option)
+                        npz_data = load_npz_file(npz_filepath)
+                        verts_data = npz_data["verts"]
 
-                    npz_filepath = bpy.path.abspath(smpl_tool.npz_filepath)
-                    if not os.path.exists(npz_filepath):
-                        self.report(
-                            {"INFO"},
-                            "Could not find .npz file, skipping shapekey creation.",
-                        )
-                        return {"FINISHED"}
+                        if verts_data.shape[1] != len(obj.data.vertices):
+                            self.report({"ERROR"}, "Vertex count mismatch.")
+                            return {"CANCELLED"}
 
-                    npz_data = load_npz_file(npz_filepath)
-                    verts_data = npz_data["verts"]
-
-                    if verts_data.shape[1] != len(obj.data.vertices):
-                        self.report({"ERROR"}, "Vertex count mismatch.")
-                        return {"CANCELLED"}
-
-                    if smpl_tool.shapekeys_from_PCA:
-                        output_dir = os.path.dirname(pkl_filepath)
-                        labels = (
-                            list(npz_data["labels"]) if "labels" in npz_data else None
-                        )
-                        cov, mean_betas = apply_pca_and_create_shapekeys(
-                            verts_data,
-                            obj,
-                            smpl_tool.number_of_PC,
-                            overwrite_mesh=True,
-                            labels=labels,
-                            output_dir=output_dir,
-                        )
-
+                        if smpl_tool.shapekeys_from_PCA:
+                            output_dir = os.path.dirname(pkl_filepath)
+                            labels = (
+                                list(npz_data["labels"]) if "labels" in npz_data else None
+                            )
+                            cov, mean_betas = apply_pca_and_create_shapekeys(
+                                verts_data,
+                                obj,
+                                smpl_tool.number_of_PC,
+                                overwrite_mesh=True,
+                                labels=labels,
+                                output_dir=output_dir,
+                            )
+                        else:
+                            cov, mean_betas = create_shapekeys(npz_data, obj)
                     else:
-                        cov, mean_betas = create_shapekeys(npz_data, obj)
+                        # No npz file - try to load shapekeys from pkl shapedirs
+                        if "shapedirs" in data and data["shapedirs"].size > 0:
+                            self.report(
+                                {"INFO"},
+                                "No .npz file provided, loading shapekeys from pkl shapedirs.",
+                            )
+                            cov, mean_betas = create_shapekeys_from_pkl_shapedirs(data, obj)
+                            
+                            if cov is None or mean_betas is None:
+                                self.report(
+                                    {"WARNING"},
+                                    "Failed to load shapekeys from pkl shapedirs.",
+                                )
+                                return {"FINISHED"}
+                        else:
+                            self.report(
+                                {"INFO"},
+                                "No .npz file or shapedirs data available, skipping shapekey creation.",
+                            )
+                            return {"FINISHED"}
 
                     data["shape_cov"] = cov
                     data["shape_mean_betas"] = mean_betas
@@ -3243,16 +3315,6 @@ class SMPL_OT_RecomputeJointPositions(bpy.types.Operator):
                     kintree_table = obj['kintree_table']
                 if 'weights' in obj:
                     weights = obj['weights']
-            
-            # If not found in object, try to get from SMIL data
-            if kintree_table is None or weights is None:
-                try:
-                    data = load_smpl_data(context, obj=obj)
-                    if data:
-                        kintree_table = data.get('kintree_table')
-                        weights = data.get('weights')
-                except:
-                    pass
         
         J_regressor = export_J_regressor_to_npy(
             obj, 
