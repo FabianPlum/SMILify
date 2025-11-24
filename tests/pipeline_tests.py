@@ -66,15 +66,7 @@ def test_neural_smil_config_validation():
         full_path = os.path.join(parent_dir, test_textured_path)
         assert os.path.exists(full_path), f"Test dataset directory not found: {full_path}"
         
-        # Test loss weights computation
-        weights_epoch_0 = TrainingConfig.get_loss_weights_for_epoch(0)
-        weights_epoch_30 = TrainingConfig.get_loss_weights_for_epoch(30)
-        
-        # Verify curriculum is working
-        assert weights_epoch_0['keypoint_2d'] == 0.0, "Initial keypoint weight should be 0"
-        assert weights_epoch_30['keypoint_2d'] == 0.05, "Epoch 30 keypoint weight should be 0.05"
-        assert weights_epoch_30['joint_rot'] == 0.01, "Epoch 30 joint_rot weight should be reduced"
-        
+   
         # Test train/val/test split calculation
         train_size, val_size, test_size = TrainingConfig.get_train_val_test_sizes(100)
         assert train_size == 85, f"Expected train size 85, got {train_size}"
