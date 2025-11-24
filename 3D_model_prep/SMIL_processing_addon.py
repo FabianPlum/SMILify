@@ -1672,11 +1672,12 @@ def export_smpl_model(obj, export_path, pkl_data=None):
     )[1:]
     
     # Check if model has static joint locations
-    if obj.get("static_joint_locs", False):
+    if obj.get("static_joint_locs", False) or bpy.context.scene.smpl_tool.force_static_joint_locs:
         # Keep J_regressor as all zeroes for static joint models
         num_joints = len(pkl_data["J"])
         num_vertices = len(obj.data.vertices)
         pkl_data["J_regressor"] = np.zeros((num_joints, num_vertices), dtype=np.float32)
+        pkl_data["static_joint_locs"] = True
         print("Static joint locations: J_regressor kept as all zeroes (not recomputed)")
     else:
         # Get the selected J_regressor method from the scene
@@ -1721,11 +1722,6 @@ def export_smpl_model(obj, export_path, pkl_data=None):
             print(f"Including transdirs in export with shape: {pkl_data['transdirs'].shape}")
     except:
         print("No scaledirs or transdirs found.")
-    
-    # Set static_joint_locs flag based on object property
-    pkl_data["static_joint_locs"] = obj.get("static_joint_locs", False)
-    if pkl_data["static_joint_locs"]:
-        print("Exporting with static joint locations enabled")
         
 
     # Write out the new pkl file to the same location as the input pkl file with the user-specified name
