@@ -1670,17 +1670,26 @@ def export_smpl_model(obj, export_path, pkl_data=None):
     pkl_data["J"], pkl_data["J_names"] = export_joint_locations_to_npy(
         armature_obj, joint_locations_npy_path
     )[1:]
-    # Get the selected J_regressor method from the scene
-    smpl_tool = bpy.context.scene.smpl_tool
-    pkl_data["J_regressor"] = export_J_regressor_to_npy(
-        obj,
-        armature_obj,
-        10,
-        j_regressor_npy_path,
-        weights=pkl_data["weights"],
-        kintree_table=pkl_data["kintree_table"],
-        influence_type=smpl_tool.j_regressor_method,
-    )
+    
+    # Check if model has static joint locations
+    if obj.get("static_joint_locs", False):
+        # Keep J_regressor as all zeroes for static joint models
+        num_joints = len(pkl_data["J"])
+        num_vertices = len(obj.data.vertices)
+        pkl_data["J_regressor"] = np.zeros((num_joints, num_vertices), dtype=np.float32)
+        print("Static joint locations: J_regressor kept as all zeroes (not recomputed)")
+    else:
+        # Get the selected J_regressor method from the scene
+        smpl_tool = bpy.context.scene.smpl_tool
+        pkl_data["J_regressor"] = export_J_regressor_to_npy(
+            obj,
+            armature_obj,
+            10,
+            j_regressor_npy_path,
+            weights=pkl_data["weights"],
+            kintree_table=pkl_data["kintree_table"],
+            influence_type=smpl_tool.j_regressor_method,
+        )
 
     # Update "shapedirs" with the content of the shapekeys
     num_vertices = len(updated_vertices)
@@ -1875,12 +1884,13 @@ def export_joint_distances(context, filepath):
     # This ensures it works even if mesh topology has changed
     # Uses the 10 nearest vertices, consider exposing this as a parameter
     smpl_tool = context.scene.smpl_tool
-    J_regressor = export_J_regressor_to_npy(
-        mesh_obj, 
-        armature, 
-        10, 
-        influence_type=smpl_tool.j_regressor_method
-    )
+    if mesh_obj.get("static_joint_locs", False):
+        J_regressor = export_J_regressor_to_npy(
+            mesh_obj, 
+            armature, 
+            10, 
+            influence_type=smpl_tool.j_regressor_method
+        )
 
     # Check if reference measurements are available
     reference_measurements = {}
@@ -1946,7 +1956,10 @@ def export_joint_distances(context, filepath):
     vertex_positions = np.array([np.array(v.co) for v in eval_obj.data.vertices])
 
     # Calculate joint positions using J_regressor
-    joint_positions = recalculate_joint_positions(vertex_positions, J_regressor)
+    if mesh_obj.get("static_joint_locs", False):
+        joint_positions = np.array([bone.head_local for bone in armature.data.bones])
+    else:
+        joint_positions = recalculate_joint_positions(vertex_positions, J_regressor)
 
     # Calculate distances between all joint pairs
     base_distances = []
@@ -1990,7 +2003,10 @@ def export_joint_distances(context, filepath):
             )
 
             # Calculate joint positions using J_regressor
-            joint_positions = recalculate_joint_positions(vertex_positions, J_regressor)
+            if mesh_obj.get("static_joint_locs", False):
+                joint_positions = np.array([bone.head_local for bone in armature.data.bones])
+            else:
+                joint_positions = recalculate_joint_positions(vertex_positions, J_regressor)
 
             # Calculate distances between joints
             key_distances = []
@@ -2516,7 +2532,11 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                         make_symmetrical(obj, data)
 
                     if smpl_tool.regress_joints:
-                        apply_updated_joint_positions(obj, data)
+                        # Skip joint regression for static joint models
+                        if not obj.get("static_joint_locs", False):
+                            apply_updated_joint_positions(obj, data)
+                        else:
+                            print("Skipping joint regression - model has static joint locations")
 
                     if smpl_tool.clean_mesh:
                         cleanup_mesh(obj, center_tolerance=smpl_tool.merging_threshold)
@@ -2766,7 +2786,11 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                 make_symmetrical(obj, data)
 
             if smpl_tool.regress_joints:
-                apply_updated_joint_positions(obj, data)
+                # Skip joint regression for static joint models
+                if not obj.get("static_joint_locs", False):
+                    apply_updated_joint_positions(obj, data)
+                else:
+                    print("Skipping joint regression - model has static joint locations")
 
             if smpl_tool.clean_mesh:
                 cleanup_mesh(obj, center_tolerance=smpl_tool.merging_threshold)
