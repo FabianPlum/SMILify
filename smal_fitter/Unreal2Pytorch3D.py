@@ -345,7 +345,7 @@ def get_joint_angles_from_pose_data(pose_data):
     Extract joint rotation angles from Unreal Engine pose data in quaternion format.
     
     Converts quaternion rotations from Unreal Engine pose data to angle-axis representation
-    suitable for SMIL model. Handles the root bone (b_t) specially by setting its rotation
+    suitable for SMIL model. Handles the root bone specially by setting its rotation
     to zero since global rotation is handled separately.
     
     Args:
@@ -363,7 +363,7 @@ def get_joint_angles_from_pose_data(pose_data):
         - Uses scipy.spatial.transform.Rotation for quaternion to euler conversion
         - Converts to ZYX euler angles then to angle-axis representation
         - Applies coordinate system transformations: z=-z, x=-x for non-root bones
-        - Root bone (b_t) rotation is set to zero as it's handled by global rotation
+        - Root bone rotation is set to zero as it's handled by global rotation
     """
 
     joint_angles = []
@@ -385,7 +385,7 @@ def get_joint_angles_from_pose_data(pose_data):
         rot_eul = rot.as_euler("zyx", degrees=False)
 
         # ignore root bone:
-        if key != "b_t":
+        if key != config.ROOT_JOINT:
             theta, vector = eulerangles.euler2angle_axis(
                 z=-rot_eul[0], y=rot_eul[1], x=-rot_eul[2]
             )
@@ -890,19 +890,19 @@ def load_SMIL_Unreal_sample(json_file_path,
     # get the model location
     model_loc = np.array(
         [
-            -pose_data["b_t"]["3DPos"]["x"],
-            pose_data["b_t"]["3DPos"]["y"],
-            pose_data["b_t"]["3DPos"]["z"],
+            -pose_data[config.ROOT_JOINT]["3DPos"]["x"],
+            pose_data[config.ROOT_JOINT]["3DPos"]["y"],
+            pose_data[config.ROOT_JOINT]["3DPos"]["z"],
         ],
         dtype=np.float32,
     )
 
     rot = Rotation.from_quat(
         [
-            pose_data["b_t"]["globalRotation"]["x"],
-            pose_data["b_t"]["globalRotation"]["y"],
-            pose_data["b_t"]["globalRotation"]["z"],
-            pose_data["b_t"]["globalRotation"]["w"],
+            pose_data[config.ROOT_JOINT]["globalRotation"]["x"],
+            pose_data[config.ROOT_JOINT]["globalRotation"]["y"],
+            pose_data[config.ROOT_JOINT]["globalRotation"]["z"],
+            pose_data[config.ROOT_JOINT]["globalRotation"]["w"],
         ],
         scalar_first=False,
     )
@@ -995,10 +995,10 @@ def load_SMIL_Unreal_sample(json_file_path,
     # Derive model rotation directly from Unreal quaternion and mirror to PyTorch3D
     rot_model_ue = Rotation.from_quat(
         [
-            -pose_data["b_t"]["globalRotation"]["x"],
-            -pose_data["b_t"]["globalRotation"]["y"],
-            -pose_data["b_t"]["globalRotation"]["z"],
-            pose_data["b_t"]["globalRotation"]["w"],
+            -pose_data[config.ROOT_JOINT]["globalRotation"]["x"],
+            -pose_data[config.ROOT_JOINT]["globalRotation"]["y"],
+            -pose_data[config.ROOT_JOINT]["globalRotation"]["z"],
+            pose_data[config.ROOT_JOINT]["globalRotation"]["w"],
         ],
         scalar_first=False,
     )
@@ -1285,7 +1285,7 @@ if __name__ == "__main__":
     
     # Read the JSON file
     json_file_path = (
-        "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Masked/replicAnt-x-SMIL-OmniAnt-Masked_0000.json"
+        "/media/fabi/Data/Mausb/Mausb_03.json"
     )
 
     # Load the SMIL data
@@ -1295,7 +1295,7 @@ if __name__ == "__main__":
                                   translation_factor=0.01)
 
     # Verify things plot correctly
-    plot_loaded_data_tests(x,y,device)
+    #plot_loaded_data_tests(x,y,device)
 
     # Render the SMAL model based on the loaded data
     Render_SMAL_Model_from_Unreal_data(x,y,device)
