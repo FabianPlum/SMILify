@@ -629,7 +629,11 @@ def load_pkl_file(filepath):
                     if type(data_de_chumpied[key]) is not str:
                         print(data_de_chumpied[key].shape)
                 except:
-                    print(len(data_de_chumpied[key]))
+                    try:
+                        print(len(data_de_chumpied[key]))
+                    except:
+                        # if it's not a numpy array or a list, just print the type
+                        print(type(data_de_chumpied[key]))
         print("Loaded .pkl file successfully.")
         
         try:
@@ -1610,6 +1614,7 @@ def export_smpl_model(obj, export_path, pkl_data=None):
             "sym_verts": [],
             "scaledirs": [],  # optional PCA components for joint scaling variation
             "transdirs": [],  # optional PCA components for joint translation variation
+            "static_joint_locs": False,  # whether joint locations are static (False by default, overwritten by object property if set)
         }
 
         # new models most likely have weight paiting / assignment issues that need to be resolved
@@ -1707,6 +1712,11 @@ def export_smpl_model(obj, export_path, pkl_data=None):
             print(f"Including transdirs in export with shape: {pkl_data['transdirs'].shape}")
     except:
         print("No scaledirs or transdirs found.")
+    
+    # Set static_joint_locs flag based on object property
+    pkl_data["static_joint_locs"] = obj.get("static_joint_locs", False)
+    if pkl_data["static_joint_locs"]:
+        print("Exporting with static joint locations enabled")
         
 
     # Write out the new pkl file to the same location as the input pkl file with the user-specified name
@@ -1746,6 +1756,7 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "merging_threshold")
         layout.prop(smpl_tool, "regress_joints")
         layout.prop(smpl_tool, "symmetrise")
+        layout.prop(smpl_tool, "force_static_joint_locs")
 
         layout.operator("smpl.import_model", text="Direct Import SMIL Model")
 
@@ -2424,6 +2435,12 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                 obj = create_mesh_from_pkl(data)
                 if obj:
                     obj["SMIL_TYPE"] = "SMIL_model_from_direct_npz_import"
+                    
+                    # Check if the loaded pkl has static_joint_locs set
+                    if data.get("static_joint_locs", False):
+                        obj["static_joint_locs"] = True
+                        print("Loaded model with static joint locations")
+                    
                     # Store SMPL data in the object
                     store_smpl_data(context, data, obj=obj)
 
@@ -2481,6 +2498,17 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
 
                     data["shape_cov"] = cov
                     data["shape_mean_betas"] = mean_betas
+                    
+                    # Handle static joint locations
+                    if smpl_tool.force_static_joint_locs:
+                        # Set J_regressor to all zeroes for static joint locations
+                        num_joints = data["J"].shape[0]
+                        num_vertices = len(obj.data.vertices)
+                        data["J_regressor"] = np.zeros((num_joints, num_vertices), dtype=np.float32)
+                        obj["static_joint_locs"] = True
+                        data["static_joint_locs"] = True
+                        print(f"Static joint locations enabled - J_regressor set to zeroes")
+                    
                     # Update the stored data with the new shape info
                     store_smpl_data(context, data, obj=obj)
 
@@ -2578,6 +2606,12 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
 
             # The rest is similar to SMPL_OT_ImportModel
             obj["SMIL_TYPE"] = "SMIL_model_from_unposed_meshes"
+            
+            # Check if the base pkl has static_joint_locs set
+            if data.get("static_joint_locs", False):
+                obj["static_joint_locs"] = True
+                print("Using base model with static joint locations")
+            
             store_smpl_data(context, data, obj=obj)
 
             create_armature_and_weights(data, obj)
@@ -2691,6 +2725,17 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
 
             data["shape_cov"] = cov
             data["shape_mean_betas"] = mean_betas
+            
+            # Handle static joint locations
+            if smpl_tool.force_static_joint_locs:
+                # Set J_regressor to all zeroes for static joint locations
+                num_joints = data["J"].shape[0]
+                num_vertices = len(obj.data.vertices)
+                data["J_regressor"] = np.zeros((num_joints, num_vertices), dtype=np.float32)
+                obj["static_joint_locs"] = True
+                data["static_joint_locs"] = True
+                print(f"Static joint locations enabled - J_regressor set to zeroes")
+            
             # Update the stored data with the new shape info
             store_smpl_data(context, data, obj=obj)
 
@@ -3302,6 +3347,12 @@ class SMPL_OT_RecomputeJointPositions(bpy.types.Operator):
         if not armature:
             self.report({'ERROR'}, 'Selected mesh has no armature.')
             return {'CANCELLED'}
+        
+        # Check if joint locations are set to be static
+        if obj.get("static_joint_locs", False):
+            self.report({'WARNING'}, 'Joint locations are set to be static for this model. Joint recomputation is disabled.')
+            return {'CANCELLED'}
+        
         # Recompute J_regressor for this mesh+armature using selected method
         smpl_tool = context.scene.smpl_tool
         
@@ -3442,6 +3493,13 @@ class SMPLProperties(bpy.types.PropertyGroup):
     )
 
     has_reference_data: bpy.props.BoolProperty(default=False)
+
+    # Add property for force static joint locations
+    force_static_joint_locs: bpy.props.BoolProperty(
+        name="Force Static Joint Locations",
+        description="Joint locations will not be affected by shape keys. J_regressor will be set to all zeroes. Useful for models with root bone at world origin or when joint locations should remain constant.",
+        default=False,
+    )
 
 
 class SMPL_OT_ApplyPoseCorrectivesOperator(bpy.types.Operator):
