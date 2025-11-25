@@ -18,6 +18,9 @@ fit3d_results
 output/
 3D_model_prep/morph_anim/
 3D_model_prep/measurements/
+3D_model_prep/VIDEOS/
+3D_model_prep/stick_data/
+3D_model_prep/stick_tex/
 sdf_batch_output/
 sample_output/
 plots/
