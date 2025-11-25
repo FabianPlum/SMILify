@@ -1,0 +1,67 @@
+# An example configuration file for an optimisation
+
+stages:
+  Stage_0_init: # Initialisation stage (see next stage for comments)
+    # init_rot_lock locks the rotation of the body which can be useful if you know the root mesh rotations are correct
+    # default scheme: 'init'
+    scheme: 'init_rot_lock_trans_scale'
+    nits: 200 # number of iterations for this stage
+    lr: 0.01 # Adam optimiser learning rate
+
+    custom_lrs: # optional, used to provide different learning rates to certain parameters
+        betas_trans: 0.002
+        log_beta_scales: 0.001
+
+  Stage_1_default: # chosen name of stage
+      scheme: 'default' # one of 'init', 'default', 'shape', 'pose', 'deform'. See README for explanation
+      nits: 300 # number of iterations for this stage
+      lr: 0.02 # Adam optimiser learning rate
+
+      loss_weights: # optional, any not provided will revert to default
+          w_chamfer: 1.
+          w_edge: 0.8
+          w_normal: 0.02
+          w_laplacian: 0.01
+
+      custom_lrs: # optional, used to provide different learning rates to certain parameters
+        joint_rot: 0.002
+        betas_trans: 0.0005
+
+  Stage_2_deform_coarse:
+    scheme: 'deform'
+    nits: 1000
+    lr: 0.002
+
+    loss_weights: # optional, any not provided will revert to default
+      w_chamfer: 1.
+      w_edge: 0.8
+      w_normal: 0.005
+      w_laplacian: 0.01
+
+  Stage_3_deform_fine:
+    scheme: 'deform'
+    nits: 500
+    lr: 0.0005
+
+    loss_weights: # optional, any not provided will revert to default
+      w_chamfer: 0.5
+      w_edge: 0.2
+      w_normal: 0.002
+      w_laplacian: 0.001 # enforce smoothness less, which reduces shrinkage.
+
+  # OPTIONAL
+  Stage_4_high_freq_detail:
+    scheme: 'deform'
+    nits: 500
+    lr: 0.0005
+
+    loss_weights: # optional, any not provided will revert to default
+      w_chamfer: 1.
+      w_edge: 0.0
+      w_normal: 0.0
+      w_laplacian: 0.0 # enforce smoothness less, which reduces shrinkage.
+
+# Custom arguments. These will *overwrite* any command line arguments passed into the script
+args:
+  results_dir: fit3d_results
+  shape_family_id: -1
