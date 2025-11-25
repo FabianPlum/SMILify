@@ -30,6 +30,9 @@ For now, I'll focus on insects, hence **SMIL**.
    ```
 
 3. clone pytorch3d and install (WINDOWS)
+   
+   **NOTE**: I've never gotten this to work properly on Windows. I'd recommend using WSL2 or making an Ubuntu partition.
+   If by what ever dark magic you posess you manage to run this on Win11, please open a PR and share your arcane wisdom.
    ```
    git clone https://github.com/facebookresearch/pytorch3d.git
    cd pytorch3d
