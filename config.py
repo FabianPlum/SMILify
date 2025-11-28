@@ -48,7 +48,7 @@ SMAL_FILE = join("3D_model_prep", 'SMIL_OmniAnt.pkl') # USING LATEST SMIL DATA
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
 PLOT_RESULTS = True  # only applies to 3D fitting (fitter_3d/optimise.py)
-DEBUG = True  # use to get A LOT of "useful" messages
+DEBUG = False  # use to get A LOT of "useful" messages
 
 # DATALOADER
 IMG_RES = 512
