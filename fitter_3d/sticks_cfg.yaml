@@ -13,7 +13,7 @@ stages:
         log_beta_scales: 0.001
 
   Stage_1_default: # chosen name of stage
-      scheme: 'default' # one of 'init', 'default', 'shape', 'pose', 'deform'. See README for explanation
+      scheme: 'default_with_betas_trans' # one of 'init', 'default', 'shape', 'pose', 'deform'. See README for explanation
       nits: 300 # number of iterations for this stage
       lr: 0.02 # Adam optimiser learning rate
 
