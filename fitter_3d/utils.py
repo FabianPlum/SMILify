@@ -102,7 +102,15 @@ def plot_mesh(ax, mesh: Meshes, label="", colour="blue", equalize=True, zoom=1.5
 
 
 def plot_set_of_meshes(args):
-    target_mesh, src_mesh, name, title, figtitle, out_dir = args
+    target_mesh_data, src_mesh_data, name, title, figtitle, out_dir = args
+    
+    # Reconstruct Meshes objects from CPU data passed from main process
+    # This avoids CUDA tensor pickling issues with multiprocessing
+    target_verts, target_faces = target_mesh_data
+    src_verts, src_faces = src_mesh_data
+    
+    target_mesh = Meshes(verts=[torch.from_numpy(target_verts)], faces=[torch.from_numpy(target_faces)])
+    src_mesh = Meshes(verts=[torch.from_numpy(src_verts)], faces=[torch.from_numpy(src_faces)])
 
     fig = plt.figure(figsize=(15, 5))
     axes = [fig.add_subplot(int(f"13{n}"), projection="3d") for n in range(1, 4)]
@@ -147,14 +155,23 @@ def plot_meshes(target_meshes, src_meshes, mesh_names=[], title="", figtitle="",
     if max_workers is None:
         max_workers = cpu_count()
 
-    # Detach the tensors before passing them to the multiprocessing pool
-    target_meshes_detached = [mesh.clone().detach() for mesh in target_meshes]
-    src_meshes_detached = [mesh.clone().detach() for mesh in src_meshes]
-
+    # Convert meshes to CPU numpy arrays before passing to multiprocessing pool
+    # This avoids CUDA tensor pickling issues with the 'spawn' method
     args_list = []
-    for n in range(len(target_meshes_detached)):
+    for n in range(len(target_meshes)):
         name = n if not mesh_names else mesh_names[n]
-        args_list.append((target_meshes_detached[n], src_meshes_detached[n], name, title, figtitle, out_dir))
+        
+        # Extract verts and faces as CPU numpy arrays
+        target_verts = target_meshes[n].verts_packed().detach().cpu().numpy()
+        target_faces = target_meshes[n].faces_packed().detach().cpu().numpy()
+        src_verts = src_meshes[n].verts_packed().detach().cpu().numpy()
+        src_faces = src_meshes[n].faces_packed().detach().cpu().numpy()
+        
+        # Pass as tuples of numpy arrays instead of Meshes objects
+        target_mesh_data = (target_verts, target_faces)
+        src_mesh_data = (src_verts, src_faces)
+        
+        args_list.append((target_mesh_data, src_mesh_data, name, title, figtitle, out_dir))
 
     with Pool(processes=max_workers) as pool:
         pool.map(plot_set_of_meshes, args_list)
