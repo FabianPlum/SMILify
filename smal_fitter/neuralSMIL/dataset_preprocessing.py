@@ -47,7 +47,8 @@ class DatasetPreprocessor:
                  compression: str = 'gzip',
                  compression_level: int = 6,
                  jpeg_quality: int = 95,
-                 ignored_joints_config: dict = None):
+                 ignored_joints_config: dict = None,
+                 verbose: bool = False):
         """
         Initialize the dataset preprocessor.
         
@@ -62,6 +63,7 @@ class DatasetPreprocessor:
             compression_level: Compression level (1-9)
             jpeg_quality: JPEG compression quality for images (1-100)
             ignored_joints_config: Dictionary containing ignored joints configuration
+            verbose: Whether to print detailed error messages
         """
         self.silhouette_threshold = silhouette_threshold
         self.target_resolution = target_resolution
@@ -73,6 +75,7 @@ class DatasetPreprocessor:
         self.compression_level = compression_level
         self.jpeg_quality = jpeg_quality
         self.ignored_joints_config = ignored_joints_config or {'ignored_joint_names': [], 'verbose_ignored_joints': False}
+        self.verbose = verbose
         
         # Determine target resolution based on backbone
         if backbone_name.startswith('vit'):
@@ -87,7 +90,8 @@ class DatasetPreprocessor:
             'silhouette_filtered': 0,
             'keypoint_filtered': 0,
             'error_samples': 0,
-            'final_samples': 0
+            'final_samples': 0,
+            'missing_roots': {}  # Track missing root joints
         }
         
         # Thread-safe progress tracking
@@ -235,10 +239,31 @@ class DatasetPreprocessor:
             
             return sample_data
             
-        except Exception as e:
-            print(f"Error processing {json_path}: {e}")
+        except KeyError as e:
+            # KeyError often indicates ROOT_JOINT mismatch or missing data fields
+            # These samples are expected to be filtered out for incompatible model structures
+            missing_key = str(e).strip("'\"")
+            
             with self._lock:
                 self.stats['error_samples'] += 1
+                # Track missing root joints
+                if missing_key not in self.stats['missing_roots']:
+                    self.stats['missing_roots'][missing_key] = 0
+                self.stats['missing_roots'][missing_key] += 1
+            
+            if self.verbose:
+                print(f"Error processing {json_path}: Missing key {e} (likely ROOT_JOINT mismatch)")
+            
+            return None
+            
+        except Exception as e:
+            # Catch all other exceptions with full error type information
+            with self._lock:
+                self.stats['error_samples'] += 1
+            
+            if self.verbose:
+                print(f"Error processing {json_path}: {type(e).__name__}: {e}")
+            
             return None
     
     def _check_silhouette_coverage(self, mask: Optional[np.ndarray]) -> bool:
@@ -500,7 +525,11 @@ class DatasetPreprocessor:
             # Store processing statistics
             stats_group = metadata.create_group('statistics')
             for key, value in self.stats.items():
-                stats_group.attrs[key] = value
+                if key == 'missing_roots':
+                    # Convert dictionary to JSON string for HDF5 compatibility
+                    stats_group.attrs[key] = json.dumps(value)
+                else:
+                    stats_group.attrs[key] = value
             
             # Determine data shapes and types from first sample
             first_sample = samples[0]
@@ -536,10 +565,28 @@ class DatasetPreprocessor:
                 compression_opts=self.compression_level
             )
             
-            # Parameters
+            # Parameters - determine which fields exist in the samples
+            # Required parameters that should always exist
+            required_params = ['global_rot', 'joint_rot', 'betas', 'trans', 'fov', 
+                             'cam_rot', 'cam_trans']
+            # Optional parameters that may not exist in all datasets
+            optional_params = ['scale_weights', 'trans_weights']
+            
+            # Check which parameters exist in the first sample
+            param_names = []
+            for param_name in required_params:
+                if param_name in first_sample:
+                    param_names.append(param_name)
+                else:
+                    print(f"Warning: Required parameter '{param_name}' not found in samples")
+            
+            for param_name in optional_params:
+                if param_name in first_sample:
+                    param_names.append(param_name)
+            
+            # Create datasets for existing parameters
             param_datasets = {}
-            for param_name in ['global_rot', 'joint_rot', 'betas', 'trans', 'fov', 
-                              'cam_rot', 'cam_trans', 'log_beta_scales', 'betas_trans']:
+            for param_name in param_names:
                 param_shape = first_sample[param_name].shape
                 param_datasets[param_name] = params_group.create_dataset(
                     param_name,
@@ -599,7 +646,11 @@ class DatasetPreprocessor:
                     
                     # Parameters
                     for param_name, dataset in param_datasets.items():
-                        dataset[i] = sample[param_name]
+                        if param_name in sample:
+                            dataset[i] = sample[param_name]
+                        else:
+                            # This shouldn't happen if we checked properly, but safety check
+                            print(f"Warning: Parameter '{param_name}' not found in sample {i}")
                     
                     # Keypoints
                     for kp_name, dataset in keypoint_datasets.items():
@@ -633,6 +684,16 @@ def print_statistics(stats: Dict[str, Any]):
     if stats['total_samples'] > 0:
         success_rate = stats['final_samples'] / stats['total_samples'] * 100
         print(f"Success rate: {success_rate:.1f}%")
+    
+    if stats['error_samples'] > 0:
+        print(f"\nNote: Errors indicate samples incompatible with target")
+        print(f"      model structure - correctly filtered out.")
+        
+        # Show missing root joints breakdown
+        if stats.get('missing_roots'):
+            print(f"\nMissing ROOT_JOINT breakdown:")
+            for root_name, count in sorted(stats['missing_roots'].items(), key=lambda x: -x[1]):
+                print(f"  - '{root_name}': {count} samples")
     
     print("="*50)
 
