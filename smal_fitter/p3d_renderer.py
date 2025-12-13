@@ -74,7 +74,14 @@ class Renderer(torch.nn.Module):
             T (torch.Tensor): Translation vector of the camera.
             fov (torch.Tensor): Field of view of the camera.
         """
-        self.cameras = OpenGLPerspectiveCameras(device=self.device, R=R, T=T, fov=fov)
+        # Ensure FOV has the correct shape for FoVPerspectiveCameras
+        # FoVPerspectiveCameras expects fov to be 1D tensor of shape (batch_size,)
+        if fov.dim() > 1:
+            fov = fov.squeeze(-1)  # Remove trailing dimensions
+        if fov.dim() == 0:
+            fov = fov.unsqueeze(0)  # Add batch dimension if scalar
+        
+        self.cameras = FoVPerspectiveCameras(device=self.device, R=R, T=T, fov=fov)
         self.silhouette_renderer.rasterizer.cameras = self.cameras
         self.color_renderer.rasterizer.cameras = self.cameras
 
