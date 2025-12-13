@@ -27,8 +27,10 @@ import os
 import sys
 import argparse
 import glob
+import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
+import h5py
 import json
 import pickle as pkl
 
@@ -53,6 +55,220 @@ from training_config import TrainingConfig
 from smal_fitter import SMALFitter
 from Unreal2Pytorch3D import return_placeholder_data
 import config
+from sleap_data_loader import SLEAPDataLoader
+import importlib.util
+import importlib
+
+
+def _import_sleap_preprocessor():
+    try:
+        module = importlib.import_module("smal_fitter.sleap_data.preprocess_sleap_dataset")
+        return module.SLEAPDatasetPreprocessor
+    except ModuleNotFoundError:
+        module_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "sleap_data", "preprocess_sleap_dataset.py")
+        )
+        spec = importlib.util.spec_from_file_location("preprocess_sleap_dataset", module_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not locate preprocess_sleap_dataset at {module_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.SLEAPDatasetPreprocessor
+
+
+SLEAPDatasetPreprocessor = _import_sleap_preprocessor()
+
+
+class SLEAPCroppingHelper:
+    """Leverage preprocessing logic from preprocess_sleap_dataset for bbox cropping."""
+
+    def __init__(self, project_path: str, crop_mode: str, target_resolution: int,
+                 backbone_name: str, use_reprojections: bool = True):
+        self.project_path = Path(project_path)
+        self.crop_mode = crop_mode
+        self.preprocessor = SLEAPDatasetPreprocessor(
+            joint_lookup_table_path=None,
+            shape_betas_table_path=None,
+            target_resolution=target_resolution,
+            backbone_name=backbone_name,
+            crop_mode=crop_mode,
+            use_reprojections=use_reprojections
+        )
+
+        session_paths = self.preprocessor.discover_sleap_sessions(project_path)
+        if not session_paths:
+            raise ValueError(f"No SLEAP sessions found in {project_path}")
+
+        self.session_map: Dict[str, Path] = {Path(s).name: Path(s) for s in session_paths}
+        self.single_session_name = next(iter(self.session_map)) if len(self.session_map) == 1 else None
+
+        self.session_loaders: Dict[str, SLEAPDataLoader] = {}
+        self.camera_data_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self.reprojection_cache: Dict[str, Tuple[Optional[h5py.File], Dict[str, h5py.File]]] = {}
+        self._warned_missing_camera: Set[str] = set()
+        self._warned_missing_frame: Set[Tuple[str, int]] = set()
+
+    def close(self):
+        """Close any open reprojection file handles."""
+        for root_handle, sub_handles in self.reprojection_cache.values():
+            try:
+                if root_handle is not None:
+                    root_handle.close()
+            except Exception:
+                pass
+            for handle in sub_handles.values():
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+
+    def list_cameras(self) -> List[str]:
+        cameras = set()
+        for session_name in self.session_map:
+            loader = self._get_loader(session_name)
+            cameras.update(loader.camera_views)
+        return sorted(cameras)
+
+    def _resolve_session(self, media_path: str) -> Tuple[str, Path]:
+        for session_name, session_path in self.session_map.items():
+            if session_name in media_path:
+                return session_name, session_path
+        if self.single_session_name is not None:
+            session_path = self.session_map[self.single_session_name]
+            return self.single_session_name, session_path
+        raise ValueError(f"Could not infer SLEAP session for path: {media_path}")
+
+    def _get_loader(self, session_name: str) -> SLEAPDataLoader:
+        if session_name not in self.session_loaders:
+            session_path = self.session_map[session_name]
+            self.session_loaders[session_name] = SLEAPDataLoader(
+                project_path=str(session_path),
+                lookup_table_path=self.preprocessor.joint_lookup_table_path,
+                shape_betas_path=self.preprocessor.shape_betas_table_path
+            )
+        return self.session_loaders[session_name]
+
+    def _get_reprojection_handles(self, session_name: str) -> Tuple[Optional[h5py.File], Dict[str, h5py.File]]:
+        if session_name in self.reprojection_cache:
+            return self.reprojection_cache[session_name]
+
+        session_path = self.session_map[session_name]
+        root_handle = None
+        root_reproj = session_path / 'reprojections.h5'
+        if root_reproj.exists():
+            try:
+                root_handle = h5py.File(str(root_reproj), 'r')
+            except Exception as exc:
+                print(f"Warning: Failed to open reprojections file {root_reproj}: {exc}")
+                root_handle = None
+
+        sub_handles = self.preprocessor._find_all_reprojection_files(str(session_path)) if self.preprocessor.use_reprojections else {}
+        self.reprojection_cache[session_name] = (root_handle, sub_handles)
+        return self.reprojection_cache[session_name]
+
+    def _get_camera_data(self, session_name: str, camera_name: str, loader: SLEAPDataLoader) -> Dict[str, Any]:
+        key = (session_name, camera_name)
+        if key not in self.camera_data_cache:
+            self.camera_data_cache[key] = loader.load_camera_data(camera_name)
+        return self.camera_data_cache[key]
+
+    def _infer_camera(self, media_path: str, loader: SLEAPDataLoader, explicit_camera: Optional[str]) -> Optional[str]:
+        if explicit_camera:
+            return explicit_camera
+
+        path_lower = str(media_path).lower()
+        stem_lower = Path(media_path).stem.lower()
+        parent_names = {p.name.lower() for p in Path(media_path).parents}
+        for camera in loader.camera_views:
+            cam_lower = camera.lower()
+            if f"_cam{cam_lower}" in path_lower or f"-cam{cam_lower}" in path_lower:
+                return camera
+            if cam_lower in stem_lower.split('_'):
+                return camera
+            # Also check directory names in the path (e.g., .../Camera2/...)
+            if cam_lower in parent_names:
+                return camera
+        if len(loader.camera_views) == 1:
+            return loader.camera_views[0]
+        return None
+
+    def _get_reprojection_handle_for_camera(self, session_name: str, camera_name: str) -> Optional[h5py.File]:
+        root_handle, sub_handles = self._get_reprojection_handles(session_name)
+        if root_handle is not None:
+            return root_handle
+        session_path = self.session_map[session_name]
+        camera_subdir = self.preprocessor._find_camera_subdir(str(session_path), camera_name)
+        if camera_subdir and camera_subdir in sub_handles:
+            return sub_handles[camera_subdir]
+        return None
+
+    def _extract_keypoints(self, loader: SLEAPDataLoader, camera_data: Dict[str, Any],
+                           camera_name: str, frame_idx: int, session_name: str) -> Optional[np.ndarray]:
+        reproj_handle = None
+        if self.preprocessor.use_reprojections:
+            reproj_handle = self._get_reprojection_handle_for_camera(session_name, camera_name)
+        try:
+            keypoints_2d, visibility = self.preprocessor._extract_2d_keypoints_for_frame(
+                loader=loader,
+                camera_data=camera_data,
+                camera_name=camera_name,
+                frame_idx=frame_idx,
+                reproj_handle=reproj_handle
+            )
+        except Exception as exc:
+            key = (camera_name, frame_idx)
+            if key not in self._warned_missing_frame:
+                print(f"Warning: Failed to extract keypoints for camera '{camera_name}', frame {frame_idx}: {exc}")
+                self._warned_missing_frame.add(key)
+            return None
+
+        keypoints_2d = self.preprocessor._sanitize_array(keypoints_2d, default_value=np.nan)
+        if keypoints_2d is None:
+            return None
+
+        keypoints = np.asarray(keypoints_2d, dtype=np.float32)
+        vis_mask = None
+        if visibility is not None:
+            visibility = np.asarray(visibility)
+            if visibility.dtype == bool:
+                vis_mask = visibility
+            else:
+                vis_mask = visibility > 0.5
+        if vis_mask is not None and vis_mask.shape[0] == keypoints.shape[0]:
+            keypoints = keypoints[vis_mask]
+
+        if keypoints.size == 0:
+            return None
+
+        valid_mask = np.isfinite(keypoints).all(axis=1)
+        keypoints = keypoints[valid_mask]
+        keypoints = keypoints[(keypoints[:, 0] > 0) & (keypoints[:, 1] > 0)]
+        return keypoints if keypoints.size > 0 else None
+
+    def preprocess_image(self, image: np.ndarray, media_path: str, frame_idx: int,
+                         explicit_camera: Optional[str] = None) -> Optional[Tuple[np.ndarray, Dict[str, Any]]]:
+        session_name, _ = self._resolve_session(media_path)
+        loader = self._get_loader(session_name)
+        camera_name = self._infer_camera(media_path, loader, explicit_camera)
+        if camera_name is None:
+            if media_path not in self._warned_missing_camera:
+                print(f"Warning: Could not infer SLEAP camera for '{media_path}'")
+                self._warned_missing_camera.add(media_path)
+            return None
+
+        camera_data = self._get_camera_data(session_name, camera_name, loader)
+        keypoints = self._extract_keypoints(loader, camera_data, camera_name, frame_idx, session_name)
+        if keypoints is None or len(keypoints) == 0:
+            return None
+
+        if image.max() <= 1.0:
+            work_image = (image * 255.0).astype(np.uint8)
+        else:
+            work_image = image.astype(np.uint8)
+
+        processed_image, transform_info = self.preprocessor._preprocess_image(work_image, keypoints)
+        return processed_image, transform_info
+
 
 class InferenceImageExporter:
     """Enhanced image exporter for inference results."""
@@ -312,16 +528,19 @@ def find_image_files(input_folder: str, supported_extensions: List[str] = None) 
 
 def preprocess_frame(image: np.ndarray, target_resolution: int, crop_mode: str = 'centred') -> Tuple[np.ndarray, Dict[str, Any]]:
     """
-    Preprocess a frame with optional center cropping (matching training preprocessing).
+    Preprocess a frame using centred or default resize.
     
     Args:
         image: Input image (H, W, C) in range [0, 255] or [0, 1]
         target_resolution: Target resolution for model input
-        crop_mode: 'centred' for center crop (preserves aspect ratio) or 'default' for direct resize
+        crop_mode: 'centred' or 'default'
         
     Returns:
         Tuple of (preprocessed_image, transform_info)
     """
+    if crop_mode == 'bbox_crop':
+        raise ValueError("bbox_crop should be handled via SLEAPCroppingHelper; preprocess_frame only supports 'centred' or 'default'.")
+
     # Ensure image is in [0, 255] range
     if image.max() <= 1.0:
         image = (image * 255).astype(np.uint8)
@@ -336,43 +555,28 @@ def preprocess_frame(image: np.ndarray, target_resolution: int, crop_mode: str =
     }
     
     if crop_mode == 'centred':
-        # Center crop to square based on shorter side
         crop_size = min(original_h, original_w)
-        
-        # Calculate crop offsets (centered)
         y_offset = (original_h - crop_size) // 2
         x_offset = (original_w - crop_size) // 2
-        
-        # Crop the image
         image = image[y_offset:y_offset + crop_size, x_offset:x_offset + crop_size]
-        
-        # Store transformation info
         transform_info['crop_offset'] = (y_offset, x_offset)
         transform_info['crop_size'] = (crop_size, crop_size)
-        
-        # Calculate scale factor for resizing
         scale_factor = target_resolution / crop_size
         transform_info['scale_factor'] = scale_factor
-        
-        # Resize to target resolution
         image = cv2.resize(image, (target_resolution, target_resolution))
-        
-    else:  # 'default' mode
-        # Direct resize (may distort aspect ratio)
+    
+    else:
         scale_y = target_resolution / original_h
         scale_x = target_resolution / original_w
-        
         transform_info['scale_factor'] = (scale_y, scale_x)
-        
         image = cv2.resize(image, (target_resolution, target_resolution))
     
-    # Normalize to [0, 1]
     image = image.astype(np.float32) / 255.0
-    
     return image, transform_info
 
 
-def load_and_preprocess_image(image_path: str, model: SMILImageRegressor, crop_mode: str = 'centred') -> Tuple[np.ndarray, torch.Tensor, Dict[str, Any]]:
+def load_and_preprocess_image(image_path: str, model: SMILImageRegressor, crop_mode: str = 'centred',
+                              keypoints_2d: Optional[np.ndarray] = None) -> Tuple[np.ndarray, torch.Tensor, Dict[str, Any]]:
     """
     Load and preprocess an image for inference.
     
@@ -393,7 +597,9 @@ def load_and_preprocess_image(image_path: str, model: SMILImageRegressor, crop_m
         
         # Preprocess with proper cropping
         target_resolution = model.input_resolution
-        preprocessed_image, transform_info = preprocess_frame(image_data, target_resolution, crop_mode)
+        preprocessed_image, transform_info = preprocess_frame(
+            image_data, target_resolution, crop_mode, keypoints_2d=keypoints_2d
+        )
         
         # Convert to tensor (C, H, W) format
         preprocessed_tensor = torch.from_numpy(preprocessed_image).permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
@@ -455,8 +661,108 @@ def run_inference_on_image(model: SMILImageRegressor, image_tensor: torch.Tensor
         raise RuntimeError(f"Inference failed: {e}")
 
 
+def render_model_only(model: SMILImageRegressor, predicted_params: Dict[str, torch.Tensor],
+                      device: str, render_size: int) -> np.ndarray:
+    """
+    Render only the predicted 3D model without any background.
+    
+    Args:
+        model: SMILImageRegressor model
+        predicted_params: Dictionary of predicted SMIL parameters
+        device: PyTorch device
+        render_size: Target render resolution
+        
+    Returns:
+        Rendered model image (render_size, render_size, 3) in RGB, range [0, 255]
+    """
+    try:
+        # Convert rotations to axis-angle if they're in 6D representation
+        if model.rotation_representation == '6d':
+            global_rot_aa = rotation_6d_to_axis_angle(predicted_params['global_rot'])
+            joint_rot_aa = rotation_6d_to_axis_angle(predicted_params['joint_rot'])
+        else:
+            global_rot_aa = predicted_params['global_rot']
+            joint_rot_aa = predicted_params['joint_rot']
+        
+        # Create a blank RGB tensor for rendering
+        rgb_tensor = torch.zeros((1, 3, render_size, render_size), device=device)
+        
+        # Create temporary SMALFitter for rendering
+        temp_fitter = SMALFitter(
+            device=device,
+            data_batch=rgb_tensor,
+            batch_size=1,
+            shape_family=config.SHAPE_FAMILY,
+            use_unity_prior=False,
+            rgb_only=True
+        )
+        
+        # Set the predicted parameters
+        temp_fitter.global_rotation.data = global_rot_aa.to(device)
+        temp_fitter.joint_rotations.data = joint_rot_aa.to(device)
+        temp_fitter.betas.data = predicted_params['betas'].to(device)
+        temp_fitter.trans.data = predicted_params['trans'].to(device)
+        temp_fitter.fov.data = predicted_params['fov'].to(device)
+        
+        # Set joint scales and translations if available
+        if 'log_beta_scales' in predicted_params:
+            temp_fitter.log_beta_scales.data = predicted_params['log_beta_scales'].to(device)
+        if 'betas_trans' in predicted_params:
+            temp_fitter.betas_trans.data = predicted_params['betas_trans'].to(device)
+        
+        # Set camera parameters
+        if 'cam_rot' in predicted_params and 'cam_trans' in predicted_params:
+            temp_fitter.renderer.set_camera_parameters(
+                R=predicted_params['cam_rot'].to(device),
+                T=predicted_params['cam_trans'].to(device),
+                fov=predicted_params['fov'].to(device)
+            )
+        
+        # Render the model
+        with torch.no_grad():
+            # Get vertices and joints from SMAL model
+            verts, joints, Rs, v_shaped = temp_fitter.smal_model(
+                temp_fitter.betas,
+                torch.cat([
+                    temp_fitter.global_rotation.unsqueeze(1),
+                    temp_fitter.joint_rotations
+                ], dim=1),
+                betas_logscale=temp_fitter.log_beta_scales,
+                betas_trans=temp_fitter.betas_trans,
+                propagate_scaling=temp_fitter.propagate_scaling
+            )
+            
+            # Apply UE scaling transformation (10x scale)
+            verts = (verts - joints[:, 0, :].unsqueeze(1)) * 10 + temp_fitter.trans.unsqueeze(1)
+            joints = (joints - joints[:, 0, :].unsqueeze(1)) * 10 + temp_fitter.trans.unsqueeze(1)
+            
+            # Get canonical model joints
+            canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
+            
+            # Prepare faces
+            faces_batch = temp_fitter.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1)
+            
+            # Render with texture
+            rendered_silhouettes, rendered_joints, rendered_image = temp_fitter.renderer(
+                verts, canonical_joints, faces_batch, render_texture=True
+            )
+        
+        # Convert rendered image to numpy (already in (B, C, H, W) format)
+        rendered_np = rendered_image[0].permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
+        rendered_np = np.clip(rendered_np, 0, 1)
+        
+        # Convert to [0, 255] range
+        return (rendered_np * 255).astype(np.uint8)
+        
+    except Exception as e:
+        print(f"Warning: Failed to render model: {e}")
+        # Return black image on error
+        return np.zeros((render_size, render_size, 3), dtype=np.uint8)
+
+
 def render_prediction_on_frame(model: SMILImageRegressor, predicted_params: Dict[str, torch.Tensor],
-                               original_frame: np.ndarray, device: str) -> np.ndarray:
+                               original_frame: np.ndarray, device: str,
+                               transform_info: Optional[Dict[str, Any]] = None) -> np.ndarray:
     """
     Render the predicted 3D model onto the original frame.
     
@@ -563,15 +869,46 @@ def render_prediction_on_frame(model: SMILImageRegressor, predicted_params: Dict
         rendered_np = rendered_image[0].permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
         rendered_np = np.clip(rendered_np, 0, 1)
         
-        # Resize back to original frame size
-        rendered_resized = cv2.resize(rendered_np, (frame_w, frame_h))
-        
-        # Create overlay: blend rendered model with original frame
         alpha = 0.6  # Transparency of the overlay
-        overlay = (alpha * rendered_resized + (1 - alpha) * (original_frame / 255.0))
-        overlay = (overlay * 255).astype(np.uint8)
-        
-        return overlay
+        overlay_base = (original_frame.astype(np.float32) / 255.0)
+
+        placed_overlay = overlay_base.copy()
+
+        if transform_info is not None and transform_info.get('mode') in ('centred', 'bbox_crop'):
+            crop_height, crop_width = transform_info.get('crop_size', (frame_h, frame_w))
+            y_offset, x_offset = transform_info.get('crop_offset', (0, 0))
+
+            crop_height = int(round(crop_height))
+            crop_width = int(round(crop_width))
+            y_offset = int(round(y_offset))
+            x_offset = int(round(x_offset))
+
+            if crop_height <= 0 or crop_width <= 0:
+                rendered_resized = cv2.resize(rendered_np, (frame_w, frame_h))
+                blended = alpha * rendered_resized + (1 - alpha) * overlay_base
+                return (blended * 255).astype(np.uint8)
+
+            overlay_y_end = min(y_offset + crop_height, frame_h)
+            overlay_x_end = min(x_offset + crop_width, frame_w)
+
+            if overlay_y_end <= y_offset or overlay_x_end <= x_offset:
+                rendered_resized = cv2.resize(rendered_np, (frame_w, frame_h))
+                blended = alpha * rendered_resized + (1 - alpha) * overlay_base
+                return (blended * 255).astype(np.uint8)
+
+            target_height = overlay_y_end - y_offset
+            target_width = overlay_x_end - x_offset
+
+            rendered_resized = cv2.resize(rendered_np, (target_width, target_height))
+
+            base_region = overlay_base[y_offset:overlay_y_end, x_offset:overlay_x_end]
+            blended_region = alpha * rendered_resized + (1 - alpha) * base_region
+            placed_overlay[y_offset:overlay_y_end, x_offset:overlay_x_end] = blended_region
+            return (placed_overlay * 255).astype(np.uint8)
+        else:
+            rendered_resized = cv2.resize(rendered_np, (frame_w, frame_h))
+            blended = alpha * rendered_resized + (1 - alpha) * overlay_base
+            return (blended * 255).astype(np.uint8)
         
     except Exception as e:
         print(f"Warning: Failed to render prediction: {e}")
@@ -694,9 +1031,10 @@ def generate_visualization(model: SMILImageRegressor, predicted_params: Dict[str
         )
 
 
-def process_images_batch(model: SMILImageRegressor, image_files: List[str], 
-                        output_folder: str, device: str, crop_mode: str = 'centred', 
-                        batch_size: int = 1) -> None:
+def process_images_batch(model: SMILImageRegressor, image_files: List[str],
+                        output_folder: str, device: str, crop_mode: str = 'centred',
+                        batch_size: int = 1, sleap_helper: Optional[SLEAPCroppingHelper] = None,
+                        sleap_camera: Optional[str] = None) -> None:
     """
     Process a batch of images for inference.
     
@@ -705,8 +1043,10 @@ def process_images_batch(model: SMILImageRegressor, image_files: List[str],
         image_files: List of image file paths
         output_folder: Output folder for results
         device: PyTorch device
-        crop_mode: Cropping mode ('centred' or 'default')
+        crop_mode: Cropping mode ('centred', 'default', or 'bbox_crop')
         batch_size: Batch size for processing (currently only supports 1)
+        sleap_helper: Optional helper for bbox_crop using SLEAP keypoints
+        sleap_camera: Optional camera override for bbox_crop
     """
     # Create output directory
     os.makedirs(output_folder, exist_ok=True)
@@ -725,10 +1065,25 @@ def process_images_batch(model: SMILImageRegressor, image_files: List[str],
             
             print(f"\nProcessing image {i+1}/{len(image_files)}: {image_name}")
             
-            # Load and preprocess image
-            original_image, preprocessed_tensor, transform_info = load_and_preprocess_image(
-                image_path, model, crop_mode
-            )
+            if crop_mode == 'bbox_crop' and sleap_helper is not None:
+                original_image = imageio.v2.imread(image_path)
+                if original_image is None:
+                    raise RuntimeError(f"Failed to read image: {image_path}")
+                preprocess_result = sleap_helper.preprocess_image(
+                    original_image, image_path, frame_idx=i, explicit_camera=sleap_camera
+                )
+                if preprocess_result is None:
+                    print("Warning: bbox_crop requested but no keypoints available; falling back to centred crop")
+                    preprocessed_image, transform_info = preprocess_frame(
+                        original_image, model.input_resolution, crop_mode='centred'
+                    )
+                else:
+                    preprocessed_image, transform_info = preprocess_result
+                preprocessed_tensor = torch.from_numpy(preprocessed_image).permute(2, 0, 1).unsqueeze(0)
+            else:
+                original_image, preprocessed_tensor, transform_info = load_and_preprocess_image(
+                    image_path, model, crop_mode
+                )
             
             # Run inference
             predicted_params = run_inference_on_image(model, preprocessed_tensor, device)
@@ -782,10 +1137,13 @@ def smooth_camera_parameters(predicted_params: Dict[str, torch.Tensor],
     return smoothed_params
 
 
-def process_video(model: SMILImageRegressor, video_path: str, output_folder: str, 
+def process_video(model: SMILImageRegressor, video_path: str, output_folder: str,
                  device: str, crop_mode: str = 'centred', fps: Optional[int] = None,
-                 save_frames: bool = False, max_frames: int = -1, 
-                 camera_smoothing_window: int = 10) -> None:
+                 save_frames: bool = False, max_frames: int = -1,
+                 camera_smoothing_window: int = 10,
+                 sleap_helper: Optional[SLEAPCroppingHelper] = None,
+                 sleap_camera: Optional[str] = None,
+                 video_export_mode: str = 'overlay') -> None:
     """
     Process a video file for inference.
     
@@ -794,11 +1152,14 @@ def process_video(model: SMILImageRegressor, video_path: str, output_folder: str
         video_path: Path to input video file
         output_folder: Output folder for results
         device: PyTorch device
-        crop_mode: Cropping mode ('centred' or 'default')
+        crop_mode: Cropping mode ('centred', 'default', or 'bbox_crop')
         fps: Output video FPS (None = same as input)
         save_frames: Whether to save individual frame results
         max_frames: Maximum number of frames to process (-1 for all frames)
         camera_smoothing_window: Number of frames for moving average of camera parameters (default: 10)
+        sleap_helper: Optional helper for bbox_crop using SLEAP keypoints
+        sleap_camera: Optional camera override when using bbox_crop
+        video_export_mode: Export mode ('overlay' or 'side_by_side')
     """
     # Create output directory
     os.makedirs(output_folder, exist_ok=True)
@@ -830,11 +1191,29 @@ def process_video(model: SMILImageRegressor, video_path: str, output_folder: str
     print(f"  Resolution: {frame_width}x{frame_height}")
     print(f"  Crop mode: {crop_mode}")
     print(f"  Camera smoothing window: {camera_smoothing_window} frames")
+    print(f"  Video export mode: {video_export_mode}")
+    
+    # Determine output video dimensions based on export mode
+    if video_export_mode == 'side_by_side':
+        # Determine render size based on model backbone
+        if model.backbone_name.startswith('vit'):
+            render_size = 224
+        else:
+            render_size = 512
+        
+        # For side-by-side: input video will be rescaled to match render_size height
+        # Output width will be 2 * render_size
+        output_height = render_size
+        output_width = render_size * 2
+    else:
+        # For overlay mode: keep original video dimensions
+        output_height = frame_height
+        output_width = frame_width
     
     # Create video writer for output
     output_video_path = os.path.join(output_folder, Path(video_path).stem + "_inference.mp4")
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_video_path, fourcc, output_fps, (frame_width, frame_height))
+    out = cv2.VideoWriter(output_video_path, fourcc, output_fps, (output_width, output_height))
     
     # Initialize moving average buffers for camera parameters
     camera_buffer = {
@@ -872,9 +1251,22 @@ def process_video(model: SMILImageRegressor, video_path: str, output_folder: str
                 
                 # Preprocess frame
                 target_resolution = model.input_resolution
-                preprocessed_image, transform_info = preprocess_frame(
-                    frame_rgb, target_resolution, crop_mode
-                )
+                if crop_mode == 'bbox_crop' and sleap_helper is not None:
+                    preprocess_result = sleap_helper.preprocess_image(
+                        frame_rgb, video_path, frame_idx=frame_idx, explicit_camera=sleap_camera
+                    )
+                    if preprocess_result is None:
+                        print(f"Warning: Missing SLEAP keypoints for frame {frame_idx}; "
+                              "falling back to centred crop for this frame")
+                        preprocessed_image, transform_info = preprocess_frame(
+                            frame_rgb, target_resolution, crop_mode='centred'
+                        )
+                    else:
+                        preprocessed_image, transform_info = preprocess_result
+                else:
+                    preprocessed_image, transform_info = preprocess_frame(
+                        frame_rgb, target_resolution, crop_mode
+                    )
                 
                 # Convert to tensor
                 preprocessed_tensor = torch.from_numpy(preprocessed_image).permute(2, 0, 1).unsqueeze(0)
@@ -890,14 +1282,30 @@ def process_video(model: SMILImageRegressor, video_path: str, output_folder: str
                 else:
                     smoothed_params = predicted_params
                 
-                # Render prediction onto frame (using smoothed camera parameters)
-                rendered_frame = render_prediction_on_frame(model, smoothed_params, frame_rgb, device)
+                # Process frame based on export mode
+                if video_export_mode == 'side_by_side':
+                    # Render model only
+                    rendered_model = render_model_only(model, smoothed_params, device, render_size)
+                    
+                    # Resize input frame to match render_size
+                    input_resized = cv2.resize(frame_rgb, (render_size, render_size))
+                    
+                    # Create side-by-side visualization
+                    side_by_side = np.hstack([input_resized, rendered_model])
+                    
+                    # Convert RGB to BGR for OpenCV
+                    output_frame_bgr = cv2.cvtColor(side_by_side, cv2.COLOR_RGB2BGR)
+                else:
+                    # Render prediction onto frame (using smoothed camera parameters)
+                    rendered_frame = render_prediction_on_frame(
+                        model, smoothed_params, frame_rgb, device, transform_info=transform_info
+                    )
+                    
+                    # Convert RGB back to BGR for OpenCV
+                    output_frame_bgr = cv2.cvtColor(rendered_frame, cv2.COLOR_RGB2BGR)
                 
-                # Convert RGB back to BGR for OpenCV
-                rendered_frame_bgr = cv2.cvtColor(rendered_frame, cv2.COLOR_RGB2BGR)
-                
-                # Write rendered frame to output video
-                out.write(rendered_frame_bgr)
+                # Write output frame to video
+                out.write(output_frame_bgr)
                 
                 # Optionally save frame results
                 if save_frames and frame_idx % 10 == 0:  # Save every 10th frame
@@ -972,9 +1380,10 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
     
     # Preprocessing options
     parser.add_argument('--crop-mode', type=str, default='centred',
-                       choices=['centred', 'default'],
+                       choices=['centred', 'default', 'bbox_crop'],
                        help='Image preprocessing mode: centred=center crop (preserves aspect ratio), '
-                            'default=direct resize (may distort). Should match training preprocessing. (default: centred)')
+                            'default=direct resize (may distort), bbox_crop=SLEAP-driven bounding box crop. '
+                            'Should match training preprocessing. (default: centred)')
     
     # Processing options
     parser.add_argument('--batch-size', type=int, default=1,
@@ -992,6 +1401,16 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
                        help='Maximum number of frames to process from video (default: -1 for all frames)')
     parser.add_argument('--camera-smoothing', type=int, default=10,
                        help='Moving average window size for camera parameter smoothing (default: 10, set to 0 to disable)')
+    parser.add_argument('--video-export-mode', type=str, default='overlay',
+                       choices=['overlay', 'side_by_side'],
+                       help='Video export mode: overlay=blend model onto input (default), '
+                            'side_by_side=display input and rendered model side by side at same resolution')
+    
+    # SLEAP-specific options
+    parser.add_argument('--sleap-project', type=str, default=None,
+                       help='Path to SLEAP project directory (required for bbox_crop)')
+    parser.add_argument('--sleap-camera', type=str, default=None,
+                       help='Optional camera name override when using bbox_crop with SLEAP data')
     
     args = parser.parse_args()
     
@@ -1005,6 +1424,10 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         print(f"Input video: {args.input_video}")
     print(f"Output folder: {args.output_folder}")
     print(f"Crop mode: {args.crop_mode}")
+    if args.sleap_project:
+        print(f"SLEAP project: {args.sleap_project}")
+        if args.sleap_camera:
+            print(f"SLEAP camera override: {args.sleap_camera}")
     if args.input_video:
         print(f"Save frames: {args.save_frames}")
         if args.fps:
@@ -1027,11 +1450,26 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
     
     print(f"Device: {device}")
     
+    if args.crop_mode == 'bbox_crop' and not args.sleap_project:
+        print("Error: bbox_crop mode requires --sleap-project to supply keypoints.")
+        return 1
+    
+    sleap_helper = None
     try:
         # Load model from checkpoint
         print("\n" + "="*40)
         print("Loading model...")
         model, model_config = load_model_from_checkpoint(args.checkpoint, device)
+        
+        if args.crop_mode == 'bbox_crop':
+            sleap_helper = SLEAPCroppingHelper(
+                project_path=args.sleap_project,
+                crop_mode=args.crop_mode,
+                target_resolution=model.input_resolution,
+                backbone_name=model.backbone_name
+            )
+            print(f"SLEAP project loaded from {args.sleap_project}")
+            print(f"Available SLEAP cameras: {sleap_helper.list_cameras()}")
         
         # Process based on input type
         if args.input_folder:
@@ -1048,8 +1486,10 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
             print("\n" + "="*40)
             print("Running inference on images...")
             process_images_batch(
-                model, image_files, args.output_folder, 
-                device, args.crop_mode, args.batch_size
+                model, image_files, args.output_folder,
+                device, args.crop_mode, args.batch_size,
+                sleap_helper=sleap_helper,
+                sleap_camera=args.sleap_camera
             )
             
         elif args.input_video:
@@ -1059,7 +1499,10 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
             process_video(
                 model, args.input_video, args.output_folder,
                 device, args.crop_mode, args.fps, args.save_frames, args.max_frames,
-                args.camera_smoothing
+                args.camera_smoothing,
+                sleap_helper=sleap_helper,
+                sleap_camera=args.sleap_camera,
+                video_export_mode=args.video_export_mode
             )
         
         print("\n" + "="*60)
@@ -1077,6 +1520,9 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         import traceback
         traceback.print_exc()
         return 1
+    finally:
+        if sleap_helper is not None:
+            sleap_helper.close()
 
 
 if __name__ == "__main__":
