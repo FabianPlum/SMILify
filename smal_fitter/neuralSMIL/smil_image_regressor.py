@@ -279,7 +279,8 @@ class SMILImageRegressor(SMALFitter):
             ief_iters=config['ief_iters'],
             rotation_representation=self.rotation_representation,
             scales_scale_factor=config.get('scales_scale_factor', 1),
-            trans_scale_factor=config.get('trans_scale_factor', 0.01)
+            trans_scale_factor=config.get('trans_scale_factor', 0.01),
+            scale_trans_mode=self.scale_trans_mode  # Pass scale_trans_mode to control output dimensions
         ).to(self.device)
     
     def preprocess_image(self, image_data) -> torch.Tensor:
@@ -609,9 +610,33 @@ class SMILImageRegressor(SMALFitter):
         """
         Process an entire batch efficiently for training/validation.
         
+        This method implements dual-layer protection against penalizing samples without ground truth:
+        
+        1. **Implicit Protection (None Detection)**:
+           - If y_data['joint_angles'] is None, target is set to None
+           - _combine_target_parameters_batch creates availability masks from None detection
+           - Ensures single-dataset training never penalizes missing ground truth
+        
+        2. **Explicit Protection (available_labels)**:
+           - Multi-dataset training can provide 'available_labels' in x_data
+           - These labels explicitly declare which parameters have ground truth
+           - Example: {'joint_rot': False, 'betas': True, 'keypoint_2d': True}
+        
+        3. **Safety Merge (AND Logic)**:
+           - Both mechanisms are combined using AND logic
+           - A sample is only penalized if BOTH mechanisms agree it has ground truth
+           - This protects against dataset configuration errors
+           - Example: If available_labels says joint_rot is available but y_data['joint_angles'] is None,
+             the sample is PROTECTED from joint rotation loss
+        
+        This ensures SLEAP data (and any other partial-label data) is never penalized for missing parameters
+        in both single-dataset and mixed-batch multi-dataset training scenarios.
+        
         Args:
             x_data_batch: List of x_data dictionaries (one per sample)
+                - Can optionally include 'available_labels' dict for explicit protection
             y_data_batch: List of y_data dictionaries (one per sample)
+                - Parameters set to None trigger implicit protection
             
         Returns:
             Tuple of (predicted_params, target_params_batch, auxiliary_data)
@@ -619,7 +644,12 @@ class SMILImageRegressor(SMALFitter):
         # Extract image data from all samples
         batch_images = []
         batch_target_params = []
-        batch_auxiliary_data = {'keypoint_data': [], 'silhouette_data': []}
+        batch_auxiliary_data = {
+            'keypoint_data': [], 
+            'silhouette_data': [], 
+            'is_sleap_dataset': [],
+            'dataset_sources': []  # For multi-dataset tracking
+        }
         
         for x_data, y_data in zip(x_data_batch, y_data_batch):
             # Skip samples without image data
@@ -646,6 +676,24 @@ class SMILImageRegressor(SMALFitter):
             
             silhouette_data = x_data.get("input_image_mask")
             batch_auxiliary_data['silhouette_data'].append(silhouette_data)
+            
+            # Extract dataset source (for multi-dataset training)
+            dataset_source = x_data.get('dataset_source', 'unknown')
+            batch_auxiliary_data['dataset_sources'].append(dataset_source)
+            
+            # Extract/derive SLEAP dataset flag
+            # Support both legacy 'is_sleap_dataset' and new 'dataset_source' fields
+            is_sleap = x_data.get('is_sleap_dataset', False)
+            if not is_sleap and 'dataset_source' in x_data:
+                # If dataset_source contains 'sleap', mark as SLEAP data
+                is_sleap = 'sleap' in dataset_source.lower()
+            batch_auxiliary_data['is_sleap_dataset'].append(is_sleap)
+
+            # Carry available_labels so the loss can mask unavailable targets
+            if 'available_labels' in x_data:
+                if 'available_labels' not in batch_auxiliary_data:
+                    batch_auxiliary_data['available_labels'] = []
+                batch_auxiliary_data['available_labels'].append(x_data['available_labels'])
         
         if not batch_images:
             # No valid samples in batch
@@ -659,6 +707,56 @@ class SMILImageRegressor(SMALFitter):
         
         # Combine target parameters into batched format
         target_params_batch = self._combine_target_parameters_batch(batch_target_params)
+
+        # If per-sample available_labels provided, convert them to availability masks
+        # so unavailable parameters are fully masked from loss
+        if 'available_labels' in batch_auxiliary_data:
+            # Get implicit availability masks from None detection (already in target_params_batch)
+            implicit_masks = target_params_batch.get('_availability_masks', {})
+            
+            # Build explicit availability masks from available_labels
+            explicit_masks = {}
+            labels_list = batch_auxiliary_data['available_labels']
+            num_samples = len(labels_list)
+            # For each parameter in targets, build a boolean mask over samples
+            for param_name in ['global_rot','joint_rot','betas','trans','fov','cam_rot','cam_trans','log_beta_scales','betas_trans','keypoint_2d','keypoint_3d','silhouette']:
+                mask_vals = []
+                for i in range(num_samples):
+                    mask_vals.append(bool(labels_list[i].get(param_name, False)))
+                explicit_masks[param_name] = torch.tensor(mask_vals, dtype=torch.bool, device=self.device)
+            
+            # Merge explicit and implicit masks using AND logic for safety
+            # A sample is only considered available if BOTH mechanisms agree
+            # This prevents penalizing samples with None ground truth even if available_labels incorrectly marks them as available
+            availability_masks = {}
+            for param_name in explicit_masks.keys():
+                if param_name in implicit_masks:
+                    # Use AND logic: only available if both implicit (None detection) AND explicit (available_labels) say so
+                    merged_mask = explicit_masks[param_name] & implicit_masks[param_name]
+                    availability_masks[param_name] = merged_mask
+                    
+                    # Detect potential dataset configuration errors where available_labels claims data is available
+                    # but the actual ground truth is None (detected by implicit mask)
+                    mismatches = explicit_masks[param_name] & ~implicit_masks[param_name]
+                    if mismatches.any():
+                        num_mismatches = mismatches.sum().item()
+                        # Only warn occasionally to avoid spam (1% of batches)
+                        if torch.rand(1).item() < 0.01:
+                            print(f"⚠️  WARNING: Dataset configuration mismatch detected for '{param_name}':")
+                            print(f"   {num_mismatches} sample(s) marked as available in 'available_labels' but have None ground truth")
+                            print(f"   These samples will be PROTECTED from loss computation (using AND logic)")
+                            print(f"   Please fix the dataset's 'available_labels' to match actual ground truth availability")
+                else:
+                    # No implicit mask for this param (e.g., keypoint_2d, silhouette), use explicit only
+                    availability_masks[param_name] = explicit_masks[param_name]
+            
+            # Also preserve any implicit masks not in explicit (shouldn't happen, but for safety)
+            for param_name in implicit_masks.keys():
+                if param_name not in availability_masks:
+                    availability_masks[param_name] = implicit_masks[param_name]
+            
+            # Attach merged masks to target_params_batch
+            target_params_batch['_availability_masks'] = availability_masks
         
         return predicted_params, target_params_batch, batch_auxiliary_data
     
@@ -668,37 +766,64 @@ class SMILImageRegressor(SMALFitter):
         targets = {}
         
         # Global rotation (root rotation)
-        targets['global_rot'] = safe_to_tensor(y_data['root_rot'], device=self.device)
+        # Return None if placeholder data (will be excluded from loss)
+        if y_data.get('root_rot') is None:
+            targets['global_rot'] = None
+        else:
+            targets['global_rot'] = safe_to_tensor(y_data['root_rot'], device=self.device)
         
         # Joint rotations (excluding root joint)
-        joint_angles = safe_to_tensor(y_data['joint_angles'], device=self.device)
-        targets['joint_rot'] = joint_angles[1:]  # Exclude root joint
+        # Return None if placeholder data (will be excluded from loss)
+        if y_data.get('joint_angles') is None:
+            targets['joint_rot'] = None
+        else:
+            joint_angles = safe_to_tensor(y_data['joint_angles'], device=self.device)
+            targets['joint_rot'] = joint_angles[1:]  # Exclude root joint
         
         # Shape parameters
-        targets['betas'] = safe_to_tensor(y_data['shape_betas'], device=self.device)
+        # Return None if placeholder data (will be excluded from loss)
+        if y_data.get('shape_betas') is None:
+            targets['betas'] = None
+        else:
+            targets['betas'] = safe_to_tensor(y_data['shape_betas'], device=self.device)
         
         # Translation (root location)
-        targets['trans'] = safe_to_tensor(y_data['root_loc'], device=self.device)
+        # Return None if placeholder data (will be excluded from loss)
+        if y_data.get('root_loc') is None:
+            targets['trans'] = None
+        else:
+            targets['trans'] = safe_to_tensor(y_data['root_loc'], device=self.device)
         
         # Camera FOV
-        fov_value = y_data['cam_fov']
-        if isinstance(fov_value, list):
-            fov_value = fov_value[0]  # Take first element if it's a list
-        targets['fov'] = torch.tensor([fov_value], dtype=torch.float32).to(self.device)
-        
-        # Camera rotation and translation (same logic as original)
-        cam_rot_matrix = y_data['cam_rot']
-        if hasattr(cam_rot_matrix, 'shape') and len(cam_rot_matrix.shape) == 2 and cam_rot_matrix.shape == (3, 3):
-            targets['cam_rot'] = safe_to_tensor(cam_rot_matrix, device=self.device)
+        # Return None if placeholder data (will be excluded from loss)
+        if y_data.get('cam_fov') is None:
+            targets['fov'] = None
         else:
-            if hasattr(cam_rot_matrix, 'shape') and cam_rot_matrix.shape == (3,):
-                r = Rotation.from_rotvec(cam_rot_matrix)
-                cam_rot_matrix = r.as_matrix()
+            fov_value = y_data['cam_fov']
+            if isinstance(fov_value, list):
+                fov_value = fov_value[0]  # Take first element if it's a list
+            targets['fov'] = torch.tensor([fov_value], dtype=torch.float32).to(self.device)
+        
+        # Camera rotation and translation
+        # Return None if placeholder data (will be excluded from loss)
+        if y_data.get('cam_rot') is None:
+            targets['cam_rot'] = None
+        else:
+            cam_rot_matrix = y_data['cam_rot']
+            if hasattr(cam_rot_matrix, 'shape') and len(cam_rot_matrix.shape) == 2 and cam_rot_matrix.shape == (3, 3):
                 targets['cam_rot'] = safe_to_tensor(cam_rot_matrix, device=self.device)
             else:
-                targets['cam_rot'] = safe_to_tensor(cam_rot_matrix, device=self.device)
+                if hasattr(cam_rot_matrix, 'shape') and cam_rot_matrix.shape == (3,):
+                    r = Rotation.from_rotvec(cam_rot_matrix)
+                    cam_rot_matrix = r.as_matrix()
+                    targets['cam_rot'] = safe_to_tensor(cam_rot_matrix, device=self.device)
+                else:
+                    targets['cam_rot'] = safe_to_tensor(cam_rot_matrix, device=self.device)
         
-        targets['cam_trans'] = safe_to_tensor(y_data['cam_trans'], device=self.device)
+        if y_data.get('cam_trans') is None:
+            targets['cam_trans'] = None
+        else:
+            targets['cam_trans'] = safe_to_tensor(y_data['cam_trans'], device=self.device)
         
         # Handle scale and translation parameters based on mode
         if self.scale_trans_mode == 'ignore':
@@ -743,21 +868,111 @@ class SMILImageRegressor(SMALFitter):
         return targets
     
     def _combine_target_parameters_batch(self, target_params_list):
-        """Combine list of target parameters into batched tensors."""
+        """
+        Combine list of target parameters into batched tensors with availability masks.
+        
+        Handles None values (placeholder data) by:
+        1. Creating zero/identity placeholders for None values
+        2. Creating availability masks to indicate which samples have real data
+        3. Using masks in loss computation (complete masking - Option A)
+        """
         if not target_params_list:
             return {}
         
+        batch_size = len(target_params_list)
         batch_targets = {}
+        batch_availability = {}  # Track which samples have real data for each parameter
         
         # Get all parameter names from first sample
-        param_names = target_params_list[0].keys()
+        param_names = set()
+        for targets in target_params_list:
+            param_names.update(targets.keys())
         
         for param_name in param_names:
-            # Stack parameters from all samples
-            param_tensors = [targets[param_name] for targets in target_params_list]
+            # Collect tensors and track availability
+            param_tensors = []
+            availability_mask = []
+            
+            for targets in target_params_list:
+                if targets.get(param_name) is not None:
+                    param_tensors.append(targets[param_name])
+                    availability_mask.append(True)
+                else:
+                    # Create placeholder tensor with appropriate shape
+                    placeholder = self._create_placeholder_tensor(param_name, targets)
+                    param_tensors.append(placeholder)
+                    availability_mask.append(False)
+            
+            # Stack all tensors (including placeholders)
             batch_targets[param_name] = torch.stack(param_tensors, dim=0)
+            
+            # Store availability mask
+            batch_availability[param_name] = torch.tensor(
+                availability_mask, dtype=torch.bool, device=self.device
+            )
+        
+        # Add availability masks to batch_targets with special key
+        batch_targets['_availability_masks'] = batch_availability
         
         return batch_targets
+    
+    def _create_placeholder_tensor(self, param_name: str, targets: Dict) -> torch.Tensor:
+        """
+        Create a placeholder tensor for a parameter with None value.
+        
+        Args:
+            param_name: Name of the parameter
+            targets: Target dictionary (used to infer shapes from other parameters)
+            
+        Returns:
+            Placeholder tensor with appropriate shape and values
+        """
+        # Use zeros for most parameters, identity for rotations
+        if param_name == 'global_rot':
+            if self.rotation_representation == '6d':
+                # Identity rotation in 6D: [1, 0, 0, 0, 1, 0]
+                return torch.tensor([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 
+                                  dtype=torch.float32, device=self.device)
+            else:
+                # Identity rotation in axis-angle: [0, 0, 0]
+                return torch.zeros(3, dtype=torch.float32, device=self.device)
+        
+        elif param_name == 'joint_rot':
+            # Need to know number of joints
+            n_joints = config.N_POSE
+            if self.rotation_representation == '6d':
+                return torch.zeros(n_joints, 6, dtype=torch.float32, device=self.device)
+            else:
+                return torch.zeros(n_joints, 3, dtype=torch.float32, device=self.device)
+        
+        elif param_name == 'betas':
+            return torch.zeros(config.N_BETAS, dtype=torch.float32, device=self.device)
+        
+        elif param_name == 'trans':
+            return torch.zeros(3, dtype=torch.float32, device=self.device)
+        
+        elif param_name == 'fov':
+            return torch.tensor([60.0], dtype=torch.float32, device=self.device)  # Default FOV
+        
+        elif param_name == 'cam_rot':
+            # Identity rotation matrix
+            return torch.eye(3, dtype=torch.float32, device=self.device)
+        
+        elif param_name == 'cam_trans':
+            return torch.zeros(3, dtype=torch.float32, device=self.device)
+        
+        elif param_name == 'log_beta_scales':
+            # For entangled mode or when not available
+            n_joints = len(config.dd["J_names"]) if hasattr(config.dd, '__getitem__') else 32
+            return torch.zeros(n_joints, 3, dtype=torch.float32, device=self.device)
+        
+        elif param_name == 'betas_trans':
+            n_joints = len(config.dd["J_names"]) if hasattr(config.dd, '__getitem__') else 32
+            return torch.zeros(n_joints, 3, dtype=torch.float32, device=self.device)
+        
+        else:
+            # Unknown parameter - return scalar zero
+            return torch.tensor(0.0, dtype=torch.float32, device=self.device)
     
     def _transform_betas_to_joint_values(self, betas, translation_factor=0.01):
         """
@@ -940,7 +1155,7 @@ class SMILImageRegressor(SMALFitter):
         Returns:
             Total loss as a scalar tensor, or (total_loss, loss_components) if return_components=True
         """
-        total_loss = 0.0
+        total_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
         loss_components = {}
         
         if loss_weights is None:
@@ -970,18 +1185,21 @@ class SMILImageRegressor(SMALFitter):
         if auxiliary_data is not None:
             keypoint_data_list = auxiliary_data.get('keypoint_data', [])
             silhouette_data_list = auxiliary_data.get('silhouette_data', [])
+            is_sleap_list = auxiliary_data.get('is_sleap_dataset', [])
             
             for i in range(batch_size):
                 # Get keypoint and silhouette data for this sample
                 keypoint_data = keypoint_data_list[i] if i < len(keypoint_data_list) else None
                 silhouette_data = silhouette_data_list[i] if i < len(silhouette_data_list) else None
+                is_sleap = is_sleap_list[i] if i < len(is_sleap_list) else False
                 
                 # Validate sample visibility
                 is_valid = self._validate_sample_visibility(
                     keypoint_data=keypoint_data,
                     silhouette_data=silhouette_data,
                     min_visible_keypoints=5,
-                    min_pixel_coverage=0.05
+                    min_pixel_coverage=0.05,
+                    is_sleap_dataset=is_sleap
                 )
                 
                 if not is_valid:
@@ -1011,6 +1229,7 @@ class SMILImageRegressor(SMALFitter):
         
         # If all samples are invalid, return zero loss
         if not sample_validity_mask.any():
+            print(f"WARNING: All {batch_size} samples in batch filtered out (invalid)")
             eps = 1e-8
             zero_loss = torch.tensor(eps, device=self.device, requires_grad=True)
             if return_components:
@@ -1071,100 +1290,195 @@ class SMILImageRegressor(SMALFitter):
         num_valid_samples = sample_validity_mask.sum().item()
         eps = 1e-8
         
+        # Extract availability masks if present (for multi-dataset training)
+        # This replaces the legacy SLEAP batch detection - availability masks handle
+        # per-sample filtering automatically, allowing mixed batches
+        availability_masks = target_params_batch.get('_availability_masks', {})
+        
         # Basic parameter losses (only for valid samples)
         
         # Global rotation loss
         if 'global_rot' in valid_target_params and num_valid_samples > 0:
-            if self.rotation_representation == '6d':
-                pred_global_matrix = rotation_6d_to_matrix(valid_predicted_params['global_rot'])
-                target_global_matrix = rotation_6d_to_matrix(valid_target_params['global_rot'])
-                matrix_diff_loss = torch.norm(pred_global_matrix - target_global_matrix, p='fro', dim=(-2, -1))
-                loss = matrix_diff_loss.mean()
-            else:
-                loss = F.mse_loss(valid_predicted_params['global_rot'], valid_target_params['global_rot'])
+            # Apply availability masking (complete masking - Option A)
+            pred_masked, target_masked, num_available = self._apply_availability_mask(
+                valid_predicted_params['global_rot'],
+                valid_target_params['global_rot'],
+                availability_masks.get('global_rot', None),
+                sample_validity_mask
+            )
             
-            loss_components['global_rot'] = loss
-            total_loss += loss_weights['global_rot'] * loss
+            if num_available > 0:
+                if self.rotation_representation == '6d':
+                    pred_global_matrix = rotation_6d_to_matrix(pred_masked)
+                    target_global_matrix = rotation_6d_to_matrix(target_masked)
+                    matrix_diff_loss = torch.norm(pred_global_matrix - target_global_matrix, p='fro', dim=(-2, -1))
+                    loss = matrix_diff_loss.mean()
+                else:
+                    loss = F.mse_loss(pred_masked, target_masked)
+                
+                loss_components['global_rot'] = loss
+                total_loss = total_loss + loss_weights['global_rot'] * loss
+            else:
+                # No available data for this parameter
+                loss_components['global_rot'] = torch.tensor(eps, device=self.device, requires_grad=True)
         else:
             # No valid samples or no global rotation data
             loss_components['global_rot'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Joint rotation loss (with visibility awareness)
+        # IMPORTANT: This loss is PROTECTED by availability masks to ensure samples without joint angle ground truth
+        # (e.g., SLEAP data) are NEVER penalized. The _apply_availability_mask filters out samples where:
+        #   - y_data['joint_angles'] was None (implicit protection via None detection)
+        #   - OR x_data['available_labels']['joint_rot'] was False (explicit protection)
+        # This works for both single-dataset and mixed-batch multi-dataset training.
         if 'joint_rot' in valid_target_params and num_valid_samples > 0:
-            # Check if we have visibility information for joint-specific loss
-            if auxiliary_data is not None and 'keypoint_data' in auxiliary_data and auxiliary_data['keypoint_data']:
-                # Filter keypoint data to only include valid samples
-                valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
-                                     if sample_validity_mask[i]]
-                
-                # Use visibility-aware joint rotation loss
-                loss = self._compute_visibility_aware_joint_rotation_loss_batch(
-                    valid_predicted_params['joint_rot'], valid_target_params['joint_rot'], valid_keypoint_data
-                )
+            # Respect availability mask (skip entirely if no samples have ground truth)
+            pred_masked_jr, target_masked_jr, num_available_joint = self._apply_availability_mask(
+                valid_predicted_params['joint_rot'],
+                valid_target_params['joint_rot'],
+                availability_masks.get('joint_rot', None),
+                sample_validity_mask
+            )
+            if num_available_joint == 0:
+                # No samples in batch have joint rotation ground truth - return epsilon loss (no penalty)
+                loss_components['joint_rot'] = torch.tensor(eps, device=self.device, requires_grad=True)
             else:
-                # Fallback to standard joint rotation loss if no visibility data
-                if self.rotation_representation == '6d':
-                    pred_matrices = rotation_6d_to_matrix(valid_predicted_params['joint_rot'])
-                    target_matrices = rotation_6d_to_matrix(valid_target_params['joint_rot'])
-                    matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
-                    loss = matrix_diff_loss.mean()
+                # Check if we have visibility information for joint-specific loss
+                if auxiliary_data is not None and 'keypoint_data' in auxiliary_data and auxiliary_data['keypoint_data']:
+                    # Build mask over original batch for samples that are both valid and available
+                    if availability_masks.get('joint_rot', None) is not None:
+                        joint_avail_mask_valid = availability_masks['joint_rot'][sample_validity_mask]
+                    else:
+                        # If no availability provided, default to all True (shouldn't happen here)
+                        joint_avail_mask_valid = torch.ones(sample_validity_mask.sum().item(), dtype=torch.bool, device=self.device)
+
+                    # First filter keypoint_data by sample_validity_mask, then by availability
+                    temp_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) if sample_validity_mask[i]]
+                    valid_keypoint_data = [kd for kd, keep in zip(temp_keypoint_data, joint_avail_mask_valid.tolist()) if keep]
+                    
+                    # Use visibility-aware joint rotation loss on masked tensors and filtered keypoint data
+                    loss = self._compute_visibility_aware_joint_rotation_loss_batch(
+                        pred_masked_jr, target_masked_jr, valid_keypoint_data
+                    )
                 else:
-                    loss = F.mse_loss(valid_predicted_params['joint_rot'], valid_target_params['joint_rot'])
-            
-            loss_components['joint_rot'] = loss
-            total_loss += loss_weights['joint_rot'] * loss
+                    # Fallback to standard joint rotation loss if no visibility data
+                    if self.rotation_representation == '6d':
+                        pred_matrices = rotation_6d_to_matrix(pred_masked_jr)
+                        target_matrices = rotation_6d_to_matrix(target_masked_jr)
+                        matrix_diff_loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1))
+                        loss = matrix_diff_loss.mean()
+                    else:
+                        loss = F.mse_loss(pred_masked_jr, target_masked_jr)
+                
+                loss_components['joint_rot'] = loss
+                total_loss = total_loss + loss_weights['joint_rot'] * loss
         else:
             # No valid samples or no joint rotation data
             loss_components['joint_rot'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Shape parameter loss
         if 'betas' in valid_target_params and num_valid_samples > 0:
-            loss = F.mse_loss(valid_predicted_params['betas'], valid_target_params['betas'])
-            loss_components['betas'] = loss
-            total_loss += loss_weights['betas'] * loss
+            # Apply availability masking
+            pred_masked, target_masked, num_available = self._apply_availability_mask(
+                valid_predicted_params['betas'],
+                valid_target_params['betas'],
+                availability_masks.get('betas', None),
+                sample_validity_mask
+            )
+            
+            if num_available > 0:
+                loss = F.mse_loss(pred_masked, target_masked)
+                loss_components['betas'] = loss
+                total_loss = total_loss + loss_weights['betas'] * loss
+            else:
+                loss_components['betas'] = torch.tensor(eps, device=self.device, requires_grad=True)
         else:
             loss_components['betas'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Translation loss
         if 'trans' in valid_target_params and num_valid_samples > 0:
-            loss = F.mse_loss(valid_predicted_params['trans'], valid_target_params['trans'])
-            loss_components['trans'] = loss
-            total_loss += loss_weights['trans'] * loss
+            # Apply availability masking
+            pred_masked, target_masked, num_available = self._apply_availability_mask(
+                valid_predicted_params['trans'],
+                valid_target_params['trans'],
+                availability_masks.get('trans', None),
+                sample_validity_mask
+            )
+            
+            if num_available > 0:
+                loss = F.mse_loss(pred_masked, target_masked)
+                loss_components['trans'] = loss
+                total_loss = total_loss + loss_weights['trans'] * loss
+            else:
+                loss_components['trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
         else:
             loss_components['trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # FOV loss
         if 'fov' in valid_target_params and num_valid_samples > 0:
-            pred_fov = valid_predicted_params['fov']
-            target_fov = valid_target_params['fov']
+            # Apply availability masking
+            pred_masked, target_masked, num_available = self._apply_availability_mask(
+                valid_predicted_params['fov'],
+                valid_target_params['fov'],
+                availability_masks.get('fov', None),
+                sample_validity_mask
+            )
             
-            # Handle shape mismatch
-            if pred_fov.shape != target_fov.shape:
-                if len(pred_fov.shape) != len(target_fov.shape):
-                    if len(pred_fov.shape) > len(target_fov.shape):
-                        target_fov = target_fov.unsqueeze(-1)
-                    else:
-                        pred_fov = pred_fov.unsqueeze(-1)
-            
-            loss = F.mse_loss(pred_fov, target_fov)
-            loss_components['fov'] = loss
-            total_loss += loss_weights['fov'] * loss
+            if num_available > 0:
+                # Handle shape mismatch
+                pred_fov = pred_masked
+                target_fov = target_masked
+                
+                if pred_fov.shape != target_fov.shape:
+                    if len(pred_fov.shape) != len(target_fov.shape):
+                        if len(pred_fov.shape) > len(target_fov.shape):
+                            target_fov = target_fov.unsqueeze(-1)
+                        else:
+                            pred_fov = pred_fov.unsqueeze(-1)
+                
+                loss = F.mse_loss(pred_fov, target_fov)
+                loss_components['fov'] = loss
+                total_loss = total_loss + loss_weights['fov'] * loss
+            else:
+                loss_components['fov'] = torch.tensor(eps, device=self.device, requires_grad=True)
         else:
             loss_components['fov'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Camera rotation loss
         if 'cam_rot' in valid_target_params and num_valid_samples > 0:
-            loss = F.mse_loss(valid_predicted_params['cam_rot'], valid_target_params['cam_rot'])
-            loss_components['cam_rot'] = loss
-            total_loss += loss_weights['cam_rot'] * loss
+            # Apply availability masking
+            pred_masked, target_masked, num_available = self._apply_availability_mask(
+                valid_predicted_params['cam_rot'],
+                valid_target_params['cam_rot'],
+                availability_masks.get('cam_rot', None),
+                sample_validity_mask
+            )
+            
+            if num_available > 0:
+                loss = F.mse_loss(pred_masked, target_masked)
+                loss_components['cam_rot'] = loss
+                total_loss = total_loss + loss_weights['cam_rot'] * loss
+            else:
+                loss_components['cam_rot'] = torch.tensor(eps, device=self.device, requires_grad=True)
         else:
             loss_components['cam_rot'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         # Camera translation loss
         if 'cam_trans' in valid_target_params and num_valid_samples > 0:
-            loss = F.mse_loss(valid_predicted_params['cam_trans'], valid_target_params['cam_trans'])
-            loss_components['cam_trans'] = loss
-            total_loss += loss_weights['cam_trans'] * loss
+            # Apply availability masking
+            pred_masked, target_masked, num_available = self._apply_availability_mask(
+                valid_predicted_params['cam_trans'],
+                valid_target_params['cam_trans'],
+                availability_masks.get('cam_trans', None),
+                sample_validity_mask
+            )
+            
+            if num_available > 0:
+                loss = F.mse_loss(pred_masked, target_masked)
+                loss_components['cam_trans'] = loss
+                total_loss = total_loss + loss_weights['cam_trans'] * loss
+            else:
+                loss_components['cam_trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
         else:
             loss_components['cam_trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
@@ -1178,77 +1492,184 @@ class SMILImageRegressor(SMALFitter):
             # Original logic for separate/ignore modes
             # Joint scales loss (if available)
             if 'log_beta_scales' in valid_target_params and 'log_beta_scales' in valid_predicted_params and num_valid_samples > 0:
-                loss = F.mse_loss(valid_predicted_params['log_beta_scales'], valid_target_params['log_beta_scales'])
-                loss_components['log_beta_scales'] = loss
-                total_loss += loss_weights['log_beta_scales'] * loss
+                # Apply availability masking
+                pred_masked, target_masked, num_available = self._apply_availability_mask(
+                    valid_predicted_params['log_beta_scales'],
+                    valid_target_params['log_beta_scales'],
+                    availability_masks.get('log_beta_scales', None),
+                    sample_validity_mask
+                )
+                
+                if num_available > 0:
+                    loss = F.mse_loss(pred_masked, target_masked)
+                    loss_components['log_beta_scales'] = loss
+                    total_loss = total_loss + loss_weights['log_beta_scales'] * loss
+                else:
+                    loss_components['log_beta_scales'] = torch.tensor(eps, device=self.device, requires_grad=True)
             else:
                 loss_components['log_beta_scales'] = torch.tensor(eps, device=self.device, requires_grad=True)
             
             # Joint translations loss (if available)
             if 'betas_trans' in valid_target_params and 'betas_trans' in valid_predicted_params and num_valid_samples > 0:
-                loss = F.mse_loss(valid_predicted_params['betas_trans'], valid_target_params['betas_trans'])
-                loss_components['betas_trans'] = loss
-                total_loss += loss_weights['betas_trans'] * loss
+                # Apply availability masking
+                pred_masked, target_masked, num_available = self._apply_availability_mask(
+                    valid_predicted_params['betas_trans'],
+                    valid_target_params['betas_trans'],
+                    availability_masks.get('betas_trans', None),
+                    sample_validity_mask
+                )
+                
+                if num_available > 0:
+                    loss = F.mse_loss(pred_masked, target_masked)
+                    loss_components['betas_trans'] = loss
+                    total_loss = total_loss + loss_weights['betas_trans'] * loss
+                else:
+                    loss_components['betas_trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
             else:
                 loss_components['betas_trans'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
-        # Batched 2D keypoint loss (only for valid samples)
+        # Batched 2D keypoint loss (only for valid samples with available 2D keypoints)
         if need_keypoint_loss and rendered_joints is not None and auxiliary_data['keypoint_data'] and num_valid_samples > 0:
-            try:
-                # Filter rendered joints and keypoint data to only include valid samples
-                valid_rendered_joints = rendered_joints[sample_validity_mask]
-                valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
-                                     if sample_validity_mask[i]]
+            # Apply availability mask - only compute loss for samples with real 2D keypoint ground truth
+            keypoint_2d_availability = availability_masks.get('keypoint_2d', None)
+            
+            if keypoint_2d_availability is not None:
+                # Filter to samples with available 2D keypoints AND valid visibility
+                combined_mask = sample_validity_mask & keypoint_2d_availability
                 
-                loss = self._compute_batch_keypoint_loss(valid_rendered_joints, valid_keypoint_data)
-                if torch.isfinite(loss):
-                    loss_components['keypoint_2d'] = loss
-                    total_loss += loss_weights['keypoint_2d'] * loss
+                if combined_mask.any():
+                    try:
+                        # Filter rendered joints and keypoint data to only include samples with available data
+                        valid_rendered_joints = rendered_joints[combined_mask]
+                        valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
+                                             if i < len(combined_mask) and combined_mask[i]]
+                        
+                        loss = self._compute_batch_keypoint_loss(valid_rendered_joints, valid_keypoint_data)
+                        if torch.isfinite(loss):
+                            loss_components['keypoint_2d'] = loss
+                            total_loss = total_loss + loss_weights['keypoint_2d'] * loss
+                        else:
+                            loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+                    except Exception as e:
+                        print(f"Warning: Failed to compute batch keypoint loss: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
                 else:
+                    # No samples with available 2D keypoints
                     loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
-            except Exception as e:
-                print(f"Warning: Failed to compute batch keypoint loss: {e}")
-                loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+            else:
+                # No availability masks - legacy behavior (try all valid samples)
+                try:
+                    valid_rendered_joints = rendered_joints[sample_validity_mask]
+                    valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
+                                         if sample_validity_mask[i]]
+                    
+                    loss = self._compute_batch_keypoint_loss(valid_rendered_joints, valid_keypoint_data)
+                    if torch.isfinite(loss):
+                        loss_components['keypoint_2d'] = loss
+                        total_loss = total_loss + loss_weights['keypoint_2d'] * loss
+                    else:
+                        loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+                except Exception as e:
+                    print(f"Warning: Failed to compute batch keypoint loss: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
         else:
             loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
-        # Batched silhouette loss (only for valid samples)
+        # Batched silhouette loss (only for valid samples with available silhouette)
         if need_silhouette_loss and rendered_silhouette is not None and auxiliary_data['silhouette_data'] and num_valid_samples > 0:
-            try:
-                # Filter rendered silhouette and silhouette data to only include valid samples
-                valid_rendered_silhouette = rendered_silhouette[sample_validity_mask]
-                valid_silhouette_data = [auxiliary_data['silhouette_data'][i] for i in range(len(auxiliary_data['silhouette_data'])) 
-                                       if sample_validity_mask[i]]
+            # Apply availability mask - only compute loss for samples with real silhouette ground truth
+            silhouette_availability = availability_masks.get('silhouette', None)
+            
+            if silhouette_availability is not None:
+                # Filter to samples with available silhouette AND valid visibility
+                combined_mask = sample_validity_mask & silhouette_availability
                 
-                loss = self._compute_batch_silhouette_loss(valid_rendered_silhouette, valid_silhouette_data)
-                if torch.isfinite(loss):
-                    loss_components['silhouette'] = loss
-                    total_loss += loss_weights['silhouette'] * loss
+                if combined_mask.any():
+                    try:
+                        # Filter rendered silhouette and silhouette data to only include samples with available data
+                        valid_rendered_silhouette = rendered_silhouette[combined_mask]
+                        valid_silhouette_data = [auxiliary_data['silhouette_data'][i] for i in range(len(auxiliary_data['silhouette_data'])) 
+                                               if i < len(combined_mask) and combined_mask[i]]
+                        
+                        loss = self._compute_batch_silhouette_loss(valid_rendered_silhouette, valid_silhouette_data)
+                        if torch.isfinite(loss):
+                            loss_components['silhouette'] = loss
+                            total_loss = total_loss + loss_weights['silhouette'] * loss
+                        else:
+                            loss_components['silhouette'] = torch.tensor(eps, device=self.device, requires_grad=True)
+                    except Exception as e:
+                        print(f"Warning: Failed to compute batch silhouette loss: {e}")
+                        loss_components['silhouette'] = torch.tensor(eps, device=self.device, requires_grad=True)
                 else:
+                    # No samples with available silhouette
                     loss_components['silhouette'] = torch.tensor(eps, device=self.device, requires_grad=True)
-            except Exception as e:
-                print(f"Warning: Failed to compute batch silhouette loss: {e}")
-                loss_components['silhouette'] = torch.tensor(eps, device=self.device, requires_grad=True)
+            else:
+                # No availability masks - legacy behavior (try all valid samples)
+                try:
+                    valid_rendered_silhouette = rendered_silhouette[sample_validity_mask]
+                    valid_silhouette_data = [auxiliary_data['silhouette_data'][i] for i in range(len(auxiliary_data['silhouette_data'])) 
+                                           if sample_validity_mask[i]]
+                    
+                    loss = self._compute_batch_silhouette_loss(valid_rendered_silhouette, valid_silhouette_data)
+                    if torch.isfinite(loss):
+                        loss_components['silhouette'] = loss
+                        total_loss = total_loss + loss_weights['silhouette'] * loss
+                    else:
+                        loss_components['silhouette'] = torch.tensor(eps, device=self.device, requires_grad=True)
+                except Exception as e:
+                    print(f"Warning: Failed to compute batch silhouette loss: {e}")
+                    loss_components['silhouette'] = torch.tensor(eps, device=self.device, requires_grad=True)
         else:
             loss_components['silhouette'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
-        # Batched 3D keypoint loss (only for valid samples)
+        # Batched 3D keypoint loss (only for valid samples with available 3D keypoints)
         if need_keypoint_3d_loss and joints_3d is not None and auxiliary_data['keypoint_data'] and num_valid_samples > 0:
-            try:
-                # Filter 3D joints and keypoint data to only include valid samples
-                valid_joints_3d = joints_3d[sample_validity_mask]
-                valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
-                                     if sample_validity_mask[i]]
+            # Apply availability mask - only compute loss for samples with real 3D keypoint ground truth
+            keypoint_3d_availability = availability_masks.get('keypoint_3d', None)
+            
+            if keypoint_3d_availability is not None:
+                # Filter to samples with available 3D keypoints AND valid visibility
+                combined_mask = sample_validity_mask & keypoint_3d_availability
                 
-                loss = self._compute_batch_keypoint_3d_loss(valid_joints_3d, valid_keypoint_data)
-                if torch.isfinite(loss):
-                    loss_components['keypoint_3d'] = loss
-                    total_loss += loss_weights['keypoint_3d'] * loss
+                if combined_mask.any():
+                    try:
+                        # Filter 3D joints and keypoint data to only include samples with available data
+                        valid_joints_3d = joints_3d[combined_mask]
+                        valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
+                                             if i < len(combined_mask) and combined_mask[i]]
+                        
+                        loss = self._compute_batch_keypoint_3d_loss(valid_joints_3d, valid_keypoint_data)
+                        if torch.isfinite(loss):
+                            loss_components['keypoint_3d'] = loss
+                            total_loss = total_loss + loss_weights['keypoint_3d'] * loss
+                        else:
+                            loss_components['keypoint_3d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+                    except Exception as e:
+                        print(f"Warning: Failed to compute batch 3D keypoint loss: {e}")
+                        loss_components['keypoint_3d'] = torch.tensor(eps, device=self.device, requires_grad=True)
                 else:
+                    # No samples with available 3D keypoints
                     loss_components['keypoint_3d'] = torch.tensor(eps, device=self.device, requires_grad=True)
-            except Exception as e:
-                print(f"Warning: Failed to compute batch 3D keypoint loss: {e}")
-                loss_components['keypoint_3d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+            else:
+                # No availability masks - legacy behavior (try all valid samples)
+                try:
+                    valid_joints_3d = joints_3d[sample_validity_mask]
+                    valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
+                                         if sample_validity_mask[i]]
+                    
+                    loss = self._compute_batch_keypoint_3d_loss(valid_joints_3d, valid_keypoint_data)
+                    if torch.isfinite(loss):
+                        loss_components['keypoint_3d'] = loss
+                        total_loss = total_loss + loss_weights['keypoint_3d'] * loss
+                    else:
+                        loss_components['keypoint_3d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+                except Exception as e:
+                    print(f"Warning: Failed to compute batch 3D keypoint loss: {e}")
+                    loss_components['keypoint_3d'] = torch.tensor(eps, device=self.device, requires_grad=True)
         else:
             loss_components['keypoint_3d'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
@@ -1256,6 +1677,34 @@ class SMILImageRegressor(SMALFitter):
         if not torch.isfinite(total_loss):
             print(f"Warning: Non-finite total loss detected: {total_loss.item()}, replacing with small epsilon")
             total_loss = torch.tensor(1e-6, device=self.device, requires_grad=True)
+        
+        # Diagnostic: Log zero or near-zero loss batches
+        if total_loss.item() < 1e-6:
+            print(f"\nWARNING: Near-zero total loss detected: {total_loss.item():.2e}")
+            print(f"  Valid samples: {num_valid_samples}/{batch_size}")
+            
+            # Show dataset composition if available
+            if auxiliary_data and 'dataset_sources' in auxiliary_data:
+                from collections import Counter
+                sources = Counter(auxiliary_data['dataset_sources'])
+                print(f"  Dataset composition: {dict(sources)}")
+            
+            print(f"  Availability masks present: {'_availability_masks' in target_params_batch}")
+            if '_availability_masks' in target_params_batch:
+                avail_masks = target_params_batch['_availability_masks']
+                print(f"  Availability summary:")
+                for key, mask in avail_masks.items():
+                    if isinstance(mask, torch.Tensor):
+                        num_avail = mask.sum().item()
+                        print(f"    {key}: {num_avail}/{len(mask)} samples have real data")
+            
+            print(f"  Loss weights: keypoint_2d={loss_weights.get('keypoint_2d', 0)}, betas={loss_weights.get('betas', 0)}")
+            print(f"  need_keypoint_loss={need_keypoint_loss}, need_silhouette_loss={need_silhouette_loss}")
+            
+            print(f"  Loss components (non-zero only):")
+            for key, val in loss_components.items():
+                if isinstance(val, torch.Tensor) and val.item() > 1e-8:
+                    print(f"    {key}: {val.item():.6f} (weight={loss_weights.get(key, 0)})")
         
         if return_components:
             return total_loss, loss_components
@@ -1477,18 +1926,25 @@ class SMILImageRegressor(SMALFitter):
                 # Only compute loss for keypoints where ground truth is within bounds
                 gt_in_bounds_mask = (target_keypoints >= 0.0) & (target_keypoints <= 1.0)
                 gt_in_bounds_mask = gt_in_bounds_mask.all(dim=-1)  # Both x and y must be in bounds
+
+                # Track non-finite predictions before sanitising so we can report them
+                non_finite_prediction_mask = ~torch.isfinite(rendered_joints).all(dim=-1)
+                if non_finite_prediction_mask.any():
+                    print(
+                        "[KeypointLoss] Detected non-finite projected joints; "
+                        f"sanitising {non_finite_prediction_mask.sum().item()} entries"
+                    )
                 
-                # Additional safety check for finite rendered joints (prevent NaN/inf in loss)
-                finite_mask = torch.isfinite(rendered_joints).all(dim=-1)
+                # Replace NaNs/Infs with zeros to keep gradients flowing
+                rendered_joints = torch.nan_to_num(rendered_joints, nan=0.0, posinf=0.0, neginf=0.0)
                 
-                # Only keep joints that are visible AND have ground truth within bounds AND are finite
-                valid_mask = visible_mask & gt_in_bounds_mask & finite_mask
+                # Only keep joints that are visible AND have ground truth within bounds
+                valid_mask = visible_mask & gt_in_bounds_mask
                 
                 # Debug: print validation info occasionally
                 if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:  # 1% of the time
-                    finite_count = finite_mask.sum().item()
                     gt_in_bounds_count = gt_in_bounds_mask.sum().item()
-                    print(f"DEBUG - Keypoint loss: visible={visible_mask.sum().item()}, gt_in_bounds={gt_in_bounds_count}, finite={finite_count}, valid={valid_mask.sum().item()}")
+                    print(f"DEBUG - Keypoint loss: visible={visible_mask.sum().item()}, gt_in_bounds={gt_in_bounds_count}, valid={valid_mask.sum().item()}")
                     print(f"  Rendered joints range: [{rendered_joints.min():.3f}, {rendered_joints.max():.3f}]")
                     print(f"  Target keypoints range: [{target_keypoints.min():.3f}, {target_keypoints.max():.3f}]")
                 
@@ -1532,11 +1988,12 @@ class SMILImageRegressor(SMALFitter):
                     eps = 1e-8
                     loss = torch.tensor(eps, device=self.device, requires_grad=True)
                     loss_components['keypoint_2d'] = loss
-                    # Only print occasionally to avoid spam
-                    if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:
-                        finite_count = finite_mask.sum().item()
-                        gt_in_bounds_count = gt_in_bounds_mask.sum().item()
-                        print(f"DEBUG - No valid joints: visible={visible_mask.sum().item()}, gt_in_bounds={gt_in_bounds_count}, finite={finite_count}")
+                    print(
+                        "[KeypointLoss] No valid 2D joints remaining for supervision "
+                        f"(visible={visible_mask.sum().item()}, "
+                        f"in_bounds={(gt_in_bounds_mask & visible_mask).sum().item()}, "
+                        f"non_finite_preds={(non_finite_prediction_mask & visible_mask).sum().item()})"
+                    )
                     
             except Exception as e:
                 # If keypoint loss computation fails, continue without it
@@ -1926,7 +2383,8 @@ class SMILImageRegressor(SMALFitter):
         return rendered_joints, rendered_silhouette, joints_3d
     
     def _validate_sample_visibility(self, keypoint_data: dict, silhouette_data=None, 
-                                   min_visible_keypoints: int = 5, min_pixel_coverage: float = 0.05) -> bool:
+                                   min_visible_keypoints: int = 5, min_pixel_coverage: float = 0.05,
+                                   is_sleap_dataset: bool = False) -> bool:
         """
         Validate if a sample has sufficient visibility for training.
         
@@ -1940,6 +2398,7 @@ class SMILImageRegressor(SMALFitter):
             silhouette_data: Optional silhouette mask tensor for pixel coverage calculation
             min_visible_keypoints: Minimum number of visible keypoints required (default: 5)
             min_pixel_coverage: Minimum pixel coverage percentage required (default: 0.05 = 5%)
+            is_sleap_dataset: If True, use more lenient validation (SLEAP data is high quality)
             
         Returns:
             bool: True if sample is valid for training, False otherwise
@@ -1962,10 +2421,16 @@ class SMILImageRegressor(SMALFitter):
         valid_keypoint_mask = visible_mask & gt_in_bounds_mask
         num_valid_keypoints = valid_keypoint_mask.sum().item()
         
-        # Check keypoint threshold
+        # For SLEAP datasets, use more lenient threshold (2 keypoints minimum)
+        # SLEAP data is high quality but may have legitimate occlusions
+        if is_sleap_dataset:
+            min_sleap_keypoints = 2  # Very lenient - just need some keypoints
+            return num_valid_keypoints >= min_sleap_keypoints
+        
+        # Check keypoint threshold for non-SLEAP data
         keypoint_valid = num_valid_keypoints >= min_visible_keypoints
         
-        # Check pixel coverage if silhouette data is available
+        # Check pixel coverage if silhouette data is available (only for non-SLEAP datasets)
         pixel_coverage_valid = True  # Default to True if no silhouette data
         if silhouette_data is not None:
             try:
@@ -2034,6 +2499,43 @@ class SMILImageRegressor(SMALFitter):
                 'batches_with_filtering': 0
             }
 
+    def _apply_availability_mask(self, predicted: torch.Tensor, target: torch.Tensor, 
+                                 availability_mask: Optional[torch.Tensor],
+                                 sample_validity_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, int]:
+        """
+        Apply availability mask to filter out samples without real ground truth data.
+        
+        This implements complete masking (Option A) - samples without real data
+        contribute nothing to the loss.
+        
+        Args:
+            predicted: Predicted parameter tensor
+            target: Target parameter tensor  
+            availability_mask: Boolean mask indicating which samples have real data (or None if all available)
+            sample_validity_mask: Boolean mask indicating which samples are valid
+            
+        Returns:
+            Tuple of (masked_predicted, masked_target, num_available_samples)
+        """
+        if availability_mask is None:
+            # No availability information - assume all samples are available
+            return predicted, target, predicted.shape[0]
+        
+        # Apply sample validity mask to availability mask
+        # Only consider samples that are both valid AND have real data
+        combined_mask = availability_mask[sample_validity_mask]
+        
+        if not combined_mask.any():
+            # No samples have real data - return empty tensors
+            return predicted[:0], target[:0], 0
+        
+        # Filter to only include samples with real data
+        filtered_pred = predicted[combined_mask]
+        filtered_target = target[combined_mask]
+        num_available = combined_mask.sum().item()
+        
+        return filtered_pred, filtered_target, num_available
+    
     def _compute_batch_keypoint_loss(self, rendered_joints: torch.Tensor, keypoint_data_list: list) -> torch.Tensor:
         """
         Compute batched 2D keypoint loss efficiently.
@@ -2068,13 +2570,23 @@ class SMILImageRegressor(SMALFitter):
             visible_mask = visibility.bool()
             gt_in_bounds_mask = (target_keypoints >= 0.0) & (target_keypoints <= 1.0)
             gt_in_bounds_mask = gt_in_bounds_mask.all(dim=-1)
-            finite_mask = torch.isfinite(rendered_joints[i]).all(dim=-1)
-            valid_mask = visible_mask & gt_in_bounds_mask & finite_mask
+
+            non_finite_prediction_mask = ~torch.isfinite(rendered_joints[i]).all(dim=-1)
+            if non_finite_prediction_mask.any():
+                print(
+                    "[KeypointLoss] (batch) Detected non-finite projected joints; "
+                    f"sanitising {non_finite_prediction_mask.sum().item()} entries"
+                )
+            rendered_joints_sample = torch.nan_to_num(
+                rendered_joints[i], nan=0.0, posinf=0.0, neginf=0.0
+            )
+
+            valid_mask = visible_mask & gt_in_bounds_mask
             
             if valid_mask.any():
                 # Compute loss for this sample using masking
                 joint_weights = valid_mask.float().unsqueeze(-1)  # Shape: (n_joints, 1)
-                diff_squared = (rendered_joints[i] - target_keypoints) ** 2
+                diff_squared = (rendered_joints_sample - target_keypoints) ** 2
                 weighted_diff = diff_squared * joint_weights
                 
                 num_valid = valid_mask.sum().float()
@@ -2082,6 +2594,13 @@ class SMILImageRegressor(SMALFitter):
                     sample_loss = weighted_diff.sum() / (num_valid * 2 + eps)
                     total_loss += sample_loss
                     valid_samples += 1
+            else:
+                print(
+                    "[KeypointLoss] (batch) No valid 2D joints remaining for supervision "
+                    f"(visible={visible_mask.sum().item()}, "
+                    f"in_bounds={(gt_in_bounds_mask & visible_mask).sum().item()}, "
+                    f"non_finite_preds={(non_finite_prediction_mask & visible_mask).sum().item()})"
+                )
         
         if valid_samples > 0:
             return total_loss / valid_samples + eps
@@ -2321,7 +2840,8 @@ class SMILImageRegressor(SMALFitter):
                 continue
             
             # Check if 3D keypoints are available in the keypoint data
-            if 'keypoints_3d' not in keypoint_data:
+            # Must check both that the key exists AND that the value is not None
+            if 'keypoints_3d' not in keypoint_data or keypoint_data['keypoints_3d'] is None:
                 continue
                 
             # Get target 3D keypoints and visibility for this sample
@@ -2397,3 +2917,4 @@ class SMILImageRegressor(SMALFitter):
             trainable_params.append({'params': self.transformer_head.parameters()})
         
         return trainable_params
+
