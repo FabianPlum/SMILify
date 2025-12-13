@@ -29,6 +29,9 @@ output/
 sdf_batch_output/
 sample_output/
 plots/
+visualizations/
+visualizations_train/
+checkpoints/
 
 #ignore other repos cloned during dev / debugging
 fitter_3d/pointcloud2smil/
