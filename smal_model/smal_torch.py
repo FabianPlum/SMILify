@@ -142,7 +142,13 @@ class SMAL(nn.Module):
             print("No symmetry axis vertices provided - using default values!")
             symmetry_axis_vertices = None
 
-        if config.ignore_hardcoded_body:
+        if config.ignore_sym:
+            # Skip symmetry alignment entirely when ignore_sym is True
+            v_sym = v_template
+            self.left_inds = np.array([])
+            self.right_inds = np.array([])
+            self.center_inds = np.array([])
+        elif config.ignore_hardcoded_body:
             v_sym, self.left_inds, self.right_inds, self.center_inds = align_smal_template_to_symmetry_axis(
                 v_template,
                 sym_file=None,
@@ -169,6 +175,12 @@ class SMAL(nn.Module):
             # in custom Blender exporter the J_regressor is stored in dense matrix form
             self.J_regressor = Variable(
                 torch.Tensor(dd['J_regressor'].T),
+                requires_grad=False).to(device)
+        
+        # only relevant for static joint locations, otherwise joint locations (J) are computed from the shape-dependent joint locations
+        if config.STATIC_JOINT_LOCATIONS:
+            self.J = Variable(
+                torch.Tensor(dd['J']),
                 requires_grad=False).to(device)
 
         # Pose blend shape basis
@@ -197,8 +209,7 @@ class SMAL(nn.Module):
             torch.Tensor(undo_chumpy(dd['weights'])),
             requires_grad=False).to(device)
 
-    def __call__(self, beta, theta, trans=None, del_v=None, betas_logscale=None, get_skin=True, v_template=None, 
-                 propagate_scaling=True, propagate_translation=False):
+    def __call__(self, beta, theta, trans=None, del_v=None, betas_logscale=None, betas_trans=None, get_skin=True, v_template=None, propagate_scaling=False):
 
         nBetas = beta.shape[1]
 
@@ -240,11 +251,16 @@ class SMAL(nn.Module):
             else:
                 v_shaped = v_template + del_v
 
-        # 2. Infer shape-dependent joint locations.
-        Jx = torch.matmul(v_shaped[:, :, 0], self.J_regressor)
-        Jy = torch.matmul(v_shaped[:, :, 1], self.J_regressor)
-        Jz = torch.matmul(v_shaped[:, :, 2], self.J_regressor)
-        J = torch.stack([Jx, Jy, Jz], dim=2)
+        # 2. Infer shape-dependent joint locations, unless static joint locations are enabled
+        # If using static joint locations, ensure correct batch dimension for J
+        if config.STATIC_JOINT_LOCATIONS:
+            # self.J is shape (num_joints, 3); add batch dimension to become (1, num_joints, 3)
+            J = self.J.unsqueeze(0).expand(v_shaped.shape[0], -1, -1)
+        else:
+            Jx = torch.matmul(v_shaped[:, :, 0], self.J_regressor)
+            Jy = torch.matmul(v_shaped[:, :, 1], self.J_regressor)
+            Jz = torch.matmul(v_shaped[:, :, 2], self.J_regressor)
+            J = torch.stack([Jx, Jy, Jz], dim=2)
 
         # 3. Add pose blend shapes
         # N x 24 x 3 x 3
@@ -290,9 +306,8 @@ class SMAL(nn.Module):
         # betas_logscale = None
 
         self.J_transformed, A = batch_global_rigid_transformation(
-            Rs, J, self.parents, betas_logscale=betas_logscale,
+            Rs, J, self.parents, betas_logscale=betas_logscale, betas_trans=betas_trans,
             propagate_scaling=propagate_scaling,
-            propagate_translation=propagate_translation,
             num_joints=NUM_JOINTS)
 
         # 5. Do skinning:
@@ -324,12 +339,17 @@ class SMAL(nn.Module):
         verts = verts + trans[:, None, :]
 
         # Get joints:
-        joint_x = torch.matmul(verts[:, :, 0], self.J_regressor)
-        joint_y = torch.matmul(verts[:, :, 1], self.J_regressor)
-        joint_z = torch.matmul(verts[:, :, 2], self.J_regressor)
-        joints = torch.stack([joint_x, joint_y, joint_z], dim=2)
+        if config.STATIC_JOINT_LOCATIONS:
+            # this should be cleaner than re-regressing joints from verts, so not sure why the below is used.
+            # Without using J_regressor this is the only way to get the updated joint locations anyway.
+            joints = self.J_transformed
+        else:
+            joint_x = torch.matmul(verts[:, :, 0], self.J_regressor)
+            joint_y = torch.matmul(verts[:, :, 1], self.J_regressor)
+            joint_z = torch.matmul(verts[:, :, 2], self.J_regressor)
+            joints = torch.stack([joint_x, joint_y, joint_z], dim=2)
 
-        if NUM_JOINTS == 35:  # assuming configuration of WLDO and SMAL is used:
+        if NUM_JOINTS == 35 and not config.ignore_hardcoded_body:  # assuming configuration of WLDO and SMAL is used:
             joints = torch.cat([
                 joints,
                 verts[:, None, 1863],  # end_of_nose

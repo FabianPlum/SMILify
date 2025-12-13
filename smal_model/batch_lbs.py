@@ -74,10 +74,9 @@ def batch_lrotmin(theta):
     return lrotmin
 
 def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
-                                    betas_logscale=None, 
-                                    betas_logtrans=None,
-                                    propagate_scaling=True,
-                                    propagate_translation=False,
+                                    betas_logscale=None,
+                                    betas_trans=None,
+                                    propagate_scaling=False,
                                     opts=None,
                                     num_joints=35):
     """
@@ -113,9 +112,11 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
     # Initialize scaling factors as identity
     scaling_factors = torch.ones(N, parent.shape[0], 3).to(Rs.device)
 
-    if torch.sum(betas_logscale) == 0 or config.ALLOW_LIMB_SCALING == False:
+    if config.ALLOW_LIMB_SCALING == False:
         betas_logscale = None
         # not sure where this broke, but if left unchecked this causes the optimise_to_joints code to fail
+        # previously: torch.sum(betas_logscale) == 0 or config.ALLOW_LIMB_SCALING == False
+        # which causes part-scaling to be disabled entirely when running fitter3d/optimise.py with new models that have no scaling parameters yet
 
     if betas_logscale is not None:
         # Convert from log space to regular scaling factors
@@ -131,6 +132,13 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
         t_homo = torch.cat([t, torch.ones([N, 1, 1]).to(Rs.device)], 1)
         return torch.cat([R_homo, t_homo], 2)
     
+    # Optional per-joint translation offsets. If provided, add to the joint offsets j_here.
+    # Shape expected: N x J x 3
+    translation_offsets = None
+    if betas_trans is not None:
+        # We need to flip the y axis for Unreal data.
+        translation_offsets = betas_trans.to(Rs.device) * torch.tensor([1, -1, 1], device=Rs.device)
+
     # Handle root joint
     A0 = make_A(root_rotation, Js[:, 0])
     results = [A0]
@@ -139,6 +147,9 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
     for i in range(1, parent.shape[0]):
         # Get offset from parent joint
         j_here = Js[:, i] - Js[:, parent[i]]
+        # Apply optional translation offsets: offsets are local to the current bone, relative to its parent
+        if translation_offsets is not None:
+            j_here = j_here + translation_offsets[:, i, :].unsqueeze(-1)
 
         # Get inverse of parent scale to cancel out parent scaling
         if not propagate_scaling:

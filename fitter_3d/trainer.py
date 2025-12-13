@@ -101,6 +101,11 @@ class SMAL3DFitter(nn.Module):
         self.log_beta_scales = nn.Parameter(
             torch.zeros(self.batch_size, self.n_joints, 3).to(device))
 
+        # Initialize betas_trans with proper shape: batch_size x n_joints x 3
+        # Starting with zeros means no translation offsets initially
+        self.betas_trans = nn.Parameter(
+            torch.zeros(self.batch_size, self.n_joints, 3).to(device))
+
         global_rotation_np = eul_to_axis(np.array([0, 0, 0]))
         global_rotation = torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0).repeat(batch_size,
                                                                                                       1)  # Global Init (Head-On)
@@ -160,7 +165,7 @@ class SMAL3DFitter(nn.Module):
         return joint_scales
 
     def forward(self, betas=None, global_rot=None, joint_rot=None, trans=None, 
-                log_beta_scales=None, deform_verts=None, return_joints=False):
+                log_beta_scales=None, betas_trans=None, deform_verts=None, return_joints=False):
         """
         Forward pass for the SMAL model.
         Can accept optional parameters to override the internal nn.Parameter attributes.
@@ -171,6 +176,7 @@ class SMAL3DFitter(nn.Module):
             joint_rot (optional): Joint rotations in axis-angle, tensor of shape (batch_size, N_POSE, 3).
             trans (optional): Global translation, tensor of shape (batch_size, 3).
             log_beta_scales (optional): Logarithm of joint scales, tensor of shape (batch_size, n_joints, 3).
+            betas_trans (optional): Joint translation offsets, tensor of shape (batch_size, n_joints, 3).
             deform_verts (optional): Vertex offsets, tensor of shape (batch_size, n_template_verts, 3).
             return_joints (bool): Whether to return joints.
 
@@ -187,6 +193,7 @@ class SMAL3DFitter(nn.Module):
         # Use provided log_beta_scales if available, otherwise use the internal one.
         # This will be passed to get_joint_scales and directly to smal_model if needed.
         _log_beta_scales_to_use = log_beta_scales if log_beta_scales is not None else self.log_beta_scales
+        _betas_trans = betas_trans if betas_trans is not None else self.betas_trans
         _deform_verts = deform_verts if deform_verts is not None else self.deform_verts
 
         # The original get_joint_scales uses self.log_beta_scales.
@@ -209,7 +216,8 @@ class SMAL3DFitter(nn.Module):
             torch.cat([
                 _global_rot.unsqueeze(1), # _global_rot is (bs, 3) -> (bs, 1, 3)
                 _joint_rot], dim=1),      # _joint_rot is (bs, N_POSE, 3)
-            betas_logscale=_log_beta_scales_to_use)  # Pass the determined log_beta_scales
+            betas_logscale=_log_beta_scales_to_use,  # Pass the determined log_beta_scales
+            betas_trans=_betas_trans)  # Pass the joint translation offsets
 
         verts = verts + _trans.unsqueeze(1) # _trans is (bs, 3) -> (bs, 1, 3)
         joints = joints + _trans.unsqueeze(1)
@@ -226,12 +234,15 @@ class SMALParamGroup:
     """Object building on model.parameters, with modifications such as variable learning rate"""
     param_map = {
         "init": ["global_rot", "trans"],
-        "init_rot_lock": ["trans"],
+        "init_rot_lock": ["trans", "log_beta_scales"],
+        "init_rot_lock_trans": ["trans", "betas_trans"],
+        "init_rot_lock_trans_scale": ["trans", "betas_trans", "log_beta_scales"],
         "default": ["global_rot", "joint_rot", "trans", "betas", "log_beta_scales"],
-        "shape": ["global_rot", "trans", "betas", "log_beta_scales"],
-        "pose": ["global_rot", "trans", "joint_rot", "betas", "log_beta_scales"],
+        "default_with_betas_trans": ["global_rot", "joint_rot", "trans", "betas", "log_beta_scales", "betas_trans"],
+        "shape": ["global_rot", "trans", "betas", "log_beta_scales", "betas_trans"],
+        "pose": ["global_rot", "trans", "joint_rot", "betas", "log_beta_scales", "betas_trans"],
         "deform": ["deform_verts"],
-        "all": ["global_rot", "trans", "joint_rot", "betas", "log_beta_scales", "deform_verts"]
+        "all": ["global_rot", "trans", "joint_rot", "betas", "log_beta_scales", "betas_trans", "deform_verts"]
     }  # map of param_type : all attributes in SMAL used in optim
 
     def __init__(self, model, group="smbld", lrs=None):
@@ -449,7 +460,7 @@ class Stage:
         labels: optional list of size n_batch, to save as labels for all entries"""
 
         out = {}
-        for param in ["global_rot", "joint_rot", "betas", "log_beta_scales", "trans", "deform_verts"]:
+        for param in ["global_rot", "joint_rot", "betas", "log_beta_scales", "trans", "deform_verts", "betas_trans"]:
             out[param] = getattr(self.smal_3d_fitter, param).cpu().detach().numpy()
 
         v = self.smal_3d_fitter()

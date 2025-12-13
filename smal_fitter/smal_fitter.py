@@ -57,11 +57,19 @@ else:
 
 
 class SMALFitter(nn.Module):
-    def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior):
+    def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior, rgb_only=False):
         super(SMALFitter, self).__init__()
 
-        self.rgb_imgs, self.sil_imgs, self.target_joints, self.target_visibility = data_batch
-        self.target_visibility = self.target_visibility.long()
+        # for neuralSMIL we will only provide rgb images, no silhouettes or 2D keypoint data
+        self.rgb_only = rgb_only
+
+        if rgb_only:
+            self.rgb_imgs = data_batch
+            self.target_visibility = torch.ones(self.rgb_imgs.shape[0]).long()
+            self.target_joints = torch.zeros(self.rgb_imgs.shape[0], config.N_POSE, 3)
+        else:
+            self.rgb_imgs, self.sil_imgs, self.target_joints, self.target_visibility = data_batch
+            self.target_visibility = self.target_visibility.long()
 
         assert self.rgb_imgs.max() <= 1.0 and self.rgb_imgs.min() >= 0.0, "RGB Image range is incorrect"
 
@@ -76,7 +84,6 @@ class SMALFitter(nn.Module):
         self.shape_family_list = np.array(shape_family)
 
         self.propagate_scaling = False
-        self.propagate_translation = False
 
         if use_unity_prior:
             with open(config.SMAL_DATA_FILE, 'rb') as f:
@@ -167,6 +174,9 @@ class SMALFitter(nn.Module):
                 # In the SMIL implementation, we allow all bones/joints to scale independently
                 self.log_beta_scales = torch.nn.Parameter(
                     torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False)
+                # Per-joint translation parameters (disabled by default)
+                self.betas_trans = torch.nn.Parameter(
+                    torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False)
             else:
                 # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters 
                 # for coupled variation in legs, tail, and ear joints. 
@@ -228,7 +238,10 @@ class SMALFitter(nn.Module):
             batch_params['log_betascale'] = self.log_beta_scales.expand(
                 len(batch_range), self.joint_rotations.shape[1] + 1, 3
             ).to(self.device)
-            print("log_betascale.shape", batch_params['log_betascale'].shape)
+            if hasattr(self, 'betas_trans'):
+                batch_params['betas_trans'] = self.betas_trans.expand(
+                    len(batch_range), self.joint_rotations.shape[1] + 1, 3
+                ).to(self.device)
         else:
             # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters 
             # for coupled variation in legs, tail, and ear joints. 
@@ -237,7 +250,8 @@ class SMALFitter(nn.Module):
 
         target_joints = self.target_joints[batch_range].to(self.device)
         target_visibility = self.target_visibility[batch_range].to(self.device)
-        sil_imgs = self.sil_imgs[batch_range].to(self.device)
+        if not self.rgb_only:
+            sil_imgs = self.sil_imgs[batch_range].to(self.device)
 
         # Then, have the model retain its current 'appearance' taking as input the currently estimated model parameters
         # betas (shape input)
@@ -248,9 +262,9 @@ class SMALFitter(nn.Module):
             torch.cat([
                 batch_params['global_rotation'].unsqueeze(1),
                 batch_params['joint_rotations']], dim=1),
-            betas_logscale=batch_params['log_betascale'],
-            propagate_scaling=self.propagate_scaling,
-            propagate_translation=self.propagate_translation)
+            betas_logscale=batch_params.get('log_betascale', None),
+            betas_trans=batch_params.get('betas_trans', None),
+            propagate_scaling=self.propagate_scaling)
 
         verts = verts + batch_params['trans'].unsqueeze(1)
         joints = joints + batch_params['trans'].unsqueeze(1)
@@ -300,7 +314,8 @@ class SMALFitter(nn.Module):
             diff_betas = (all_betas - self.mean_betas.unsqueeze(0))  # N, B
             res = torch.tensordot(diff_betas, self.betas_prec, dims=([1], [0]))
             objs['betas'] = w_betas * (res ** 2).mean()
-        if w_reproj > 0:
+            
+        if w_reproj > 0 and not self.rgb_only:
             objs['sil_reproj'] = w_reproj * F.l1_loss(rendered_silhouettes, sil_imgs)
 
         return reduce(lambda x, y: x + y, objs.values()), objs
@@ -339,7 +354,8 @@ class SMALFitter(nn.Module):
         self.betas = torch.nn.Parameter(torch.from_numpy(np.mean(beta_list, axis=0)).float().to(self.device))
         self.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.mean(scale_list, axis=0)).float().to(self.device))
 
-    def generate_visualization(self, image_exporter, apply_UE_transform=False):
+    def generate_visualization(self, image_exporter, apply_UE_transform=False, img_idx=0):
+        # rotation matrix here only used to produce alternative rotated view
         rot_matrix = torch.from_numpy(R.from_euler('y', 180.0, degrees=True).as_matrix()).float().to(self.device)
         for j in range(0, self.num_images, self.batch_size):
             batch_range = list(range(j, min(self.num_images, j + self.batch_size)))
@@ -355,8 +371,12 @@ class SMALFitter(nn.Module):
                 batch_params['log_betascale'] = self.log_beta_scales.expand(
                     len(batch_range), self.joint_rotations.shape[1] + 1, 3
                 ).to(self.device)
+                if hasattr(self, 'betas_trans'):
+                    batch_params['betas_trans'] = self.betas_trans.expand(
+                        len(batch_range), self.joint_rotations.shape[1] + 1, 3
+                    ).to(self.device)
             else:
-                # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters 
+                # LEGACY CODE! The original code in the WLDO implementation has 6 scale parameters 
                 # for coupled variation in legs, tail, and ear joints. 
                 # (See: https://github.com/benjiebob/SMALify/blob/7f6f06f9e3080c32bb286cde1185de401c7b46e8/smal_model/batch_lbs.py#L106-L129)
                 batch_params['log_betascale'] = self.log_beta_scales.expand(len(batch_range), 6)
@@ -364,7 +384,11 @@ class SMALFitter(nn.Module):
             target_joints = self.target_joints[batch_range]
             target_visibility = self.target_visibility[batch_range]
             rgb_imgs = self.rgb_imgs[batch_range].to(self.device)
-            sil_imgs = self.sil_imgs[batch_range].to(self.device)
+            if not self.rgb_only:
+                sil_imgs = self.sil_imgs[batch_range].to(self.device)
+            else:
+                # Create dummy silhouette for rgb_only mode
+                sil_imgs = torch.zeros_like(rgb_imgs[:, :1, :, :])
 
             with torch.no_grad():
                 verts, joints, Rs, v_shaped = self.smal_model(
@@ -372,9 +396,9 @@ class SMALFitter(nn.Module):
                     torch.cat([
                         batch_params['global_rotation'].unsqueeze(1),
                         batch_params['joint_rotations']], dim=1),
-                    betas_logscale=batch_params['log_betascale'],
-                    propagate_scaling=self.propagate_scaling,
-                    propagate_translation=self.propagate_translation)
+                    betas_logscale=batch_params.get('log_betascale', None),
+                    betas_trans=batch_params.get('betas_trans', None),
+                    propagate_scaling=self.propagate_scaling)
 
                 if apply_UE_transform:
                     # in UE5 the model is scaled up by 10 (double check model size in your replicant project, if modified)
@@ -402,12 +426,15 @@ class SMALFitter(nn.Module):
 
                 overlay_image = (rendered_images * 0.5) + (rgb_imgs * 0.5)
 
-                target_vis = SMALJointDrawer.draw_joints(rgb_imgs, target_joints, visible=target_visibility)
+                # Get image size for resolution-aware keypoint scaling
+                image_size = rgb_imgs.shape[-1]  # Assuming square images, get height/width
+
+                target_vis = SMALJointDrawer.draw_joints(rgb_imgs, target_joints, visible=target_visibility, image_size=image_size)
                 rendered_images_vis = SMALJointDrawer.draw_joints(rendered_images, rendered_joints,
-                                                                  visible=target_visibility)
+                                                                  visible=target_visibility, image_size=image_size)
                 rendered_overlay_vis = SMALJointDrawer.draw_joints(overlay_image, rendered_joints,
-                                                                   visible=target_visibility)
-                rev_images_vis = SMALJointDrawer.draw_joints(rev_images, rev_joints, visible=target_visibility)
+                                                                   visible=target_visibility, image_size=image_size)
+                rev_images_vis = SMALJointDrawer.draw_joints(rev_images, rev_joints, visible=target_visibility, image_size=image_size)
 
                 silhouette_error = 1.0 - F.l1_loss(sil_imgs, rendered_silhouettes, reduction='none')
                 silhouette_error = silhouette_error.expand_as(rgb_imgs).data.cpu()
@@ -423,4 +450,5 @@ class SMALFitter(nn.Module):
                     image_exporter.export(
                         (collage_np * 255.0).astype(np.uint8),
                         batch_id, global_id, img_parameters,
-                        verts, self.smal_model.faces.data.cpu().numpy())
+                        verts, self.smal_model.faces.data.cpu().numpy(), 
+                        img_idx)

@@ -3,6 +3,7 @@ import pickle as pkl
 import cv2
 import os
 import time
+import numpy as np
 
 # Define paths to each dataset
 data_path = "data"
@@ -40,7 +41,9 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 
 # custom elements added:
 # SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
-SMAL_FILE = join("3D_model_prep", 'SMIL_unposed.pkl') # USING LATEST SMIL DATA
+#SMAL_FILE = join("3D_model_prep", 'SMIL_OmniAnt.pkl') # USING LATEST SMIL DATA
+#SMAL_FILE = join("3D_model_prep", 'SMILy_STICK.pkl')
+SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_REPOSE.pkl') #UPDATED JOINT LOCS
 
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
@@ -75,10 +78,24 @@ if ignore_hardcoded_body:
         u.encoding = 'latin1'
         dd = u.load()
 
+    # check if joint locations are static
+    if "static_joint_locs" in dd and dd["static_joint_locs"] == True:
+        STATIC_JOINT_LOCATIONS = True
+        if DEBUG:
+            print("INFO: Joint locations are static")
+    else:
+        STATIC_JOINT_LOCATIONS = False
+        if DEBUG:
+            print("INFO: Joint locations are not static")
+
     # get J_names  |  names of joints
     joint_names = dd["J_names"]
     if DEBUG:
-        print(joint_names)
+        print("INFO: Joint names:", joint_names)
+
+    ROOT_JOINT = dd["J_names"][np.where(dd["kintree_table"][0] == -1)[0][0]]
+    if DEBUG:
+        print("INFO: Root joint:", ROOT_JOINT)
 
     # IDs of every joint that starts with b, referring to the animal body, including the tail
     # as this is used for the initial alignment, we include the mandibles as well to provide a sense of left vs right
