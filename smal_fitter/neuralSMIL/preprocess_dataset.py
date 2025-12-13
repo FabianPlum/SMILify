@@ -140,8 +140,8 @@ Examples:
                        help="Output HDF5 file path (e.g., optimized_dataset.h5)")
     
     # Filtering options
-    parser.add_argument("--silhouette_threshold", type=float, default=0.1,
-                       help="Minimum silhouette coverage fraction (0.0-1.0, default: 0.1)")
+    parser.add_argument("--silhouette_threshold", type=float, default=0.05,
+                       help="Minimum silhouette coverage fraction (0.0-1.0, default: 0.02)")
     parser.add_argument("--min_visible_keypoints", type=int, default=5,
                        help="Minimum number of visible keypoints required (default: 5)")
     
@@ -167,6 +167,8 @@ Examples:
     # Output options
     parser.add_argument("--quiet", action="store_true",
                        help="Suppress progress output")
+    parser.add_argument("--verbose", action="store_true",
+                       help="Print detailed error messages for each failed sample")
     parser.add_argument("--validate", action="store_true",
                        help="Validate the output dataset after preprocessing")
     
@@ -242,7 +244,8 @@ Examples:
             num_workers=args.num_workers,
             jpeg_quality=args.jpeg_quality,
             ignored_joints_config=ignored_joints_config,
-            verbose=not args.quiet
+            verbose=args.verbose,
+            show_progress=not args.quiet
         )
         
         # Calculate processing time
