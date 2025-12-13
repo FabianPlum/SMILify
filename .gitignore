@@ -18,6 +18,14 @@ fit3d_results
 output/
 3D_model_prep/morph_anim/
 3D_model_prep/measurements/
+3D_model_prep/VIDEOS/
+3D_model_prep/stick_data/
+3D_model_prep/stick_tex/
+3D_model_prep/temp_models/
+3D_model_prep/COMPARE.blend
+3D_model_prep/SMIL_processing_addon_MOUSE.blend
+3D_model_prep/SMIL_Stick_insects.blend
+3D_model_prep/stick_tex.zip
 sdf_batch_output/
 sample_output/
 plots/
@@ -37,6 +45,8 @@ fitter_3d/ALL_ANTS/
 fitter_3d/ATTA_ALL/
 fitter_3d/DOG_BOI/
 fitter_3d/STICKS/
+fitter_3d/MOUSE_BOY/
+fitter_3d/STICK_TESTS/
 
 # datasets
 data/BADJA/
