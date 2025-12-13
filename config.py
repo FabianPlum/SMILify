@@ -41,14 +41,14 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 
 # custom elements added:
 # SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl')
-SMAL_FILE = join("3D_model_prep", 'SMIL_OmniAnt.pkl') # USING LATEST SMIL DATA
+#SMAL_FILE = join("3D_model_prep", 'SMIL_OmniAnt.pkl') # USING LATEST SMIL DATA
 #SMAL_FILE = join("3D_model_prep", 'SMILy_STICK.pkl')
-#SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints.pkl')
+SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_REPOSE.pkl') #UPDATED JOINT LOCS
 
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
 PLOT_RESULTS = True  # only applies to 3D fitting (fitter_3d/optimise.py)
-DEBUG = True  # use to get A LOT of "useful" messages
+DEBUG = False  # use to get A LOT of "useful" messages
 
 # DATALOADER
 IMG_RES = 512
