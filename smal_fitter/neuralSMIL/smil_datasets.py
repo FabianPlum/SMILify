@@ -191,7 +191,8 @@ class UnifiedSMILDataset:
                           num_workers: int = 4,
                           jpeg_quality: int = 95,
                           ignored_joints_config: dict = None,
-                          verbose: bool = True):
+                          verbose: bool = False,
+                          show_progress: bool = True):
         """
         Preprocess a JSON dataset into optimized HDF5 format.
         
@@ -207,7 +208,8 @@ class UnifiedSMILDataset:
             num_workers: Number of parallel workers
             jpeg_quality: JPEG compression quality (1-100)
             ignored_joints_config: Configuration for ignored joints (from TrainingConfig)
-            verbose: Whether to print progress information
+            verbose: Whether to print detailed error messages for each failed sample
+            show_progress: Whether to print final statistics
             
         Returns:
             Dictionary containing preprocessing statistics
@@ -223,7 +225,8 @@ class UnifiedSMILDataset:
             min_visible_keypoints=min_visible_keypoints,
             chunk_size=chunk_size,
             jpeg_quality=jpeg_quality,
-            ignored_joints_config=ignored_joints_config
+            ignored_joints_config=ignored_joints_config,
+            verbose=verbose
         )
         
         # Process dataset
@@ -233,7 +236,7 @@ class UnifiedSMILDataset:
             num_workers=num_workers
         )
         
-        if verbose:
+        if show_progress:
             print_statistics(stats)
         
         return stats
