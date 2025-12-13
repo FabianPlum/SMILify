@@ -39,6 +39,16 @@ import config
 from training_config import TrainingConfig
 from memory_optimization import MemoryOptimizer, recommend_training_config, MixedPrecisionTrainer
 
+# Import SLEAP dataset to enable patching of UnifiedSMILDataset
+# Note: This import happens in each worker process due to multiprocessing data loaders
+try:
+    from sleap_data.sleap_dataset import SLEAPDataset, _patch_unified_dataset
+    # Apply the patch to enable SLEAP dataset support (silently to avoid spam from workers)
+    _patch_unified_dataset()
+except ImportError:
+    # SLEAP dataset not available, continue without it
+    pass
+
 
 def set_random_seeds(seed=0):
     """
@@ -66,10 +76,10 @@ def setup_ddp(rank, world_size, port=None):
     Args:
         rank: Current process rank
         world_size: Total number of processes
-        port: Master port for communication (default: 12355)
+        port: Master port for communication (default: 12345)
     """
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = port or '12355'
+    os.environ['MASTER_PORT'] = port or '12345'
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
 
@@ -284,12 +294,15 @@ def extract_target_parameters(y_data, device, scale_trans_mode='separate'):
 def custom_collate_fn(batch):
     """
     Custom collate function to handle the dataset format.
+    Preserves metadata fields for multi-dataset training (dataset_source, available_labels).
     
     Args:
         batch: List of (x_data, y_data) tuples
         
     Returns:
         Tuple of (x_data_batch, y_data_batch)
+        - x_data contains 'dataset_source' and 'available_labels' for multi-dataset training
+        - y_data may contain None values for unavailable labels
     """
     x_data_batch = []
     y_data_batch = []
@@ -297,6 +310,28 @@ def custom_collate_fn(batch):
     for x_data, y_data in batch:
         x_data_batch.append(x_data)
         y_data_batch.append(y_data)
+    
+    # Debug: Print metadata for first sample in first few batches (multi-dataset mode)
+    # Only print on main process to avoid duplicate output in multi-GPU training
+    should_print = True
+    if dist.is_initialized():
+        should_print = dist.get_rank() == 0
+    
+    if should_print:
+        if hasattr(custom_collate_fn, '_batch_count'):
+            custom_collate_fn._batch_count += 1
+        else:
+            custom_collate_fn._batch_count = 1
+        
+        if custom_collate_fn._batch_count <= 3 and len(x_data_batch) > 0:
+            first_sample = x_data_batch[0]
+            if 'dataset_source' in first_sample:
+                # Multi-dataset mode - show batch composition
+                sources = [x.get('dataset_source', 'unknown') for x in x_data_batch]
+                source_counts = {}
+                for src in sources:
+                    source_counts[src] = source_counts.get(src, 0) + 1
+                print(f"\nBatch {custom_collate_fn._batch_count} composition: {source_counts}")
     
     return x_data_batch, y_data_batch
 
@@ -363,9 +398,8 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
             # Update parameters
             optimizer.step()
             
-            # Ensure all processes are synchronized after each step in DDP
-            if is_distributed:
-                torch.distributed.barrier()
+            # Note: DDP automatically synchronizes gradients during backward pass
+            # No need for manual barrier here - it would severely slow down training
             
             # Record loss and parameter errors
             batch_loss = loss.item()
@@ -492,7 +526,10 @@ def plot_training_history(train_losses, val_losses, save_path='training_history.
 
 def visualize_training_progress(model, val_loader, device, epoch, model_config, dataset, output_dir='visualizations', num_samples=5):
     """
-    Visualize training progress by rendering the first few validation samples.
+    Visualize training progress by rendering samples stratified across datasets.
+    
+    Uses a fixed random seed (42) for sample selection to ensure the same samples
+    are visualized across all epochs, enabling consistent progress tracking.
     
     Args:
         model: SMILImageRegressor model
@@ -504,172 +541,262 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
     """
     model.eval()
     
-    # Create output directory for this epoch
-    epoch_dir = os.path.join(output_dir, f'epoch_{epoch:03d}')
-    os.makedirs(epoch_dir, exist_ok=True)
+    # Save current random states to restore after visualization
+    # This ensures visualization doesn't affect training randomness
+    torch_rng_state = torch.get_rng_state()
+    numpy_rng_state = np.random.get_state()
+    python_rng_state = random.getstate()
+    if torch.cuda.is_available():
+        cuda_rng_state = torch.cuda.get_rng_state()
     
-    # Create image exporter
-    image_exporter = ImageExporter(epoch_dir)
+    # Set fixed seed for deterministic sample selection across epochs
+    # This ensures the same samples are visualized every epoch for consistent progress tracking
+    visualization_seed = 42
+    torch.manual_seed(visualization_seed)
+    np.random.seed(visualization_seed)
+    random.seed(visualization_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(visualization_seed)
     
-    with torch.no_grad():
-        sample_count = 0
-        for batch_idx, (x_data_batch, y_data_batch) in enumerate(val_loader):
-            if sample_count >= num_samples:
-                break
-                
-            for i, (x_data, y_data) in enumerate(zip(x_data_batch, y_data_batch)):
-                if sample_count >= num_samples:
+    try:
+        # Create output directory for this epoch
+        epoch_dir = os.path.join(output_dir, f'epoch_{epoch:03d}')
+        os.makedirs(epoch_dir, exist_ok=True)
+        
+        # Create image exporter
+        image_exporter = ImageExporter(epoch_dir)
+        
+        # First pass: collect samples and group by dataset source for stratified sampling
+        samples_by_dataset = {}
+        samples_per_dataset_target = max(5, num_samples * 2)  # Collect at least 5 samples per dataset
+        max_batches_to_process = 200  # Safety limit to avoid processing entire dataset
+        
+        with torch.no_grad():
+            for batch_idx, (x_data_batch, y_data_batch) in enumerate(val_loader):
+                if batch_idx >= max_batches_to_process:
                     break
                     
-                # Extract image data
-                if x_data['input_image_data'] is not None:
-                    image_data = x_data['input_image_data']
-                else:
-                    continue
-                
-                # Preprocess image
-                image_tensor = model.preprocess_image(image_data).to(device)
-                
-                # Get prediction from model
-                predicted_params = model(image_tensor)
-                
-                # Create placeholder data for SMALFitter
-                # For visualization, we need the original image data, not the preprocessed tensor
-                
-                if isinstance(dataset, OptimizedSMILDataset):
-                    # For optimized dataset, use the original image data and correct image size
-                    original_image = x_data['input_image_data']  # This is already in RGB format [0,1]
+                for i, (x_data, y_data) in enumerate(zip(x_data_batch, y_data_batch)):
+                    # Skip if no image data
+                    if x_data.get('input_image_data') is None:
+                        continue
                     
-                    # Convert RGB to BGR for visualization compatibility
-                    if isinstance(original_image, np.ndarray):
-                        # Swap RGB to BGR channels
-                        original_image_bgr = original_image[:, :, [2, 1, 0]]  # RGB -> BGR
-                        rgb = torch.from_numpy(original_image_bgr).permute(2, 0, 1).unsqueeze(0)
-                    else:
-                        # Swap RGB to BGR channels for tensor
-                        original_image_bgr = original_image[:, :, [2, 1, 0]]  # RGB -> BGR
-                        rgb = original_image_bgr.permute(2, 0, 1).unsqueeze(0) if len(original_image_bgr.shape) == 3 else original_image_bgr
+                    # Get dataset source (defaults to 'unknown' if not available)
+                    dataset_source = x_data.get('dataset_source', 'unknown')
+                    if isinstance(dataset_source, bytes):
+                        dataset_source = dataset_source.decode('utf-8')
                     
-                    # Get the actual image size from the original image
-                    image_height, image_width = original_image.shape[:2]
+                    # Group samples by dataset source
+                    if dataset_source not in samples_by_dataset:
+                        samples_by_dataset[dataset_source] = []
+                    
+                    # Only add if we haven't reached the target for this dataset
+                    if len(samples_by_dataset[dataset_source]) < samples_per_dataset_target:
+                        samples_by_dataset[dataset_source].append((x_data, y_data))
+                
+                # Check if we have enough samples from all datasets
+                if len(samples_by_dataset) > 0:
+                    min_samples = min(len(samples) for samples in samples_by_dataset.values())
+                    # Continue until all discovered datasets have at least the target number
+                    all_have_enough = all(len(samples) >= samples_per_dataset_target for samples in samples_by_dataset.values())
+                    if all_have_enough and min_samples >= num_samples:
+                        break
+        
+        # Select samples proportionally from each dataset
+        selected_samples = []
+        num_datasets = len(samples_by_dataset)
+        
+        if num_datasets == 0:
+            print(f"Warning: No samples collected for visualization")
+            return
+        
+        # Calculate samples per dataset (aim for equal representation)
+        samples_per_dataset = max(1, num_samples // num_datasets)
+        remaining_samples = num_samples - (samples_per_dataset * num_datasets)
+        
+        for dataset_idx, (dataset_name, samples) in enumerate(samples_by_dataset.items()):
+            # Take samples_per_dataset from this dataset, plus one extra if we have remaining
+            num_to_take = samples_per_dataset
+            if dataset_idx < remaining_samples:
+                num_to_take += 1
+            
+            num_to_take = min(num_to_take, len(samples))
+            selected_samples.extend(samples[:num_to_take])
+            print(f"Visualizing {num_to_take} samples from dataset: {dataset_name}")
+        
+        # Now process the selected samples for visualization
+        sample_count = 0
+        for x_data, y_data in selected_samples:
+            if sample_count >= num_samples:
+                break
+            
+            # Extract image data
+            if x_data['input_image_data'] is not None:
+                image_data = x_data['input_image_data']
+            else:
+                continue
+            
+            # Preprocess image
+            image_tensor = model.preprocess_image(image_data).to(device)
+            
+            # Get prediction from model
+            predicted_params = model(image_tensor)
+            
+            # Create placeholder data for SMALFitter
+            # For visualization, we need the original image data, not the preprocessed tensor
+            
+            # Check if this is an HDF5 dataset by looking for 'input_image_data' field
+            is_hdf5_dataset = 'input_image_data' in x_data and x_data['input_image_data'] is not None
+            
+            if is_hdf5_dataset or x_data.get("is_sleap_dataset", False):
+                # For optimized dataset or SLEAP dataset, use the original image data and correct image size
+                original_image = x_data['input_image_data']  # This is already in RGB format [0,1]
+                
+                # Convert RGB to BGR for visualization compatibility
+                if isinstance(original_image, np.ndarray):
+                    # Swap RGB to BGR channels
+                    original_image_bgr = original_image[:, :, [2, 1, 0]]  # RGB -> BGR
+                    rgb = torch.from_numpy(original_image_bgr).permute(2, 0, 1).unsqueeze(0)
                 else:
-                    # For original dataset, use preprocessed tensor (no channel swap needed)
-                    rgb = image_tensor.cpu()
-                    # Image size will be determined by return_placeholder_data from the file
+                    # Swap RGB to BGR channels for tensor
+                    original_image_bgr = original_image[:, :, [2, 1, 0]]  # RGB -> BGR
+                    rgb = original_image_bgr.permute(2, 0, 1).unsqueeze(0) if len(original_image_bgr.shape) == 3 else original_image_bgr
+                
+                # Get the actual image size from the original image
+                image_height, image_width = original_image.shape[:2]
+            else:
+                # For original dataset, use preprocessed tensor (no channel swap needed)
+                rgb = image_tensor.cpu()
+                # Image size will be determined by return_placeholder_data from the file
 
-                if x_data["input_image_mask"] is not None:
-                    if isinstance(dataset, OptimizedSMILDataset):
-                        # Optimized dataset - manually create placeholder data with correct image size
-                        # Create silhouette tensor
-                        sil = torch.FloatTensor(x_data["input_image_mask"])[None, None, ...]
-                        
-                        # Convert keypoints to pixel coordinates using backbone image size
-                        if model_config['backbone_name'].startswith('vit'):
-                            target_size = 224
-                        else:
-                            target_size = 512
-                            
-                        pixel_coords = y_data["keypoints_2d"].copy()
-                        pixel_coords[:, 0] = pixel_coords[:, 0] * target_size  # y coordinates  
-                        pixel_coords[:, 1] = pixel_coords[:, 1] * target_size  # x coordinates
-                        
-                        joints = torch.tensor(pixel_coords.reshape(1, len(y_data["joint_angles"]), 2), dtype=torch.float32)
-                        visibility = torch.tensor(y_data["keypoint_visibility"].reshape(1, len(y_data["joint_angles"])), dtype=torch.float32)
-                        
-                        temp_batch = (rgb, sil, joints, visibility)
-                        filenames = [f"optimized_sample_{i}"]
-                    else:
-                        # Original dataset - use file path
-                        temp_batch, filenames = return_placeholder_data(
-                            input_image=x_data["input_image"],
-                            num_joints=len(y_data["joint_angles"]),
-                            keypoints_2d=y_data["keypoints_2d"],
-                            keypoint_visibility=y_data["keypoint_visibility"],
-                            silhouette=x_data["input_image_mask"]
-                        )
-                    temp_fitter = SMALFitter(
-                        device=device,
-                        data_batch=temp_batch,  # For rgb_only=False, use the temp_batch
-                        batch_size=1,
-                        shape_family=config.SHAPE_FAMILY,
-                        use_unity_prior=False,
-                        rgb_only=False
-                    )
-                else:
-                    temp_fitter = SMALFitter(
-                        device=device,
-                        data_batch=rgb,  # For rgb_only=True, just pass the RGB tensor
-                        batch_size=1,
-                        shape_family=config.SHAPE_FAMILY,
-                        use_unity_prior=False,
-                        rgb_only=True
-                    )
-                
-                # Set proper target joints and visibility for visualization
-                # Convert normalized keypoints back to pixel coordinates for visualization
-                if 'keypoints_2d' in y_data and 'keypoint_visibility' in y_data:
-                    # Use backbone-specific image size for keypoint conversion
+            if x_data["input_image_mask"] is not None:
+                if is_hdf5_dataset or x_data.get("is_sleap_dataset", False):
+                    # Optimized dataset or SLEAP dataset - manually create placeholder data with correct image size
+                    # Create silhouette tensor
+                    sil = torch.FloatTensor(x_data["input_image_mask"])[None, None, ...]
+                    
+                    # Convert keypoints to pixel coordinates using backbone image size
                     if model_config['backbone_name'].startswith('vit'):
-                        target_height, target_width = 224, 224  # ViT uses 224x224
+                        target_size = 224
                     else:
-                        target_height, target_width = 512, 512  # ResNet uses 512x512
-                    
-                    # Convert normalized [0,1] coordinates to pixel coordinates
-                    keypoints_2d = y_data['keypoints_2d']  # Shape: (num_joints, 2), already in [y_norm, x_norm] format
-                    keypoint_visibility = y_data['keypoint_visibility']  # Shape: (num_joints,)
-                    
-                    # Convert to pixel coordinates using rendered image size
-                    # Note: keypoints are normalized [0,1] and need to be scaled to rendered resolution
-                    pixel_coords = keypoints_2d.copy()
-                    pixel_coords[:, 0] = pixel_coords[:, 0] * target_height  # y to pixels
-                    pixel_coords[:, 1] = pixel_coords[:, 1] * target_width   # x to pixels
-                    
-                    temp_fitter.target_joints = torch.tensor(pixel_coords, dtype=torch.float32, device=device).unsqueeze(0)
-                    temp_fitter.target_visibility = torch.tensor(keypoint_visibility, dtype=torch.float32, device=device).unsqueeze(0)
-                else:
-                    # Fallback to zeros if no keypoint data
-                    temp_fitter.target_joints = torch.zeros((1, config.N_POSE, 2), device=device)
-                    temp_fitter.target_visibility = torch.zeros((1, config.N_POSE), device=device)
-                
-                # Set the predicted parameters to the SMALFitter
-                # Convert rotations to axis-angle if they're in 6D representation
-                if model.rotation_representation == '6d':
-                    # Convert 6D rotations to axis-angle for SMALFitter
-                    global_rot_aa = rotation_6d_to_axis_angle(predicted_params['global_rot'][0:1])
-                    joint_rot_aa = rotation_6d_to_axis_angle(predicted_params['joint_rot'][0:1])
-                else:
-                    # Already in axis-angle format
-                    global_rot_aa = predicted_params['global_rot'][0:1]
-                    joint_rot_aa = predicted_params['joint_rot'][0:1]
-                
-                temp_fitter.global_rotation.data = global_rot_aa
-                temp_fitter.joint_rotations.data = joint_rot_aa
-                temp_fitter.betas.data = predicted_params['betas'][0:1]
-                temp_fitter.trans.data = predicted_params['trans'][0:1]
-                temp_fitter.fov.data = predicted_params['fov'][0:1]
-                
-                # Set joint scales and translations if available
-                if 'log_beta_scales' in predicted_params and 'betas_trans' in predicted_params:
-                    # Transform PCA weights to per-joint values for visualization
-                    if model.scale_trans_mode in ['separate', 'ignore']:
-                        # In separate/ignore modes, predicted_params contain PCA weights (5 parameters each)
-                        # Transform them to per-joint values for the SMALFitter
-                        scale_weights = predicted_params['log_beta_scales'][0:1]  # (1, 5)
-                        trans_weights = predicted_params['betas_trans'][0:1]      # (1, 5)
+                        target_size = 512
                         
-                        # Transform to per-joint values using the helper method
-                        log_beta_scales_joint, betas_trans_joint = model._transform_separate_pca_weights_to_joint_values(
-                            scale_weights, trans_weights
-                        )
-                        
-                        temp_fitter.log_beta_scales.data = log_beta_scales_joint
-                        temp_fitter.betas_trans.data = betas_trans_joint
+                    pixel_coords = y_data["keypoints_2d"].copy()
+                    pixel_coords[:, 0] = pixel_coords[:, 0] * target_size  # y coordinates  
+                    pixel_coords[:, 1] = pixel_coords[:, 1] * target_size  # x coordinates
+                    
+                    num_joints = len(y_data["keypoints_2d"])
+                    joints = torch.tensor(pixel_coords.reshape(1, num_joints, 2), dtype=torch.float32)
+                    visibility = torch.tensor(y_data["keypoint_visibility"].reshape(1, num_joints), dtype=torch.float32)
+                    
+                    temp_batch = (rgb, sil, joints, visibility)
+                    if x_data.get("is_sleap_dataset", False):
+                        filenames = [f"sleap_sample_{sample_count}"]
                     else:
-                        # In other modes, the values are already per-joint
-                        temp_fitter.log_beta_scales.data = predicted_params['log_beta_scales'][0:1]
-                        temp_fitter.betas_trans.data = predicted_params['betas_trans'][0:1]
+                        filenames = [f"optimized_sample_{sample_count}"]
+                else:
+                    # Original dataset - use file path
+                    num_joints = len(y_data["keypoints_2d"]) if y_data["joint_angles"] is None else len(y_data["joint_angles"])
+                    temp_batch, filenames = return_placeholder_data(
+                        input_image=x_data["input_image"],
+                        num_joints=num_joints,
+                        keypoints_2d=y_data["keypoints_2d"],
+                        keypoint_visibility=y_data["keypoint_visibility"],
+                        silhouette=x_data["input_image_mask"]
+                    )
+                temp_fitter = SMALFitter(
+                    device=device,
+                    data_batch=temp_batch,  # For rgb_only=False, use the temp_batch
+                    batch_size=1,
+                    shape_family=config.SHAPE_FAMILY,
+                    use_unity_prior=False,
+                    rgb_only=False
+                )
+            else:
+                temp_fitter = SMALFitter(
+                    device=device,
+                    data_batch=rgb,  # For rgb_only=True, just pass the RGB tensor
+                    batch_size=1,
+                    shape_family=config.SHAPE_FAMILY,
+                    use_unity_prior=False,
+                    rgb_only=True
+                )
+            
+            # Set proper target joints and visibility for visualization
+            # Convert normalized keypoints back to pixel coordinates for visualization
+            if 'keypoints_2d' in y_data and 'keypoint_visibility' in y_data:
+                # Use backbone-specific image size for keypoint conversion
+                if model_config['backbone_name'].startswith('vit'):
+                    target_height, target_width = 224, 224  # ViT uses 224x224
+                else:
+                    target_height, target_width = 512, 512  # ResNet uses 512x512
                 
-                # Set camera parameters from ground truth
+                # Convert normalized [0,1] coordinates to pixel coordinates
+                keypoints_2d = y_data['keypoints_2d']  # Shape: (num_joints, 2), already in [y_norm, x_norm] format
+                keypoint_visibility = y_data['keypoint_visibility']  # Shape: (num_joints,)
+                
+                # Convert to pixel coordinates using rendered image size
+                # Note: keypoints are normalized [0,1] and need to be scaled to rendered resolution
+                pixel_coords = keypoints_2d.copy()
+                pixel_coords[:, 0] = pixel_coords[:, 0] * target_height  # y to pixels
+                pixel_coords[:, 1] = pixel_coords[:, 1] * target_width   # x to pixels
+                
+                temp_fitter.target_joints = torch.tensor(pixel_coords, dtype=torch.float32, device=device).unsqueeze(0)
+                temp_fitter.target_visibility = torch.tensor(keypoint_visibility, dtype=torch.float32, device=device).unsqueeze(0)
+            else:
+                # Fallback to zeros if no keypoint data
+                temp_fitter.target_joints = torch.zeros((1, config.N_POSE, 2), device=device)
+                temp_fitter.target_visibility = torch.zeros((1, config.N_POSE), device=device)
+            
+            # Set the predicted parameters to the SMALFitter
+            # Convert rotations to axis-angle if they're in 6D representation
+            if model.rotation_representation == '6d':
+                # Convert 6D rotations to axis-angle for SMALFitter
+                global_rot_aa = rotation_6d_to_axis_angle(predicted_params['global_rot'][0:1])
+                joint_rot_aa = rotation_6d_to_axis_angle(predicted_params['joint_rot'][0:1])
+            else:
+                # Already in axis-angle format
+                global_rot_aa = predicted_params['global_rot'][0:1]
+                joint_rot_aa = predicted_params['joint_rot'][0:1]
+            
+            temp_fitter.global_rotation.data = global_rot_aa
+            temp_fitter.joint_rotations.data = joint_rot_aa
+            temp_fitter.betas.data = predicted_params['betas'][0:1]
+            temp_fitter.trans.data = predicted_params['trans'][0:1]
+            temp_fitter.fov.data = predicted_params['fov'][0:1]
+            
+            # Set joint scales and translations if available
+            if 'log_beta_scales' in predicted_params and 'betas_trans' in predicted_params:
+                # Transform PCA weights to per-joint values for visualization
+                if model.scale_trans_mode in ['separate', 'ignore']:
+                    # In separate/ignore modes, predicted_params contain PCA weights (5 parameters each)
+                    # Transform them to per-joint values for the SMALFitter
+                    scale_weights = predicted_params['log_beta_scales'][0:1]  # (1, 5)
+                    trans_weights = predicted_params['betas_trans'][0:1]      # (1, 5)
+                    
+                    # Transform to per-joint values using the helper method
+                    log_beta_scales_joint, betas_trans_joint = model._transform_separate_pca_weights_to_joint_values(
+                        scale_weights, trans_weights
+                    )
+                    
+                    temp_fitter.log_beta_scales.data = log_beta_scales_joint
+                    temp_fitter.betas_trans.data = betas_trans_joint
+                else:
+                    # In other modes, the values are already per-joint
+                    temp_fitter.log_beta_scales.data = predicted_params['log_beta_scales'][0:1]
+                    temp_fitter.betas_trans.data = predicted_params['betas_trans'][0:1]
+            
+            # Set camera parameters from PREDICTED values (not ground truth!)
+            # This ensures visualization matches the loss computation
+            if 'cam_rot' in predicted_params and 'cam_trans' in predicted_params:
+                # Use predicted camera parameters for consistent visualization
+                temp_fitter.renderer.set_camera_parameters(
+                    R=predicted_params['cam_rot'][0:1],  # Predicted camera rotation
+                    T=predicted_params['cam_trans'][0:1],  # Predicted camera translation
+                    fov=predicted_params['fov'][0:1]  # Predicted FOV
+                )
+            else:
+                # Fallback to ground truth if predicted camera params not available
                 if 'cam_rot' in y_data and 'cam_trans' in y_data:
                     # Handle both tensor and numpy array cases
                     cam_rot = y_data['cam_rot']
@@ -697,13 +824,21 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                         T=cam_trans_tensor,
                         fov=fov_tensor
                     )
-                
-                # Generate visualization
-                temp_fitter.generate_visualization(image_exporter, apply_UE_transform=True, img_idx=sample_count)
-                
-                sample_count += 1
+            
+            # Generate visualization
+            temp_fitter.generate_visualization(image_exporter, apply_UE_transform=True, img_idx=sample_count)
+            
+            sample_count += 1
+        
+        print(f"Generated {sample_count} visualization images for epoch {epoch} in {epoch_dir}")
     
-    print(f"Generated {sample_count} visualization images for epoch {epoch} in {epoch_dir}")
+    finally:
+        # Always restore random states to ensure visualization doesn't affect training
+        torch.set_rng_state(torch_rng_state)
+        np.random.set_state(numpy_rng_state)
+        random.setstate(python_rng_state)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state(cuda_rng_state)
 
 
 def plot_parameter_errors(train_param_errors, val_param_errors, save_path='parameter_errors.png'):
@@ -834,18 +969,97 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
         model.load_state_dict(model_state_dict, strict=False)
         print("Model state loaded successfully")
         
-        # Load optimizer state
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        print("Optimizer state loaded successfully")
-        
-        # Get epoch information first
+        # Get epoch information first (before trying to load optimizer)
         start_epoch = checkpoint.get('epoch', 0) + 1  # Resume from next epoch
+        
+        # Try to load optimizer state (may fail if optimizer configuration changed)
+        optimizer_loaded = False
+        try:
+            if 'optimizer_state_dict' in checkpoint:
+                # Debug: Compare parameter groups before loading
+                checkpoint_optimizer_state = checkpoint['optimizer_state_dict']
+                current_param_groups = optimizer.param_groups
+                checkpoint_param_groups = checkpoint_optimizer_state.get('param_groups', [])
+                
+                print(f"\nOptimizer parameter group comparison:")
+                print(f"  Current optimizer has {len(current_param_groups)} parameter group(s)")
+                print(f"  Checkpoint has {len(checkpoint_param_groups)} parameter group(s)")
+                
+                # Show details of each parameter group
+                for i, (curr_group, ckpt_group) in enumerate(zip(current_param_groups, checkpoint_param_groups)):
+                    curr_num_params = len(curr_group['params'])
+                    ckpt_num_params = len(ckpt_group['params'])
+                    curr_lr = curr_group.get('lr', 'N/A')
+                    ckpt_lr = ckpt_group.get('lr', 'N/A')
+                    
+                    print(f"  Group {i}:")
+                    print(f"    Current: {curr_num_params} parameters, lr={curr_lr}")
+                    print(f"    Checkpoint: {ckpt_num_params} parameters, lr={ckpt_lr}")
+                    
+                    if curr_num_params != ckpt_num_params:
+                        print(f"    ⚠️  MISMATCH: Parameter count differs!")
+                        
+                        # Get parameter names from model state dict to identify the differences
+                        # We'll compare the parameter names from both state dicts
+                        current_param_names = set(model.state_dict().keys())
+                        checkpoint_param_names = set(checkpoint['model_state_dict'].keys())
+                        
+                        # Find parameters that are in current model but not in checkpoint
+                        new_params = current_param_names - checkpoint_param_names
+                        # Find parameters that are in checkpoint but not in current model
+                        removed_params = checkpoint_param_names - current_param_names
+                        
+                        if new_params:
+                            print(f"\n    Parameters in CURRENT model but NOT in checkpoint ({len(new_params)}):")
+                            for param_name in sorted(new_params):
+                                param_shape = model.state_dict()[param_name].shape
+                                print(f"      + {param_name}: {tuple(param_shape)}")
+                        
+                        if removed_params:
+                            print(f"\n    Parameters in CHECKPOINT but NOT in current model ({len(removed_params)}):")
+                            for param_name in sorted(removed_params):
+                                param_shape = checkpoint['model_state_dict'][param_name].shape
+                                print(f"      - {param_name}: {tuple(param_shape)}")
+                        
+                        # Also check for shape mismatches in common parameters
+                        common_params = current_param_names & checkpoint_param_names
+                        shape_mismatches = []
+                        for param_name in common_params:
+                            curr_shape = model.state_dict()[param_name].shape
+                            ckpt_shape = checkpoint['model_state_dict'][param_name].shape
+                            if curr_shape != ckpt_shape:
+                                shape_mismatches.append((param_name, curr_shape, ckpt_shape))
+                        
+                        if shape_mismatches:
+                            print(f"\n    Parameters with SHAPE mismatches ({len(shape_mismatches)}):")
+                            for param_name, curr_shape, ckpt_shape in sorted(shape_mismatches):
+                                print(f"      ~ {param_name}: current={tuple(curr_shape)}, checkpoint={tuple(ckpt_shape)}")
+                
+                # If group counts differ, show that too
+                if len(current_param_groups) != len(checkpoint_param_groups):
+                    print(f"  ⚠️  MISMATCH: Number of parameter groups differs!")
+                    print(f"     This usually happens when the model architecture or optimizer")
+                    print(f"     configuration has changed between checkpoint save and resume.")
+                
+                # Try to load anyway
+                optimizer.load_state_dict(checkpoint_optimizer_state)
+                print("\nOptimizer state loaded successfully")
+                optimizer_loaded = True
+        except Exception as opt_error:
+            print(f"\n⚠️  Warning: Could not load optimizer state: {opt_error}")
+            print("Optimizer will be reinitialized (learning rate and momentum will be reset)")
+            print("This is usually safe - training will continue from the model weights,")
+            print("just without the optimizer's momentum/state from the checkpoint.")
         
         # Update learning rate to match curriculum for the resumed epoch
         resumed_lr = TrainingConfig.get_learning_rate_for_epoch(start_epoch)
         for param_group in optimizer.param_groups:
             param_group['lr'] = resumed_lr
-        print(f"Learning rate set to {resumed_lr} for resumed epoch {start_epoch}")
+        
+        if optimizer_loaded:
+            print(f"Learning rate updated to {resumed_lr} for resumed epoch {start_epoch}")
+        else:
+            print(f"Learning rate set to {resumed_lr} for resumed epoch {start_epoch} (optimizer reinitialized)")
         
         # Initialize training history lists
         train_losses = []
@@ -1008,25 +1222,99 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     learning_rate = training_params['learning_rate']
     rotation_representation = training_params['rotation_representation']
     
-    # Create dataset
+    # Create dataset (multi-dataset or single dataset)
     print("Loading dataset...")
     print(f"Using rotation representation: {rotation_representation}")
     print(f"Using backbone: {model_config['backbone_name']}")
-    dataset = UnifiedSMILDataset.from_path(
-        data_path, 
-        rotation_representation=rotation_representation,
-        backbone_name=model_config['backbone_name']
-    )
-    print(f"Dataset size: {len(dataset)}")
-    print(f"Original resolution: {dataset.get_input_resolution()}")
-    print(f"Target resolution: {dataset.get_target_resolution()}")
     
-    # Split dataset using configuration
-    train_amount, val_amount, test_amount = TrainingConfig.get_train_val_test_sizes(len(dataset))
+    # Check if multi-dataset training is enabled
+    use_multi_dataset = TrainingConfig.is_multi_dataset_enabled()
     
-    train_set, val_set, test_set = torch.utils.data.random_split(
-        dataset, [train_amount, val_amount, test_amount]
-    )
+    if use_multi_dataset:
+        # Multi-dataset training mode
+        print("\n" + "="*70)
+        print("MULTI-DATASET TRAINING MODE ENABLED")
+        print("="*70)
+        
+        from combined_dataset import CombinedSMILDataset
+        
+        # Get enabled dataset configurations
+        dataset_configs = TrainingConfig.get_enabled_datasets()
+        
+        if not dataset_configs:
+            raise ValueError("Multi-dataset mode enabled but no datasets are configured!")
+        
+        print(f"Loading {len(dataset_configs)} datasets:")
+        for ds_config in dataset_configs:
+            print(f"  - {ds_config['name']}: {ds_config['path']} (weight: {ds_config['weight']})")
+        
+        # Create combined dataset
+        dataset = CombinedSMILDataset(
+            dataset_configs=dataset_configs,
+            rotation_representation=rotation_representation,
+            backbone_name=model_config['backbone_name']
+        )
+        
+        # Print statistics
+        dataset.print_statistics()
+        
+        # Split dataset using per-dataset strategy
+        split_strategy = TrainingConfig.get_validation_split_strategy()
+        print(f"\nUsing '{split_strategy}' split strategy")
+        
+        train_set, val_set, test_set = dataset.split_datasets(
+            train_size=1.0 - training_config['split_config']['test_size'] - training_config['split_config']['val_size'],
+            val_size=training_config['split_config']['val_size'],
+            test_size=training_config['split_config']['test_size'],
+            seed=seed
+        )
+        
+        # Create weighted sampler for mixed batches
+        dataset_weights = TrainingConfig.get_dataset_weights()
+        train_sampler_weighted = dataset.create_weighted_sampler(
+            weights=dataset_weights,
+            train_indices=dataset.train_indices,
+            num_samples=len(train_set)
+        )
+        
+        print(f"\nCreated weighted sampler with weights: {dataset_weights}")
+        
+    else:
+        # Single dataset training mode (legacy)
+        print("\n" + "="*70)
+        print("SINGLE DATASET TRAINING MODE (Legacy)")
+        print("="*70)
+        
+        # Check if SLEAP dataset support is available
+        try:
+            from sleap_data.sleap_dataset import SLEAPDataset
+            sleap_available = True
+        except ImportError:
+            sleap_available = False
+        
+        if not is_distributed or rank == 0:
+            if sleap_available:
+                print("SLEAP dataset support: enabled")
+            else:
+                print("SLEAP dataset support: not available")
+        
+        dataset = UnifiedSMILDataset.from_path(
+            data_path, 
+            rotation_representation=rotation_representation,
+            backbone_name=model_config['backbone_name']
+        )
+        print(f"Dataset size: {len(dataset)}")
+        print(f"Original resolution: {dataset.get_input_resolution()}")
+        print(f"Target resolution: {dataset.get_target_resolution()}")
+        
+        # Split dataset using configuration
+        train_amount, val_amount, test_amount = TrainingConfig.get_train_val_test_sizes(len(dataset))
+        
+        train_set, val_set, test_set = torch.utils.data.random_split(
+            dataset, [train_amount, val_amount, test_amount]
+        )
+        
+        train_sampler_weighted = None  # No weighted sampler for single dataset
     
     print(f"Train set: {len(train_set)} samples")
     print(f"Validation set: {len(val_set)} samples")
@@ -1051,6 +1339,13 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     # Create data loaders with distributed samplers if using DDP
     if is_distributed:
         # Create distributed samplers
+        # Note: If using weighted sampler for multi-dataset, we can't use DistributedSampler directly
+        # Would need to implement DistributedWeightedSampler (TODO for future)
+        if use_multi_dataset and train_sampler_weighted is not None:
+            print("WARNING: Distributed training with weighted sampling not yet implemented")
+            print("  Falling back to standard distributed sampler")
+            print("  Batch composition may not follow dataset weights correctly")
+        
         train_sampler = DistributedSampler(train_set, rank=rank, num_replicas=world_size, shuffle=True)
         val_sampler = DistributedSampler(val_set, rank=rank, num_replicas=world_size, shuffle=False)
         test_sampler = DistributedSampler(test_set, rank=rank, num_replicas=world_size, shuffle=False)
@@ -1065,14 +1360,21 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             print(f"Rank {rank}: Train sampler size: {len(train_sampler)}, Val sampler size: {len(val_sampler)}")
             print(f"Rank {rank}: Train sampler epoch: {train_sampler.epoch}, Val sampler epoch: {val_sampler.epoch}")
     else:
-        train_sampler = val_sampler = test_sampler = None
+        # Use weighted sampler for training if available (multi-dataset mode)
+        if use_multi_dataset and train_sampler_weighted is not None:
+            train_sampler = train_sampler_weighted
+            print("Using weighted random sampler for mixed-batch training")
+        else:
+            train_sampler = None
+        
+        val_sampler = test_sampler = None
     
     # Try to create data loaders with multiprocessing, fallback to single-threaded if issues
     try:
         train_loader = DataLoader(
             train_set, 
             batch_size=batch_size, 
-            shuffle=(not is_distributed),  # Don't shuffle when using distributed sampler
+            shuffle=(not is_distributed and train_sampler is None),  # Don't shuffle when using sampler
             sampler=train_sampler,
             num_workers=num_workers, 
             collate_fn=custom_collate_fn,
@@ -1109,7 +1411,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             print(f"Warning: Failed to create multiprocessing data loaders: {e}")
             print("Falling back to single-threaded data loading...")
         num_workers = 0
-        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=(not is_distributed), sampler=train_sampler, num_workers=0, collate_fn=custom_collate_fn)
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=(not is_distributed and train_sampler is None), sampler=train_sampler, num_workers=0, collate_fn=custom_collate_fn)
         val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, sampler=val_sampler, num_workers=0, collate_fn=custom_collate_fn)
         test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, sampler=test_sampler, num_workers=0, collate_fn=custom_collate_fn)
     
@@ -1150,7 +1452,8 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         rgb_only=model_config['rgb_only'],
         freeze_backbone=model_config['freeze_backbone'],
         hidden_dim=model_config['hidden_dim'],
-        use_ue_scaling=dataset.get_ue_scaling_flag(),
+        #use_ue_scaling=dataset.get_ue_scaling_flag(),
+        use_ue_scaling=True,  # Always apply UE scaling so training matches visualization behaviour
         rotation_representation=rotation_representation,
         input_resolution=input_resolution,
         backbone_name=model_config['backbone_name'],
@@ -1218,32 +1521,76 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     if base_model.head_type == 'transformer_decoder':
         # Use much lower learning rate for transformer decoder head (AniMer-style)
         transformer_lr = initial_lr * 0.01  # 100x smaller learning rate to prevent gradient explosion
-        print(f"Using conservative learning rate for transformer decoder: {transformer_lr}")
+        if not is_distributed or rank == 0:
+            print(f"Using conservative learning rate for transformer decoder: {transformer_lr}")
         
         # Create separate parameter groups with different learning rates
         backbone_params = []
         transformer_params = []
         
         for param_group in trainable_params:
-            if 'transformer_head' in str(param_group.get('params', [])):
+            # Use the 'name' field to identify parameter groups
+            group_name = param_group.get('name', '')
+            if group_name == 'transformer_head':
                 # Lower learning rate for transformer head
-                transformer_params.append({'params': param_group['params'], 'lr': transformer_lr, 'weight_decay': weight_decay})
+                transformer_params.append({
+                    'params': param_group['params'], 
+                    'lr': transformer_lr, 
+                    'weight_decay': weight_decay,
+                    'name': group_name  # Preserve name for debugging
+                })
             else:
-                # Normal learning rate for backbone
-                backbone_params.append({'params': param_group['params'], 'lr': initial_lr, 'weight_decay': weight_decay})
+                # Normal learning rate for backbone and other components
+                backbone_params.append({
+                    'params': param_group['params'], 
+                    'lr': initial_lr, 
+                    'weight_decay': weight_decay,
+                    'name': group_name  # Preserve name for debugging
+                })
         
         # Combine parameter groups
         trainable_params = backbone_params + transformer_params
+        
+        if not is_distributed or rank == 0:
+            print(f"Optimizer parameter groups created:")
+            print(f"  Backbone/other groups: {len(backbone_params)}")
+            for i, g in enumerate(backbone_params):
+                print(f"    - {g.get('name', 'unnamed')} (lr={g['lr']})")
+            print(f"  Transformer groups: {len(transformer_params)}")
+            for i, g in enumerate(transformer_params):
+                print(f"    - {g.get('name', 'unnamed')} (lr={g['lr']})")
+            print(f"  Total groups: {len(trainable_params)}")
     else:
         # For MLP head, add weight decay to all parameters
-        trainable_params = [{'params': param_group['params'], 'lr': initial_lr, 'weight_decay': weight_decay} 
-                           for param_group in trainable_params]
+        trainable_params = [
+            {
+                'params': param_group['params'], 
+                'lr': initial_lr, 
+                'weight_decay': weight_decay,
+                'name': param_group.get('name', f'group_{i}')  # Preserve name for debugging
+            } 
+            for i, param_group in enumerate(trainable_params)
+        ]
+        if not is_distributed or rank == 0:
+            print(f"Optimizer parameter groups created: {len(trainable_params)}")
+            for i, g in enumerate(trainable_params):
+                print(f"  - {g.get('name', 'unnamed')} (lr={g['lr']})")
     
     # Use AdamW optimizer (AniMer-style)
     optimizer = optim.AdamW(trainable_params, lr=initial_lr, weight_decay=weight_decay)
     criterion = nn.MSELoss()
     
-    print(f"Initial learning rate set to: {initial_lr}")
+    # Show optimizer configuration
+    if not is_distributed or rank == 0:
+        print(f"\nOptimizer configuration:")
+        print(f"  Type: AdamW")
+        print(f"  Initial learning rate: {initial_lr}")
+        print(f"  Weight decay: {weight_decay}")
+        print(f"  Number of parameter groups: {len(optimizer.param_groups)}")
+        for i, group in enumerate(optimizer.param_groups):
+            num_params = len(group['params'])
+            total_params = sum(p.numel() for p in group['params'])
+            print(f"  Group {i}: {num_params} tensors, {total_params:,} total parameters, lr={group['lr']}")
     
     # Create output directories
     os.makedirs(output_config['checkpoint_dir'], exist_ok=True)
@@ -1421,8 +1768,8 @@ if __name__ == "__main__":
                        help='Path to dataset (overrides config default). Can be a directory or HDF5 file.')
     parser.add_argument('--num-gpus', type=int, default=1,
                        help='Number of GPUs to use for training (default: 1)')
-    parser.add_argument('--master-port', type=str, default='12355',
-                       help='Master port for distributed training (default: 12355)')
+    parser.add_argument('--master-port', type=str, default='12345',
+                       help='Master port for distributed training (default: 12345)')
     args = parser.parse_args()
     
     # Create config override dictionary for any provided arguments
