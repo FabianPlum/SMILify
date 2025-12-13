@@ -6,7 +6,7 @@ including dataset paths, training splits, loss curriculum, and hyperparameters.
 """
 
 import os
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 
 class TrainingConfig:
@@ -23,11 +23,89 @@ class TrainingConfig:
         'simple': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Simple",
         'simple100k': "/media/fabi/Data/replicAnt-x-SMIL-OmniAnt-Simple100k-noScale",
         'simple100k_local': "/home/fabi/DATA_LOCAL/replicAnt-x-SMIL-OmniAnt-Simple100k-noScale",
-        'SMILySTICK_precomp': "/home/fabi/dev/SMILify/SMILySTICK100k.h5"
+        'SMILySTICK_precomp': "/home/fabi/dev/SMILify/SMILySTICK100k.h5",
+        'SMILySLEAPySTICK-test': "/home/fabi/dev/SMILify/test_sleap_dataset.h5",
+        'SMILySLEAPySTICKS': "/home/fabi/dev/SMILify/SMILySLEAPySTICKS.h5",
+        'SMILySLEAPySTICKS-cropped': "/home/fabi/dev/SMILify/SMILySLEAPySTICKS-cropped.h5",
+        'STICKyreprojected': "/home/fabi/dev/SMILify/STICKyReprojections.h5",
+        'bbox_center_STICKY': "/home/fabi/dev/SMILify/bbox_center_STICKY.h5",
+        'bbox_center_test': "/home/fabi/dev/SMILify/bbox_center_STICKY_test.h5",
+        'bbox_center_STICKY_single_animal': "/home/fabi/dev/SMILify/bbox_center_STICKY_single_animal.h5",
+        'bbox_center_PERU': "/home/fabi/dev/SMILify/bbox_center_PERU_test.h5",
+        'SMILyMouseSYNTH': "/home/fabi/dev/SMILify/SMILyMouseSYNTH.h5",
+        'RealSMILyMouse': "/home/fabi/dev/SMILify/RealSMILyMouse.h5",
+        'RealSMILyMouseFalkner': "/home/fabi/dev/SMILify/RealSMILyMouseFalkner.h5"
+
     }
     
-    # Default dataset to use
-    DEFAULT_DATASET = 'SMILySTICK_precomp'
+    # Default dataset to use (legacy single-dataset mode)
+    DEFAULT_DATASET = 'RealSMILyMouseFalkner'#'bbox_center_STICKY' #'SMILySLEAPySTICKS-cropped'
+    
+    # Multi-dataset configuration for combined training
+    # Set use_multi_dataset=True to enable training with multiple datasets
+    # 
+    # IMPORTANT NOTES:
+    # 1. UE Scaling: Currently assumes all datasets use UE scaling (10x scale).
+    #    This is handled uniformly across all datasets. For SLEAP data without
+    #    ground truth scaling info, this is acceptable. Future: make this per-sample.
+    # 2. Label Availability: Each dataset specifies which labels are real vs placeholder.
+    #    Placeholder labels (False) contribute ZERO to loss (complete masking).
+    # 3. Weighted Sampling: Dataset weights control relative sampling frequency.
+    #    weight=1.0 means normal sampling, weight=0.5 means sample half as often.
+    MULTI_DATASET_CONFIG = {
+        'enabled': False,  # Set to True to use multi-dataset training
+        'datasets': [
+            {
+                'name': 'replicant_main',
+                'path': "/home/fabi/dev/SMILify/SMILySTICK100k.h5",
+                'type': 'optimized_hdf5',  # 'replicant', 'sleap', 'optimized_hdf5', or 'auto'
+                'weight': 0.2,  # Sampling weight (higher = more frequent sampling)
+                'enabled': True,
+                'available_labels': {
+                    # Which ground truth labels are available in this dataset
+                    'global_rot': True,
+                    'joint_rot': True,
+                    'betas': True,
+                    'trans': True,
+                    'fov': True,
+                    'cam_rot': True,
+                    'cam_trans': True,
+                    'log_beta_scales': True,
+                    'betas_trans': True,
+                    'keypoint_2d': True,
+                    'keypoint_3d': True,
+                    'silhouette': True
+                }
+            },
+            {
+                'name': 'sleap_data',
+                #'path': "/home/fabi/dev/SMILify/STICKyReprojections.h5",
+                'path': "/home/fabi/dev/SMILify/bbox_center_STICKY_SLEAP.h5",
+                'type': 'optimized_hdf5',
+                'weight': 1.0,  # Sample 20% as often as replicant data
+                'enabled': True,
+                'available_labels': {
+                    # SLEAP data only has keypoints and betas
+                    'global_rot': False,  # Placeholder values only
+                    'joint_rot': False,   # Placeholder values only
+                    'betas': True,        # Real ground truth from lookup table
+                    'trans': False,       # Placeholder
+                    'fov': False,         # Placeholder
+                    'cam_rot': False,     # Placeholder
+                    'cam_trans': False,   # Placeholder
+                    'log_beta_scales': False,  # Placeholder
+                    'betas_trans': False,      # Placeholder
+                    'keypoint_2d': True,  # Real ground truth from SLEAP
+                    'keypoint_3d': False, # Placeholder
+                    'silhouette': False   # Placeholder
+                }
+            }
+        ],
+        # Validation split strategy: 'per_dataset' or 'combined'
+        # 'per_dataset': Split each dataset separately, then combine
+        # 'combined': Combine datasets first, then split
+        'validation_split_strategy': 'per_dataset'
+    }
     
     # Training split configuration
     SPLIT_CONFIG = {
@@ -39,12 +117,12 @@ class TrainingConfig:
     # Training hyperparameters (AniMer-style conservative settings)
     TRAINING_PARAMS = {
         'batch_size': 8,
-        'num_epochs': 200,
+        'num_epochs': 1000,
         'learning_rate': 1.25e-6,  # AniMer-style very conservative learning rate
         'weight_decay': 1e-4,  # Add weight decay for AdamW
         'seed': 1234,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': None, #'checkpoints/checkpoint_epoch_69.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': 'checkpoints/checkpoint_epoch_125.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 16,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 8,  # Prefetch batches
@@ -78,7 +156,7 @@ class TrainingConfig:
         'ignored_joint_names': [
             # Add joint names here that should be ignored
             # Example: 'head_tip', 'antenna_tip', etc.
-            "b_a_5"
+            #"b_a_5"
         ],
         
         # Whether to print information about ignored joints during preprocessing
@@ -87,7 +165,7 @@ class TrainingConfig:
     
     # Scale and Translation Beta Handling Configuration
     SCALE_TRANS_BETA_CONFIG = {
-        'mode': 'entangled_with_betas',  # Options: 'ignore', 'separate', 'entangled_with_betas'
+        'mode': 'ignore',  # Options: 'ignore', 'separate', 'entangled_with_betas'
         
         # Mode-specific configurations
         'ignore': {
@@ -153,12 +231,26 @@ class TrainingConfig:
                 'keypoint_3d': 0.005,   # 
                 'silhouette': 0.01,
             }),
-            (100, {
+            (80, {
                 'cam_trans': 0.00001,
-                'joint_rot': 0.01,
-                'keypoint_2d': 0.01,    # AniMer: 0.01
+                'joint_rot': 0.001,
+                'keypoint_2d': 0.5,    # AniMer: 0.01
                 'keypoint_3d': 0.005,   # 
-                'silhouette': 0.1,
+                'silhouette': 0.01,
+            }),
+            (120, {
+                'cam_trans': 0.00001,
+                'joint_rot': 0.001,
+                'keypoint_2d': 0.01,    # AniMer: 0.01
+                'keypoint_3d': 0.002,   # 
+                'silhouette': 0.01,
+            }),
+            (200, {
+                'cam_trans': 0.00001,
+                'joint_rot': 0.001,
+                'keypoint_2d': 0.01,    # AniMer: 0.01
+                'keypoint_3d': 0.002,   # 
+                'silhouette': 0.01,
             })
         ]
     }
@@ -166,18 +258,32 @@ class TrainingConfig:
     # Learning rate curriculum configuration (AniMer-style conservative)
     LEARNING_RATE_CURRICULUM = {
         # Base learning rate (applied at epoch 0) - AniMer-style
-        'base_learning_rate': 1.25e-6,
+        'base_learning_rate': 1e-4, #previous value: 1.25e-6
         
         # Learning rate stages: (epoch_threshold, learning_rate) - Very conservative
         'lr_stages': [
+            (5, 1e-5),      # 1e-5
             # Stage 1: Slight reduction for fine-tuning
-            (40, 1e-6),      # 1e-6
+            (40, 1e-6),      # 1e-5
             
             # Stage 2: Further reduce
             (60, 5e-7),      # 5e-7
             
             # Stage 3: Very low learning rate for final convergence
-            (80, 1e-7),      # 1e-7
+            (80, 5e-7),      # 1e-7
+
+            # TRAIN UNTIL HERE WITH SYNTH ONLY, THEN SWITCH TO REAL DATA
+            # THE HIGH LEARNING RATE IS NEEDED TO WEIGH THE 2D KEYPOINTS HIGH ENOUGH
+            (125, 1.5e-6),      # 1e-7
+
+            # Stage 3: Very low learning rate for final convergence
+            (150, 2e-7),      # 1e-7
+
+            # It's save to use high learning rates when using ONLY 2D loss here!
+            (500, 1e-4),
+
+            # It's save to use high learning rates when using ONLY 2D loss here!
+            (718, 1e-5)      # 1e-5
         ]
     }
     
@@ -189,7 +295,7 @@ class TrainingConfig:
         'train_visualizations_dir': 'visualizations_train',
         'save_checkpoint_every': 2,        # Save checkpoint every N epochs
         'generate_visualizations_every': 1, # Generate visualizations every N epochs
-        'plot_history_every': 10,          # Plot training history every N epochs
+        'plot_history_every': 1,          # Plot training history every N epochs
         'num_visualization_samples': 10,    # Number of samples to visualize
     }
     
@@ -338,6 +444,61 @@ class TrainingConfig:
     def get_scale_trans_mode(cls):
         """Get current scale and translation mode."""
         return cls.SCALE_TRANS_BETA_CONFIG['mode']
+    
+    @classmethod
+    def is_multi_dataset_enabled(cls) -> bool:
+        """Check if multi-dataset training is enabled."""
+        return cls.MULTI_DATASET_CONFIG.get('enabled', False)
+    
+    @classmethod
+    def get_enabled_datasets(cls) -> List[Dict[str, Any]]:
+        """
+        Get list of enabled dataset configurations.
+        
+        Returns:
+            List of dataset configuration dictionaries
+        """
+        if not cls.is_multi_dataset_enabled():
+            return []
+        
+        datasets = cls.MULTI_DATASET_CONFIG.get('datasets', [])
+        return [ds for ds in datasets if ds.get('enabled', False)]
+    
+    @classmethod
+    def get_dataset_config_by_name(cls, name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get dataset configuration by name.
+        
+        Args:
+            name: Dataset name
+            
+        Returns:
+            Dataset configuration dictionary or None if not found
+        """
+        for dataset in cls.get_enabled_datasets():
+            if dataset['name'] == name:
+                return dataset
+        return None
+    
+    @classmethod
+    def get_dataset_weights(cls) -> List[float]:
+        """
+        Get sampling weights for all enabled datasets.
+        
+        Returns:
+            List of weights (one per dataset)
+        """
+        return [ds.get('weight', 1.0) for ds in cls.get_enabled_datasets()]
+    
+    @classmethod
+    def get_validation_split_strategy(cls) -> str:
+        """
+        Get validation split strategy for multi-dataset training.
+        
+        Returns:
+            'per_dataset' or 'combined'
+        """
+        return cls.MULTI_DATASET_CONFIG.get('validation_split_strategy', 'per_dataset')
     
     @classmethod
     def print_config_summary(cls, dataset_name: Optional[str] = None):
