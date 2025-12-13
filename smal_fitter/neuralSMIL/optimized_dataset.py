@@ -59,12 +59,13 @@ class OptimizedSMILDataset(torch.utils.data.Dataset):
             self.metadata = dict(temp_file['metadata'].attrs)
             self.target_resolution = self.metadata['target_resolution']
             self.original_backbone = self.metadata['backbone_name']
-            self.original_rotation_repr = self.metadata['rotation_representation']
+            # Get rotation representation from metadata, fallback to requested if not available
+            self.original_rotation_repr = self.metadata.get('rotation_representation', self.rotation_representation)
             # Get number of samples
             self.num_samples = self.metadata['total_samples']
         
-        # Validate compatibility
-        if self.rotation_representation != self.original_rotation_repr:
+        # Validate compatibility (only if metadata has rotation representation)
+        if 'rotation_representation' in self.metadata and self.rotation_representation != self.original_rotation_repr:
             print(f"Warning: Requested rotation representation '{self.rotation_representation}' "
                   f"differs from preprocessed '{self.original_rotation_repr}'. "
                   f"Using preprocessed representation.")
@@ -127,9 +128,20 @@ class OptimizedSMILDataset(torch.utils.data.Dataset):
         # Ensure HDF5 file is open in current worker process
         self._ensure_file_open()
         
-        # Load image data
-        jpeg_bytes = self.images['rgb_jpeg'][idx]
-        silhouette_mask = self.images['silhouette_masks'][idx]
+        # Load image data - handle both standard and SLEAP datasets
+        if 'rgb_jpeg' in self.images:
+            jpeg_bytes = self.images['rgb_jpeg'][idx]
+        elif 'image_jpeg' in self.images:
+            jpeg_bytes = self.images['image_jpeg'][idx]
+        else:
+            raise KeyError("Neither 'rgb_jpeg' nor 'image_jpeg' found in images group")
+        
+        if 'silhouette_masks' in self.images:
+            silhouette_mask = self.images['silhouette_masks'][idx]
+        elif 'mask' in self.images:
+            silhouette_mask = self.images['mask'][idx]
+        else:
+            raise KeyError("Neither 'silhouette_masks' nor 'mask' found in images group")
         
         # Load parameters
         global_rot = self.parameters['global_rot'][idx]
@@ -139,16 +151,36 @@ class OptimizedSMILDataset(torch.utils.data.Dataset):
         fov = self.parameters['fov'][idx]
         cam_rot = self.parameters['cam_rot'][idx]
         cam_trans = self.parameters['cam_trans'][idx]
-        log_beta_scales = self.parameters['log_beta_scales'][idx]
-        betas_trans = self.parameters['betas_trans'][idx]
+        # Handle scale and translation parameters - support both standard and SLEAP datasets
+        if 'log_beta_scales' in self.parameters:
+            log_beta_scales = self.parameters['log_beta_scales'][idx]
+        elif 'scale_weights' in self.parameters:
+            log_beta_scales = self.parameters['scale_weights'][idx]
+        else:
+            # Fallback to zeros if neither exists
+            log_beta_scales = np.zeros(5, dtype=np.float32)
+        
+        if 'betas_trans' in self.parameters:
+            betas_trans = self.parameters['betas_trans'][idx]
+        elif 'trans_weights' in self.parameters:
+            betas_trans = self.parameters['trans_weights'][idx]
+        else:
+            # Fallback to zeros if neither exists
+            betas_trans = np.zeros(5, dtype=np.float32)
         
         # Load keypoints
         keypoints_2d = self.keypoints['keypoints_2d'][idx]
         keypoints_3d = self.keypoints['keypoints_3d'][idx]
         keypoint_visibility = self.keypoints['keypoint_visibility'][idx]
         
-        # Load auxiliary data
-        original_path = self.auxiliary['original_paths'][idx]
+        # Load auxiliary data - handle both standard and SLEAP datasets
+        if 'original_paths' in self.auxiliary:
+            original_path = self.auxiliary['original_paths'][idx]
+        elif 'original_path' in self.auxiliary:
+            original_path = self.auxiliary['original_path'][idx]
+        else:
+            # Fallback to a default path if neither exists
+            original_path = f"sample_{idx}"
         
         # Decode JPEG image
         rgb_image = self._decode_jpeg_image(jpeg_bytes)
@@ -157,7 +189,7 @@ class OptimizedSMILDataset(torch.utils.data.Dataset):
         x_data = {
             'input_image': original_path,  # Keep original path for compatibility
             'input_image_data': rgb_image,
-            'input_image_mask': silhouette_mask.squeeze(0)  # Remove channel dimension
+            'input_image_mask': silhouette_mask.squeeze(0) if silhouette_mask.ndim == 3 else silhouette_mask  # Remove channel dimension if present
         }
         
         # Prepare y_data (target data)
@@ -228,10 +260,13 @@ class OptimizedSMILDataset(torch.utils.data.Dataset):
             Full joint angles including root (N, rot_dim)
         """
         # Add zero rotation for root joint at the beginning
-        if self.rotation_representation == '6d':
+        # Detect rotation format from data dimensions
+        if joint_rot.shape[-1] == 6:
+            # 6D rotation representation
             root_rot = np.array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], dtype=np.float32)  # Identity in 6D
             full_joint_angles = np.vstack([root_rot.reshape(1, -1), joint_rot])
         else:
+            # 3D rotation representation (axis-angle)
             root_rot = np.zeros(3, dtype=np.float32)  # Zero rotation in axis-angle
             full_joint_angles = np.vstack([root_rot.reshape(1, -1), joint_rot])
         
