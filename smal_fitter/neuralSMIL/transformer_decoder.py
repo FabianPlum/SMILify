@@ -116,7 +116,8 @@ class SMILTransformerDecoderHead(nn.Module):
                  depth: int = 6, heads: int = 8, dim_head: int = 64, 
                  mlp_dim: int = 1024, dropout: float = 0.0, 
                  ief_iters: int = 3, rotation_representation: str = 'axis_angle',
-                 scales_scale_factor: float = 0.01, trans_scale_factor: float = 0.01):
+                 scales_scale_factor: float = 0.01, trans_scale_factor: float = 0.01,
+                 scale_trans_mode: str = 'separate'):
         super().__init__()
         
         self.feature_dim = feature_dim
@@ -126,6 +127,7 @@ class SMILTransformerDecoderHead(nn.Module):
         self.rotation_representation = rotation_representation
         self.scales_scale_factor = scales_scale_factor
         self.trans_scale_factor = trans_scale_factor
+        self.scale_trans_mode = scale_trans_mode
         
         # Calculate output dimensions for SMIL parameters
         self._calculate_output_dims()
@@ -186,14 +188,29 @@ class SMILTransformerDecoderHead(nn.Module):
         self.cam_rot_dim = 9  # 3x3 rotation matrix (flattened)
         self.cam_trans_dim = 3
         
-        # Optional joint scales and translations
+        # Handle scale and translation dimensions based on mode
         self.scales_dim = 0
         self.joint_trans_dim = 0
         
-        if config.ignore_hardcoded_body:
-            n_joints = config.N_POSE + 1
-            self.scales_dim = n_joints * 3
-            self.joint_trans_dim = n_joints * 3
+        if self.scale_trans_mode == 'entangled_with_betas':
+            # In entangled mode, scales and trans are derived from betas via PCA
+            # No separate prediction heads needed
+            self.scales_dim = 0
+            self.joint_trans_dim = 0
+        elif self.scale_trans_mode == 'separate':
+            # In separate mode, predict PCA weights directly (same dimension as betas)
+            self.scales_dim = config.N_BETAS  # PCA weights for scaling
+            self.joint_trans_dim = config.N_BETAS  # PCA weights for translation
+        elif self.scale_trans_mode == 'ignore':
+            # In ignore mode, no scales or translations
+            self.scales_dim = 0
+            self.joint_trans_dim = 0
+        else:
+            # Fallback for legacy code - check config.ignore_hardcoded_body
+            if config.ignore_hardcoded_body:
+                n_joints = config.N_POSE + 1
+                self.scales_dim = n_joints * 3
+                self.joint_trans_dim = n_joints * 3
     
     def _initialize_parameters(self):
         """Initialize transformer decoder parameters."""
@@ -423,7 +440,8 @@ def build_smil_transformer_decoder_head(feature_dim: int, context_dim: int,
                                        ief_iters: int = 3, 
                                        rotation_representation: str = 'axis_angle',
                                        scales_scale_factor: float = 0.01,
-                                       trans_scale_factor: float = 0.01) -> SMILTransformerDecoderHead:
+                                       trans_scale_factor: float = 0.01,
+                                       scale_trans_mode: str = 'separate') -> SMILTransformerDecoderHead:
     """
     Build a SMIL transformer decoder head.
     
@@ -440,6 +458,7 @@ def build_smil_transformer_decoder_head(feature_dim: int, context_dim: int,
         rotation_representation: '6d' or 'axis_angle'
         scales_scale_factor: Scaling factor for log_beta_scales predictions (default: 0.01)
         trans_scale_factor: Scaling factor for betas_trans predictions (default: 0.01)
+        scale_trans_mode: Mode for handling scale and translation betas ('ignore', 'separate', 'entangled_with_betas')
         
     Returns:
         SMILTransformerDecoderHead instance
@@ -456,5 +475,6 @@ def build_smil_transformer_decoder_head(feature_dim: int, context_dim: int,
         ief_iters=ief_iters,
         rotation_representation=rotation_representation,
         scales_scale_factor=scales_scale_factor,
-        trans_scale_factor=trans_scale_factor
+        trans_scale_factor=trans_scale_factor,
+        scale_trans_mode=scale_trans_mode
     )
