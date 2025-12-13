@@ -3,9 +3,6 @@ SLEAP Data Loader for SMILify Pipeline
 
 This module provides functionality to load and process SLEAP pose estimation data
 for integration with the SMILify training pipeline.
-
-Author: SMILify Team
-Date: 2025
 """
 
 import os
@@ -17,6 +14,12 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import toml
+import pandas as pd
+import sys
+
+# Add the parent directories to the path to import config
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import config
 
 
 class SLEAPDataLoader:
@@ -30,20 +33,40 @@ class SLEAPDataLoader:
     - Video frames for visualization
     """
     
-    def __init__(self, project_path: str):
+    def __init__(self, project_path: str, lookup_table_path: Optional[str] = None, 
+                 shape_betas_path: Optional[str] = None):
         """
         Initialize the SLEAP data loader.
         
         Args:
             project_path (str): Path to the SLEAP project directory
+            lookup_table_path (str, optional): Path to CSV lookup table for joint name mapping
+            shape_betas_path (str, optional): Path to CSV lookup table for ground truth shape betas
         """
         self.project_path = Path(project_path)
+        self.lookup_table_path = lookup_table_path
+        self.shape_betas_path = shape_betas_path
         self.calibration_data = None
         self.camera_views = []
         self.keypoint_names = []
         self.data_structure_type = None  # 'camera_dirs' or 'session_dirs'
         self.session_name = None  # For session-based structure
+        
+        # SMAL model joint information
+        self.smal_joint_names = []
+        self.smal_n_joints = 0
+        self.joint_mapping = {}  # Maps SMAL joint index to SLEAP keypoint index
+        self.lookup_table = None
+        
+        # Ground truth shape betas
+        self.shape_betas_table = None
+        self.ground_truth_betas = None
+        
         self._load_project_structure()
+        self._load_smal_model_info()
+        self._load_lookup_table()
+        self._load_shape_betas()
+        self._create_joint_mapping()
         
     def _load_project_structure(self):
         """Load the project structure and identify available camera views."""
@@ -209,14 +232,20 @@ class SLEAPDataLoader:
             if 'pred_points' in f:
                 data['pred_points'] = f['pred_points'][:]
                 
-            # Load metadata
+            # Load metadata (optional, not required for keypoint extraction)
             if 'videos_json' in f:
-                videos_json = f['videos_json'][()]
-                data['videos'] = json.loads(videos_json.item())
+                try:
+                    videos_json = f['videos_json'][()]
+                    data['videos'] = json.loads(self._decode_json_data(videos_json))
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"Warning: Could not parse videos_json metadata: {e}")
                 
             if 'tracks_json' in f:
-                tracks_json = f['tracks_json'][()]
-                data['tracks'] = json.loads(tracks_json.item())
+                try:
+                    tracks_json = f['tracks_json'][()]
+                    data['tracks_metadata'] = json.loads(self._decode_json_data(tracks_json))
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"Warning: Could not parse tracks_json metadata: {e}")
                 
         # Load calibration data for this camera
         calibration_entry = self._get_calibration_entry(camera_name)
@@ -290,6 +319,50 @@ class SLEAPDataLoader:
             if key != 'metadata' and value.get('name') == camera_name:
                 return value
         return None
+    
+    def _decode_json_data(self, data) -> str:
+        """
+        Decode JSON data from various HDF5 storage formats.
+        
+        Args:
+            data: Data loaded from HDF5, could be bytes, str, numpy array, etc.
+            
+        Returns:
+            str: Decoded JSON string ready for json.loads()
+        """
+        # Handle bytes directly
+        if isinstance(data, bytes):
+            return data.decode('utf-8')
+        
+        # Handle string directly
+        if isinstance(data, str):
+            return data
+        
+        # Handle numpy array or HDF5 dataset
+        if hasattr(data, 'shape'):
+            # Single element array - use .item()
+            if data.shape == () or (hasattr(data, 'size') and data.size == 1):
+                item = data.item() if hasattr(data, 'item') else data[()]
+                if isinstance(item, bytes):
+                    return item.decode('utf-8')
+                return str(item)
+            
+            # Array of bytes/strings - join them
+            if len(data.shape) == 1:
+                try:
+                    # Try to decode and join if it's an array of bytes
+                    decoded_parts = []
+                    for item in data:
+                        if isinstance(item, bytes):
+                            decoded_parts.append(item.decode('utf-8'))
+                        else:
+                            decoded_parts.append(str(item))
+                    return ''.join(decoded_parts)
+                except Exception:
+                    pass
+        
+        # Fallback: convert to string
+        return str(data)
         
     def extract_2d_keypoints(self, camera_data: Dict[str, Any], frame_idx: int = 0) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -453,24 +526,82 @@ class SLEAPDataLoader:
         """Load video frame for camera_dirs structure."""
         camera_dir = self.project_path / camera_name
         
-        # Find video file
+        # Prefer the video path referenced inside an associated .h5 file, if available
+        try:
+            # First, look for an analysis file, then fall back to predictions.h5
+            h5_candidates = list(camera_dir.glob("*.analysis.h5"))
+            if not h5_candidates:
+                h5_candidates = list(camera_dir.glob("*.predictions.h5"))
+            
+            if h5_candidates:
+                h5_file = h5_candidates[0]
+                with h5py.File(h5_file, 'r') as f:
+                    if 'video_path' in f:
+                        raw_path = f['video_path'][()]
+                        # Decode path from HDF5 and use only the filename, as the
+                        # original absolute directory is not available on this system.
+                        if isinstance(raw_path, bytes):
+                            video_path_str = raw_path.decode('utf-8')
+                        else:
+                            video_path_str = str(raw_path)
+                        video_filename = Path(video_path_str).name
+                        candidate_path = camera_dir / video_filename
+
+                        if candidate_path.exists():
+                            print(f"Using video file from {h5_file} for camera {camera_name}: {candidate_path}")
+                            return self._read_video_frame(candidate_path, frame_idx)
+
+                        print(f"Warning: Expected video file not found next to {h5_file}: {candidate_path}")
+        except Exception as e:
+            print(f"Warning: Failed to read video_path from h5 in {camera_dir}: {e}")
+        
+        # Fallback: find video file directly in camera directory
         video_files = list(camera_dir.glob("*.mp4"))
         if not video_files:
             print(f"No video file found in {camera_dir}")
             return None
             
         video_file = video_files[0]
+        print(f"Using fallback video file for camera {camera_name}: {video_file}")
         return self._read_video_frame(video_file, frame_idx)
         
     def _load_video_frame_session_dirs(self, camera_name: str, frame_idx: int) -> Optional[np.ndarray]:
         """Load video frame for session_dirs structure."""
-        # Find video file in main directory
+        # Prefer the video path referenced inside the per-camera .h5 file
+        if self.session_name:
+            session_dir = self.project_path / self.session_name
+            camera_h5_files = list(session_dir.glob(f"*_cam{camera_name}.h5"))
+            if camera_h5_files:
+                camera_h5_file = camera_h5_files[0]
+                try:
+                    with h5py.File(camera_h5_file, 'r') as f:
+                        if 'video_path' in f:
+                            raw_path = f['video_path'][()]
+                            # Decode path from HDF5 and use only the filename, as the
+                            # original absolute directory is not available on this system.
+                            if isinstance(raw_path, bytes):
+                                video_path_str = raw_path.decode('utf-8')
+                            else:
+                                video_path_str = str(raw_path)
+                            video_filename = Path(video_path_str).name
+                            candidate_path = camera_h5_file.parent / video_filename
+
+                            if candidate_path.exists():
+                                print(f"Using video file from {camera_h5_file} for camera {camera_name}: {candidate_path}")
+                                return self._read_video_frame(candidate_path, frame_idx)
+
+                            print(f"Warning: Expected video file not found next to {camera_h5_file}: {candidate_path}")
+                except Exception as e:
+                    print(f"Warning: Failed to read video_path from {camera_h5_file}: {e}")
+
+        # Fallback: find video file in main directory by pattern
         video_files = list(self.project_path.glob(f"*_cam{camera_name}.mp4"))
         if not video_files:
             print(f"No video file found for camera {camera_name} in {self.project_path}")
             return None
             
         video_file = video_files[0]
+        print(f"Using fallback video file for camera {camera_name}: {video_file}")
         return self._read_video_frame(video_file, frame_idx)
         
     def _read_video_frame(self, video_file: Path, frame_idx: int) -> Optional[np.ndarray]:
@@ -706,9 +837,20 @@ class SLEAPDataLoader:
                 if camera_h5_files:
                     analysis_file = camera_h5_files[0]
                 
+        # If no analysis file was found, try falling back to predictions files (camera_dirs only)
+        if analysis_file is None and self.data_structure_type == 'camera_dirs':
+            for camera_name in self.camera_views:
+                camera_dir = self.project_path / camera_name
+                # Use the first predictions file we find
+                predictions_files = list(camera_dir.glob("*.predictions.h5"))
+                if predictions_files:
+                    analysis_file = predictions_files[0]
+                    print(f"Using predictions file for keypoint names: {analysis_file}")
+                    break
+
         if analysis_file is None:
-            print("Warning: No analysis file found, using generic keypoint names")
-            # Fallback to generic names if no analysis file found
+            print("Warning: No analysis or predictions file found, using generic keypoint names")
+            # Fallback to generic names if no analysis/predictions file found
             num_keypoints = 15  # Based on the data structure we observed
             return [f'keypoint_{i}' for i in range(num_keypoints)]
             
@@ -760,9 +902,22 @@ class SLEAPDataLoader:
                 if camera_h5_files:
                     analysis_file = camera_h5_files[0]
                 
+        # If no analysis file was found, try falling back to predictions files
         if analysis_file is None:
-            print("Warning: No analysis file found for skeleton structure")
-            return [], []
+            if self.data_structure_type == 'camera_dirs':
+                # Look for *.predictions.h5 files inside camera directories
+                for camera_name in self.camera_views:
+                    camera_dir = self.project_path / camera_name
+                    # Use the first predictions file we find
+                    predictions_files = list(camera_dir.glob("*.predictions.h5"))
+                    if predictions_files:
+                        analysis_file = predictions_files[0]
+                        print(f"Using predictions file for skeleton structure: {analysis_file}")
+                        break
+
+            if analysis_file is None:
+                print("Warning: No analysis or predictions file found for skeleton structure")
+                return [], []
             
         try:
             # Extract skeleton structure from the analysis file
@@ -826,37 +981,432 @@ class SLEAPDataLoader:
             print(f"Calibration data available for: {list(self.calibration_data.keys())}")
             
         print("="*50)
+    
+    def _load_smal_model_info(self):
+        """Load SMAL model joint information from config."""
+        try:
+            # Load SMAL model data from config
+            self.smal_joint_names = config.dd["J_names"]
+            self.smal_n_joints = len(self.smal_joint_names)
+            print(f"Loaded SMAL model with {self.smal_n_joints} joints")
+            print(f"SMAL joint names: {self.smal_joint_names}")
+        except Exception as e:
+            print(f"Warning: Failed to load SMAL model info from config: {e}")
+            # Fallback to generic joint names
+            self.smal_joint_names = [f"joint_{i}" for i in range(50)]  # Default size
+            self.smal_n_joints = len(self.smal_joint_names)
+    
+    def _load_lookup_table(self):
+        """Load CSV lookup table for joint name mapping."""
+        if not self.lookup_table_path:
+            print("No lookup table provided, will use direct name matching")
+            return
+            
+        try:
+            self.lookup_table = pd.read_csv(self.lookup_table_path)
+            print(f"Loaded lookup table from: {self.lookup_table_path}")
+            print(f"Lookup table shape: {self.lookup_table.shape}")
+            print(f"Columns: {list(self.lookup_table.columns)}")
+            
+            # Display first few mappings
+            print("Sample mappings:")
+            for i, row in self.lookup_table.head().iterrows():
+                model_name = row.get('model', 'N/A')
+                data_name = row.get('data', 'N/A')
+                print(f"  {model_name} -> {data_name}")
+                
+        except Exception as e:
+            print(f"Warning: Failed to load lookup table from {self.lookup_table_path}: {e}")
+            self.lookup_table = None
+    
+    def _load_shape_betas(self):
+        """Load ground truth shape betas from CSV lookup table."""
+        if not self.shape_betas_path:
+            print("No shape betas lookup table provided")
+            return
+            
+        try:
+            self.shape_betas_table = pd.read_csv(self.shape_betas_path)
+            print(f"Loaded shape betas table from: {self.shape_betas_path}")
+            print(f"Shape betas table shape: {self.shape_betas_table.shape}")
+            print(f"Columns: {list(self.shape_betas_table.columns)}")
+            
+            # Validate shape betas table against SMAL model configuration
+            self._validate_shape_betas_table()
+            
+            # Try to match the current dataset to a row in the shape betas table
+            self._match_dataset_to_shape_betas()
+            
+        except Exception as e:
+            print(f"Warning: Failed to load shape betas table from {self.shape_betas_path}: {e}")
+            self.shape_betas_table = None
+            self.ground_truth_betas = None
+    
+    def _validate_shape_betas_table(self):
+        """Validate the shape betas table against SMAL model configuration."""
+        if self.shape_betas_table is None:
+            return
+            
+        # Get expected number of shape betas from config
+        expected_n_betas = config.N_BETAS
+        print(f"Expected number of shape betas from config: {expected_n_betas}")
+        
+        # Count PC columns in the table
+        pc_columns = [col for col in self.shape_betas_table.columns if col.startswith('PC')]
+        actual_n_betas = len(pc_columns)
+        print(f"Number of PC columns in table: {actual_n_betas}")
+        print(f"PC columns: {pc_columns}")
+        
+        # Validate the number of components
+        if actual_n_betas != expected_n_betas:
+            print(f"WARNING: Mismatch in number of shape betas!")
+            print(f"  Expected (from config): {expected_n_betas}")
+            print(f"  Found in table: {actual_n_betas}")
+            print(f"  This may cause issues during training.")
+            
+            # Use the smaller number to avoid index errors
+            self.n_shape_betas_to_use = min(expected_n_betas, actual_n_betas)
+            print(f"  Using {self.n_shape_betas_to_use} shape betas to avoid errors.")
+        else:
+            print(f"✓ Shape betas count matches: {expected_n_betas}")
+            self.n_shape_betas_to_use = expected_n_betas
+    
+    def _match_dataset_to_shape_betas(self):
+        """Match the current dataset to ground truth shape betas."""
+        if self.shape_betas_table is None:
+            return
+            
+        # Extract dataset name from project path
+        dataset_name = self.project_path.name
+        print(f"Looking for shape betas for dataset: {dataset_name}")
+        
+        # Try to find a matching row in the shape betas table
+        matched_row = None
+        
+        # First, try exact match
+        for _, row in self.shape_betas_table.iterrows():
+            label = str(row.get('label', '')).strip()
+            if label == dataset_name:
+                matched_row = row
+                print(f"Found exact match: {label}")
+                break
+        
+        # If no exact match, try partial matching
+        if matched_row is None:
+            for _, row in self.shape_betas_table.iterrows():
+                label = str(row.get('label', '')).strip()
+                if dataset_name in label or label in dataset_name:
+                    matched_row = row
+                    print(f"Found partial match: {label} for {dataset_name}")
+                    break
+        
+        if matched_row is not None:
+            # Extract shape betas dynamically based on validated number
+            shape_betas = []
+            for i in range(1, self.n_shape_betas_to_use + 1):  # PC1 to PC{n}
+                pc_col = f'PC{i}'
+                if pc_col in matched_row:
+                    shape_betas.append(float(matched_row[pc_col]))
+                else:
+                    print(f"Warning: {pc_col} not found in shape betas table")
+                    shape_betas.append(0.0)
+            
+            # Pad with zeros if we have fewer betas than expected by config
+            if len(shape_betas) < config.N_BETAS:
+                padding_needed = config.N_BETAS - len(shape_betas)
+                shape_betas.extend([0.0] * padding_needed)
+                print(f"Padded shape betas with {padding_needed} zeros to match config.N_BETAS ({config.N_BETAS})")
+            
+            self.ground_truth_betas = np.array(shape_betas, dtype=np.float32)
+            print(f"Loaded ground truth shape betas: {self.ground_truth_betas}")
+            print(f"Shape betas shape: {self.ground_truth_betas.shape}")
+            print(f"Shape betas range: [{self.ground_truth_betas.min():.3f}, {self.ground_truth_betas.max():.3f}]")
+        else:
+            print(f"Warning: No matching shape betas found for dataset: {dataset_name}")
+            print("Available labels in shape betas table:")
+            for _, row in self.shape_betas_table.iterrows():
+                label = str(row.get('label', '')).strip()
+                print(f"  - {label}")
+            self.ground_truth_betas = None
+    
+    def _create_joint_mapping(self):
+        """Create mapping between SMAL model joints and SLEAP keypoints."""
+        # Get SLEAP keypoint names
+        sleap_keypoint_names = self.get_keypoint_names()
+        
+        print(f"Creating joint mapping between {len(self.smal_joint_names)} SMAL joints and {len(sleap_keypoint_names)} SLEAP keypoints")
+        
+        # Initialize mapping (all joints start as unmapped)
+        self.joint_mapping = {i: -1 for i in range(self.smal_n_joints)}
+        
+        # Create mapping using lookup table if available
+        if self.lookup_table is not None:
+            self._create_mapping_with_lookup_table(sleap_keypoint_names)
+        else:
+            self._create_mapping_direct_matching(sleap_keypoint_names)
+        
+        # Print mapping summary
+        mapped_count = sum(1 for idx in self.joint_mapping.values() if idx != -1)
+        print(f"Joint mapping created: {mapped_count}/{self.smal_n_joints} joints mapped")
+        
+        # Show some example mappings
+        print("Sample mappings:")
+        for i, (smal_idx, sleap_idx) in enumerate(self.joint_mapping.items()):
+            if sleap_idx != -1 and i < 10:  # Show first 10 mappings
+                smal_name = self.smal_joint_names[smal_idx]
+                sleap_name = sleap_keypoint_names[sleap_idx]
+                print(f"  SMAL[{smal_idx}] {smal_name} -> SLEAP[{sleap_idx}] {sleap_name}")
+    
+    def _create_mapping_with_lookup_table(self, sleap_keypoint_names: List[str]):
+        """Create joint mapping using lookup table."""
+        print("Using lookup table for joint mapping")
+        
+        for _, row in self.lookup_table.iterrows():
+            model_name = row.get('model', '')
+            data_name = row.get('data', '')
+            
+            # Handle NaN values and convert to string
+            if pd.isna(model_name) or pd.isna(data_name):
+                continue
+                
+            model_name = str(model_name).strip()
+            data_name = str(data_name).strip()
+            
+            if not model_name or not data_name:
+                continue
+                
+            # Find SMAL joint index
+            smal_idx = None
+            for i, smal_name in enumerate(self.smal_joint_names):
+                if smal_name == model_name:
+                    smal_idx = i
+                    break
+            
+            # Find SLEAP keypoint index
+            sleap_idx = None
+            for i, sleap_name in enumerate(sleap_keypoint_names):
+                if sleap_name == data_name:
+                    sleap_idx = i
+                    break
+            
+            # Create mapping if both found
+            if smal_idx is not None and sleap_idx is not None:
+                self.joint_mapping[smal_idx] = sleap_idx
+                print(f"  Mapped: {model_name} -> {data_name}")
+            else:
+                if smal_idx is None:
+                    print(f"  Warning: SMAL joint '{model_name}' not found in model")
+                if sleap_idx is None:
+                    print(f"  Warning: SLEAP keypoint '{data_name}' not found in data")
+    
+    def _create_mapping_direct_matching(self, sleap_keypoint_names: List[str]):
+        """Create joint mapping using direct name matching."""
+        print("Using direct name matching for joint mapping")
+        
+        for smal_idx, smal_name in enumerate(self.smal_joint_names):
+            for sleap_idx, sleap_name in enumerate(sleap_keypoint_names):
+                if smal_name == sleap_name:
+                    self.joint_mapping[smal_idx] = sleap_idx
+                    print(f"  Direct match: {smal_name} -> {sleap_name}")
+                    break
+    
+    def map_keypoints_to_smal_model(self, keypoints_2d: np.ndarray, visibility: np.ndarray, 
+                                   image_size: Tuple[int, int]) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Map SLEAP keypoints to SMAL model joint order and convert to SMILify format.
+        
+        Args:
+            keypoints_2d (np.ndarray): SLEAP 2D keypoints (N, 2) in pixel coordinates
+            visibility (np.ndarray): SLEAP visibility flags (N,)
+            image_size (Tuple[int, int]): Image size (width, height)
+            
+        Returns:
+            Tuple of (smal_keypoints_2d, smal_visibility) where:
+            - smal_keypoints_2d: (N_SMAL_JOINTS, 2) normalized coordinates [0,1] in [y, x] format
+            - smal_visibility: (N_SMAL_JOINTS,) binary visibility flags
+        """
+        width, height = image_size
+        
+        # Initialize arrays for SMAL model joints
+        smal_keypoints_2d = np.zeros((self.smal_n_joints, 2), dtype=np.float32)
+        smal_visibility = np.zeros(self.smal_n_joints, dtype=np.float32)
+        
+        # Map each SMAL joint
+        for smal_idx, sleap_idx in self.joint_mapping.items():
+            if sleap_idx != -1 and sleap_idx < len(keypoints_2d):
+                # Get SLEAP keypoint data
+                sleap_x, sleap_y = keypoints_2d[sleap_idx]
+                sleap_visible = visibility[sleap_idx]
+                
+                # Convert to normalized coordinates [0, 1]
+                # Note: SLEAP uses [x, y] format, SMILify uses [y, x] format
+                norm_x = sleap_x / width
+                norm_y = sleap_y / height
+                
+                # Store in SMAL format: [y, x] normalized coordinates
+                smal_keypoints_2d[smal_idx, 0] = norm_y  # y coordinate
+                smal_keypoints_2d[smal_idx, 1] = norm_x  # x coordinate
+                smal_visibility[smal_idx] = float(sleap_visible)
+        
+        return smal_keypoints_2d, smal_visibility
+    
+    def get_ground_truth_shape_betas(self) -> Optional[np.ndarray]:
+        """
+        Get the ground truth shape betas for the current dataset.
+        
+        Returns:
+            np.ndarray or None: Ground truth shape betas if available
+        """
+        return self.ground_truth_betas
+    
+    def get_shape_betas_info(self) -> Dict[str, Any]:
+        """
+        Get information about shape betas loading and validation.
+        
+        Returns:
+            Dict containing shape betas information
+        """
+        info = {
+            'shape_betas_available': self.ground_truth_betas is not None,
+            'shape_betas_table_loaded': self.shape_betas_table is not None,
+            'expected_n_betas': config.N_BETAS,
+            'actual_n_betas_in_table': getattr(self, 'n_shape_betas_to_use', 0),
+            'shape_betas_shape': self.ground_truth_betas.shape if self.ground_truth_betas is not None else None
+        }
+        
+        if self.ground_truth_betas is not None:
+            info.update({
+                'shape_betas_range': [float(self.ground_truth_betas.min()), float(self.ground_truth_betas.max())],
+                'shape_betas_mean': float(self.ground_truth_betas.mean()),
+                'shape_betas_std': float(self.ground_truth_betas.std())
+            })
+        
+        return info
+    
+    def get_smal_model_info(self) -> Dict[str, Any]:
+        """Get information about the SMAL model and joint mapping."""
+        return {
+            'smal_joint_names': self.smal_joint_names,
+            'smal_n_joints': self.smal_n_joints,
+            'joint_mapping': self.joint_mapping,
+            'lookup_table_used': self.lookup_table is not None,
+            'mapped_joints': sum(1 for idx in self.joint_mapping.values() if idx != -1),
+            'ground_truth_betas_available': self.ground_truth_betas is not None,
+            'ground_truth_betas': self.ground_truth_betas
+        }
 
 
 def main():
-    """Test the SLEAP data loader with both data structures."""
-    # Test with original structure (camera_dirs)
+    """Test the SLEAP data loader with lookup table functionality."""
+    # Test with session_dirs structure and lookup table
     print("="*60)
-    print("TESTING CAMERA_DIRS STRUCTURE")
+    print("TESTING SLEAP DATA LOADER WITH LOOKUP TABLE")
     print("="*60)
-    project_path_1 = "/home/fabi/DATA_LOCAL/MICE/10072022120554"
-    if Path(project_path_1).exists():
-        loader1 = SLEAPDataLoader(project_path_1)
-        loader1.print_data_summary()
-        print("\nPlotting 2D keypoints for all cameras...")
-        loader1.plot_all_cameras(frame_idx=0, save_dir="sleap_validation_plots_camera_dirs")
-    else:
-        print(f"Path not found: {project_path_1}")
     
-    # Test with new structure (session_dirs)
-    print("\n" + "="*60)
-    print("TESTING SESSION_DIRS STRUCTURE")
-    print("="*60)
-    project_path_2 = "/home/fabi/DATA_LOCAL/STICKS/SMILy_data_test/7th_instar"
-    if Path(project_path_2).exists():
-        loader2 = SLEAPDataLoader(project_path_2)
-        loader2.print_data_summary()
-        print("\nPlotting 2D keypoints for all cameras...")
-        loader2.plot_all_cameras(frame_idx=0, save_dir="sleap_validation_plots_session_dirs")
-    else:
-        print(f"Path not found: {project_path_2}")
+    project_path = "/home/fabi/DATA_LOCAL/2025-12-05-better-falkner-mice/TRAIN_SMIL_MICE/WhiteMouse"
+    lookup_table_path = "/home/fabi/DATA_LOCAL/2025-12-05-better-falkner-mice/TRAIN_SMIL_MICE/lookup_table_names_Falkner_MICE.csv"
+    shape_betas_path = "/home/fabi/DATA_LOCAL/2025-12-05-better-falkner-mice/TRAIN_SMIL_MICE/lookup_table_PCs_Falkner_MICE.csv"
     
-    print("\nSLEAP data loader test completed!")
+    if Path(project_path).exists():
+        print(f"Testing with project: {project_path}")
+        if Path(lookup_table_path).exists():
+            print(f"Using lookup table: {lookup_table_path}")
+        else:
+            print(f"Lookup table not found: {lookup_table_path}")
+            lookup_table_path = None
+            
+        if Path(shape_betas_path).exists():
+            print(f"Using shape betas table: {shape_betas_path}")
+        else:
+            print(f"Shape betas table not found: {shape_betas_path}")
+            shape_betas_path = None
+            
+        # Initialize loader with lookup table and shape betas
+        loader = SLEAPDataLoader(project_path, lookup_table_path, shape_betas_path)
+        
+        # Print data summary
+        loader.print_data_summary()
+        
+        # Print SMAL model info
+        print("\n" + "="*50)
+        print("SMAL MODEL INTEGRATION INFO")
+        print("="*50)
+        smal_info = loader.get_smal_model_info()
+        print(f"SMAL joints: {smal_info['smal_n_joints']}")
+        print(f"Mapped joints: {smal_info['mapped_joints']}")
+        print(f"Lookup table used: {smal_info['lookup_table_used']}")
+        print(f"Ground truth betas available: {smal_info['ground_truth_betas_available']}")
+        
+        if smal_info['ground_truth_betas_available']:
+            betas = smal_info['ground_truth_betas']
+            print(f"Ground truth shape betas: {betas}")
+            print(f"Shape betas shape: {betas.shape}")
+            print(f"Shape betas range: [{betas.min():.3f}, {betas.max():.3f}]")
+        
+        # Print detailed shape betas validation info
+        print("\n" + "="*50)
+        print("SHAPE BETAS VALIDATION INFO")
+        print("="*50)
+        shape_betas_info = loader.get_shape_betas_info()
+        print(f"Shape betas available: {shape_betas_info['shape_betas_available']}")
+        print(f"Shape betas table loaded: {shape_betas_info['shape_betas_table_loaded']}")
+        print(f"Expected N_BETAS (from config): {shape_betas_info['expected_n_betas']}")
+        print(f"Actual betas in table: {shape_betas_info['actual_n_betas_in_table']}")
+        
+        if shape_betas_info['shape_betas_available']:
+            print(f"Final shape betas shape: {shape_betas_info['shape_betas_shape']}")
+            print(f"Shape betas statistics:")
+            print(f"  Range: [{shape_betas_info['shape_betas_range'][0]:.3f}, {shape_betas_info['shape_betas_range'][1]:.3f}]")
+            print(f"  Mean: {shape_betas_info['shape_betas_mean']:.3f}")
+            print(f"  Std: {shape_betas_info['shape_betas_std']:.3f}")
+        
+        # Test keypoint mapping for first camera
+        if loader.camera_views:
+            camera_name = loader.camera_views[0]
+            print(f"\nTesting keypoint mapping for camera: {camera_name}")
+            
+            # Load camera data
+            camera_data = loader.load_camera_data(camera_name)
+            
+            # Extract 2D keypoints
+            keypoints_2d, visibility = loader.extract_2d_keypoints(camera_data, frame_idx=0)
+            
+            if len(keypoints_2d) > 0:
+                # Get image size
+                image_size = loader.get_camera_image_size(camera_name)
+                
+                # Map to SMAL model
+                smal_keypoints, smal_visibility = loader.map_keypoints_to_smal_model(
+                    keypoints_2d, visibility, image_size
+                )
+                
+                print(f"Original SLEAP keypoints shape: {keypoints_2d.shape}")
+                print(f"Mapped SMAL keypoints shape: {smal_keypoints.shape}")
+                print(f"Original visibility shape: {visibility.shape}")
+                print(f"Mapped SMAL visibility shape: {smal_visibility.shape}")
+                
+                # Show some mapped keypoints
+                print("\nSample mapped keypoints:")
+                for i in range(min(10, len(smal_keypoints))):
+                    if smal_visibility[i] > 0:
+                        y_norm, x_norm = smal_keypoints[i]
+                        smal_name = loader.smal_joint_names[i]
+                        print(f"  {smal_name}: ({x_norm:.3f}, {y_norm:.3f}) - visible")
+                    else:
+                        smal_name = loader.smal_joint_names[i]
+                        print(f"  {smal_name}: (0.000, 0.000) - hidden")
+            else:
+                print("No keypoints found for testing")
+
+        # After all checks, plot all cameras for the first frame
+        print("\nPlotting keypoints for all cameras (frame 0)...")
+        loader.plot_all_cameras(frame_idx=0, save_dir=None, overlay_on_frames=True)
+        
+        
+        print("\nSLEAP data loader with lookup table test completed!")
+    else:
+        print(f"Project path not found: {project_path}")
+        print("Please update the path in the main() function to test with your data.")
 
 
 if __name__ == "__main__":
