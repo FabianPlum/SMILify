@@ -31,6 +31,7 @@ sample_output/
 plots/
 visualizations/
 visualizations_train/
+test_visualizations/
 checkpoints/
 
 #ignore other repos cloned during dev / debugging
