@@ -47,7 +47,7 @@ For now, I'll focus on insects, hence **SMIL**.
 
 4. some more dependencies
    ```
-   pip install matplotlib scipy opencv-python nibabel trimesh
+   pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psutil
    ```
    
 5. Test your installation
