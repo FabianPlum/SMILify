@@ -69,19 +69,45 @@ def set_random_seeds(seed=0):
     torch.backends.cudnn.benchmark = False
 
 
-def setup_ddp(rank, world_size, port=None):
+def is_torchrun_launched():
+    """
+    Check if the script was launched via torchrun/torch.distributed.launch.
+    
+    When launched via torchrun, environment variables RANK, LOCAL_RANK, and WORLD_SIZE
+    are set automatically.
+
+    NOTE: Other distributed training frameworks (e.g. SLURM) may also set these environment variables.
+    Thus, this function may or may not work for other frameworks as well. Good luck.
+    
+    Returns:
+        bool: True if launched via torchrun, False otherwise
+    """
+    return all(var in os.environ for var in ['RANK', 'LOCAL_RANK', 'WORLD_SIZE'])
+
+
+def setup_ddp(rank, world_size, port=None, local_rank=None):
     """
     Initialize DDP environment.
     
     Args:
-        rank: Current process rank
+        rank: Current process rank (global rank across all nodes)
         world_size: Total number of processes
-        port: Master port for communication (default: 12345)
+        port: Master port for communication (default: 12345, ignored if MASTER_PORT env var is set)
+        local_rank: Local rank within the node (for GPU assignment). If None, uses rank.
     """
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = port or '12345'
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-    torch.cuda.set_device(rank)
+    # Only set MASTER_ADDR/PORT if not already set (e.g., by torchrun or SLURM)
+    if 'MASTER_ADDR' not in os.environ:
+        os.environ['MASTER_ADDR'] = 'localhost'
+    if 'MASTER_PORT' not in os.environ:
+        os.environ['MASTER_PORT'] = port or '12345'
+    
+    # Initialize process group if not already initialized
+    if not dist.is_initialized():
+        dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    
+    # Use local_rank for GPU assignment (important for multi-node setups)
+    gpu_rank = local_rank if local_rank is not None else rank
+    torch.cuda.set_device(gpu_rank)
 
 
 def cleanup_ddp():
@@ -124,19 +150,36 @@ def ddp_main(rank, world_size, dataset_name, checkpoint_path, config_override, m
     """
     DDP wrapper around existing main() function.
     
+    Supports two launch modes:
+    1. mp.spawn (single-node): rank is passed by spawn, local_rank == rank
+    2. torchrun/SLURM (multi-node): environment variables are auto-detected and used
+    
+    When torchrun (or other distributed training frameworks) environment is detected, the environment variables take precedence
+    over the passed arguments for rank/world_size/local_rank.
+    
     Args:
-        rank: Current process rank
-        world_size: Total number of processes
+        rank: Current process rank (may be overridden by env vars if torchrun detected)
+        world_size: Total number of processes (may be overridden by env vars)
         dataset_name: Dataset name to use
         checkpoint_path: Path to checkpoint file
         config_override: Configuration overrides
-        master_port: Master port for DDP communication
+        master_port: Master port for DDP communication (ignored if MASTER_PORT env var is set)
     """
-    setup_ddp(rank, world_size, master_port)
+    # Check if running under torchrun/SLURM - if so, use environment variables
+    if is_torchrun_launched():
+        rank = int(os.environ['RANK'])
+        local_rank = int(os.environ['LOCAL_RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        gpu_rank = local_rank
+    else:
+        # mp.spawn mode (single-node) - local_rank == rank
+        gpu_rank = rank
+    
+    setup_ddp(rank, world_size, master_port, local_rank=gpu_rank)
     
     # Modify config for distributed training
     config_override = config_override or {}
-    config_override['device_override'] = f"cuda:{rank}"
+    config_override['device_override'] = f"cuda:{gpu_rank}"
     config_override['is_distributed'] = True
     config_override['rank'] = rank
     config_override['world_size'] = world_size
@@ -913,7 +956,7 @@ def plot_parameter_errors(train_param_errors, val_param_errors, save_path='param
     plt.close()
 
 
-def load_checkpoint(checkpoint_path, model, optimizer, device):
+def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=False, rank=0):
     """
     Load checkpoint and restore model, optimizer state and training history.
     
@@ -922,10 +965,17 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
         model: SMILImageRegressor model to load state into
         optimizer: Optimizer to load state into
         device: PyTorch device
+        is_distributed: Whether running in distributed mode
+        rank: Current process rank (for print gating)
         
     Returns:
         Tuple of (start_epoch, train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss)
     """
+    # Helper to print only on main process
+    def log(msg):
+        if not is_distributed or rank == 0:
+            print(msg)
+    
     if not checkpoint_path or not os.path.exists(checkpoint_path):
         if checkpoint_path:  # Only raise error if a path was actually provided
             raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
@@ -933,7 +983,7 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
             # No checkpoint provided, return default values
             return 0, [], [], [], [], float('inf')
     
-    print(f"Loading checkpoint from: {checkpoint_path}")
+    log(f"Loading checkpoint from: {checkpoint_path}")
     
     try:
         checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -947,7 +997,7 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
         
         # Check if checkpoint has 'module.' prefix but model doesn't (loading DDP checkpoint into non-DDP model)
         if any(key.startswith('module.') for key in checkpoint_keys) and not any(key.startswith('module.') for key in model_keys):
-            print("Converting DDP checkpoint to non-DDP model...")
+            log("Converting DDP checkpoint to non-DDP model...")
             new_state_dict = {}
             for key, value in model_state_dict.items():
                 if key.startswith('module.'):
@@ -959,7 +1009,7 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
         
         # Check if model has 'module.' prefix but checkpoint doesn't (loading non-DDP checkpoint into DDP model)
         elif any(key.startswith('module.') for key in model_keys) and not any(key.startswith('module.') for key in checkpoint_keys):
-            print("Converting non-DDP checkpoint to DDP model...")
+            log("Converting non-DDP checkpoint to DDP model...")
             new_state_dict = {}
             for key, value in model_state_dict.items():
                 new_key = f'module.{key}'  # Add 'module.' prefix
@@ -967,7 +1017,7 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
             model_state_dict = new_state_dict
         
         model.load_state_dict(model_state_dict, strict=False)
-        print("Model state loaded successfully")
+        log("Model state loaded successfully")
         
         # Get epoch information first (before trying to load optimizer)
         start_epoch = checkpoint.get('epoch', 0) + 1  # Resume from next epoch
@@ -981,9 +1031,9 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
                 current_param_groups = optimizer.param_groups
                 checkpoint_param_groups = checkpoint_optimizer_state.get('param_groups', [])
                 
-                print(f"\nOptimizer parameter group comparison:")
-                print(f"  Current optimizer has {len(current_param_groups)} parameter group(s)")
-                print(f"  Checkpoint has {len(checkpoint_param_groups)} parameter group(s)")
+                log(f"\nOptimizer parameter group comparison:")
+                log(f"  Current optimizer has {len(current_param_groups)} parameter group(s)")
+                log(f"  Checkpoint has {len(checkpoint_param_groups)} parameter group(s)")
                 
                 # Show details of each parameter group
                 for i, (curr_group, ckpt_group) in enumerate(zip(current_param_groups, checkpoint_param_groups)):
@@ -992,12 +1042,12 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
                     curr_lr = curr_group.get('lr', 'N/A')
                     ckpt_lr = ckpt_group.get('lr', 'N/A')
                     
-                    print(f"  Group {i}:")
-                    print(f"    Current: {curr_num_params} parameters, lr={curr_lr}")
-                    print(f"    Checkpoint: {ckpt_num_params} parameters, lr={ckpt_lr}")
+                    log(f"  Group {i}:")
+                    log(f"    Current: {curr_num_params} parameters, lr={curr_lr}")
+                    log(f"    Checkpoint: {ckpt_num_params} parameters, lr={ckpt_lr}")
                     
                     if curr_num_params != ckpt_num_params:
-                        print(f"    ⚠️  MISMATCH: Parameter count differs!")
+                        log(f"    ⚠️  MISMATCH: Parameter count differs!")
                         
                         # Get parameter names from model state dict to identify the differences
                         # We'll compare the parameter names from both state dicts
@@ -1010,16 +1060,16 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
                         removed_params = checkpoint_param_names - current_param_names
                         
                         if new_params:
-                            print(f"\n    Parameters in CURRENT model but NOT in checkpoint ({len(new_params)}):")
+                            log(f"\n    Parameters in CURRENT model but NOT in checkpoint ({len(new_params)}):")
                             for param_name in sorted(new_params):
                                 param_shape = model.state_dict()[param_name].shape
-                                print(f"      + {param_name}: {tuple(param_shape)}")
+                                log(f"      + {param_name}: {tuple(param_shape)}")
                         
                         if removed_params:
-                            print(f"\n    Parameters in CHECKPOINT but NOT in current model ({len(removed_params)}):")
+                            log(f"\n    Parameters in CHECKPOINT but NOT in current model ({len(removed_params)}):")
                             for param_name in sorted(removed_params):
                                 param_shape = checkpoint['model_state_dict'][param_name].shape
-                                print(f"      - {param_name}: {tuple(param_shape)}")
+                                log(f"      - {param_name}: {tuple(param_shape)}")
                         
                         # Also check for shape mismatches in common parameters
                         common_params = current_param_names & checkpoint_param_names
@@ -1031,25 +1081,25 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
                                 shape_mismatches.append((param_name, curr_shape, ckpt_shape))
                         
                         if shape_mismatches:
-                            print(f"\n    Parameters with SHAPE mismatches ({len(shape_mismatches)}):")
+                            log(f"\n    Parameters with SHAPE mismatches ({len(shape_mismatches)}):")
                             for param_name, curr_shape, ckpt_shape in sorted(shape_mismatches):
-                                print(f"      ~ {param_name}: current={tuple(curr_shape)}, checkpoint={tuple(ckpt_shape)}")
+                                log(f"      ~ {param_name}: current={tuple(curr_shape)}, checkpoint={tuple(ckpt_shape)}")
                 
                 # If group counts differ, show that too
                 if len(current_param_groups) != len(checkpoint_param_groups):
-                    print(f"  ⚠️  MISMATCH: Number of parameter groups differs!")
-                    print(f"     This usually happens when the model architecture or optimizer")
-                    print(f"     configuration has changed between checkpoint save and resume.")
+                    log(f"  ⚠️  MISMATCH: Number of parameter groups differs!")
+                    log(f"     This usually happens when the model architecture or optimizer")
+                    log(f"     configuration has changed between checkpoint save and resume.")
                 
                 # Try to load anyway
                 optimizer.load_state_dict(checkpoint_optimizer_state)
-                print("\nOptimizer state loaded successfully")
+                log("\nOptimizer state loaded successfully")
                 optimizer_loaded = True
         except Exception as opt_error:
-            print(f"\n⚠️  Warning: Could not load optimizer state: {opt_error}")
-            print("Optimizer will be reinitialized (learning rate and momentum will be reset)")
-            print("This is usually safe - training will continue from the model weights,")
-            print("just without the optimizer's momentum/state from the checkpoint.")
+            log(f"\n⚠️  Warning: Could not load optimizer state: {opt_error}")
+            log("Optimizer will be reinitialized (learning rate and momentum will be reset)")
+            log("This is usually safe - training will continue from the model weights,")
+            log("just without the optimizer's momentum/state from the checkpoint.")
         
         # Update learning rate to match curriculum for the resumed epoch
         resumed_lr = TrainingConfig.get_learning_rate_for_epoch(start_epoch)
@@ -1057,9 +1107,9 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
             param_group['lr'] = resumed_lr
         
         if optimizer_loaded:
-            print(f"Learning rate updated to {resumed_lr} for resumed epoch {start_epoch}")
+            log(f"Learning rate updated to {resumed_lr} for resumed epoch {start_epoch}")
         else:
-            print(f"Learning rate set to {resumed_lr} for resumed epoch {start_epoch} (optimizer reinitialized)")
+            log(f"Learning rate set to {resumed_lr} for resumed epoch {start_epoch} (optimizer reinitialized)")
         
         # Initialize training history lists
         train_losses = []
@@ -1071,19 +1121,19 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
         # Try to load training history if available
         if 'train_losses' in checkpoint:
             train_losses = checkpoint['train_losses']
-            print(f"Loaded training history with {len(train_losses)} epochs")
+            log(f"Loaded training history with {len(train_losses)} epochs")
         
         if 'val_losses' in checkpoint:
             val_losses = checkpoint['val_losses']
-            print(f"Loaded validation history with {len(val_losses)} epochs")
+            log(f"Loaded validation history with {len(val_losses)} epochs")
         
         if 'train_param_errors_history' in checkpoint:
             train_param_errors = checkpoint['train_param_errors_history']
-            print(f"Loaded training parameter error history with {len(train_param_errors)} epochs")
+            log(f"Loaded training parameter error history with {len(train_param_errors)} epochs")
         
         if 'val_param_errors_history' in checkpoint:
             val_param_errors = checkpoint['val_param_errors_history']
-            print(f"Loaded validation parameter error history with {len(val_param_errors)} epochs")
+            log(f"Loaded validation parameter error history with {len(val_param_errors)} epochs")
         
         # Get best validation loss
         if 'best_val_loss' in checkpoint:
@@ -1093,14 +1143,14 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
         elif val_losses:
             best_val_loss = min(val_losses)
         
-        print(f"Resuming training from epoch {start_epoch}")
-        print(f"Best validation loss so far: {best_val_loss:.6f}")
+        log(f"Resuming training from epoch {start_epoch}")
+        log(f"Best validation loss so far: {best_val_loss:.6f}")
         
         return start_epoch, train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss
         
     except Exception as e:
-        print(f"Error loading checkpoint: {e}")
-        print("Starting training from scratch...")
+        log(f"Error loading checkpoint: {e}")
+        log("Starting training from scratch...")
         return 0, [], [], [], [], float('inf')
 
 
@@ -1197,12 +1247,14 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             output_config['checkpoint_dir'] = os.path.join(temp_dir, 'checkpoints')
             output_config['plots_dir'] = os.path.join(temp_dir, 'plots')
             output_config['visualizations_dir'] = os.path.join(temp_dir, 'visualizations')
-            print(f"Test mode: Using temporary directory: {temp_dir}")
+            if not is_distributed or rank == 0:
+                print(f"Test mode: Using temporary directory: {temp_dir}")
     
     # Set random seeds for reproducibility
     seed = training_params['seed']
     set_random_seeds(seed)
-    print(f"Random seed set to: {seed}")
+    if not is_distributed or rank == 0:
+        print(f"Random seed set to: {seed}")
     
     # Set device (use device_override for distributed training)
     if device_override:
@@ -1223,18 +1275,20 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     rotation_representation = training_params['rotation_representation']
     
     # Create dataset (multi-dataset or single dataset)
-    print("Loading dataset...")
-    print(f"Using rotation representation: {rotation_representation}")
-    print(f"Using backbone: {model_config['backbone_name']}")
+    if not is_distributed or rank == 0:
+        print("Loading dataset...")
+        print(f"Using rotation representation: {rotation_representation}")
+        print(f"Using backbone: {model_config['backbone_name']}")
     
     # Check if multi-dataset training is enabled
     use_multi_dataset = TrainingConfig.is_multi_dataset_enabled()
     
     if use_multi_dataset:
         # Multi-dataset training mode
-        print("\n" + "="*70)
-        print("MULTI-DATASET TRAINING MODE ENABLED")
-        print("="*70)
+        if not is_distributed or rank == 0:
+            print("\n" + "="*70)
+            print("MULTI-DATASET TRAINING MODE ENABLED")
+            print("="*70)
         
         from combined_dataset import CombinedSMILDataset
         
@@ -1244,9 +1298,10 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         if not dataset_configs:
             raise ValueError("Multi-dataset mode enabled but no datasets are configured!")
         
-        print(f"Loading {len(dataset_configs)} datasets:")
-        for ds_config in dataset_configs:
-            print(f"  - {ds_config['name']}: {ds_config['path']} (weight: {ds_config['weight']})")
+        if not is_distributed or rank == 0:
+            print(f"Loading {len(dataset_configs)} datasets:")
+            for ds_config in dataset_configs:
+                print(f"  - {ds_config['name']}: {ds_config['path']} (weight: {ds_config['weight']})")
         
         # Create combined dataset
         dataset = CombinedSMILDataset(
@@ -1256,11 +1311,13 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         )
         
         # Print statistics
-        dataset.print_statistics()
+        if not is_distributed or rank == 0:
+            dataset.print_statistics()
         
         # Split dataset using per-dataset strategy
         split_strategy = TrainingConfig.get_validation_split_strategy()
-        print(f"\nUsing '{split_strategy}' split strategy")
+        if not is_distributed or rank == 0:
+            print(f"\nUsing '{split_strategy}' split strategy")
         
         train_set, val_set, test_set = dataset.split_datasets(
             train_size=1.0 - training_config['split_config']['test_size'] - training_config['split_config']['val_size'],
@@ -1277,13 +1334,15 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             num_samples=len(train_set)
         )
         
-        print(f"\nCreated weighted sampler with weights: {dataset_weights}")
+        if not is_distributed or rank == 0:
+            print(f"\nCreated weighted sampler with weights: {dataset_weights}")
         
     else:
         # Single dataset training mode (legacy)
-        print("\n" + "="*70)
-        print("SINGLE DATASET TRAINING MODE (Legacy)")
-        print("="*70)
+        if not is_distributed or rank == 0:
+            print("\n" + "="*70)
+            print("SINGLE DATASET TRAINING MODE (Legacy)")
+            print("="*70)
         
         # Check if SLEAP dataset support is available
         try:
@@ -1303,9 +1362,10 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             rotation_representation=rotation_representation,
             backbone_name=model_config['backbone_name']
         )
-        print(f"Dataset size: {len(dataset)}")
-        print(f"Original resolution: {dataset.get_input_resolution()}")
-        print(f"Target resolution: {dataset.get_target_resolution()}")
+        if not is_distributed or rank == 0:
+            print(f"Dataset size: {len(dataset)}")
+            print(f"Original resolution: {dataset.get_input_resolution()}")
+            print(f"Target resolution: {dataset.get_target_resolution()}")
         
         # Split dataset using configuration
         train_amount, val_amount, test_amount = TrainingConfig.get_train_val_test_sizes(len(dataset))
@@ -1316,9 +1376,10 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         
         train_sampler_weighted = None  # No weighted sampler for single dataset
     
-    print(f"Train set: {len(train_set)} samples")
-    print(f"Validation set: {len(val_set)} samples")
-    print(f"Test set: {len(test_set)} samples")
+    if not is_distributed or rank == 0:
+        print(f"Train set: {len(train_set)} samples")
+        print(f"Validation set: {len(val_set)} samples")
+        print(f"Test set: {len(test_set)} samples")
     
     # Create data loaders with optimized multiprocessing
     # Use configuration parameters for data loading optimization
@@ -1326,22 +1387,20 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     pin_memory = training_params.get('pin_memory', True)
     prefetch_factor = training_params.get('prefetch_factor', 2)
     
-    # Ensure matplotlib backend is set for multiprocessing safety
-    import matplotlib
-    matplotlib.use('Agg')
     
-    print(f"Data loading configuration:")
-    print(f"  Workers: {num_workers}")
-    print(f"  Pin memory: {pin_memory}")
-    print(f"  Prefetch factor: {prefetch_factor}")
-    print(f"  Matplotlib backend: {matplotlib.get_backend()}")
+    if not is_distributed or rank == 0:
+        print(f"Data loading configuration:")
+        print(f"  Workers: {num_workers}")
+        print(f"  Pin memory: {pin_memory}")
+        print(f"  Prefetch factor: {prefetch_factor}")
+        print(f"  Matplotlib backend: {matplotlib.get_backend()}")
     
     # Create data loaders with distributed samplers if using DDP
     if is_distributed:
         # Create distributed samplers
         # Note: If using weighted sampler for multi-dataset, we can't use DistributedSampler directly
         # Would need to implement DistributedWeightedSampler (TODO for future)
-        if use_multi_dataset and train_sampler_weighted is not None:
+        if use_multi_dataset and train_sampler_weighted is not None and rank == 0:
             print("WARNING: Distributed training with weighted sampling not yet implemented")
             print("  Falling back to standard distributed sampler")
             print("  Batch composition may not follow dataset weights correctly")
@@ -1350,20 +1409,20 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         val_sampler = DistributedSampler(val_set, rank=rank, num_replicas=world_size, shuffle=False)
         test_sampler = DistributedSampler(test_set, rank=rank, num_replicas=world_size, shuffle=False)
         
-        if not is_distributed or rank == 0:
+        if rank == 0:
             print(f"Using distributed samplers for {world_size} GPUs")
             print(f"Effective batch size per GPU: {batch_size}")
             print(f"Total effective batch size: {batch_size * world_size}")
             
-        # Debug: Print sampler information for each process
-        if is_distributed:
+        # Debug: Print sampler information (only from rank 0 to reduce noise)
+        if rank == 0:
             print(f"Rank {rank}: Train sampler size: {len(train_sampler)}, Val sampler size: {len(val_sampler)}")
-            print(f"Rank {rank}: Train sampler epoch: {train_sampler.epoch}, Val sampler epoch: {val_sampler.epoch}")
     else:
         # Use weighted sampler for training if available (multi-dataset mode)
         if use_multi_dataset and train_sampler_weighted is not None:
             train_sampler = train_sampler_weighted
-            print("Using weighted random sampler for mixed-batch training")
+            if not is_distributed or rank == 0:
+                print("Using weighted random sampler for mixed-batch training")
         else:
             train_sampler = None
         
@@ -1420,28 +1479,33 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     
     # Memory optimization setup
     memory_optimizer = MemoryOptimizer(device=device, target_memory_gb=20.0)
-    memory_optimizer.monitor.print_memory_status("Before model initialization")
+    if not is_distributed or rank == 0:
+        memory_optimizer.monitor.print_memory_status("Before model initialization")
     
     # Get memory recommendations
     memory_config = recommend_training_config(model_config['backbone_name'], 24.0)
-    print(f"Memory recommendations for {model_config['backbone_name']}:")
-    for key, value in memory_config.items():
-        if key != 'memory_optimizations':
-            print(f"  {key}: {value}")
+    if not is_distributed or rank == 0:
+        print(f"Memory recommendations for {model_config['backbone_name']}:")
+        for key, value in memory_config.items():
+            if key != 'memory_optimizations':
+                print(f"  {key}: {value}")
     
     # Initialize model
-    print("Initializing model...")
-    print(f"Using backbone: {model_config['backbone_name']}")
+    if not is_distributed or rank == 0:
+        print("Initializing model...")
+        print(f"Using backbone: {model_config['backbone_name']}")
     
     # Determine appropriate input resolution based on backbone
     if model_config['backbone_name'].startswith('vit'):
         # Vision Transformers expect 224x224 input
         input_resolution = 224
-        print(f"Using ViT input resolution: {input_resolution}x{input_resolution}")
+        if not is_distributed or rank == 0:
+            print(f"Using ViT input resolution: {input_resolution}x{input_resolution}")
     else:
         # ResNet can handle higher resolutions
         input_resolution = dataset.get_input_resolution()
-        print(f"Using ResNet input resolution: {input_resolution}x{input_resolution}")
+        if not is_distributed or rank == 0:
+            print(f"Using ResNet input resolution: {input_resolution}x{input_resolution}")
     
     model = SMILImageRegressor(
         device=device,
@@ -1463,12 +1527,13 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     ).to(device)
     
     # Print model configuration
-    print(f"Model created with head type: {model.head_type}")
-    print(f"Scale/Translation mode: {TrainingConfig.get_scale_trans_mode()}")
-    if model.head_type == 'transformer_decoder':
-        print(f"Transformer decoder config: {model.transformer_config}")
-        if 'trans_scale_factor' in model.transformer_config:
-            print(f"  Trans scale factor: {model.transformer_config['trans_scale_factor']}")
+    if not is_distributed or rank == 0:
+        print(f"Model created with head type: {model.head_type}")
+        print(f"Scale/Translation mode: {TrainingConfig.get_scale_trans_mode()}")
+        if model.head_type == 'transformer_decoder':
+            print(f"Transformer decoder config: {model.transformer_config}")
+            if 'trans_scale_factor' in model.transformer_config:
+                print(f"  Trans scale factor: {model.transformer_config['trans_scale_factor']}")
     
     # Apply memory optimizations
     memory_optimizer.optimize_model_for_memory(
@@ -1477,7 +1542,8 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         use_gradient_checkpointing=memory_config['use_gradient_checkpointing']
     )
     
-    memory_optimizer.monitor.print_memory_status("After model initialization")
+    if not is_distributed or rank == 0:
+        memory_optimizer.monitor.print_memory_status("After model initialization")
     
     # Wrap model with DDP if using distributed training
     if is_distributed:
@@ -1608,14 +1674,15 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     # Load checkpoint if provided
     if checkpoint_path is not None:
         start_epoch, train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss = load_checkpoint(
-            checkpoint_path, model, optimizer, device
+            checkpoint_path, model, optimizer, device, is_distributed=is_distributed, rank=rank
         )
     
-    print("Starting training...")
-    if start_epoch > 0:
-        print(f"Resuming from epoch {start_epoch}")
-    else:
-        print("Training from scratch")
+    if not is_distributed or rank == 0:
+        print("Starting training...")
+        if start_epoch > 0:
+            print(f"Resuming from epoch {start_epoch}")
+        else:
+            print("Training from scratch")
     
     for epoch in range(start_epoch, num_epochs):
         # Set epoch for distributed sampler (important for proper shuffling)
@@ -1767,9 +1834,9 @@ if __name__ == "__main__":
     parser.add_argument('--data_path', type=str, default=None,
                        help='Path to dataset (overrides config default). Can be a directory or HDF5 file.')
     parser.add_argument('--num-gpus', type=int, default=1,
-                       help='Number of GPUs to use for training (default: 1)')
-    parser.add_argument('--master-port', type=str, default='12345',
-                       help='Master port for distributed training (default: 12345)')
+                       help='Number of GPUs to use for training (default: 1, ignored when using torchrun)')
+    parser.add_argument('--master-port', type=str, default=None,
+                       help='Master port for distributed training (default: from MASTER_PORT env var or 12345)')
     args = parser.parse_args()
     
     # Create config override dictionary for any provided arguments
@@ -1793,8 +1860,38 @@ if __name__ == "__main__":
         if args.data_path is not None:
             config_override['data_path'] = args.data_path
     
-    # Launch training (single-GPU or multi-GPU)
-    if args.num_gpus > 1:
+    # Get master port from args or environment variable
+    master_port = args.master_port or os.environ.get('MASTER_PORT', '12345')
+    
+    # Check if launched via torchrun/torch.distributed.launch (HPC environment)
+    # This is detected by the presence of RANK, LOCAL_RANK, and WORLD_SIZE env vars
+    if is_torchrun_launched():
+        # Launched via torchrun - processes are already spawned by the launcher
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        
+        # Only print from rank 0 to avoid duplicate output
+        if rank == 0:
+            local_rank = int(os.environ['LOCAL_RANK'])
+            print(f"Detected torchrun/HPC launch environment:")
+            print(f"  Global rank: {rank}")
+            print(f"  Local rank (GPU): {local_rank}")
+            print(f"  World size: {world_size}")
+            print(f"  MASTER_ADDR: {os.environ.get('MASTER_ADDR', 'not set')}")
+            print(f"  MASTER_PORT: {os.environ.get('MASTER_PORT', 'not set')}")
+        
+        # Call ddp_main directly - it will read LOCAL_RANK from env internally
+        ddp_main(
+            rank,
+            world_size,
+            args.dataset,
+            args.checkpoint,
+            config_override or None,
+            master_port
+        )
+    
+    elif args.num_gpus > 1:
+        # Manual multi-GPU launch using mp.spawn
         if not torch.cuda.is_available():
             print("ERROR: Multi-GPU training requested but CUDA is not available!")
             exit(1)
@@ -1803,14 +1900,14 @@ if __name__ == "__main__":
             print(f"ERROR: Requested {args.num_gpus} GPUs but only {available_gpus} available!")
             exit(1)
             
-        print(f"Launching multi-GPU training on {args.num_gpus} GPUs...")
-        print(f"Master port: {args.master_port}")
+        print(f"Launching multi-GPU training on {args.num_gpus} GPUs (using mp.spawn)...")
+        print(f"Master port: {master_port}")
         print(f"Batch size per GPU: {args.batch_size if args.batch_size else 'from config'}")
         print(f"Total effective batch size: {args.batch_size * args.num_gpus if args.batch_size else 'config_batch_size * num_gpus'}")
         
         # Launch multi-GPU training using spawn
         mp.spawn(ddp_main, 
-                args=(args.num_gpus, args.dataset, args.checkpoint, config_override or None, args.master_port),
+                args=(args.num_gpus, args.dataset, args.checkpoint, config_override or None, master_port),
                 nprocs=args.num_gpus,
                 join=True)
     else:
