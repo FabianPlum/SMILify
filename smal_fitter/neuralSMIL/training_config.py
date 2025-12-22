@@ -32,9 +32,10 @@ class TrainingConfig:
         'bbox_center_test': "/home/fabi/dev/SMILify/bbox_center_STICKY_test.h5",
         'bbox_center_STICKY_single_animal': "/home/fabi/dev/SMILify/bbox_center_STICKY_single_animal.h5",
         'bbox_center_PERU': "/home/fabi/dev/SMILify/bbox_center_PERU_test.h5",
-        'SMILyMouseSYNTH': "/home/fabi/dev/SMILify/SMILyMouseSYNTH.h5",
+        'SMILyMouseSYNTH': "SMILyMouseSYNTH.h5",
         'RealSMILyMouse': "/home/fabi/dev/SMILify/RealSMILyMouse.h5",
-        'RealSMILyMouseFalkner': "/home/fabi/dev/SMILify/RealSMILyMouseFalkner.h5"
+        'RealSMILyMouseFalkner': "RealSMILyMouseFalknerFROM3D.h5",
+        'RealSMILyMouseFalknerFROM3D_no_crop': "RealSMILyMouseFalknerFROM3D_no_crop.h5"
 
     }
     
@@ -57,9 +58,9 @@ class TrainingConfig:
         'datasets': [
             {
                 'name': 'replicant_main',
-                'path': "/home/fabi/dev/SMILify/SMILySTICK100k.h5",
+                'path': "SMILyMouseSYNTH.h5",
                 'type': 'optimized_hdf5',  # 'replicant', 'sleap', 'optimized_hdf5', or 'auto'
-                'weight': 0.2,  # Sampling weight (higher = more frequent sampling)
+                'weight': 1.0,  # Sampling weight (higher = more frequent sampling)
                 'enabled': True,
                 'available_labels': {
                     # Which ground truth labels are available in this dataset
@@ -80,7 +81,7 @@ class TrainingConfig:
             {
                 'name': 'sleap_data',
                 #'path': "/home/fabi/dev/SMILify/STICKyReprojections.h5",
-                'path': "/home/fabi/dev/SMILify/bbox_center_STICKY_SLEAP.h5",
+                'path': "RealSMILyMouseFalkner.h5",
                 'type': 'optimized_hdf5',
                 'weight': 1.0,  # Sample 20% as often as replicant data
                 'enabled': True,
@@ -122,7 +123,7 @@ class TrainingConfig:
         'weight_decay': 1e-4,  # Add weight decay for AdamW
         'seed': 1234,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': 'checkpoints/checkpoint_epoch_125.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': 'checkpoints/checkpoint_epoch_169.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 16,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 8,  # Prefetch batches
@@ -274,13 +275,19 @@ class TrainingConfig:
 
             # TRAIN UNTIL HERE WITH SYNTH ONLY, THEN SWITCH TO REAL DATA
             # THE HIGH LEARNING RATE IS NEEDED TO WEIGH THE 2D KEYPOINTS HIGH ENOUGH
-            (125, 1.5e-6),      # 1e-7
+            (125, 1e-4),      # 1e-7
 
             # Stage 3: Very low learning rate for final convergence
-            (150, 2e-7),      # 1e-7
+            (200, 5e-5),      # 1e-7
+
+            # Stage 3: Very low learning rate for final convergence
+            (250, 1e-5),      # 1e-7
+
+            # Stage 3: Very low learning rate for final convergence
+            (300, 2e-6),      # 1e-7
 
             # It's save to use high learning rates when using ONLY 2D loss here!
-            (500, 1e-4),
+            (500, 1e-6),
 
             # It's save to use high learning rates when using ONLY 2D loss here!
             (718, 1e-5)      # 1e-5
@@ -293,9 +300,9 @@ class TrainingConfig:
         'plots_dir': 'plots',
         'visualizations_dir': 'visualizations',
         'train_visualizations_dir': 'visualizations_train',
-        'save_checkpoint_every': 2,        # Save checkpoint every N epochs
-        'generate_visualizations_every': 1, # Generate visualizations every N epochs
-        'plot_history_every': 1,          # Plot training history every N epochs
+        'save_checkpoint_every': 10,        # Save checkpoint every N epochs
+        'generate_visualizations_every': 5, # Generate visualizations every N epochs
+        'plot_history_every': 5,          # Plot training history every N epochs
         'num_visualization_samples': 10,    # Number of samples to visualize
     }
     
