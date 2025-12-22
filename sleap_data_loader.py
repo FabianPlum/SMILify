@@ -34,7 +34,7 @@ class SLEAPDataLoader:
     """
     
     def __init__(self, project_path: str, lookup_table_path: Optional[str] = None, 
-                 shape_betas_path: Optional[str] = None):
+                 shape_betas_path: Optional[str] = None, confidence_threshold: float = 0.5):
         """
         Initialize the SLEAP data loader.
         
@@ -42,10 +42,14 @@ class SLEAPDataLoader:
             project_path (str): Path to the SLEAP project directory
             lookup_table_path (str, optional): Path to CSV lookup table for joint name mapping
             shape_betas_path (str, optional): Path to CSV lookup table for ground truth shape betas
+            confidence_threshold (float): Minimum confidence score for keypoints (0.0-1.0). 
+                                         Keypoints below this threshold will be marked as invisible.
+                                         Default: 0.5
         """
         self.project_path = Path(project_path)
         self.lookup_table_path = lookup_table_path
         self.shape_betas_path = shape_betas_path
+        self.confidence_threshold = confidence_threshold
         self.calibration_data = None
         self.camera_views = []
         self.keypoint_names = []
@@ -421,7 +425,26 @@ class SLEAPDataLoader:
         
         # Extract 2D coordinates and visibility
         keypoints_2d = np.column_stack([instance_points['x'], instance_points['y']])
-        visibility = instance_points['visible']
+        
+        # Check for zero coordinates (invisible keypoints often at 0,0)
+        non_zero_coords = (keypoints_2d[:, 0] != 0) | (keypoints_2d[:, 1] != 0)
+        
+        # Determine visibility based on confidence scores and original visibility flag
+        # For pred_points, use the 'score' field if available
+        if 'pred_points' in camera_data and 'score' in instance_points.dtype.names:
+            # Use confidence scores from pred_points
+            confidence_scores = instance_points['score']
+            # Filter out NaN and low-confidence keypoints
+            valid_confidence = ~np.isnan(confidence_scores)
+            above_threshold = confidence_scores >= self.confidence_threshold
+            # Also check original visibility flag
+            original_visible = instance_points['visible'] if 'visible' in instance_points.dtype.names else np.ones(len(instance_points), dtype=bool)
+            # Keypoint is visible if: has valid confidence, above threshold, originally marked visible, and has non-zero coordinates
+            visibility = valid_confidence & above_threshold & original_visible & non_zero_coords
+        else:
+            # Fallback: check original visibility flag and non-zero coordinates
+            original_visible = instance_points['visible'] if 'visible' in instance_points.dtype.names else np.ones(len(instance_points), dtype=bool)
+            visibility = original_visible & non_zero_coords
         
         return keypoints_2d, visibility
         
@@ -445,13 +468,23 @@ class SLEAPDataLoader:
         # Combine x and y coordinates
         keypoints_2d = np.column_stack([x_coords, y_coords])  # Shape: (n_keypoints, 2)
         
-        # For visibility, we can use point scores if available
+        # For visibility, use point scores if available, filtering by confidence threshold
         if 'point_scores' in camera_data:
             point_scores = camera_data['point_scores']  # Shape: (n_tracks, n_keypoints, n_frames)
-            visibility = point_scores[0, :, frame_idx] > 0.5  # Threshold for visibility
+            frame_scores = point_scores[0, :, frame_idx]  # Get scores for this frame
+            
+            # Filter out NaN scores and low-confidence keypoints
+            valid_confidence = ~np.isnan(frame_scores)
+            above_threshold = frame_scores >= self.confidence_threshold
+            # Also check that coordinates are not zero (invisible keypoints often at 0,0)
+            non_zero_coords = (keypoints_2d[:, 0] != 0) | (keypoints_2d[:, 1] != 0)
+            # Keypoint is visible if: has valid confidence, above threshold, and has non-zero coordinates
+            visibility = valid_confidence & above_threshold & non_zero_coords
         else:
-            # Fallback: assume keypoints are visible if they have non-NaN coordinates
-            visibility = ~np.isnan(keypoints_2d).any(axis=1)
+            # Fallback: assume keypoints are visible if they have non-NaN, non-zero coordinates
+            valid_coords = ~np.isnan(keypoints_2d).any(axis=1)
+            non_zero_coords = (keypoints_2d[:, 0] != 0) | (keypoints_2d[:, 1] != 0)
+            visibility = valid_coords & non_zero_coords
             
         return keypoints_2d, visibility
         

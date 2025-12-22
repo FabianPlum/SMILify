@@ -60,7 +60,8 @@ class SLEAPDatasetPreprocessor:
                  compression_level: int = 6,
                 max_frames_per_video: Optional[int] = None,
                 crop_mode: str = 'default',
-                use_reprojections: bool = False):
+                use_reprojections: bool = False,
+                confidence_threshold: float = 0.5):
         """
         Initialize the SLEAP dataset preprocessor.
         
@@ -80,6 +81,8 @@ class SLEAPDatasetPreprocessor:
                       'bbox_crop' - crop around instance based on 2D keypoints bounding box (1.05x padding)
             use_reprojections: If True, use reprojected 2D coordinates from reprojections.h5 
                              instead of raw SLEAP predictions for improved accuracy
+            confidence_threshold: Minimum confidence score (0.0-1.0) for keypoints. Keypoints below 
+                                this threshold will be marked as invisible. Default: 0.5
         """
         self.joint_lookup_table_path = joint_lookup_table_path
         self.shape_betas_table_path = shape_betas_table_path
@@ -92,6 +95,7 @@ class SLEAPDatasetPreprocessor:
         self.max_frames_per_video = max_frames_per_video
         self.crop_mode = crop_mode
         self.use_reprojections = use_reprojections
+        self.confidence_threshold = confidence_threshold
         self._reproj_camera_cache: Dict[str, Any] = {}
         self._reproj_warned_missing: bool = False
         
@@ -191,7 +195,8 @@ class SLEAPDatasetPreprocessor:
             loader = SLEAPDataLoader(
                 project_path=session_path,
                 lookup_table_path=self.joint_lookup_table_path,
-                shape_betas_path=self.shape_betas_table_path
+                shape_betas_path=self.shape_betas_table_path,
+                confidence_threshold=self.confidence_threshold
             )
             
             samples = []
@@ -199,16 +204,22 @@ class SLEAPDatasetPreprocessor:
             reproj_files_by_subdir = {}
             
             if self.use_reprojections:
-                # Try to open reprojections.h5 at session root level (optional)
-                reproj_path = Path(session_path) / 'reprojections.h5'
-                if reproj_path.exists():
+                # Try to open reprojections*.h5 at session root level (optional)
+                # Look for files matching pattern reprojections*.h5
+                session_path_obj = Path(session_path)
+                reproj_candidates = list(session_path_obj.glob('reprojections*.h5'))
+                if reproj_candidates:
+                    reproj_path = reproj_candidates[0]  # Use first match
                     try:
                         reproj_file = h5py.File(str(reproj_path), 'r')
+                        print(f"Info: Using reprojections file: {reproj_path.name}")
                     except Exception as e:
                         print(f"Warning: Failed to open reprojections file {reproj_path}: {e}")
                         reproj_file = None
+                else:
+                    reproj_file = None
                 
-                # If not at root, find and open reprojections.h5 files in subdirectories
+                # If not at root, find and open reprojections*.h5 files in subdirectories
                 # This allows sharing one file handle across multiple cameras in the same subdir
                 if reproj_file is None:
                     reproj_files_by_subdir = self._find_all_reprojection_files(session_path)
@@ -742,7 +753,7 @@ class SLEAPDatasetPreprocessor:
 
     def _find_all_reprojection_files(self, session_path: str) -> Dict[str, h5py.File]:
         """
-        Find and open all reprojections.h5 files in subdirectories of session_path.
+        Find and open all reprojections*.h5 files in subdirectories of session_path.
         Returns a dictionary mapping subdirectory paths to open file handles.
         """
         reproj_files = {}
@@ -751,17 +762,21 @@ class SLEAPDatasetPreprocessor:
             for sub in base.iterdir():
                 if not sub.is_dir():
                     continue
-                cand = sub / 'reprojections.h5'
-                if cand.exists():
+                # Look for files matching pattern reprojections*.h5
+                candidates = list(sub.glob('reprojections*.h5'))
+                if candidates:
+                    cand = candidates[0]  # Use first match
                     try:
                         reproj_files[str(sub)] = h5py.File(str(cand), 'r')
+                        if not self._reproj_warned_missing:
+                            print(f"Info: Found reprojections file in {sub.name}: {cand.name}")
                     except Exception as e:
                         print(f"Warning: Failed to open reprojections file {cand}: {e}")
         except Exception as e:
             print(f"Warning: Error searching for reprojections in {session_path}: {e}")
         
         if reproj_files and not self._reproj_warned_missing:
-            print(f"Info: Found {len(reproj_files)} reprojections.h5 file(s) in session subdirectories")
+            print(f"Info: Found {len(reproj_files)} reprojections*.h5 file(s) in session subdirectories")
             self._reproj_warned_missing = True  # Prevent spam
         
         return reproj_files
@@ -798,17 +813,19 @@ class SLEAPDatasetPreprocessor:
                 # Does this subdir contain the annotation for this camera?
                 annotation_files = list(sub.glob(f"*_cam{camera_name}.h5"))
                 if annotation_files:
-                    cand = sub / 'reprojections.h5'
-                    if cand.exists():
+                    # Look for files matching pattern reprojections*.h5
+                    candidates = list(sub.glob('reprojections*.h5'))
+                    if candidates:
+                        cand = candidates[0]  # Use first match
                         try:
                             return h5py.File(str(cand), 'r')
                         except Exception as e:
                             print(f"Warning: Failed to open reprojections file {cand}: {e}")
                             return None
                     else:
-                        # Annotation dir found but no reprojections.h5
+                        # Annotation dir found but no reprojections*.h5
                         if not self._reproj_warned_missing:
-                            print(f"Info: Annotation directory found ({sub}) but no reprojections.h5 for camera {camera_name}")
+                            print(f"Info: Annotation directory found ({sub}) but no reprojections*.h5 for camera {camera_name}")
                             self._reproj_warned_missing = True
         except Exception as e:
             print(f"Warning: Error searching for reprojections in {session_path}: {e}")
@@ -1418,6 +1435,7 @@ class SLEAPDatasetPreprocessor:
             metadata_group.attrs['joint_lookup_table_used'] = self.joint_lookup_table_path is not None
             metadata_group.attrs['shape_betas_table_used'] = self.shape_betas_table_path is not None
             metadata_group.attrs['used_reprojections'] = self.use_reprojections
+            metadata_group.attrs['confidence_threshold'] = self.confidence_threshold
             
             # Save processing statistics
             metadata_group.attrs['total_sessions'] = self.stats['total_sessions']
@@ -1586,6 +1604,9 @@ Examples:
                        help="Validate the output dataset after preprocessing")
     parser.add_argument("--use_reprojections", action="store_true",
                        help="Use per-session reprojections.h5 for 2D keypoints instead of raw predictions")
+    parser.add_argument("--confidence_threshold", type=float, default=0.5,
+                       help="Minimum confidence score (0.0-1.0) for keypoints. Keypoints below this threshold "
+                            "will be marked as invisible. Default: 0.5")
     
     args = parser.parse_args()
     
@@ -1600,6 +1621,10 @@ Examples:
     
     if args.num_workers < 1:
         print("Error: num_workers must be at least 1")
+        sys.exit(1)
+    
+    if args.confidence_threshold < 0.0 or args.confidence_threshold > 1.0:
+        print("Error: confidence_threshold must be between 0.0 and 1.0")
         sys.exit(1)
     
     # Validate input and output paths
@@ -1632,6 +1657,7 @@ Examples:
         print(f"Workers: {args.num_workers}")
         print(f"Max frames per video: {args.max_frames_per_video or 'All frames'}")
         print(f"Use reprojections: {args.use_reprojections}")
+        print(f"Confidence threshold: {args.confidence_threshold}")
         print(f"Estimated time: {estimate_processing_time(num_sessions, args.num_workers)}")
         print("="*60)
         
@@ -1651,7 +1677,8 @@ Examples:
             chunk_size=args.chunk_size,
             max_frames_per_video=args.max_frames_per_video,
             crop_mode=args.crop_mode,
-            use_reprojections=args.use_reprojections
+            use_reprojections=args.use_reprojections,
+            confidence_threshold=args.confidence_threshold
         )
         
         # Process dataset
