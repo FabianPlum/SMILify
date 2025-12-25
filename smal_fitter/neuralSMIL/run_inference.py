@@ -160,22 +160,47 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
         # Verify this matches the checkpoint by checking state dict keys
         state_dict = checkpoint['model_state_dict']
         
-        # Verify backbone type matches
-        has_vit = any('vit' in key.lower() for key in state_dict.keys())
-        has_resnet = any('resnet' in key.lower() or 'layer' in key for key in state_dict.keys())
+        # Check for transformer head
         has_transformer_head = any('transformer_head' in key for key in state_dict.keys())
         
-        if model_config['backbone_name'].startswith('vit') and not has_vit:
-            print("WARNING: Config specifies ViT but checkpoint appears to contain ResNet")
-        elif model_config['backbone_name'].startswith('resnet') and not has_resnet:
-            print("WARNING: Config specifies ResNet but checkpoint appears to contain ViT")
+        # Infer backbone type from feature dimensions in the checkpoint
+        # Note: Backbone weights are NOT saved (frozen pretrained weights are re-downloaded on load)
+        # So we detect backbone type from the input dimension of the regression head
+        inferred_backbone = None
+        if has_transformer_head:
+            # Check transformer head input dimension from token_embedding weight
+            token_emb_key = 'transformer_head.token_embedding.weight'
+            if token_emb_key in state_dict:
+                feature_dim = state_dict[token_emb_key].shape[0]
+                if feature_dim == 1024:
+                    inferred_backbone = 'vit_large'
+                elif feature_dim == 768:
+                    inferred_backbone = 'vit_base'
+                elif feature_dim == 2048:
+                    inferred_backbone = 'resnet'
+                print(f"Inferred backbone from checkpoint feature dim ({feature_dim}): {inferred_backbone}")
+        
+        # Validate config matches inferred backbone
+        config_backbone = model_config['backbone_name']
+        if inferred_backbone:
+            config_is_vit_large = 'vit_large' in config_backbone
+            config_is_vit_base = 'vit_base' in config_backbone
+            config_is_resnet = config_backbone.startswith('resnet')
+            
+            if inferred_backbone == 'vit_large' and not config_is_vit_large:
+                print(f"WARNING: Checkpoint was trained with ViT-Large but config specifies {config_backbone}")
+            elif inferred_backbone == 'vit_base' and not config_is_vit_base:
+                print(f"WARNING: Checkpoint was trained with ViT-Base but config specifies {config_backbone}")
+            elif inferred_backbone == 'resnet' and not config_is_resnet:
+                print(f"WARNING: Checkpoint was trained with ResNet but config specifies {config_backbone}")
+            else:
+                print(f"Backbone configuration matches checkpoint: {config_backbone}")
         
         if model_config['head_type'] == 'transformer_decoder' and not has_transformer_head:
             print("WARNING: Config specifies transformer_decoder but checkpoint doesn't contain transformer_head")
         
         print(f"Checkpoint verification:")
-        print(f"  Contains ViT keys: {has_vit}")
-        print(f"  Contains ResNet keys: {has_resnet}")
+        print(f"  Inferred backbone: {inferred_backbone or 'unknown'}")
         print(f"  Contains transformer_head: {has_transformer_head}")
         
         print(f"Model configuration:")
