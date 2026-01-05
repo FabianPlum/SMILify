@@ -1438,7 +1438,7 @@ torchrun --nproc_per_node=4 smal_fitter/neuralSMIL/train_multiview_regressor.py 
 
 *Document Version: 2.0*  
 *Last Updated: 2026-01-05*  
-*Author: Claude (AI Assistant)*  
+*Author: Fabian Plum x Claude (AI Assistant)*  
 *Status: IMPLEMENTED - Multi-view system ready for testing*
 
 **Changelog**:
