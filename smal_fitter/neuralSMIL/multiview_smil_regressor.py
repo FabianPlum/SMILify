@@ -175,21 +175,35 @@ class MultiViewFeatureFusion(nn.Module):
 class CameraHead(nn.Module):
     """
     Camera parameter prediction head for a single canonical view.
+    
+    Outputs camera parameters with sensible constraints:
+    - FOV: Clamped to [10, 60] degrees (typical range for perspective cameras)
+    - Rotation: 6D representation for continuous optimization, converted to 3x3 matrix
+    - Translation: Scaled to reasonable range
     """
     
-    def __init__(self, input_dim: int, hidden_dim: int = 256):
+    def __init__(self, input_dim: int, hidden_dim: int = 256, 
+                 default_fov: float = 30.0, fov_range: Tuple[float, float] = (10.0, 60.0),
+                 trans_scale: float = 5.0):
         """
         Initialize camera head.
         
         Args:
             input_dim: Input feature dimension
             hidden_dim: Hidden layer dimension
+            default_fov: Default FOV in degrees
+            fov_range: (min, max) FOV in degrees
+            trans_scale: Scale factor for translation output
         """
         super().__init__()
         
-        # Camera parameters: FOV (1) + rotation (9 for 3x3 matrix) + translation (3) = 13
+        self.default_fov = default_fov
+        self.fov_min, self.fov_max = fov_range
+        self.trans_scale = trans_scale
+        
+        # Camera parameters: FOV delta (1) + rotation 6D (6) + translation (3) = 10
         self.fov_dim = 1
-        self.cam_rot_dim = 9  # 3x3 rotation matrix flattened
+        self.cam_rot_dim = 6  # 6D rotation representation for continuous optimization
         self.cam_trans_dim = 3
         self.total_cam_dim = self.fov_dim + self.cam_rot_dim + self.cam_trans_dim
         
@@ -219,6 +233,30 @@ class CameraHead(nn.Module):
         nn.init.xavier_uniform_(last_linear.weight, gain=0.01)
         nn.init.zeros_(last_linear.bias)
     
+    def _rotation_6d_to_matrix(self, rotation_6d: torch.Tensor) -> torch.Tensor:
+        """
+        Convert 6D rotation representation to 3x3 rotation matrix.
+        
+        The 6D representation consists of the first two columns of the rotation matrix.
+        The third column is computed via cross product.
+        
+        Args:
+            rotation_6d: (..., 6) tensor
+            
+        Returns:
+            (..., 3, 3) rotation matrix
+        """
+        a1 = rotation_6d[..., :3]  # First column
+        a2 = rotation_6d[..., 3:6]  # Second column
+        
+        # Gram-Schmidt orthogonalization
+        b1 = F.normalize(a1, dim=-1)
+        b2 = a2 - (b1 * a2).sum(dim=-1, keepdim=True) * b1
+        b2 = F.normalize(b2, dim=-1)
+        b3 = torch.cross(b1, b2, dim=-1)
+        
+        return torch.stack([b1, b2, b3], dim=-1)
+    
     def forward(self, features: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
         Predict camera parameters from features.
@@ -232,13 +270,25 @@ class CameraHead(nn.Module):
         output = self.layers(features)
         
         idx = 0
-        fov = output[:, idx:idx + self.fov_dim]
+        
+        # FOV: Apply sigmoid to get [0,1], then scale to [fov_min, fov_max]
+        fov_raw = output[:, idx:idx + self.fov_dim]
+        fov = self.fov_min + torch.sigmoid(fov_raw) * (self.fov_max - self.fov_min)
         idx += self.fov_dim
         
-        cam_rot = output[:, idx:idx + self.cam_rot_dim].view(-1, 3, 3)
+        # Rotation: 6D representation -> orthonormal 3x3 matrix
+        rot_6d = output[:, idx:idx + self.cam_rot_dim]
+        # Initialize close to identity: add identity's first two columns
+        # Identity 6D: [1,0,0, 0,1,0]
+        identity_6d = torch.tensor([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 
+                                   device=output.device, dtype=output.dtype)
+        rot_6d = rot_6d + identity_6d
+        cam_rot = self._rotation_6d_to_matrix(rot_6d)
         idx += self.cam_rot_dim
         
-        cam_trans = output[:, idx:idx + self.cam_trans_dim]
+        # Translation: Scale with tanh to bound range, then scale
+        cam_trans_raw = output[:, idx:idx + self.cam_trans_dim]
+        cam_trans = torch.tanh(cam_trans_raw) * self.trans_scale
         
         return {
             'fov': fov,
@@ -436,16 +486,26 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             
             # Joint scales (if available)
             if self.scales_dim > 0:
-                scales_flat = output[:, idx:idx + self.scales_dim]
-                n_joints = self.scales_dim // 3
-                params['log_beta_scales'] = scales_flat.view(batch_size, n_joints, 3)
+                if self.scale_trans_mode == 'separate':
+                    # In separate mode, these are PCA weights, keep as 1D
+                    params['log_beta_scales'] = output[:, idx:idx + self.scales_dim]  # (batch_size, N_BETAS)
+                else:
+                    # In other modes, reshape to per-joint values
+                    scales_flat = output[:, idx:idx + self.scales_dim]
+                    n_joints = self.scales_dim // 3
+                    params['log_beta_scales'] = scales_flat.view(batch_size, n_joints, 3)
                 idx += self.scales_dim
             
             # Joint translations (if available)
             if self.joint_trans_dim > 0:
-                trans_flat = output[:, idx:idx + self.joint_trans_dim]
-                n_joints = self.joint_trans_dim // 3
-                params['betas_trans'] = trans_flat.view(batch_size, n_joints, 3)
+                if self.scale_trans_mode == 'separate':
+                    # In separate mode, these are PCA weights, keep as 1D
+                    params['betas_trans'] = output[:, idx:idx + self.joint_trans_dim]  # (batch_size, N_BETAS)
+                else:
+                    # In other modes, reshape to per-joint values
+                    trans_flat = output[:, idx:idx + self.joint_trans_dim]
+                    n_joints = self.joint_trans_dim // 3
+                    params['betas_trans'] = trans_flat.view(batch_size, n_joints, 3)
             
             return params
             
@@ -544,6 +604,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 'log_beta_scales': 0.1,
                 'betas_trans': 0.1,
                 'keypoint_2d': 1.0,
+                'joint_angle_regularization': 0.0001,  # Penalty for large joint angles
             }
         
         batch_size = predicted_params['global_rot'].shape[0]
@@ -579,6 +640,31 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             )
             loss_components['joint_rot'] = loss
             total_loss = total_loss + loss_weights['joint_rot'] * loss
+        
+        # Joint angle regularization: penalize deviations from default (0,0,0) angles
+        # This helps prevent extreme joint angles and encourages natural poses
+        if loss_weights.get('joint_angle_regularization', 0) > 0:
+            joint_rot_pred = predicted_params['joint_rot']  # (batch_size, N_POSE, 6) or (batch_size, N_POSE, 3)
+            
+            # Convert to axis-angle if needed
+            if self.rotation_representation == '6d':
+                # Convert 6D to axis-angle
+                joint_rot_aa = rotation_6d_to_axis_angle(joint_rot_pred)  # (batch_size, N_POSE, 3)
+            else:
+                # Already in axis-angle format
+                joint_rot_aa = joint_rot_pred  # (batch_size, N_POSE, 3)
+            
+            # Compute L2 norm of joint angles (excluding root joint which is index 0)
+            # joint_rot_aa is already excluding root (it's N_POSE joints, not N_POSE+1)
+            # So we can use all joints, or if we want to be explicit, we can verify
+            joint_angle_norms = torch.norm(joint_rot_aa, dim=-1)  # (batch_size, N_POSE)
+            
+            # Regularization: penalize large joint angles
+            # Use L2 penalty (squared norm) to encourage small angles
+            joint_angle_reg = torch.mean(joint_angle_norms ** 2)
+            
+            loss_components['joint_angle_regularization'] = joint_angle_reg
+            total_loss = total_loss + loss_weights['joint_angle_regularization'] * joint_angle_reg
         
         # Betas loss
         if body_targets.get('betas') is not None and loss_weights.get('betas', 0) > 0:
@@ -799,35 +885,66 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         
         # Convert rotations to axis-angle format for SMAL model
         if self.rotation_representation == '6d':
-            try:
-                global_rot_aa = rotation_6d_to_axis_angle(body_params['global_rot'])
-                joint_rot_aa = rotation_6d_to_axis_angle(body_params['joint_rot'])
-            except Exception as e:
-                print(f"Error converting 6D rotations: {e}")
-                global_rot_aa = torch.zeros_like(body_params['global_rot'][:, :3])
-                joint_rot_aa = torch.zeros_like(body_params['joint_rot'][:, :, :3])
+            global_rot_aa = rotation_6d_to_axis_angle(body_params['global_rot'])
+            joint_rot_aa = rotation_6d_to_axis_angle(body_params['joint_rot'])
         else:
             global_rot_aa = body_params['global_rot']
             joint_rot_aa = body_params['joint_rot']
         
+        # Ensure correct shapes for concatenation
+        if global_rot_aa.dim() == 2:
+            global_rot_aa = global_rot_aa.unsqueeze(1)  # (batch_size, 1, 3)
+        if joint_rot_aa.dim() == 2:
+            joint_rot_aa = joint_rot_aa.unsqueeze(1)  # Handle edge case
+        
+        # Build pose tensor: (batch_size, N_POSE+1, 3)
+        pose_tensor = torch.cat([global_rot_aa, joint_rot_aa], dim=1)
+        
+        # Handle scale/trans parameters based on mode
+        # In 'separate' mode, predicted values are PCA weights that would need transformation
+        # However, for rendering we skip these as they require PCA components that may not be available
+        # and their loss weights are typically 0 anyway. The SMAL model handles None gracefully.
+        betas_logscale = None
+        betas_trans_val = None
+        
+        if 'log_beta_scales' in body_params and body_params['log_beta_scales'] is not None:
+            if self.scale_trans_mode == 'separate':
+                # In separate mode, skip scale/trans for rendering (PCA transformation often fails
+                # due to missing scaledirs/transdirs, and loss weights are typically 0)
+                # Just pass None and let SMAL model use defaults
+                pass
+            elif self.scale_trans_mode != 'ignore':
+                # In other modes (e.g., entangled_with_betas), values are already per-joint
+                betas_logscale = body_params['log_beta_scales']
+                betas_trans_val = body_params.get('betas_trans', None)
+        
         # Run SMAL model
         verts, joints, Rs, v_shaped = self.smal_model(
             body_params['betas'],
-            torch.cat([global_rot_aa.unsqueeze(1), joint_rot_aa], dim=1),
-            betas_logscale=body_params.get('log_beta_scales', None),
-            betas_trans=body_params.get('betas_trans', None),
+            pose_tensor,
+            betas_logscale=betas_logscale,
+            betas_trans=betas_trans_val,
             propagate_scaling=self.propagate_scaling
         )
         
         # Apply transformation
         if self.use_ue_scaling:
-            verts = (verts - joints[:, 0, :].unsqueeze(1)) * 10 + body_params['trans'].unsqueeze(1)
-            joints = (joints - joints[:, 0, :].unsqueeze(1)) * 10 + body_params['trans'].unsqueeze(1)
+            root_joint = joints[:, 0:1, :]  # (batch_size, 1, 3) - safer indexing
+            verts = (verts - root_joint) * 10 + body_params['trans'].unsqueeze(1)
+            joints = (joints - root_joint) * 10 + body_params['trans'].unsqueeze(1)
         else:
             verts = verts + body_params['trans'].unsqueeze(1)
             joints = joints + body_params['trans'].unsqueeze(1)
         
-        # Get canonical joints
+        # Get canonical joints - check bounds first
+        max_joint_idx = max(config.CANONICAL_MODEL_JOINTS) if config.CANONICAL_MODEL_JOINTS else 0
+        if joints.shape[1] <= max_joint_idx:
+            print(f"Warning: joints has {joints.shape[1]} joints but CANONICAL_MODEL_JOINTS needs index {max_joint_idx}")
+            print(f"  CANONICAL_MODEL_JOINTS: {config.CANONICAL_MODEL_JOINTS}")
+            # Return zeros as fallback
+            n_canonical = len(config.CANONICAL_MODEL_JOINTS)
+            return torch.zeros(batch_size, n_canonical, 2, device=self.device)
+        
         canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
         
         # Set camera parameters for rendering
@@ -842,8 +959,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         
         _, rendered_joints_raw = self.renderer(verts, canonical_joints, faces_batch)
         
-        # Normalize rendered joints
-        rendered_image_size = 512
+        # Normalize rendered joints using the actual renderer image size
+        # This ensures consistency between training loss and visualization
+        rendered_image_size = self.renderer.image_size
         eps = 1e-8
         rendered_joints = rendered_joints_raw / (rendered_image_size + eps)
         rendered_joints = torch.clamp(rendered_joints, 0.0, 1.0)
@@ -979,6 +1097,8 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     # Preprocess image
                     img = images[v]
                     img_tensor = self.preprocess_image(img).squeeze(0)  # Remove batch dim
+                    # Ensure tensor is on the correct device
+                    img_tensor = img_tensor.to(self.device)
                     all_images_per_view[v].append(img_tensor)
                     
                     # Get camera index
@@ -1039,7 +1159,10 @@ def create_multiview_regressor(device, batch_size, shape_family, use_unity_prior
         MultiViewSMILImageRegressor instance
     """
     # Create placeholder data batch
-    data_batch = torch.zeros(batch_size, 3, 224, 224, device=device)
+    # Use input_resolution if provided, otherwise default to 224
+    # This ensures the renderer is initialized with the correct size
+    input_resolution = kwargs.get('input_resolution', 224)
+    data_batch = torch.zeros(batch_size, 3, input_resolution, input_resolution, device=device)
     
     return MultiViewSMILImageRegressor(
         device=device,
