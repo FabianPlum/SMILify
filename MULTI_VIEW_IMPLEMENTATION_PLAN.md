@@ -603,6 +603,14 @@ The key insight is that **body parameters are shared** across views, but **2D ke
 - This naturally handles partial occlusions: more confident keypoints contribute more
 - Per-view loss is normalized by total visibility weight (not count) to avoid penalizing views with fewer visible keypoints
 
+**Joint Angle Regularization**:
+- Added penalty for joint angles that deviate from default (0,0,0) angles
+- Excludes root joint (which is required for global rotation)
+- Uses L2 penalty (squared norm) to encourage natural poses and prevent extreme joint angles
+- Configurable weight via `joint_angle_regularization` in loss curriculum
+- Default weight: 0.001 (can be adjusted per training stage)
+- This is especially useful for early training stages, before halfway decent camera predictions are produced which can otherwise lead the model to contort violently,
+
 ```python
 def compute_multiview_batch_loss(self, predicted_params: Dict[str, torch.Tensor],
                                   target_params_batch: Dict[str, torch.Tensor],
@@ -631,6 +639,26 @@ def compute_multiview_batch_loss(self, predicted_params: Dict[str, torch.Tensor]
     
     # Similar for global_rot, joint_rot, trans (if ground truth available)
     ...
+    
+    # Joint angle regularization: penalize deviations from default (0,0,0) angles
+    # Excludes root joint (which is required for global rotation)
+    if loss_weights.get('joint_angle_regularization', 0) > 0:
+        joint_rot_pred = predicted_params['joint_rot']  # (batch_size, N_POSE, 6) or (batch_size, N_POSE, 3)
+        
+        # Convert to axis-angle if needed
+        if self.rotation_representation == '6d':
+            joint_rot_aa = rotation_6d_to_axis_angle(joint_rot_pred)  # (batch_size, N_POSE, 3)
+        else:
+            joint_rot_aa = joint_rot_pred  # Already in axis-angle format
+        
+        # Compute L2 norm of joint angles (N_POSE excludes root joint)
+        joint_angle_norms = torch.norm(joint_rot_aa, dim=-1)  # (batch_size, N_POSE)
+        
+        # Regularization: penalize large joint angles (L2 penalty)
+        joint_angle_reg = torch.mean(joint_angle_norms ** 2)
+        
+        loss_components['joint_angle_regularization'] = joint_angle_reg
+        total_loss = total_loss + loss_weights['joint_angle_regularization'] * joint_angle_reg
     
     # 2. Per-view 2D keypoint loss WITH VISIBILITY WEIGHTING
     if loss_weights.get('keypoint_2d', 0) > 0:
@@ -1327,6 +1355,7 @@ total_2d_loss = weighted_average([loss_view_0, loss_view_1, loss_view_2],
 | **Visibility weighting** | Weighting per-keypoint loss by keypoint visibility confidence |
 | **Unified body params** | Single set of body parameters predicted from ALL view features |
 | **num_views_to_use** | Training config option specifying max views to use per sample |
+| **Joint angle regularization** | L2 penalty on joint angles to encourage natural poses and prevent extreme angles (excludes root joint) |
 
 ---
 
@@ -1373,6 +1402,22 @@ def test_gradient_flow():
     # - body_head.weight.grad is NOT None (body params affected)
     # - camera_head_0.weight.grad is NOT None (camera 0 affected)
     # - camera_head_1.weight.grad IS None (camera 1 NOT affected by view 0 loss)
+```
+
+### Device Placement
+
+**Critical**: All tensors must be on the same device before operations like `torch.stack()`.
+
+**Implementation**:
+- `preprocess_image()` returns tensors on CPU (created via `torch.from_numpy()`)
+- Dummy padding images are created directly on the target device
+- **Fix**: Explicitly move preprocessed images to device with `.to(self.device)` before adding to batch lists
+
+```python
+# In predict_from_multiview_batch:
+img_tensor = self.preprocess_image(img).squeeze(0)
+img_tensor = img_tensor.to(self.device)  # Ensure device consistency
+all_images_per_view[v].append(img_tensor)
 ```
 
 ---
@@ -1429,6 +1474,13 @@ The following files have been created implementing the multi-view system:
 - Filename format: `sample_XXX_view_XX_epoch_XXX.png`
 - Enables visual verification that the same body produces correct 2D projections across all views
 
+**Mesh Geometry Export** (`export_mesh_as_obj`):
+- Exports mesh vertices and faces as OBJ files for external inspection
+- One OBJ file per view per sample: `sample_XXX_view_XX_epoch_XXX.obj` (this is stupid because only the camera rotation differs between meshes, so this is just here for debugging. Later, we will generate only one mesh for each multi-view rendering and export camera parameters alongside.)
+- Uses the same predicted parameters as visualization (no UE scaling)
+- Enables debugging mesh geometry, pose, and scale in external 3D software (Blender, MeshLab, etc.)
+- Saved alongside visualization images in the same output directory
+
 ### Design Decisions Made
 
 | Decision | Choice | Rationale |
@@ -1436,6 +1488,28 @@ The following files have been created implementing the multi-view system:
 | Feature Fusion | **Cross-Attention** | Allows views to share information and understand spatial relationships |
 | Camera Head Design | **N Separate Heads** | One dedicated head per canonical view position for specialization |
 | Training Integration | **Separate Script** | Start with standalone script, later combine via flag-based system |
+| Joint Angle Regularization | **L2 Penalty on Squared Norm** | Encourages natural poses, prevents extreme joint angles, excludes root joint |
+
+### Recent Improvements & Bug Fixes
+
+#### Joint Angle Regularization (2026-01-06)
+- **Added**: Regularization loss to penalize large joint angles (excluding root joint)
+- **Implementation**: Computes L2 norm of axis-angle representation for all non-root joints
+- **Configuration**: Configurable weight in training curriculum (default: 0.001, can be reduced/disabled in later stages)
+- **Files Modified**: 
+  - `multiview_smil_regressor.py`: Added `joint_angle_regularization` loss computation
+  - `training_config.py`: Added default weight and curriculum stages
+
+#### Device Mismatch Fix (2026-01-06)
+- **Issue**: Preprocessed images were on CPU while dummy padding images were on GPU, causing `RuntimeError` during `torch.stack()`
+- **Fix**: Added `.to(self.device)` after preprocessing each image in `predict_from_multiview_batch`
+- **Files Modified**: `multiview_smil_regressor.py`
+
+#### Mesh Geometry Export (2026-01-06)
+- **Added**: OBJ file export functionality for debugging mesh geometry
+- **Purpose**: Enable external inspection of predicted mesh in 3D software
+- **Implementation**: `export_mesh_as_obj()` function exports vertices and faces using same parameters as visualization
+- **Files Modified**: `train_multiview_regressor.py`
 
 ### Usage
 
@@ -1458,12 +1532,13 @@ torchrun --nproc_per_node=4 smal_fitter/neuralSMIL/train_multiview_regressor.py 
 
 ---
 
-*Document Version: 2.1*  
+*Document Version: 2.2*  
 *Last Updated: 2026-01-06*  
 *Author: Fabian Plum x Claude (AI Assistant)*  
 *Status: IMPLEMENTED - Multi-view system ready for testing*
 
 **Changelog**:
+- v2.2: Added joint angle regularization, device mismatch fix, and OBJ mesh export functionality
 - v2.1: Added Phase 4 (Visualization) - multi-view training progress visualization
 - v2.0: Implementation complete with cross-attention fusion and separate camera heads
 - v1.1: Resolved design decisions for view handling, loss weighting, and training strategy
