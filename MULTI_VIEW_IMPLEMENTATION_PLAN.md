@@ -1407,6 +1407,28 @@ The following files have been created implementing the multi-view system:
 |------|--------|-------------|
 | `smal_fitter/neuralSMIL/train_multiview_regressor.py` | ✅ Complete | Standalone training script with DDP support, mixed precision, and comprehensive configuration |
 
+#### Phase 4: Visualization
+
+| File | Status | Description |
+|------|--------|-------------|
+| `train_multiview_regressor.py::visualize_multiview_training_progress()` | ✅ Complete | Multi-view visualization showing all camera views in a grid |
+| `train_multiview_regressor.py::visualize_singleview_renders()` | ✅ Complete | SMALFitter-style mesh rendering for each view separately |
+
+**Multi-View Grid Visualization** (`visualize_multiview_training_progress`):
+- Creates a grid visualization showing all camera views side-by-side
+- Top row: Input images from each camera
+- Bottom row: Rendered mesh using unified body params + per-view camera params
+- Overlays GT keypoints (circles) and predicted keypoints (crosses) on each view
+
+**Single-View Mesh Renders** (`visualize_singleview_renders`):
+- Uses SMALFitter to generate full mesh visualization for each camera view
+- Shows complete collage including: input image, rendered mesh, keypoint overlay
+- Uses unified body parameters (pose, shape) with per-view camera parameters
+- Produces one visualization file per view per sample
+- Output directory: `multiview_singleview_renders/epoch_XXX/`
+- Filename format: `sample_XXX_view_XX_epoch_XXX.png`
+- Enables visual verification that the same body produces correct 2D projections across all views
+
 ### Design Decisions Made
 
 | Decision | Choice | Rationale |
@@ -1436,12 +1458,13 @@ torchrun --nproc_per_node=4 smal_fitter/neuralSMIL/train_multiview_regressor.py 
 
 ---
 
-*Document Version: 2.0*  
-*Last Updated: 2026-01-05*  
+*Document Version: 2.1*  
+*Last Updated: 2026-01-06*  
 *Author: Fabian Plum x Claude (AI Assistant)*  
 *Status: IMPLEMENTED - Multi-view system ready for testing*
 
 **Changelog**:
+- v2.1: Added Phase 4 (Visualization) - multi-view training progress visualization
 - v2.0: Implementation complete with cross-attention fusion and separate camera heads
 - v1.1: Resolved design decisions for view handling, loss weighting, and training strategy
 - v1.0: Initial draft
