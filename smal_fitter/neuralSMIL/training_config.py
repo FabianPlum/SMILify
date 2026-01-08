@@ -35,12 +35,13 @@ class TrainingConfig:
         'SMILyMouseSYNTH': "SMILyMouseSYNTH.h5",
         'RealSMILyMouse': "/home/fabi/dev/SMILify/RealSMILyMouse.h5",
         'RealSMILyMouseFalkner': "RealSMILyMouseFalknerFROM3D.h5",
-        'RealSMILyMouseFalknerFROM3D_no_crop': "RealSMILyMouseFalknerFROM3D_no_crop.h5"
+        'RealSMILyMouseFalknerFROM3D_no_crop': "RealSMILyMouseFalknerFROM3D_no_crop.h5",
+        'RealSMILyMouseFalknerREAL3D': "RealSMILyMouseFalknerFROM3D_no_crop_REAL3D.h5"
 
     }
     
     # Default dataset to use (legacy single-dataset mode)
-    DEFAULT_DATASET = 'RealSMILyMouseFalkner'#'bbox_center_STICKY' #'SMILySLEAPySTICKS-cropped'
+    DEFAULT_DATASET = 'RealSMILyMouseFalknerFROM3D_no_crop'#'bbox_center_STICKY' #'SMILySLEAPySTICKS-cropped'
     
     # Multi-dataset configuration for combined training
     # Set use_multi_dataset=True to enable training with multiple datasets
@@ -117,13 +118,13 @@ class TrainingConfig:
     
     # Training hyperparameters (AniMer-style conservative settings)
     TRAINING_PARAMS = {
-        'batch_size': 8,
+        'batch_size': 1,
         'num_epochs': 1000,
         'learning_rate': 1.25e-6,  # AniMer-style very conservative learning rate
         'weight_decay': 1e-4,  # Add weight decay for AdamW
         'seed': 1234,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': 'checkpoints/checkpoint_epoch_169.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': 'multiview_checkpoints/checkpoint_epoch_0069.pth', #'checkpoints/checkpoint_epoch_299.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 16,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 8,  # Prefetch batches
@@ -212,32 +213,37 @@ class TrainingConfig:
             'cam_trans': 0.001,
             'log_beta_scales': 0.0005,  # Conservative
             'betas_trans': 0.0005,      # Conservative
-            'keypoint_2d': 0.0,        # AniMer: 0.01
+            'keypoint_2d': 0.1,        # AniMer: 0.01
             'keypoint_3d': 0.0,        # 3D keypoint loss - start at zero
-            'silhouette': 0.0           # Start at zero
+            'silhouette': 0.0,          # Start at zero
+            'joint_angle_regularization': 0.001  # Penalty for large joint angles (excluding root)
         },
         
         # Curriculum stages: (epoch_threshold, weight_updates) - AniMer-style conservative
         'curriculum_stages': [
+            (1, {
+                'joint_angle_regularization': 0.00001
+            }),
             # Stage 1: Introduce keypoint losses gradually (AniMer-style)
-            (10, {
-                'cam_trans': 0.00001, # decrease cam_trans once suitable extrinsics are found otherwise the error is overpowering
-                'joint_rot': 0.002,
+            (5, {
+                'joint_angle_regularization': 0.00001
             }),
             # Stage 2: Introduce keypoint losses gradually (AniMer-style)
-            (20, {
-                'cam_trans': 0.00001,
-                'joint_rot': 0.001,
-                'keypoint_2d': 0.01,    # AniMer: 0.01
-                'keypoint_3d': 0.005,   # 
-                'silhouette': 0.01,
+            (10, {
+                'keypoint_2d': 0.1,    # AniMer: 0.01
+                'joint_angle_regularization': 0.000001
             }),
-            (80, {
-                'cam_trans': 0.00001,
-                'joint_rot': 0.001,
-                'keypoint_2d': 0.5,    # AniMer: 0.01
-                'keypoint_3d': 0.005,   # 
-                'silhouette': 0.01,
+            (20, {
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0000001
+            }),
+            (25, {
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0
+            }),
+            (35, {
+                'keypoint_2d': 20,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0
             }),
             (120, {
                 'cam_trans': 0.00001,
@@ -249,7 +255,7 @@ class TrainingConfig:
             (200, {
                 'cam_trans': 0.00001,
                 'joint_rot': 0.001,
-                'keypoint_2d': 0.01,    # AniMer: 0.01
+                'keypoint_2d': 0.1,    # AniMer: 0.01
                 'keypoint_3d': 0.002,   # 
                 'silhouette': 0.01,
             })
@@ -263,9 +269,9 @@ class TrainingConfig:
         
         # Learning rate stages: (epoch_threshold, learning_rate) - Very conservative
         'lr_stages': [
-            (5, 1e-5),      # 1e-5
+            (50, 1e-4),      # 1e-5
             # Stage 1: Slight reduction for fine-tuning
-            (40, 1e-6),      # 1e-5
+            (100, 1e-5),      # 1e-5
             
             # Stage 2: Further reduce
             (60, 5e-7),      # 5e-7
@@ -301,8 +307,8 @@ class TrainingConfig:
         'visualizations_dir': 'visualizations',
         'train_visualizations_dir': 'visualizations_train',
         'save_checkpoint_every': 10,        # Save checkpoint every N epochs
-        'generate_visualizations_every': 5, # Generate visualizations every N epochs
-        'plot_history_every': 5,          # Plot training history every N epochs
+        'generate_visualizations_every': 10, # Generate visualizations every N epochs
+        'plot_history_every': 10,          # Plot training history every N epochs
         'num_visualization_samples': 10,    # Number of samples to visualize
     }
     
