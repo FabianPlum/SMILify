@@ -92,10 +92,69 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             self.n_betas = metadata.attrs['n_betas']
             self.min_views_per_sample = metadata.attrs.get('min_views_per_sample', 2)
             self.crop_mode = metadata.attrs.get('crop_mode', 'bbox_crop')
+
+            # Optional 3D + camera supervision flags (added by preprocess_sleap_multiview_dataset.py)
+            self.has_camera_parameters = bool(metadata.attrs.get('has_camera_parameters', False))
+            self.has_3d_keypoints = bool(metadata.attrs.get('has_3d_keypoints', False))
+            self.load_3d_data = bool(metadata.attrs.get('load_3d_data', False))
+
+            # World unit scale for 3D + camera translation.
+            # - SMAL/SMILify generally operates in "meters-ish" units (order 1.0)
+            # - SLEAP/anipose often produces mm-scale coordinates (order 100-1000)
+            # We store an explicit `world_scale` if available; otherwise infer a sensible default.
+            self.world_scale = float(metadata.attrs.get('world_scale', 1.0))
+            if 'world_scale' not in metadata.attrs and (self.has_camera_parameters or self.has_3d_keypoints):
+                try:
+                    inferred = None
+                    if self.has_camera_parameters and 'multiview_keypoints' in f and 'camera_extrinsics_t' in f['multiview_keypoints']:
+                        t0 = f['multiview_keypoints/camera_extrinsics_t'][0, 0]  # (3,)
+                        tnorm = float(np.linalg.norm(t0))
+                        # Heuristic: translations >> 50 are almost certainly mm (or similar), convert to meters.
+                        if tnorm > 50.0:
+                            inferred = 0.001
+                    if inferred is None and self.has_3d_keypoints and 'multiview_keypoints' in f and 'keypoints_3d' in f['multiview_keypoints']:
+                        kp0 = f['multiview_keypoints/keypoints_3d'][0]
+                        kmax = float(np.max(np.abs(kp0)))
+                        if kmax > 50.0:
+                            inferred = 0.001
+                    if inferred is not None:
+                        self.world_scale = float(inferred)
+                except Exception:
+                    # Fall back to 1.0 if inference fails
+                    self.world_scale = float(self.world_scale)
             
             # Parse canonical camera order
             canonical_order_json = metadata.attrs.get('canonical_camera_order', '[]')
             self.canonical_camera_order = json.loads(canonical_order_json)
+
+    @staticmethod
+    def _sleap_to_pytorch3d_camera(R_cv: np.ndarray, t_cv: np.ndarray, K: np.ndarray, image_size_wh: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float, float]:
+        """
+        Convert SLEAP/OpenCV camera parameters to the PyTorch3D convention used by SMILify.
+
+        Mirrors `convert_sleap_to_pytorch3d_camera` in `smal_fitter/sleap_data/sleap_3d_loader.py`.
+
+        Returns:
+            (R_p3d, T_p3d, fov_y_degrees, aspect_ratio)
+        """
+        width = float(image_size_wh[0])
+        height = float(image_size_wh[1])
+        fx = float(K[0, 0])
+        fy = float(K[1, 1])
+        fov_y = float(2.0 * np.arctan(height / (2.0 * fy)) * 180.0 / np.pi)
+        # For FoVPerspectiveCameras, `aspect_ratio` controls how horizontal FOV relates to vertical FOV.
+        # Match pinhole intrinsics by using:
+        #   tan(fov_x/2) = aspect_ratio * tan(fov_y/2)
+        # with tan(fov_x/2) = width/(2*fx), tan(fov_y/2) = height/(2*fy)
+        # => aspect_ratio = (width*fy)/(height*fx)
+        aspect_ratio = float((width * fy) / (height * fx + 1e-12))
+
+        Rz_180 = np.array([[-1, 0, 0],
+                           [0, -1, 0],
+                           [0, 0, 1]], dtype=np.float32)
+        R_p3d = (R_cv.T @ Rz_180).astype(np.float32)
+        T_p3d = (Rz_180 @ t_cv).astype(np.float32)
+        return R_p3d, T_p3d, fov_y, aspect_ratio
     
     def _validate_dataset(self):
         """Validate that the dataset is properly formatted."""
@@ -221,13 +280,13 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                 'joint_rot': False,
                 'betas': bool(has_ground_truth_betas),
                 'trans': False,
-                'fov': False,
-                'cam_rot': False,
-                'cam_trans': False,
+                'fov': self.has_camera_parameters,
+                'cam_rot': self.has_camera_parameters,
+                'cam_trans': self.has_camera_parameters,
                 'log_beta_scales': False,
                 'betas_trans': False,
                 'keypoint_2d': True,
-                'keypoint_3d': False,
+                'keypoint_3d': self.has_3d_keypoints,
                 'silhouette': False,
             },
         }
@@ -249,11 +308,74 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             'cam_fov': None,
             'cam_rot': None,
             'cam_trans': None,
+
+            # Optional 3D + camera supervision (if present in HDF5)
+            'camera_intrinsics': None,
+            'camera_extrinsics_R': None,
+            'camera_extrinsics_t': None,
+            'image_sizes': None,
+            'cam_fov_per_view': None,
+            'cam_rot_per_view': None,
+            'cam_trans_per_view': None,
+            'keypoints_3d': None,
+            'has_3d_data': False,
             
             # Metadata
             'has_ground_truth_betas': has_ground_truth_betas,
             'num_views': num_views,
         }
+
+        # Load optional camera parameters and 3D keypoints if available in the file
+        try:
+            if self.has_camera_parameters and 'camera_intrinsics' in f['multiview_keypoints']:
+                K_all = f['multiview_keypoints/camera_intrinsics'][idx]  # (max_views, 3, 3)
+                R_all = f['multiview_keypoints/camera_extrinsics_R'][idx]  # (max_views, 3, 3)
+                t_all = f['multiview_keypoints/camera_extrinsics_t'][idx]  # (max_views, 3)
+                sz_all = f['multiview_keypoints/image_sizes'][idx]  # (max_views, 2) as (W,H)
+
+                K_sel = K_all[selected_indices]
+                R_sel = R_all[selected_indices]
+                t_sel = t_all[selected_indices]
+                sz_sel = sz_all[selected_indices]
+
+                # Convert to PyTorch3D camera convention per view
+                cam_fov = np.zeros((num_views, 1), dtype=np.float32)
+                cam_rot = np.zeros((num_views, 3, 3), dtype=np.float32)
+                cam_trans = np.zeros((num_views, 3), dtype=np.float32)
+                cam_aspect = np.ones((num_views, 1), dtype=np.float32)
+                for vi in range(num_views):
+                    R_p3d, T_p3d, fov_y, aspect = self._sleap_to_pytorch3d_camera(
+                        R_cv=R_sel[vi].astype(np.float32),
+                        # Scale translation into SMILify's world units (typically meters)
+                        t_cv=(t_sel[vi].astype(np.float32) * float(self.world_scale)),
+                        K=K_sel[vi].astype(np.float32),
+                        image_size_wh=sz_sel[vi].astype(np.float32),
+                    )
+                    cam_fov[vi, 0] = fov_y
+                    cam_rot[vi] = R_p3d
+                    cam_trans[vi] = T_p3d
+                    cam_aspect[vi, 0] = float(aspect)
+
+                y_data.update({
+                    'camera_intrinsics': K_sel.astype(np.float32),
+                    'camera_extrinsics_R': R_sel.astype(np.float32),
+                    # Store scaled translation for downstream consumers (losses, debugging)
+                    'camera_extrinsics_t': (t_sel.astype(np.float32) * float(self.world_scale)),
+                    'image_sizes': sz_sel.astype(np.int32),
+                    'cam_fov_per_view': cam_fov,
+                    'cam_rot_per_view': cam_rot,
+                    'cam_trans_per_view': cam_trans,
+                    'cam_aspect_per_view': cam_aspect,
+                })
+
+            if self.has_3d_keypoints and 'keypoints_3d' in f['multiview_keypoints'] and 'has_3d_data' in f['auxiliary']:
+                kp3d = f['multiview_keypoints/keypoints_3d'][idx]  # (n_joints, 3)
+                has_3d = bool(f['auxiliary/has_3d_data'][idx])
+                y_data['keypoints_3d'] = (kp3d.astype(np.float32) * float(self.world_scale))
+                y_data['has_3d_data'] = has_3d
+        except Exception:
+            # Keep None defaults if optional datasets are missing or malformed.
+            pass
         
         return x_data, y_data
     
@@ -304,13 +426,13 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                 'joint_rot': False,
                 'betas': bool(has_ground_truth_betas),
                 'trans': False,
-                'fov': False,
-                'cam_rot': False,
-                'cam_trans': False,
+                'fov': self.has_camera_parameters,
+                'cam_rot': self.has_camera_parameters,
+                'cam_trans': self.has_camera_parameters,
                 'log_beta_scales': False,
                 'betas_trans': False,
                 'keypoint_2d': True,
-                'keypoint_3d': False,
+                'keypoint_3d': self.has_3d_keypoints,
                 'silhouette': False,
             },
         }
@@ -326,8 +448,43 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             'cam_fov': None,
             'cam_rot': None,
             'cam_trans': None,
+            'camera_intrinsics': None,
+            'camera_extrinsics_R': None,
+            'camera_extrinsics_t': None,
+            'image_sizes': None,
+            'cam_fov_per_view': None,
+            'cam_rot_per_view': None,
+            'cam_trans_per_view': None,
+            'keypoints_3d': None,
+            'has_3d_data': False,
             'has_ground_truth_betas': has_ground_truth_betas,
         }
+
+        # Optional supervision for single-view mode: select the chosen view's camera params
+        try:
+            if self.has_camera_parameters and 'camera_intrinsics' in f['multiview_keypoints']:
+                K = f['multiview_keypoints/camera_intrinsics'][idx, selected_view].astype(np.float32)
+                R = f['multiview_keypoints/camera_extrinsics_R'][idx, selected_view].astype(np.float32)
+                t = f['multiview_keypoints/camera_extrinsics_t'][idx, selected_view].astype(np.float32) * float(self.world_scale)
+                sz = f['multiview_keypoints/image_sizes'][idx, selected_view].astype(np.int32)
+                R_p3d, T_p3d, fov_y, aspect = self._sleap_to_pytorch3d_camera(R, t, K, sz.astype(np.float32))
+                y_data.update({
+                    'camera_intrinsics': K,
+                    'camera_extrinsics_R': R,
+                    'camera_extrinsics_t': t,
+                    'image_sizes': sz,
+                    'cam_fov': float(fov_y),
+                    'cam_rot': R_p3d,
+                    'cam_trans': T_p3d,
+                    'cam_aspect': float(aspect),
+                })
+
+            if self.has_3d_keypoints and 'keypoints_3d' in f['multiview_keypoints'] and 'has_3d_data' in f['auxiliary']:
+                kp3d = f['multiview_keypoints/keypoints_3d'][idx].astype(np.float32) * float(self.world_scale)
+                y_data['keypoints_3d'] = kp3d
+                y_data['has_3d_data'] = bool(f['auxiliary/has_3d_data'][idx])
+        except Exception:
+            pass
         
         return x_data, y_data
     
