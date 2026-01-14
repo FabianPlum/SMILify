@@ -100,7 +100,8 @@ class SMILImageRegressor(SMALFitter):
     def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior, 
                  rgb_only=True, freeze_backbone=True, hidden_dim=512, use_ue_scaling=True, 
                  rotation_representation='axis_angle', input_resolution=512, backbone_name='resnet152',
-                 head_type='mlp', transformer_config=None, scale_trans_mode='separate'):
+                 head_type='mlp', transformer_config=None, scale_trans_mode='separate',
+                 allow_mesh_scaling=False, mesh_scale_init=1.0):
         """
         Initialize the SMIL Image Regressor.
         
@@ -119,6 +120,9 @@ class SMILImageRegressor(SMALFitter):
             backbone_name: Backbone network name ('resnet152', 'vit_base_patch16_224', etc.)
             head_type: Type of regression head ('mlp' or 'transformer_decoder')
             transformer_config: Configuration dict for transformer decoder (only used if head_type='transformer_decoder')
+            scale_trans_mode: Mode for handling scale/translation betas ('ignore', 'separate', 'entangled_with_betas')
+            allow_mesh_scaling: If True, predict a global mesh scale factor (default: False)
+            mesh_scale_init: Initial value for mesh scale (default: 1.0 = no scaling)
         """
         # For rgb_only=True, SMALFitter expects data_batch to be just the RGB tensor
         if rgb_only and isinstance(data_batch, tuple):
@@ -141,6 +145,8 @@ class SMILImageRegressor(SMALFitter):
         self.head_type = head_type
         self.transformer_config = transformer_config or {}
         self.scale_trans_mode = scale_trans_mode
+        self.allow_mesh_scaling = allow_mesh_scaling
+        self.mesh_scale_init = mesh_scale_init
         
         # Enable scaling propagation for SMIL models (matches Unreal2Pytorch3D behavior)
         self.propagate_scaling = True
@@ -280,7 +286,9 @@ class SMILImageRegressor(SMALFitter):
             rotation_representation=self.rotation_representation,
             scales_scale_factor=config.get('scales_scale_factor', 1),
             trans_scale_factor=config.get('trans_scale_factor', 0.01),
-            scale_trans_mode=self.scale_trans_mode  # Pass scale_trans_mode to control output dimensions
+            scale_trans_mode=self.scale_trans_mode,  # Pass scale_trans_mode to control output dimensions
+            allow_mesh_scaling=self.allow_mesh_scaling,
+            mesh_scale_init=self.mesh_scale_init
         ).to(self.device)
     
     def preprocess_image(self, image_data) -> torch.Tensor:
@@ -2301,8 +2309,15 @@ class SMILImageRegressor(SMALFitter):
             # This aligns the model at the root joint and scales it to the replicAnt model size
             verts = (verts - joints[:, 0, :].unsqueeze(1)) * 10 + batch_params['trans'].unsqueeze(1)
             joints = (joints - joints[:, 0, :].unsqueeze(1)) * 10 + batch_params['trans'].unsqueeze(1)
+        elif self.allow_mesh_scaling and 'mesh_scale' in predicted_params:
+            # Apply predicted mesh scale - centers at root, scales, then translates
+            # mesh_scale is (batch_size, 1), expand for broadcasting
+            mesh_scale = predicted_params['mesh_scale']  # (batch_size, 1)
+            root_joint = joints[:, 0, :].unsqueeze(1)  # (batch_size, 1, 3)
+            verts = (verts - root_joint) * mesh_scale.unsqueeze(-1) + batch_params['trans'].unsqueeze(1)
+            joints = (joints - root_joint) * mesh_scale.unsqueeze(-1) + batch_params['trans'].unsqueeze(1)
         else:
-            # Standard transformation without UE scaling
+            # Standard transformation without scaling
             verts = verts + batch_params['trans'].unsqueeze(1)
             joints = joints + batch_params['trans'].unsqueeze(1)
         
