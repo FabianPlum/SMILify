@@ -41,6 +41,13 @@ except ImportError:
     sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
     from sleap_data_loader import SLEAPDataLoader
 
+# Import SLEAP3DDataLoader for 3D keypoints and camera parameters
+try:
+    from sleap_3d_loader import SLEAP3DDataLoader
+except ImportError:
+    sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+    from smal_fitter.sleap_data.sleap_3d_loader import SLEAP3DDataLoader
+
 import config
 
 
@@ -65,10 +72,11 @@ class SLEAPMultiViewPreprocessor:
                  compression: str = 'gzip',
                  compression_level: int = 6,
                  max_frames_per_session: Optional[int] = None,
-                 crop_mode: str = 'bbox_crop',
+                 crop_mode: str = 'default',
                  use_reprojections: bool = False,
                  confidence_threshold: float = 0.5,
-                 min_views_per_sample: int = 2):
+                 min_views_per_sample: int = 2,
+                 load_3d_data: bool = True):
         """
         Initialize the multi-view SLEAP dataset preprocessor.
         
@@ -82,10 +90,11 @@ class SLEAPMultiViewPreprocessor:
             compression: HDF5 compression algorithm
             compression_level: Compression level (1-9)
             max_frames_per_session: Maximum frames to process per session (None for all)
-            crop_mode: Image cropping mode ('default', 'centred', 'bbox_crop')
+            crop_mode: Image cropping mode ('default', 'centred', 'bbox_crop'). Default: 'default'
             use_reprojections: If True, use reprojected 2D coordinates
             confidence_threshold: Minimum confidence for keypoints
             min_views_per_sample: Minimum views required per sample (skip samples with fewer)
+            load_3d_data: If True, attempt to load 3D keypoints and camera parameters from SLEAP 3D data
         """
         self.joint_lookup_table_path = joint_lookup_table_path
         self.shape_betas_table_path = shape_betas_table_path
@@ -100,6 +109,7 @@ class SLEAPMultiViewPreprocessor:
         self.use_reprojections = use_reprojections
         self.confidence_threshold = confidence_threshold
         self.min_views_per_sample = min_views_per_sample
+        self.load_3d_data = load_3d_data
         
         # Validate crop_mode
         if self.crop_mode not in ['default', 'centred', 'bbox_crop']:
@@ -114,7 +124,9 @@ class SLEAPMultiViewPreprocessor:
             'failed_samples': 0,
             'sessions_processed': 0,
             'sessions_failed': 0,
-            'views_per_sample_histogram': defaultdict(int)
+            'views_per_sample_histogram': defaultdict(int),
+            'sessions_with_3d_data': 0,
+            'samples_with_3d_data': 0
         }
         
         # Canonical camera ordering (will be determined from first session)
@@ -286,6 +298,20 @@ class SLEAPMultiViewPreprocessor:
                 confidence_threshold=self.confidence_threshold
             )
             
+            # Try to load 3D data if enabled
+            loader_3d = None
+            has_3d_data = False
+            if self.load_3d_data:
+                try:
+                    loader_3d = SLEAP3DDataLoader(session_path, session_idx=0)
+                    has_3d_data = True
+                    self.stats['sessions_with_3d_data'] += 1
+                    print(f"Loaded 3D data for {Path(session_path).name}: {loader_3d.n_frames} frames, {loader_3d.n_keypoints} keypoints")
+                except Exception as e:
+                    print(f"Warning: Could not load 3D data for {session_path}: {e}")
+                    loader_3d = None
+                    has_3d_data = False
+            
             # Discover multi-view frames
             multiview_frames = self._discover_multiview_frames(loader, session_path)
             
@@ -324,11 +350,15 @@ class SLEAPMultiViewPreprocessor:
                         session_path=session_path,
                         camera_data_cache=camera_data_cache,
                         video_cap_cache=video_cap_cache,
-                        ground_truth_betas=ground_truth_betas
+                        ground_truth_betas=ground_truth_betas,
+                        loader_3d=loader_3d,
+                        has_3d_data=has_3d_data
                     )
                     if sample is not None:
                         samples.append(sample)
                         self.stats['views_per_sample_histogram'][sample['num_views']] += 1
+                        if has_3d_data and sample.get('has_3d_data', False):
+                            self.stats['samples_with_3d_data'] += 1
                 except Exception as e:
                     print(f"Warning: Failed to process frame {frame_info['frame_idx']}: {e}")
                     self.stats['failed_samples'] += 1
@@ -351,7 +381,9 @@ class SLEAPMultiViewPreprocessor:
                                   session_path: str,
                                   camera_data_cache: Dict[str, Dict],
                                   video_cap_cache: Dict[str, cv2.VideoCapture],
-                                  ground_truth_betas: Optional[np.ndarray]) -> Optional[Dict[str, Any]]:
+                                  ground_truth_betas: Optional[np.ndarray],
+                                  loader_3d: Optional['SLEAP3DDataLoader'] = None,
+                                  has_3d_data: bool = False) -> Optional[Dict[str, Any]]:
         """
         Process a single multi-view frame (all cameras for one time instant).
         
@@ -361,12 +393,30 @@ class SLEAPMultiViewPreprocessor:
         frame_idx = frame_info['frame_idx']
         available_cameras = frame_info['available_cameras']
         
+        # Load 3D keypoints if available
+        keypoints_3d = None
+        if has_3d_data and loader_3d is not None:
+            try:
+                if frame_idx < loader_3d.n_frames:
+                    keypoints_3d_raw = loader_3d.get_3d_keypoints(frame_idx)  # (N_sleap, 3)
+                    # IMPORTANT: Map 3D keypoints to the SMAL joint order used by training.
+                    # 2D keypoints are already mapped via `loader.map_keypoints_to_smal_model(...)`,
+                    # so 3D must match the same joint indexing/count (n_joints) for 3D supervision.
+                    keypoints_3d = self._map_3d_keypoints_to_smal(loader, keypoints_3d_raw)
+            except Exception as e:
+                print(f"Warning: Failed to load 3D keypoints for frame {frame_idx}: {e}")
+                keypoints_3d = None
+        
         # Collect data for each view
         view_images = []
         view_keypoints = []
         view_visibility = []
         view_camera_names = []
         view_camera_indices = []
+        view_camera_intrinsics = []  # K matrices
+        view_camera_extrinsics_R = []  # Rotation matrices
+        view_camera_extrinsics_t = []  # Translation vectors
+        view_image_sizes = []  # Original image sizes (width, height)
         
         for camera_name in available_cameras:
             if camera_name not in camera_data_cache:
@@ -425,6 +475,34 @@ class SLEAPMultiViewPreprocessor:
                 view_camera_names.append(camera_name)
                 view_camera_indices.append(cam_idx)
                 
+                # Extract camera parameters if 3D data is available
+                if has_3d_data and loader_3d is not None:
+                    try:
+                        # Get camera parameters from 3D loader
+                        cam_params = loader_3d.get_camera_parameters(camera_name)
+                        K = cam_params['intrinsic']['K']
+                        R = cam_params['extrinsic']['R']
+                        t = cam_params['extrinsic']['t']
+                        img_size = cam_params['image_size']
+                        
+                        view_camera_intrinsics.append(K.astype(np.float32))
+                        view_camera_extrinsics_R.append(R.astype(np.float32))
+                        view_camera_extrinsics_t.append(t.astype(np.float32))
+                        view_image_sizes.append(np.array([img_size['width'], img_size['height']], dtype=np.int32))
+                    except Exception as e:
+                        print(f"Warning: Failed to extract camera parameters for {camera_name}: {e}")
+                        # Add placeholder camera parameters
+                        view_camera_intrinsics.append(np.eye(3, dtype=np.float32))
+                        view_camera_extrinsics_R.append(np.eye(3, dtype=np.float32))
+                        view_camera_extrinsics_t.append(np.zeros(3, dtype=np.float32))
+                        view_image_sizes.append(np.array([image_size[0], image_size[1]], dtype=np.int32))
+                else:
+                    # Add placeholder camera parameters if no 3D data
+                    view_camera_intrinsics.append(np.eye(3, dtype=np.float32))
+                    view_camera_extrinsics_R.append(np.eye(3, dtype=np.float32))
+                    view_camera_extrinsics_t.append(np.zeros(3, dtype=np.float32))
+                    view_image_sizes.append(np.array([image_size[0], image_size[1]], dtype=np.int32))
+                
             except Exception as e:
                 print(f"Warning: Failed to process camera {camera_name} frame {frame_idx}: {e}")
                 continue
@@ -444,10 +522,20 @@ class SLEAPMultiViewPreprocessor:
             'camera_indices': np.array(view_camera_indices, dtype=np.int32),  # (num_views,)
             'num_views': len(view_images),
             
+            # Camera parameters (per-view)
+            'camera_intrinsics': np.stack(view_camera_intrinsics, axis=0) if view_camera_intrinsics else None,  # (num_views, 3, 3)
+            'camera_extrinsics_R': np.stack(view_camera_extrinsics_R, axis=0) if view_camera_extrinsics_R else None,  # (num_views, 3, 3)
+            'camera_extrinsics_t': np.stack(view_camera_extrinsics_t, axis=0) if view_camera_extrinsics_t else None,  # (num_views, 3)
+            'image_sizes': np.stack(view_image_sizes, axis=0) if view_image_sizes else None,  # (num_views, 2) - (width, height)
+            
+            # 3D keypoints (shared across views)
+            'keypoints_3d': keypoints_3d.astype(np.float32) if keypoints_3d is not None else None,  # (n_joints, 3)
+            'has_3d_data': keypoints_3d is not None,
+            
             # Shared body parameters (placeholders for SLEAP)
             'global_rot': np.zeros(3, dtype=np.float32),
             'joint_rot': np.zeros((config.N_POSE + 1, 3), dtype=np.float32),
-            'betas': ground_truth_betas if ground_truth_betas is not None else np.zeros(config.N_BETAS, dtype=np.float32),
+            'betas': ground_truth_betas.astype(np.float32) if ground_truth_betas is not None else np.zeros(config.N_BETAS, dtype=np.float32),
             'trans': np.zeros(3, dtype=np.float32),
             
             # Metadata
@@ -457,6 +545,41 @@ class SLEAPMultiViewPreprocessor:
         }
         
         return sample
+
+    def _map_3d_keypoints_to_smal(self, loader: SLEAPDataLoader, keypoints_3d: np.ndarray) -> np.ndarray:
+        """
+        Map raw SLEAP 3D keypoints to SMAL joint order using the same mapping as 2D preprocessing.
+
+        Args:
+            loader: SLEAPDataLoader (contains `smal_n_joints` and `joint_mapping`)
+            keypoints_3d: (N_sleap, 3) array in world coordinates (units as provided by SLEAP/anipose)
+
+        Returns:
+            (N_smal, 3) array where N_smal == loader.smal_n_joints.
+            Unmapped joints are filled with zeros.
+        """
+        if keypoints_3d is None:
+            return None
+        smal_n = int(getattr(loader, 'smal_n_joints', 0) or 0)
+        mapping = getattr(loader, 'joint_mapping', None)
+        if smal_n <= 0 or not isinstance(mapping, dict) or len(mapping) == 0:
+            # Fallback: if no mapping, try best-effort truncate/pad to config-defined joint count
+            # (this should not happen in normal training runs where 2D mapping is enabled).
+            from config import CANONICAL_MODEL_JOINTS
+            target_n = len(CANONICAL_MODEL_JOINTS)
+            out = np.zeros((target_n, 3), dtype=np.float32)
+            n = min(target_n, keypoints_3d.shape[0])
+            out[:n] = keypoints_3d[:n].astype(np.float32)
+            return out
+
+        out = np.zeros((smal_n, 3), dtype=np.float32)
+        for smal_idx, sleap_idx in mapping.items():
+            if sleap_idx is None or int(sleap_idx) < 0:
+                continue
+            sleap_idx_int = int(sleap_idx)
+            if sleap_idx_int < keypoints_3d.shape[0]:
+                out[int(smal_idx)] = keypoints_3d[sleap_idx_int].astype(np.float32)
+        return out
     
     def _find_video_file(self, loader: SLEAPDataLoader, camera_name: str) -> Optional[Path]:
         """Find video file for a camera."""
@@ -734,6 +857,16 @@ class SLEAPMultiViewPreprocessor:
             # Camera indices
             camera_indices_data = np.full((num_samples, max_views), -1, dtype=np.int32)
             
+            # Camera parameters: (num_samples, max_views, ...)
+            camera_intrinsics_data = np.zeros((num_samples, max_views, 3, 3), dtype=np.float32)
+            camera_extrinsics_R_data = np.zeros((num_samples, max_views, 3, 3), dtype=np.float32)
+            camera_extrinsics_t_data = np.zeros((num_samples, max_views, 3), dtype=np.float32)
+            image_sizes_data = np.zeros((num_samples, max_views, 2), dtype=np.int32)
+            
+            # 3D keypoints: (num_samples, n_keypoints_3d, 3) - variable size, will determine from first sample
+            keypoints_3d_list = []
+            has_3d_data_list = []
+            
             # Shared parameters
             global_rot_data = []
             joint_rot_data = []
@@ -762,6 +895,22 @@ class SLEAPMultiViewPreprocessor:
                     keypoints_2d_data[i, v] = sample['keypoints_2d'][v]
                     keypoint_visibility_data[i, v] = sample['keypoint_visibility'][v]
                     camera_indices_data[i, v] = sample['camera_indices'][v]
+                    
+                    # Camera parameters
+                    if sample.get('camera_intrinsics') is not None:
+                        camera_intrinsics_data[i, v] = sample['camera_intrinsics'][v]
+                        camera_extrinsics_R_data[i, v] = sample['camera_extrinsics_R'][v]
+                        camera_extrinsics_t_data[i, v] = sample['camera_extrinsics_t'][v]
+                        image_sizes_data[i, v] = sample['image_sizes'][v]
+                
+                # 3D keypoints
+                if sample.get('keypoints_3d') is not None:
+                    keypoints_3d_list.append(sample['keypoints_3d'])
+                    has_3d_data_list.append(True)
+                else:
+                    # Placeholder - use zeros with same shape as 2D keypoints
+                    keypoints_3d_list.append(np.zeros((n_joints, 3), dtype=np.float32))
+                    has_3d_data_list.append(False)
                 
                 # Shared parameters
                 global_rot_data.append(sample['global_rot'])
@@ -791,17 +940,40 @@ class SLEAPMultiViewPreprocessor:
                                           compression=self.compression,
                                           compression_opts=self.compression_level)
             
+            # Save camera parameters
+            keypoints_group.create_dataset('camera_intrinsics', data=camera_intrinsics_data,
+                                          compression=self.compression,
+                                          compression_opts=self.compression_level)
+            keypoints_group.create_dataset('camera_extrinsics_R', data=camera_extrinsics_R_data,
+                                          compression=self.compression,
+                                          compression_opts=self.compression_level)
+            keypoints_group.create_dataset('camera_extrinsics_t', data=camera_extrinsics_t_data,
+                                          compression=self.compression,
+                                          compression_opts=self.compression_level)
+            keypoints_group.create_dataset('image_sizes', data=image_sizes_data,
+                                          compression=self.compression,
+                                          compression_opts=self.compression_level)
+            
+            # Save 3D keypoints
+            keypoints_3d_data = np.array(keypoints_3d_list)
+            keypoints_group.create_dataset('keypoints_3d', data=keypoints_3d_data,
+                                          compression=self.compression,
+                                          compression_opts=self.compression_level)
+            auxiliary_group.create_dataset('has_3d_data', data=np.array(has_3d_data_list),
+                                          compression=self.compression,
+                                          compression_opts=self.compression_level)
+            
             # Save shared parameters
-            parameters_group.create_dataset('global_rot', data=np.array(global_rot_data),
+            parameters_group.create_dataset('global_rot', data=np.array(global_rot_data, dtype=np.float32),
                                            compression=self.compression,
                                            compression_opts=self.compression_level)
-            parameters_group.create_dataset('joint_rot', data=np.array(joint_rot_data),
+            parameters_group.create_dataset('joint_rot', data=np.array(joint_rot_data, dtype=np.float32),
                                            compression=self.compression,
                                            compression_opts=self.compression_level)
-            parameters_group.create_dataset('betas', data=np.array(betas_data),
+            parameters_group.create_dataset('betas', data=np.array(betas_data, dtype=np.float32),
                                            compression=self.compression,
                                            compression_opts=self.compression_level)
-            parameters_group.create_dataset('trans', data=np.array(trans_data),
+            parameters_group.create_dataset('trans', data=np.array(trans_data, dtype=np.float32),
                                            compression=self.compression,
                                            compression_opts=self.compression_level)
             
@@ -838,6 +1010,14 @@ class SLEAPMultiViewPreprocessor:
             metadata_group.attrs['n_betas'] = config.N_BETAS
             metadata_group.attrs['min_views_per_sample'] = self.min_views_per_sample
             metadata_group.attrs['canonical_camera_order'] = json.dumps(self.canonical_camera_order)
+            metadata_group.attrs['has_camera_parameters'] = True
+            metadata_group.attrs['has_3d_keypoints'] = any(has_3d_data_list)
+            metadata_group.attrs['load_3d_data'] = self.load_3d_data
+            # Store mapping info for downstream consumers/debugging
+            try:
+                metadata_group.attrs['keypoints_3d_joint_order'] = 'smal'
+            except Exception:
+                pass
             
             # Save statistics
             metadata_group.attrs['total_sessions'] = self.stats['total_sessions']
@@ -847,6 +1027,8 @@ class SLEAPMultiViewPreprocessor:
             metadata_group.attrs['processed_samples'] = self.stats['processed_samples']
             metadata_group.attrs['skipped_insufficient_views'] = self.stats['skipped_insufficient_views']
             metadata_group.attrs['failed_samples'] = self.stats['failed_samples']
+            metadata_group.attrs['sessions_with_3d_data'] = self.stats['sessions_with_3d_data']
+            metadata_group.attrs['samples_with_3d_data'] = self.stats['samples_with_3d_data']
 
 
 def main():
@@ -883,15 +1065,19 @@ Examples:
                        help="Backbone network name (default: vit_large_patch16_224)")
     parser.add_argument("--jpeg_quality", type=int, default=95,
                        help="JPEG compression quality 1-100 (default: 95)")
-    parser.add_argument("--crop_mode", type=str, default='bbox_crop',
+    parser.add_argument("--crop_mode", type=str, default='default',
                        choices=['default', 'centred', 'bbox_crop'],
-                       help="Image cropping mode (default: bbox_crop)")
+                       help="Image cropping mode (default: default)")
     
     # Multi-view specific options
     parser.add_argument("--min_views", type=int, default=2,
                        help="Minimum views required per sample (default: 2)")
     parser.add_argument("--max_frames_per_session", type=int, default=None,
                        help="Maximum frames to process per session (default: all)")
+    
+    # 3D data options
+    parser.add_argument("--no_3d_data", action="store_true",
+                       help="Skip loading 3D keypoints and camera parameters (default: load if available)")
     
     # Other options
     parser.add_argument("--confidence_threshold", type=float, default=0.5,
@@ -927,6 +1113,9 @@ Examples:
     start_time = time.time()
     
     try:
+        # Load 3D data by default unless explicitly disabled
+        load_3d = not args.no_3d_data
+        
         preprocessor = SLEAPMultiViewPreprocessor(
             joint_lookup_table_path=args.joint_lookup_table,
             shape_betas_table_path=args.shape_betas_table,
@@ -936,7 +1125,8 @@ Examples:
             max_frames_per_session=args.max_frames_per_session,
             crop_mode=args.crop_mode,
             confidence_threshold=args.confidence_threshold,
-            min_views_per_sample=args.min_views
+            min_views_per_sample=args.min_views,
+            load_3d_data=load_3d
         )
         
         stats = preprocessor.process_dataset(
@@ -955,6 +1145,8 @@ Examples:
             print(f"  Multi-view samples: {stats['total_multiview_samples']}")
             print(f"  Skipped (insufficient views): {stats['skipped_insufficient_views']}")
             print(f"  Failed samples: {stats['failed_samples']}")
+            print(f"  Sessions with 3D data: {stats['sessions_with_3d_data']}")
+            print(f"  Samples with 3D data: {stats['samples_with_3d_data']}")
             print(f"\nViews per sample distribution:")
             for num_views, count in sorted(stats['views_per_sample_histogram'].items()):
                 print(f"    {num_views} views: {count} samples")
