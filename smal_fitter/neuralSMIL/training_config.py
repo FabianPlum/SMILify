@@ -246,8 +246,12 @@ class TrainingConfig:
                 'joint_angle_regularization': 0.0025    
             }),
             (35, {
-                'keypoint_3d': 2,    # AniMer: 0.01
+                'keypoint_3d': 1,    # AniMer: 0.01
                 'joint_angle_regularization': 0.001
+            }),
+            (70, {
+                'keypoint_3d': 2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0005
             }),
             (120, {
                 'cam_trans': 0.00001,

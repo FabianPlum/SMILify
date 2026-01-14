@@ -312,6 +312,10 @@ def train_epoch(model: MultiViewSMILImageRegressor,
         Dictionary with training metrics
     """
     model.train()
+
+    # If wrapped in DDP, call custom helper methods on the underlying module.
+    # NOTE: DDP does not automatically expose arbitrary custom methods.
+    base_model = model.module if hasattr(model, "module") else model
     
     # Get epoch-specific loss weights from curriculum
     loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(
@@ -331,14 +335,14 @@ def train_epoch(model: MultiViewSMILImageRegressor,
             # Forward pass with mixed precision if enabled
             if scaler is not None:
                 with torch.cuda.amp.autocast():
-                    predicted_params, _, auxiliary_data = model.predict_from_multiview_batch(
+                    predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
                         x_data_batch, y_data_batch
                     )
                     
                     if predicted_params is None:
                         continue
                     
-                    loss, loss_components = model.compute_multiview_batch_loss(
+                    loss, loss_components = base_model.compute_multiview_batch_loss(
                         predicted_params, y_data_batch,
                         loss_weights=loss_weights,
                         return_components=True
@@ -359,14 +363,14 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                 scaler.update()
             else:
                 # Standard forward/backward
-                predicted_params, _, auxiliary_data = model.predict_from_multiview_batch(
+                predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
                     x_data_batch, y_data_batch
                 )
                 
                 if predicted_params is None:
                     continue
                 
-                loss, loss_components = model.compute_multiview_batch_loss(
+                loss, loss_components = base_model.compute_multiview_batch_loss(
                     predicted_params, y_data_batch,
                     loss_weights=loss_weights,
                     return_components=True
@@ -441,6 +445,9 @@ def validate(model: MultiViewSMILImageRegressor,
         Dictionary with validation metrics
     """
     model.eval()
+
+    # If wrapped in DDP, call custom helper methods on the underlying module.
+    base_model = model.module if hasattr(model, "module") else model
     
     # Get epoch-specific loss weights from curriculum
     loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(
@@ -454,14 +461,14 @@ def validate(model: MultiViewSMILImageRegressor,
     with torch.no_grad():
         for x_data_batch, y_data_batch in tqdm(val_loader, desc="Validating", disable=(rank != 0)):
             try:
-                predicted_params, _, auxiliary_data = model.predict_from_multiview_batch(
+                predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
                     x_data_batch, y_data_batch
                 )
                 
                 if predicted_params is None:
                     continue
                 
-                loss, loss_components = model.compute_multiview_batch_loss(
+                loss, loss_components = base_model.compute_multiview_batch_loss(
                     predicted_params, y_data_batch,
                     loss_weights=loss_weights,
                     return_components=True
