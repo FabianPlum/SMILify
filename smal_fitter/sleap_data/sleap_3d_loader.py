@@ -968,7 +968,10 @@ def visualize_reprojection_comparison(loader: SLEAP3DDataLoader, camera_name: st
     print(f"  Saved visualization to: {output_path}")
 
 
-def convert_sleap_to_pytorch3d_camera(loader: SLEAP3DDataLoader, camera_name: str) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray]:
+def convert_sleap_to_pytorch3d_camera(
+    loader: SLEAP3DDataLoader, 
+    camera_name: str
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray]:
     """
     Convert SLEAP camera parameters to pytorch3d format.
     
@@ -1587,11 +1590,8 @@ def main():
                 for i, session in enumerate(sessions):
                     print(f"  [{i}] {Path(session).name}")
                 sys.exit(1)
-    elif len(sessions) == 1:
-        # Single session found, use it
-        pass  # sessions already contains the single session
-    else:
-        # No sessions found, treat as single session directory
+    elif len(sessions) == 0:
+        # No sessions found, treat path as single session directory
         sessions = [session_path]
     
     # Determine which sessions to process
@@ -1623,6 +1623,7 @@ def main():
         print("="*60)
         
         # Create loader for this session
+        # Note: session_idx=0 because current_session_path is already the specific session directory
         try:
             loader = SLEAP3DDataLoader(current_session_path, video_subdir=args.video_subdir, session_idx=0)
         except Exception as e:
