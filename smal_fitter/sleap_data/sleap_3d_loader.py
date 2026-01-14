@@ -24,6 +24,26 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import cv2
 
+# Try to import pytorch3d for visualization
+try:
+    import torch
+    from pytorch3d.structures import Meshes
+    from pytorch3d.renderer import (
+        FoVPerspectiveCameras,
+        RasterizationSettings,
+        MeshRenderer,
+        MeshRasterizer,
+        PointLights,
+        HardPhongShader,
+        Materials,
+        TexturesVertex,
+    )
+    from pytorch3d.utils import ico_sphere
+    PYTORCH3D_AVAILABLE = True
+except ImportError:
+    PYTORCH3D_AVAILABLE = False
+    torch = None
+
 # Add paths for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -936,6 +956,348 @@ def visualize_reprojection_comparison(loader: SLEAP3DDataLoader, camera_name: st
     print(f"  Saved visualization to: {output_path}")
 
 
+def convert_sleap_to_pytorch3d_camera(loader: SLEAP3DDataLoader, camera_name: str) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray]:
+    """
+    Convert SLEAP camera parameters to pytorch3d format.
+    
+    SLEAP/OpenCV convention: X_cam = R @ X_world + t (column vector)
+        Camera coords: X-right, Y-down, Z-forward
+    
+    PyTorch3D convention: X_view = X_world @ R_p3d + T_p3d (row vector)
+        Camera coords: X-left, Y-up, Z-forward (180° rotated around Z from OpenCV)
+    
+    Args:
+        loader: SLEAP3DDataLoader instance
+        camera_name: Name of the camera
+        
+    Returns:
+        Tuple of (R_pytorch3d, T_pytorch3d, fov, flip_matrix) where:
+        - R_pytorch3d: (1, 3, 3) rotation matrix
+        - T_pytorch3d: (1, 3) translation vector
+        - fov: (1,) field of view in degrees
+        - flip_matrix: (3, 3) matrix to convert points from SLEAP to PyTorch3D coords
+    """
+    if not PYTORCH3D_AVAILABLE:
+        raise ImportError("pytorch3d is not available. Please install it to use this function.")
+    
+    # Get camera parameters
+    K = loader.get_camera_intrinsic(camera_name)
+    R_sleap, t_sleap = loader.get_camera_extrinsic(camera_name)
+    width, height = loader.get_image_size(camera_name)
+    
+    # Calculate FOV from intrinsic matrix
+    fy = K[1, 1]
+    fov_y = 2 * np.arctan(height / (2 * fy)) * 180 / np.pi
+    
+    # 180° rotation around Z-axis to convert from OpenCV to PyTorch3D camera coordinates
+    # OpenCV camera: X-right, Y-down, Z-forward
+    # PyTorch3D camera: X-left, Y-up, Z-forward
+    Rz_180 = np.array([
+        [-1,  0,  0],
+        [ 0, -1,  0],
+        [ 0,  0,  1]
+    ], dtype=np.float32)
+    
+    # SLEAP: X_cam_cv = R @ X_world + t (column vector)
+    # PyTorch3D: X_view_p3d = X_world @ R_p3d + T_p3d (row vector)
+    # 
+    # Step 1: Convert column to row vector: R_row = R^T, t stays same
+    # Step 2: Apply coordinate system conversion (180° around Z)
+    #         X_cam_p3d = Rz_180 @ X_cam_cv
+    #         So: R_p3d such that X_world @ R_p3d = Rz_180 @ (R @ X_world)^T = Rz_180 @ X_world^T @ R^T
+    #         In row form: X_world @ R_p3d = X_world @ R^T @ Rz_180^T
+    #         Therefore: R_p3d = R^T @ Rz_180^T = R^T @ Rz_180 (Rz_180 is symmetric)
+    R_pytorch3d = R_sleap.T @ Rz_180
+    
+    # Translation also needs coordinate conversion
+    T_pytorch3d = Rz_180 @ t_sleap
+    
+    # Convert to torch tensors with batch dimension
+    R_torch = torch.from_numpy(R_pytorch3d).float().unsqueeze(0)  # (1, 3, 3)
+    T_torch = torch.from_numpy(T_pytorch3d).float().unsqueeze(0)  # (1, 3)
+    fov_torch = torch.tensor([fov_y], dtype=torch.float32)  # (1,)
+    
+    # No coordinate flip needed for 3D points
+    flip_matrix = np.eye(3, dtype=np.float32)
+    
+    return R_torch, T_torch, fov_torch, flip_matrix
+
+
+def create_sphere_meshes_at_points(points: np.ndarray, radius: float = 0.05, 
+                                   device: str = "cpu", color: Optional[np.ndarray] = None,
+                                   use_rainbow: bool = True) -> Meshes:
+    """
+    Create pytorch3d sphere meshes at 3D point locations.
+    
+    Args:
+        points: (N, 3) array of 3D points
+        radius: Radius of spheres
+        device: Device to place tensors on
+        color: Optional (N, 3) array of RGB colors in [0, 1], or single color
+        use_rainbow: If True, use rainbow colors
+        
+    Returns:
+        Meshes object containing all spheres
+    """
+    if not PYTORCH3D_AVAILABLE:
+        raise ImportError("pytorch3d is not available. Please install it to use this function.")
+    
+    if not isinstance(points, np.ndarray):
+        points = np.array(points)
+    
+    if len(points.shape) == 1:
+        points = points.reshape(1, 3)
+    
+    # Default color is red
+    if color is None:
+        color = np.array([1.0, 0.0, 0.0])
+    
+    # Generate rainbow colors if requested
+    if use_rainbow and points.shape[0] > 1:
+        rainbow_colors = np.zeros((points.shape[0], 3))
+        for i in range(points.shape[0]):
+            hue = i / (points.shape[0] - 1) if points.shape[0] > 1 else 0
+            h = hue * 6.0
+            x = 1.0 - abs(h % 2.0 - 1.0)
+            if h < 1.0:
+                rainbow_colors[i] = [1.0, x, 0.0]
+            elif h < 2.0:
+                rainbow_colors[i] = [x, 1.0, 0.0]
+            elif h < 3.0:
+                rainbow_colors[i] = [0.0, 1.0, x]
+            elif h < 4.0:
+                rainbow_colors[i] = [0.0, x, 1.0]
+            elif h < 5.0:
+                rainbow_colors[i] = [x, 0.0, 1.0]
+            else:
+                rainbow_colors[i] = [1.0, 0.0, x]
+        color = rainbow_colors
+    
+    points_tensor = torch.tensor(points, dtype=torch.float32, device=device)
+    
+    # Create base sphere
+    base_sphere = ico_sphere(level=2, device=device)
+    base_verts = base_sphere.verts_padded()[0]  # (V, 3)
+    base_faces = base_sphere.faces_padded()[0]  # (F, 3)
+    
+    all_verts = []
+    all_faces = []
+    all_colors = []
+    
+    for i in range(points.shape[0]):
+        # Scale and translate sphere
+        verts = base_verts * radius + points_tensor[i]
+        
+        # Set color
+        if isinstance(color, np.ndarray) and color.shape[0] == points.shape[0]:
+            sphere_color = torch.tensor(color[i], dtype=torch.float32, device=device)
+        else:
+            sphere_color = torch.tensor(color, dtype=torch.float32, device=device)
+        
+        all_verts.append(verts)
+        faces_offset = base_faces + (i * base_verts.shape[0])
+        all_faces.append(faces_offset)
+        verts_rgb = sphere_color.expand(verts.shape[0], 3)
+        all_colors.append(verts_rgb)
+    
+    # Concatenate all
+    all_verts = torch.cat(all_verts, dim=0)
+    all_faces = torch.cat(all_faces, dim=0)
+    all_colors = torch.cat(all_colors, dim=0)
+    
+    # Create textures and mesh
+    textures = TexturesVertex(verts_features=[all_colors])
+    spheres_mesh = Meshes(verts=[all_verts], faces=[all_faces], textures=textures)
+    
+    return spheres_mesh
+
+
+def visualize_pytorch3d_alignment(loader: SLEAP3DDataLoader, camera_name: str, 
+                                  frame_idx: int, keypoints_3d: np.ndarray,
+                                  original_2d: np.ndarray, visibility: np.ndarray,
+                                  output_path: str, device: str = "cpu"):
+    """
+    Visualize 3D keypoints rendered from camera perspective using pytorch3d,
+    overlaid with original 2D keypoints to verify alignment.
+    
+    This function verifies that camera parameters can be correctly converted to
+    the pytorch3d format used by the SMILify framework.
+    
+    Args:
+        loader: SLEAP3DDataLoader instance
+        camera_name: Name of the camera
+        frame_idx: Frame index
+        keypoints_3d: (N, 3) array of 3D keypoints in SLEAP/OpenCV coordinates
+        original_2d: (N, 2) array of 2D keypoints in pixel coordinates
+        visibility: (N,) boolean array of keypoint visibility
+        output_path: Path to save the visualization
+        device: Device to use for rendering ('cpu' or 'cuda')
+    """
+    if not PYTORCH3D_AVAILABLE:
+        print("Warning: pytorch3d not available, skipping pytorch3d visualization")
+        return
+    
+    # Get image size and camera intrinsics for reference
+    width, height = loader.get_image_size(camera_name)
+    K = loader.get_camera_intrinsic(camera_name)
+    
+    print(f"  PyTorch3D visualization for {camera_name}:")
+    print(f"    Image size: {width}x{height}")
+    print(f"    Intrinsics - fx: {K[0,0]:.1f}, fy: {K[1,1]:.1f}, cx: {K[0,2]:.1f}, cy: {K[1,2]:.1f}")
+    
+    # Convert camera parameters to pytorch3d format
+    R, T, fov, flip_matrix = convert_sleap_to_pytorch3d_camera(loader, camera_name)
+    
+    # Move to device
+    R = R.to(device)
+    T = T.to(device)
+    fov = fov.to(device)
+    
+    # Create camera
+    cameras = FoVPerspectiveCameras(R=R, T=T, fov=fov, device=device)
+    
+    print(f"    FOV: {fov.item():.1f} degrees")
+    print(f"    3D keypoints range: X[{keypoints_3d[:,0].min():.1f}, {keypoints_3d[:,0].max():.1f}], "
+          f"Y[{keypoints_3d[:,1].min():.1f}, {keypoints_3d[:,1].max():.1f}], "
+          f"Z[{keypoints_3d[:,2].min():.1f}, {keypoints_3d[:,2].max():.1f}]")
+    
+    # Use keypoints directly (no coordinate flip)
+    keypoints_3d_p3d = keypoints_3d.copy()
+    
+    # Check camera position relative to scene
+    # In PyTorch3D, camera center = -R^T @ T
+    camera_center = (-R[0].T @ T[0]).cpu().numpy()
+    print(f"    Camera center: [{camera_center[0]:.1f}, {camera_center[1]:.1f}, {camera_center[2]:.1f}]")
+    
+    # Create sphere meshes for 3D keypoints (in PyTorch3D coords)
+    # Scale radius based on scene size
+    scene_scale = np.linalg.norm(keypoints_3d_p3d, axis=1).max()
+    sphere_radius = max(0.01, scene_scale * 0.02)  # 2% of scene size, minimum 0.01
+    
+    sphere_meshes = create_sphere_meshes_at_points(
+        keypoints_3d_p3d, 
+        radius=sphere_radius, 
+        device=device,
+        use_rainbow=True
+    )
+    
+    # Set up renderer
+    # PyTorch3D accepts image_size as (height, width) tuple for rectangular images
+    # This matches the camera's actual sensor dimensions
+    raster_settings = RasterizationSettings(
+        image_size=(height, width),  # Note: PyTorch3D uses (H, W) order
+        blur_radius=0.0,
+        faces_per_pixel=1,
+    )
+    
+    # Check if points are in front of the camera (positive Z in view space after transform)
+    # PyTorch3D: X_view = X_world @ R + T
+    keypoints_3d_tensor = torch.from_numpy(keypoints_3d_p3d).float().unsqueeze(0).to(device)  # (1, N, 3)
+    points_view = keypoints_3d_tensor[0] @ R[0] + T[0]
+    z_in_view = points_view[:, 2].cpu().numpy()
+    print(f"    Z in view space: min={z_in_view.min():.1f}, max={z_in_view.max():.1f} (should be positive for visible)")
+    
+    # Position lights at camera location for good illumination
+    lights = PointLights(device=device, location=[camera_center.tolist()])
+    materials = Materials(device=device, specular_color=[[1.0, 1.0, 1.0]], shininess=10.0)
+    
+    renderer = MeshRenderer(
+        rasterizer=MeshRasterizer(cameras=cameras, raster_settings=raster_settings),
+        shader=HardPhongShader(device=device, cameras=cameras, lights=lights),
+    )
+    
+    # Also project 3D keypoints using pytorch3d to verify alignment
+    # Must use same (H, W) format as rasterizer for consistency
+    screen_size = torch.tensor([[height, width]], device=device)
+    projected_2d = cameras.transform_points_screen(keypoints_3d_tensor, image_size=screen_size)  # (1, N, 3)
+    projected_2d = projected_2d[0, :, :2].cpu().numpy()  # (N, 2) - drop Z
+    # Note: transform_points_screen returns (x, y) where x ∈ [0, width], y ∈ [0, height]
+    
+    # Compute visible mask
+    visible_mask = visibility > 0
+    
+    # No scaling needed - rendered image matches camera dimensions exactly
+    scaled_original_2d = original_2d.copy()
+    
+    # Check if Y needs to be flipped by comparing projection with original
+    # Try both with and without Y flip and use the one with lower error
+    projected_2d_flipped = projected_2d.copy()
+    projected_2d_flipped[:, 1] = height - projected_2d_flipped[:, 1]
+    
+    error_no_flip = np.linalg.norm(projected_2d[visible_mask] - scaled_original_2d[visible_mask], axis=1).mean() if visible_mask.sum() > 0 else float('inf')
+    error_with_flip = np.linalg.norm(projected_2d_flipped[visible_mask] - scaled_original_2d[visible_mask], axis=1).mean() if visible_mask.sum() > 0 else float('inf')
+    
+    if error_with_flip < error_no_flip:
+        projected_2d = projected_2d_flipped
+        print(f"    Y-flip applied (improved error from {error_no_flip:.1f} to {error_with_flip:.1f}px)")
+    
+    print(f"    Rendered at native camera resolution: {width}x{height}")
+    print(f"    Projected 2D range: X[{projected_2d[:,0].min():.1f}, {projected_2d[:,0].max():.1f}], "
+          f"Y[{projected_2d[:,1].min():.1f}, {projected_2d[:,1].max():.1f}]")
+    print(f"    Original 2D range: X[{scaled_original_2d[:,0].min():.1f}, {scaled_original_2d[:,0].max():.1f}], "
+          f"Y[{scaled_original_2d[:,1].min():.1f}, {scaled_original_2d[:,1].max():.1f}]")
+    
+    # Render spheres
+    rendered_images = renderer(sphere_meshes, lights=lights, materials=materials)
+    rendered_image = rendered_images[0, ..., :3].cpu().numpy()  # (H, W, 3)
+    
+    # Create figure
+    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    
+    # Display rendered image
+    ax.imshow(rendered_image)
+    
+    # Overlay 2D keypoints
+    # No scaling needed - rendered image matches camera dimensions
+    scaled_2d = scaled_original_2d
+    
+    # Plot pytorch3d projected points (green X markers)
+    if np.any(visible_mask):
+        ax.scatter(projected_2d[visible_mask, 0], projected_2d[visible_mask, 1],
+                  c='lime', s=200, alpha=0.9, marker='x', 
+                  label='PyTorch3D Projected', linewidth=3, zorder=11)
+    
+    # Plot original 2D keypoints (yellow circles)
+    if np.any(visible_mask):
+        ax.scatter(scaled_2d[visible_mask, 0], scaled_2d[visible_mask, 1],
+                  c='yellow', s=150, alpha=0.9, marker='o', 
+                  label='Original 2D', edgecolors='black', linewidth=2, zorder=10)
+        
+        # Plot invisible keypoints
+        invisible_mask = ~visible_mask
+        if np.any(invisible_mask):
+            ax.scatter(scaled_2d[invisible_mask, 0], scaled_2d[invisible_mask, 1],
+                      c='gray', s=100, alpha=0.5, marker='o',
+                      label='Original 2D (invisible)', edgecolors='white', linewidth=1, zorder=9)
+    
+    # Calculate reprojection error between pytorch3d projected and scaled original
+    if np.any(visible_mask):
+        reproj_errors = np.linalg.norm(projected_2d[visible_mask] - scaled_2d[visible_mask], axis=1)
+        mean_error = reproj_errors.mean()
+        max_error = reproj_errors.max()
+        print(f"    PyTorch3D reprojection error: mean={mean_error:.1f}px, max={max_error:.1f}px")
+    
+    ax.set_title(f'Pytorch3D Camera Alignment: {camera_name} - Frame {frame_idx}', 
+                fontsize=14, fontweight='bold')
+    ax.legend(loc='upper right', fontsize=10)
+    
+    # Add stats text box
+    if np.any(visible_mask):
+        stats_text = (f'FOV: {fov.item():.1f}°\n'
+                     f'Visible: {visible_mask.sum()}/{len(visibility)}\n'
+                     f'Reproj error: {mean_error:.1f}px')
+        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=10,
+               verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    ax.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"  Saved pytorch3d visualization to: {output_path}")
+
+
 def test_3d_to_2d_projection(session_path: str, plot_examples: bool = False):
     """Test 3D to 2D projection by comparing to ground truth predictions."""
     loader = SLEAP3DDataLoader(session_path)
@@ -1044,6 +1406,22 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
                 if plot_examples:
                     plot_path = plot_dir / f"{camera_name}_frame_0_reprojection.png"
                     visualize_reprojection_comparison(loader, camera_name, frame_idx=0, output_path=str(plot_path))
+                    
+                    # Also create pytorch3d visualization to verify camera parameter conversion
+                    if PYTORCH3D_AVAILABLE:
+                        pytorch3d_plot_path = plot_dir / f"{camera_name}_frame_0_pytorch3d.png"
+                        try:
+                            visualize_pytorch3d_alignment(loader, camera_name, frame_idx=0, 
+                                                          keypoints_3d=keypoints_3d,
+                                                          original_2d=original_2d,
+                                                          visibility=visibility,
+                                                          output_path=str(pytorch3d_plot_path))
+                        except Exception as e:
+                            print(f"  Warning: Could not create pytorch3d visualization: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    else:
+                        print(f"  Note: pytorch3d not available, skipping pytorch3d visualization")
                 
             except Exception as e:
                 print(f"  Warning: Could not load 2D predictions: {e}")
