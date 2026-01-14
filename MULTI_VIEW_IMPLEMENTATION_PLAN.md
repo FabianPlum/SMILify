@@ -6,6 +6,12 @@ This document outlines the implementation plan for adding multi-view support to 
 
 **Critical Constraint**: All changes must be additive and backward-compatible with the existing single-view workflow.
 
+**Recent Expansion (GT 3D + Calibrated Cameras)**: The multi-view pipeline now optionally ingests **ground truth 3D keypoints** and **per-camera calibration** (intrinsics + extrinsics) from SLEAP/Anipose exports. This enables:
+- Direct **3D keypoint supervision** (`keypoint_3d` loss)
+- Direct **camera supervision** (`fov`, `cam_rot`, `cam_trans` losses)
+- Robust camera conversion to PyTorch3D including **aspect ratio** handling
+- A dataset-level `world_scale` to keep 3D coordinates + camera translations consistent with SMILify world units
+
 ---
 
 ## Table of Contents
@@ -56,6 +62,7 @@ Input Image (1, 3, H, W)
    │  - fov (1, 1)                       │
    │  - cam_rot (1, 3, 3)                │
    │  - cam_trans (1, 3)                 │
+   │  - mesh_scale (optional, 1, 1)      │
    └─────────────────────────────────────┘
 ```
 
@@ -129,6 +136,13 @@ For each active view v:
 Total 2D loss = weighted average of per-view losses
 ```
 
+**Additional Supervision (Optional, when available)**:
+- **3D keypoint loss**: compares predicted canonical joints (3D) to GT 3D keypoints (world/model space after `world_scale`)
+- **Camera parameter losses**: supervises each camera head with GT:
+  - `fov` (vertical FOV in degrees)
+  - `cam_rot` (3x3 rotation matrix)
+  - `cam_trans` (3-vector translation)
+
 ---
 
 ## 2. Data Pipeline Changes
@@ -167,6 +181,13 @@ Total 2D loss = weighted average of per-view losses
     keypoint_visibility: (N_samples, max_views, N_joints) float32
     view_valid: (N_samples, max_views) bool        # Valid view mask
 
+    # Optional calibrated-camera + 3D supervision (if available in source SLEAP/Anipose export)
+    camera_intrinsics: (N_samples, max_views, 3, 3) float32
+    camera_extrinsics_R: (N_samples, max_views, 3, 3) float32
+    camera_extrinsics_t: (N_samples, max_views, 3) float32
+    image_sizes: (N_samples, max_views, 2) int32          # (width, height) per view
+    keypoints_3d: (N_samples, N_joints, 3) float32        # 3D joints in world coordinates (scaled by world_scale at load time)
+
 /parameters/
     # Shared body parameters (placeholders for SLEAP data)
     global_rot: (N_samples, 3) float32
@@ -180,6 +201,7 @@ Total 2D loss = weighted average of per-view losses
     camera_names: (N_samples, max_views) string    # Camera name for each view slot
     num_views: (N_samples,) int32                  # Actual number of views per sample
     has_ground_truth_betas: (N_samples,) bool
+    has_3d_data: (N_samples,) bool                 # Per-sample indicator for 3D labels
 
 /metadata/
     attrs:
@@ -188,6 +210,9 @@ Total 2D loss = weighted average of per-view losses
         max_views: int                             # Maximum views across all samples
         canonical_camera_order: list[str]          # Ordered list of camera names
         target_resolution: int
+        has_camera_parameters: bool
+        has_3d_keypoints: bool
+        world_scale: float                         # Scales 3D points + camera translations into SMILify units
         ...
 ```
 
@@ -318,6 +343,21 @@ def load_all_cameras_for_frame(self, frame_idx: int) -> Dict[str, Dict]:
         Dict mapping camera_name -> camera_data for all available cameras
     """
 ```
+
+### 2.3 New File: `smal_fitter/sleap_data/sleap_3d_loader.py`
+
+**Purpose**: Load 3D keypoints and calibrated camera parameters from SLEAP/Anipose exports and provide robust conversion to the PyTorch3D camera convention used by SMILify.
+
+**Key Responsibilities**:
+- Load per-camera intrinsics `K`, extrinsics `(R, t)`, and image sizes
+- Convert OpenCV/SLEAP camera parameters to PyTorch3D (`R_p3d`, `T_p3d`, `fov_y_degrees`, `aspect_ratio`)
+- Provide visualization utilities for verifying 3D→2D projection alignment
+
+**Key Design Detail (Aspect Ratio)**:
+PyTorch3D’s `FoVPerspectiveCameras` requires explicit `aspect_ratio` for correct projection when `W!=H` and/or `fx!=fy`. The conversion derives:
+\[
+\text{aspect\_ratio}=\frac{W\cdot f_y}{H\cdot f_x}
+\]
 
 ---
 
@@ -1434,6 +1474,7 @@ The following files have been created implementing the multi-view system:
 |------|--------|-------------|
 | `smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py` | ✅ Complete | Multi-view SLEAP preprocessor that groups frames by (session, frame_idx) and stores all camera views together |
 | `smal_fitter/sleap_data/sleap_multiview_dataset.py` | ✅ Complete | PyTorch dataset for loading multi-view samples with view sampling and masking support |
+| `smal_fitter/sleap_data/sleap_3d_loader.py` | ✅ Complete | Loader + conversion utilities for calibrated cameras + 3D keypoints from SLEAP/Anipose |
 
 #### Phase 2: Model Architecture
 
@@ -1445,6 +1486,7 @@ The following files have been created implementing the multi-view system:
 - **Feature Fusion**: Cross-attention between views (not simple concatenation)
 - **Camera Heads**: N separate heads, one per canonical view position
 - **View Embeddings**: Learned embeddings help identify which camera a view belongs to
+- **Global mesh scaling (optional)**: model can predict a single scalar `mesh_scale` used consistently during training + visualization (no direct GT)
 
 #### Phase 3: Training Pipeline
 
@@ -1473,6 +1515,10 @@ The following files have been created implementing the multi-view system:
 - Output directory: `multiview_singleview_renders/epoch_XXX/`
 - Filename format: `sample_XXX_view_XX_epoch_XXX.png`
 - Enables visual verification that the same body produces correct 2D projections across all views
+
+**GT Cam + GT 3D Projection Sanity Overlay**:
+- When `has_3d_data` and calibrated cameras are present, visualization projects **GT 3D keypoints** using **GT camera parameters** and overlays them on the image.
+- This catches convention mismatches (R/T), unit scale issues (mm vs m), and aspect ratio errors early.
 
 **Mesh Geometry Export** (`export_mesh_as_obj`):
 - Exports mesh vertices and faces as OBJ files for external inspection
@@ -1511,6 +1557,56 @@ The following files have been created implementing the multi-view system:
 - **Implementation**: `export_mesh_as_obj()` function exports vertices and faces using same parameters as visualization
 - **Files Modified**: `train_multiview_regressor.py`
 
+#### GT 3D + Calibrated Camera Integration (2026-01-14)
+- **Added**: Optional loading of 3D keypoints + calibrated camera parameters into the multi-view dataset.
+- **Added**: `world_scale` handling so GT 3D keypoints and GT camera translations stay consistent and in the expected numerical range.
+- **Added**: Camera conversion returns **vertical FOV** and **aspect ratio**; aspect ratio is threaded into the renderer (`FoVPerspectiveCameras`).
+- **Added**: Multi-view losses for `keypoint_3d`, `fov`, `cam_rot`, `cam_trans`, and printing of all components in the epoch summary.
+- **Files Modified/Added**:
+  - `smal_fitter/sleap_data/sleap_3d_loader.py`
+  - `smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py`
+  - `smal_fitter/sleap_data/sleap_multiview_dataset.py`
+  - `smal_fitter/neuralSMIL/multiview_smil_regressor.py`
+  - `smal_fitter/neuralSMIL/train_multiview_regressor.py`
+
+#### Critical Bugfix: Transformer Body Head Ignored Inputs (2026-01-14)
+- **Issue**: In multi-view mode with `head_type='transformer_decoder'`, the body head was called as `transformer_head(features, None)`. The decoder uses `spatial_features` for cross-attention; passing `None` meant the body prediction was effectively **input-independent**, causing identical body predictions across samples.
+- **Fix**: Pass the aggregated body feature as a one-token `spatial_features` sequence: `spatial_feats = features.unsqueeze(1)` and call `transformer_head(features, spatial_feats)`.
+- **Files Modified**: `smal_fitter/neuralSMIL/multiview_smil_regressor.py`
+
+#### Camera/Rendering Robustness Fixes (2026-01-14)
+- **Aspect ratio propagation**:
+  - **Issue**: PyTorch3D projections misaligned when `aspect_ratio` wasn’t provided (defaulted to 1).
+  - **Fix**: Compute/store per-view `aspect_ratio` and pass through dataset → loss/render → renderer.
+- **`aspect_ratio=None` crash**:
+  - **Issue**: `FoVPerspectiveCameras` can error if `aspect_ratio=None`.
+  - **Fix**: Default to ones tensor and broadcast scalars to batch shape.
+- **Rasterization overflow warning**:
+  - **Issue**: PyTorch3D “Bin size was too small…” coarse rasterization overflow.
+  - **Fix**: Set `bin_size=0` (naive rasterization) for stability.
+- **Clipping planes**:
+  - **Issue**: Mesh/keypoints could be clipped by narrow `znear/zfar`.
+  - **Fix**: Use wider clipping bounds (`znear=1e-3`, `zfar=1e3`) in renderer camera setup.
+- **Dtype consistency**:
+  - **Issue**: runtime errors from `Double` vs `Float` during rendering and camera ops.
+  - **Fix**: Enforce `float32` for camera tensors, renderer inputs, and initialized tensors (`torch.zeros/ones(..., dtype=torch.float32)`), and cast faces to `long`.
+- **Files Modified**:
+  - `smal_fitter/p3d_renderer.py`
+  - `smal_fitter/neuralSMIL/multiview_smil_regressor.py`
+  - `smal_fitter/smal_fitter.py`
+
+#### Preprocessing/CLI Fixes (2026-01-14)
+- **Cropping bug**:
+  - **Issue**: Preprocessor defaulted to always cropping.
+  - **Fix**: Default `crop_mode` changed to `'default'` so cropping is opt-in.
+- **CLI cleanup**:
+  - **Issue**: Redundant flags `--load_3d_data` and `--no_3d_data`.
+  - **Fix**: Keep a single disabling flag (`--no_3d_data`) while default is to load when available.
+- **All numeric outputs float32**:
+  - **Fix**: Ensure HDF5 saved arrays are consistently `float32` to avoid downstream dtype mismatches.
+- **Files Modified**:
+  - `smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py`
+
 ### Usage
 
 ```bash
@@ -1532,12 +1628,13 @@ torchrun --nproc_per_node=4 smal_fitter/neuralSMIL/train_multiview_regressor.py 
 
 ---
 
-*Document Version: 2.2*  
-*Last Updated: 2026-01-06*  
+*Document Version: 2.3*  
+*Last Updated: 2026-01-14*  
 *Author: Fabian Plum x Claude (AI Assistant)*  
-*Status: IMPLEMENTED - Multi-view system ready for testing*
+*Status: IMPLEMENTED - Multi-view system with optional GT 3D + calibrated camera supervision*
 
 **Changelog**:
+- v2.3: Added GT 3D + calibrated camera supervision (world_scale + aspect_ratio), fixed transformer body-head conditioning bug, and hardened rendering (dtype, rasterization, clipping planes)
 - v2.2: Added joint angle regularization, device mismatch fix, and OBJ mesh export functionality
 - v2.1: Added Phase 4 (Visualization) - multi-view training progress visualization
 - v2.0: Implementation complete with cross-attention fusion and separate camera heads
