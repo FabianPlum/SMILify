@@ -33,6 +33,7 @@ from tqdm import tqdm
 from datetime import datetime
 import argparse
 import imageio
+from typing import Optional
 
 # Add parent directories to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -83,6 +84,27 @@ def cleanup_ddp():
         dist.destroy_process_group()
 
 
+def _print_component_metrics(train_components: dict, val_components: dict, indent: str = "    "):
+    """
+    Print a stable, readable table of per-loss component metrics.
+
+    Matches the spirit of the reporting in `train_smil_regressor.py`: show all tracked
+    components (including camera + 3D keypoints) for train and validation.
+    """
+    train_components = train_components or {}
+    val_components = val_components or {}
+    all_keys = sorted(set(train_components.keys()) | set(val_components.keys()))
+    if not all_keys:
+        print(f"{indent}(no loss components reported)")
+        return
+
+    print(f"{indent}Loss Components (Train / Val):")
+    for k in all_keys:
+        t = float(train_components.get(k, 0.0))
+        v = float(val_components.get(k, 0.0))
+        print(f"{indent}  {k:20s}: {t:.6f} / {v:.6f}")
+
+
 class MultiViewTrainingConfig:
     """
     Configuration for multi-view training.
@@ -118,6 +140,11 @@ class MultiViewTrainingConfig:
         'train_ratio': 0.8,
         'val_ratio': 0.1,
         'test_ratio': 0.1,
+        
+        # Mesh scaling - allows network to predict global mesh scale
+        # (useful when 3D ground truth has different scale than model)
+        'allow_mesh_scaling': False,
+        'mesh_scale_init': 1.0,
     }
     
     @classmethod
@@ -169,6 +196,11 @@ class MultiViewTrainingConfig:
         
         # Shape family from global config
         merged['shape_family'] = config.SHAPE_FAMILY
+        
+        # Mesh scaling config from TrainingConfig (if available)
+        mesh_scaling_config = TrainingConfig.get_mesh_scaling_config()
+        merged['allow_mesh_scaling'] = mesh_scaling_config.get('allow_mesh_scaling', False)
+        merged['mesh_scale_init'] = mesh_scaling_config.get('init_mesh_scale', 1.0)
         
         return merged
     
@@ -817,6 +849,47 @@ def create_rendered_view_with_keypoints(model: MultiViewSMILImageRegressor,
     return np.array(pil_img)
 
 
+def draw_keypoints_on_image(image_rgb: np.ndarray,
+                            gt_kps: Optional[np.ndarray] = None,
+                            gt_vis: Optional[np.ndarray] = None,
+                            pred_kps: Optional[np.ndarray] = None) -> np.ndarray:
+    """
+    Draw GT (green circles) and "pred" (red crosses) keypoints on top of an RGB image.
+
+    Notes:
+      - Keypoints are expected in (y, x) pixel coordinates.
+      - `image_rgb` can be float in [0,1] or uint8 in [0,255].
+    """
+    from PIL import Image, ImageDraw
+
+    img = image_rgb
+    if img is None:
+        return None
+
+    if img.dtype != np.uint8:
+        img = np.clip(img, 0.0, 1.0)
+        img = (img * 255.0).astype(np.uint8)
+
+    pil_img = Image.fromarray(img)
+    draw = ImageDraw.Draw(pil_img)
+
+    # GT keypoints (green circles)
+    if gt_kps is not None:
+        for j, (y, x) in enumerate(gt_kps):
+            if gt_vis is None or gt_vis[j] > 0.5:
+                x, y = float(x), float(y)
+                draw.ellipse([x - 3, y - 3, x + 3, y + 3], outline='green', width=2)
+
+    # Pred keypoints (red crosses)
+    if pred_kps is not None:
+        for (y, x) in pred_kps:
+            x, y = float(x), float(y)
+            draw.line([x - 4, y, x + 4, y], fill='red', width=2)
+            draw.line([x, y - 4, x, y + 4], fill='red', width=2)
+
+    return np.array(pil_img)
+
+
 class SingleViewImageExporter:
     """Image exporter for single-view rendered visualizations."""
     def __init__(self, output_dir: str, sample_idx: int, view_idx: int, epoch: int):
@@ -1037,17 +1110,16 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
         print(f"  Model renderer size: {model_renderer_size}")
         print(f"  This ensures keypoint normalization matches training")
     
-    # Debug: Print predicted params summary for first sample
-    if sample_idx == 0:
-        print(f"\n[Visualization Debug] Sample 0 predicted params:")
-        print(f"  global_rot shape: {predicted_params['global_rot'].shape}, values: {predicted_params['global_rot'][0, :3].detach().cpu().numpy()}")
-        print(f"  joint_rot shape: {predicted_params['joint_rot'].shape}")
-        print(f"  betas shape: {predicted_params['betas'].shape}, values: {predicted_params['betas'][0, :3].detach().cpu().numpy()}")
-        print(f"  trans shape: {predicted_params['trans'].shape}, values: {predicted_params['trans'][0].detach().cpu().numpy()}")
-        if fov_per_view is not None:
-            print(f"  fov_per_view[0]: {fov_per_view[0][0, 0].item():.4f}")
-        if cam_trans_per_view is not None:
-            print(f"  cam_trans_per_view[0]: {cam_trans_per_view[0][0].detach().cpu().numpy()}")
+    # Debug: Print predicted params summary and input fingerprint for EACH sample
+    # This helps diagnose if model receives different inputs but outputs same predictions
+    img_fingerprint = images_tensors[0][0, 0, :5, :5].mean().item()  # Small patch mean as fingerprint
+    print(f"\n[Sample {sample_idx}] Input fingerprint (img patch mean): {img_fingerprint:.6f}")
+    print(f"  trans: [{predicted_params['trans'][0, 0].item():.4f}, {predicted_params['trans'][0, 1].item():.4f}, {predicted_params['trans'][0, 2].item():.4f}]")
+    print(f"  global_rot[0:3]: [{predicted_params['global_rot'][0, 0].item():.4f}, {predicted_params['global_rot'][0, 1].item():.4f}, {predicted_params['global_rot'][0, 2].item():.4f}]")
+    if fov_per_view is not None:
+        print(f"  fov_per_view[0]: {fov_per_view[0][0, 0].item():.4f}")
+    if model.allow_mesh_scaling and 'mesh_scale' in predicted_params:
+        print(f"  mesh_scale: {predicted_params['mesh_scale'][0].item():.4f}")
     
     for view_idx in range(num_views):
         try:
@@ -1167,21 +1239,19 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 temp_fitter.fov.data = predicted_params['fov'][0:1].detach().to(device)  # (1,)
             
             # Set scale and translation parameters if available
+            #
+            # IMPORTANT:
+            # In `separate` mode these are PCA weights; in training we intentionally *do not* apply
+            # them in the renderer path (`_render_keypoints_with_camera`) because they require PCA
+            # dirs and are typically unsupervised (loss weights often 0).
+            #
+            # Applying them here in visualization can make the mesh look severely deformed even
+            # though training is not actually optimizing those degrees of freedom.
             if 'log_beta_scales' in predicted_params and 'betas_trans' in predicted_params:
                 if model.scale_trans_mode in ['separate', 'ignore']:
-                    # Transform PCA weights to per-joint values
-                    scale_weights = predicted_params['log_beta_scales'][0:1].detach()
-                    trans_weights = predicted_params['betas_trans'][0:1].detach()
-                    
-                    try:
-                        log_beta_scales_joint, betas_trans_joint = model._transform_separate_pca_weights_to_joint_values(
-                            scale_weights, trans_weights
-                        )
-                        temp_fitter.log_beta_scales.data = log_beta_scales_joint.to(device)
-                        temp_fitter.betas_trans.data = betas_trans_joint.to(device)
-                    except Exception:
-                        # PCA transformation failed, use defaults
-                        pass
+                    # Mirror training behavior: skip unsupervised per-joint scaling/translation.
+                    # This keeps visualizations consistent with what the loss is optimizing.
+                    pass
                 else:
                     temp_fitter.log_beta_scales.data = predicted_params['log_beta_scales'][0:1].detach().to(device)
                     temp_fitter.betas_trans.data = predicted_params['betas_trans'][0:1].detach().to(device)
@@ -1206,10 +1276,20 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                     
                     # Set camera parameters on renderer - this is critical for correct visualization
                     # IMPORTANT: Must set camera BEFORE calling generate_visualization
+                    # If the dataset provides a GT-derived aspect ratio, use it for rendering geometry.
+                    # This is critical for calibrated cameras with W!=H and/or fx!=fy.
+                    aspect = None
+                    try:
+                        if y_data.get('cam_aspect_per_view') is not None:
+                            aspect = float(np.array(y_data['cam_aspect_per_view'][view_idx]).reshape(-1)[0])
+                    except Exception:
+                        aspect = None
+
                     temp_fitter.renderer.set_camera_parameters(
                         R=cam_rot,
                         T=cam_trans,
-                        fov=view_fov
+                        fov=view_fov,
+                        aspect_ratio=aspect
                     )
                     
                     # Verify camera was set correctly
@@ -1228,6 +1308,82 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                         print(f"  Camera R shape: {temp_fitter.renderer.cameras.R.shape}")
                         print(f"  Camera T shape: {temp_fitter.renderer.cameras.T.shape}")
                         print(f"  Camera fov shape: {temp_fitter.renderer.cameras.fov.shape}")
+
+                    # ===================== GT CAMERA + GT 3D PROJECTION SANITY CHECK =====================
+                    # If the dataset provides 3D keypoints + calibrated cameras, verify that:
+                    #   GT 3D keypoints + GT camera -> projected 2D aligns with GT 2D keypoints.
+                    #
+                    # This catches unit-scale issues (e.g., mm vs m) and convention mismatches in R/T parsing.
+                    try:
+                        has_3d = bool(y_data.get('has_3d_data', False))
+                        kp3d = y_data.get('keypoints_3d', None)
+                        gt_cam_R_all = y_data.get('cam_rot_per_view', None)
+                        gt_cam_T_all = y_data.get('cam_trans_per_view', None)
+                        gt_cam_fov_all = y_data.get('cam_fov_per_view', None)
+
+                        if has_3d and kp3d is not None and gt_cam_R_all is not None and gt_cam_T_all is not None and gt_cam_fov_all is not None:
+                            # Extract GT cam params for this view
+                            gt_R = torch.from_numpy(np.array(gt_cam_R_all[view_idx])).to(device=device, dtype=torch.float32).unsqueeze(0)  # (1,3,3)
+                            gt_T = torch.from_numpy(np.array(gt_cam_T_all[view_idx])).to(device=device, dtype=torch.float32).unsqueeze(0)  # (1,3)
+                            gt_fov_arr = np.array(gt_cam_fov_all[view_idx]).reshape(-1)
+                            gt_fov = torch.from_numpy(gt_fov_arr).to(device=device, dtype=torch.float32)  # (1,)
+                            if gt_fov.numel() != 1:
+                                gt_fov = gt_fov[:1]
+
+                            # GT 3D points (world coords, should already be scaled into SMILify world units by dataset)
+                            pts3d = torch.from_numpy(np.array(kp3d)).to(device=device, dtype=torch.float32).unsqueeze(0)  # (1,J,3)
+
+                            # Project using GT camera (temporarily swap camera, then restore predicted camera)
+                            gt_aspect = None
+                            try:
+                                if y_data.get('cam_aspect_per_view') is not None:
+                                    gt_aspect = float(np.array(y_data['cam_aspect_per_view'][view_idx]).reshape(-1)[0])
+                            except Exception:
+                                gt_aspect = None
+                            temp_fitter.renderer.set_camera_parameters(R=gt_R, T=gt_T, fov=gt_fov, aspect_ratio=gt_aspect)
+                            screen_size = torch.ones(1, 2, dtype=torch.float32, device=device) * float(target_size)
+                            proj = temp_fitter.renderer.cameras.transform_points_screen(pts3d, image_size=screen_size)[:, :, [1, 0]]  # (1,J,2) (y,x)
+                            proj_np = proj[0].detach().cpu().numpy()
+
+                            # Restore predicted camera for SMALFitter visualization
+                            temp_fitter.renderer.set_camera_parameters(R=cam_rot, T=cam_trans, fov=view_fov, aspect_ratio=aspect)
+
+                            # Only draw overlay if we have 2D keypoints for this view
+                            if view_keypoints is not None and view_visibility is not None:
+                                gt2d_px = view_keypoints.copy()
+                                gt2d_px[:, 0] = gt2d_px[:, 0] * target_size
+                                gt2d_px[:, 1] = gt2d_px[:, 1] * target_size
+
+                                overlay = draw_keypoints_on_image(
+                                    resized_image,  # RGB
+                                    gt_kps=gt2d_px,
+                                    gt_vis=view_visibility,
+                                    pred_kps=proj_np,
+                                )
+                                overlay_name = f"sample_{sample_idx:03d}_view_{view_idx:02d}_epoch_{epoch:03d}_gtcam_gt3dproj.png"
+                                imageio.imsave(os.path.join(output_dir, overlay_name), overlay)
+
+                            # Debug stats for first sample/view
+                            if sample_idx == 0 and view_idx == 0:
+                                tnorm = float(torch.linalg.norm(gt_T[0]).item())
+                                kpnorm = float(torch.max(torch.abs(pts3d)).item())
+                                print(f"\n[GT Cam+3D Sanity] view {view_idx}:")
+                                print(f"  GT fov_y: {float(gt_fov[0].item()):.2f} deg")
+                                print(f"  ||GT cam_T||: {tnorm:.3f}  (should be O(0.1-10) after scaling, not O(100-1000))")
+                                print(f"  max|GT kp3d|: {kpnorm:.3f} (same unit scale as SMAL verts/joints)")
+                                if view_keypoints is not None and view_visibility is not None:
+                                    vis_mask = (np.array(view_visibility).reshape(-1) > 0.5)
+                                    if vis_mask.any():
+                                        gt2d_px = view_keypoints.copy()
+                                        gt2d_px[:, 0] = gt2d_px[:, 0] * target_size
+                                        gt2d_px[:, 1] = gt2d_px[:, 1] * target_size
+                                        diff = proj_np[vis_mask] - gt2d_px[vis_mask]
+                                        err_px = float(np.mean(np.linalg.norm(diff, axis=1)))
+                                        print(f"  mean reproj err (GT 3D + GT cam -> 2D): {err_px:.2f} px @ {target_size}px")
+                    except Exception as _e:
+                        # Best-effort debug only; never break training visualization.
+                        print(f"Warning: Failed to perform GT Cam+3D Sanity check: {_e}")
+                        pass
             else:
                 # Fallback: if no per-view camera params, use temp_fitter's default camera
                 # This shouldn't happen in multi-view, but handle gracefully
@@ -1263,8 +1419,22 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                     propagate_scaling=temp_fitter.propagate_scaling
                 )
                 
-                # Apply transformation (same as in generate_visualization with apply_UE_transform=False)
-                mesh_verts = mesh_verts + temp_fitter.trans[0:1].unsqueeze(1)
+                # Apply transformation to match training rendering logic:
+                # - If use_ue_scaling: apply 10x scaling
+                # - If allow_mesh_scaling: apply predicted mesh_scale
+                # - Otherwise: just translation
+                # NOTE: generate_visualization uses apply_UE_transform=False, which only applies translation.
+                # However, training rendering (_render_keypoints_with_camera) applies mesh scaling if enabled.
+                # We apply the same logic here for OBJ export consistency.
+                if model.use_ue_scaling:
+                    root_joint = mesh_joints[:, 0:1, :]
+                    mesh_verts = (mesh_verts - root_joint) * 10 + temp_fitter.trans[0:1].unsqueeze(1)
+                elif model.allow_mesh_scaling and 'mesh_scale' in predicted_params:
+                    mesh_scale = predicted_params['mesh_scale'][0:1]  # (1, 1)
+                    root_joint = mesh_joints[:, 0:1, :]
+                    mesh_verts = (mesh_verts - root_joint) * mesh_scale.unsqueeze(-1) + temp_fitter.trans[0:1].unsqueeze(1)
+                else:
+                    mesh_verts = mesh_verts + temp_fitter.trans[0:1].unsqueeze(1)
                 
                 # Get faces
                 mesh_faces = temp_fitter.smal_model.faces
@@ -1279,12 +1449,52 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                     print(f"  Mesh vertices: {mesh_verts.shape}, range: [{mesh_verts.min():.3f}, {mesh_verts.max():.3f}]")
                     print(f"  Mesh faces: {mesh_faces.shape}")
             
+            # ===================== DEBUG: Print model trans and 3D coordinate stats =====================
+            # Compute predicted 3D joints for this sample
+            with torch.no_grad():
+                pred_joints_3d = model._predict_canonical_joints_3d(predicted_params)  # (1, J, 3)
+                pred_joints_mean = pred_joints_3d[0].mean(dim=0).cpu().numpy()  # (3,)
+                model_trans = predicted_params['trans'][0].detach().cpu().numpy()  # (3,)
+            
+            # Get GT 3D keypoints if available
+            gt_kp3d_mean = None
+            if y_data.get('has_3d_data', False) and y_data.get('keypoints_3d') is not None:
+                gt_kp3d = np.array(y_data['keypoints_3d'])  # (J, 3)
+                gt_kp3d_mean = gt_kp3d.mean(axis=0)  # (3,)
+            
+            # Print debug info only for first view of each sample (body params are shared across views)
+            if view_idx == 0:
+                # Print global_rot (root rotation) to check if it's varying or staying near identity
+                global_rot_raw = predicted_params['global_rot'][0].detach().cpu()
+                if model.rotation_representation == '6d':
+                    # Convert 6D to axis-angle for readability
+                    global_rot_aa = rotation_6d_to_axis_angle(global_rot_raw.unsqueeze(0))[0].numpy()
+                else:
+                    global_rot_aa = global_rot_raw.numpy()
+                # Compute rotation magnitude (angle in degrees)
+                rot_angle_rad = np.linalg.norm(global_rot_aa)
+                rot_angle_deg = np.degrees(rot_angle_rad)
+                
+                print(f"  Mean pred 3D: [{pred_joints_mean[0]:.4f}, {pred_joints_mean[1]:.4f}, {pred_joints_mean[2]:.4f}]")
+                if gt_kp3d_mean is not None:
+                    print(f"  Mean GT 3D:  [{gt_kp3d_mean[0]:.4f}, {gt_kp3d_mean[1]:.4f}, {gt_kp3d_mean[2]:.4f}]")
+                print(f"  Root rot magnitude: {rot_angle_deg:.2f}°")
+            
             # Create image exporter for this view
             image_exporter = SingleViewImageExporter(output_dir, sample_idx, view_idx, epoch)
             
             # Generate visualization - use apply_UE_transform=False to match training
             # (training uses use_ue_scaling=False by default)
-            temp_fitter.generate_visualization(image_exporter, apply_UE_transform=False, img_idx=view_idx)
+            # Pass mesh_scale if allow_mesh_scaling is enabled to match training render path
+            vis_mesh_scale = None
+            if model.allow_mesh_scaling and 'mesh_scale' in predicted_params:
+                vis_mesh_scale = predicted_params['mesh_scale'][0:1].detach()
+            temp_fitter.generate_visualization(
+                image_exporter, 
+                apply_UE_transform=False, 
+                img_idx=view_idx,
+                mesh_scale=vis_mesh_scale
+            )
             
             views_rendered += 1
             
@@ -1454,6 +1664,13 @@ def main(config: dict):
     if rank == 0:
         print(f"Using input resolution: {input_resolution}x{input_resolution} (based on backbone: {backbone_name})")
     
+    # Get mesh scaling config
+    allow_mesh_scaling = config.get('allow_mesh_scaling', False)
+    mesh_scale_init = config.get('mesh_scale_init', 1.0)
+    
+    if rank == 0 and allow_mesh_scaling:
+        print(f"Mesh scaling enabled with init={mesh_scale_init}")
+    
     model = create_multiview_regressor(
         device=device,
         batch_size=config['batch_size'],
@@ -1471,7 +1688,9 @@ def main(config: dict):
         rotation_representation=config['rotation_representation'],
         scale_trans_mode=config['scale_trans_mode'],
         use_ue_scaling=config.get('use_ue_scaling', False),
-        input_resolution=input_resolution
+        input_resolution=input_resolution,
+        allow_mesh_scaling=allow_mesh_scaling,
+        mesh_scale_init=mesh_scale_init
     )
     
     model = model.to(device)
@@ -1528,6 +1747,7 @@ def main(config: dict):
         'train_loss': [],
         'val_loss': [],
         'loss_components': [],
+        'val_loss_components': [],
         'learning_rates': []
     }
     
@@ -1555,6 +1775,7 @@ def main(config: dict):
         if epoch % config['validate_every_n_epochs'] == 0:
             val_metrics = validate(model, val_loader, device, config, epoch=epoch, rank=rank)
             training_history['val_loss'].append(val_metrics['avg_loss'])
+            training_history['val_loss_components'].append(val_metrics.get('loss_components', {}))
             
             # Get current epoch loss weights for logging
             current_loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(
@@ -1565,7 +1786,11 @@ def main(config: dict):
                 print(f"\nEpoch {epoch} Summary:")
                 print(f"  Train Loss: {train_metrics['avg_loss']:.4f}")
                 print(f"  Val Loss: {val_metrics['avg_loss']:.4f}")
-                print(f"  Loss Components: {train_metrics['loss_components']}")
+                _print_component_metrics(
+                    train_components=train_metrics.get('loss_components', {}),
+                    val_components=val_metrics.get('loss_components', {}),
+                    indent="  "
+                )
                 print(f"  LR (curriculum): {curriculum_lr:.2e}")
                 print(f"  Key loss weights: kp2d={current_loss_weights.get('keypoint_2d', 0):.4f}, "
                       f"joint_rot={current_loss_weights.get('joint_rot', 0):.4f}")
@@ -1698,7 +1923,7 @@ Examples:
                        help="Number of cross-attention heads")
     
     # Training configuration
-    parser.add_argument("--batch_size", type=int, default=6,
+    parser.add_argument("--batch_size", type=int, default=4,
                        help="Batch size")
     parser.add_argument("--num_epochs", type=int, default=100,
                        help="Number of training epochs")
