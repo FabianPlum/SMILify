@@ -183,7 +183,7 @@ class CameraHead(nn.Module):
     """
     
     def __init__(self, input_dim: int, hidden_dim: int = 256, 
-                 default_fov: float = 30.0, fov_range: Tuple[float, float] = (10.0, 60.0),
+                 default_fov: float = 30.0, fov_range: Tuple[float, float] = (5.0, 120.0),
                  trans_scale: float = 5.0):
         """
         Initialize camera head.
@@ -269,6 +269,9 @@ class CameraHead(nn.Module):
         """
         output = self.layers(features)
         
+        # Ensure output is float32
+        output = output.float()
+        
         idx = 0
         
         # FOV: Apply sigmoid to get [0,1], then scale to [fov_min, fov_max]
@@ -281,7 +284,7 @@ class CameraHead(nn.Module):
         # Initialize close to identity: add identity's first two columns
         # Identity 6D: [1,0,0, 0,1,0]
         identity_6d = torch.tensor([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 
-                                   device=output.device, dtype=output.dtype)
+                                   device=output.device, dtype=torch.float32)
         rot_6d = rot_6d + identity_6d
         cam_rot = self._rotation_6d_to_matrix(rot_6d)
         idx += self.cam_rot_dim
@@ -291,9 +294,9 @@ class CameraHead(nn.Module):
         cam_trans = torch.tanh(cam_trans_raw) * self.trans_scale
         
         return {
-            'fov': fov,
-            'cam_rot': cam_rot,
-            'cam_trans': cam_trans
+            'fov': fov.float(),
+            'cam_rot': cam_rot.float(),
+            'cam_trans': cam_trans.float()
         }
 
 
@@ -437,6 +440,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         output['cam_trans_per_view'] = per_view_cam_params['cam_trans']  # List of (batch_size, 3)
         output['num_views'] = num_views
         output['view_mask'] = view_mask
+        output['camera_indices'] = camera_indices  # (batch_size, num_views) - canonical camera indices for verification
         
         return output
     
@@ -511,7 +515,13 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             
         elif self.head_type == 'transformer_decoder':
             # Use transformer decoder for body params
-            params = self.transformer_head(features, None)
+            # IMPORTANT: Pass features as spatial_features so the decoder can cross-attend to them.
+            # The transformer decoder uses spatial_features for cross-attention in its layers.
+            # Without this, the decoder would output the same result regardless of input!
+            # Shape: features is (batch_size, feature_dim), reshape to (batch_size, 1, feature_dim)
+            # to serve as a single-token sequence for cross-attention.
+            spatial_feats = features.unsqueeze(1)  # (batch_size, 1, feature_dim)
+            params = self.transformer_head(features, spatial_feats)
             
             # Handle scale/trans mode
             if self.scale_trans_mode == 'entangled_with_betas':
@@ -551,9 +561,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             cam_idx = camera_indices[:, v]  # (batch_size,)
             
             # Predict camera params per sample using appropriate head
-            fov_batch = torch.zeros(batch_size, 1, device=self.device)
-            cam_rot_batch = torch.zeros(batch_size, 3, 3, device=self.device)
-            cam_trans_batch = torch.zeros(batch_size, 3, device=self.device)
+            fov_batch = torch.zeros(batch_size, 1, dtype=torch.float32, device=self.device)
+            cam_rot_batch = torch.zeros(batch_size, 3, 3, dtype=torch.float32, device=self.device)
+            cam_trans_batch = torch.zeros(batch_size, 3, dtype=torch.float32, device=self.device)
             
             # Group samples by camera index for efficient processing
             for head_idx in range(self.num_canonical_cameras):
@@ -562,9 +572,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     head_features = view_features[mask]
                     head_output = self.camera_heads[head_idx](head_features)
                     
-                    fov_batch[mask] = head_output['fov']
-                    cam_rot_batch[mask] = head_output['cam_rot']
-                    cam_trans_batch[mask] = head_output['cam_trans']
+                    fov_batch[mask] = head_output['fov'].float()
+                    cam_rot_batch[mask] = head_output['cam_rot'].float()
+                    cam_trans_batch[mask] = head_output['cam_trans'].float()
             
             fov_list.append(fov_batch)
             cam_rot_list.append(cam_rot_batch)
@@ -604,6 +614,10 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 'log_beta_scales': 0.1,
                 'betas_trans': 0.1,
                 'keypoint_2d': 1.0,
+                'keypoint_3d': 1.0,
+                'fov': 0.0,
+                'cam_rot': 0.0,
+                'cam_trans': 0.0,
                 'joint_angle_regularization': 0.0001,  # Penalty for large joint angles
             }
         
@@ -718,11 +732,18 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 fov_v = predicted_params['fov_per_view'][v]
                 cam_rot_v = predicted_params['cam_rot_per_view'][v]
                 cam_trans_v = predicted_params['cam_trans_per_view'][v]
+
+                # Use GT-derived aspect ratio (when available) for rendering geometry.
+                # This is not predicted by the network, but is fixed per physical camera.
+                aspect_v = None
+                gt_cam = self._collect_view_camera_data(target_data, v, batch_size)
+                if gt_cam is not None and gt_cam.get('aspect_ratio') is not None:
+                    aspect_v = gt_cam['aspect_ratio']
                 
                 # Render 2D keypoints using body params + this view's camera
                 try:
                     rendered_joints = self._render_keypoints_with_camera(
-                        predicted_params, fov_v, cam_rot_v, cam_trans_v
+                        predicted_params, fov_v, cam_rot_v, cam_trans_v, aspect_ratio=aspect_v
                     )
                 except Exception as e:
                     print(f"Warning: Failed to render keypoints for view {v}: {e}")
@@ -752,10 +773,284 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 total_loss = total_loss + loss_weights['keypoint_2d'] * keypoint_loss
             else:
                 loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+
+        # =================== PER-VIEW CAMERA SUPERVISION LOSSES ===================
+        # If GT camera parameters are available (e.g., from SLEAP 3D calibration), we can supervise
+        # the per-view camera heads directly.
+        #
+        # IMPORTANT: Each view position v uses the camera head corresponding to camera_indices[batch_idx, v].
+        # The GT camera data at view position v should correspond to the same canonical camera.
+        # We verify this by checking that GT data is collected for the same view position that was used
+        # for prediction (which is correct, since both use view position indexing).
+        if num_views > 0:
+            # Get camera indices for verification (if available)
+            camera_indices = predicted_params.get('camera_indices', None)  # (B, num_views) - canonical camera indices
+            
+            # FOV loss
+            if loss_weights.get('fov', 0) > 0:
+                fov_loss_sum = torch.tensor(0.0, device=self.device, requires_grad=True)
+                fov_count = 0
+                for v in range(num_views):
+                    gt_cam = self._collect_view_camera_data(target_data, v, batch_size)
+                    if gt_cam is None or gt_cam.get('fov') is None:
+                        continue
+                    pred_fov = predicted_params['fov_per_view'][v].float()  # (B, 1)
+                    gt_fov = gt_cam['fov'].float()
+                    if gt_fov.dim() == 1:
+                        gt_fov = gt_fov.unsqueeze(1)
+                    mask = gt_cam.get('mask', None)
+                    if mask is not None and mask.any():
+                        # Verify: For each sample in the batch, the predicted camera head should match
+                        # the canonical camera index for this view position.
+                        # pred_fov[mask] was predicted using camera_heads[camera_indices[mask, v]]
+                        # gt_fov[mask] should be the GT for the same canonical cameras.
+                        fov_loss_sum = fov_loss_sum + F.mse_loss(pred_fov[mask], gt_fov[mask])
+                        fov_count += 1
+                if fov_count > 0:
+                    fov_loss = fov_loss_sum / fov_count
+                    loss_components['fov'] = fov_loss
+                    total_loss = total_loss + loss_weights['fov'] * fov_loss
+
+            # Camera rotation loss
+            if loss_weights.get('cam_rot', 0) > 0:
+                rot_loss_sum = torch.tensor(0.0, device=self.device, requires_grad=True)
+                rot_count = 0
+                for v in range(num_views):
+                    gt_cam = self._collect_view_camera_data(target_data, v, batch_size)
+                    if gt_cam is None or gt_cam.get('cam_rot') is None:
+                        continue
+                    pred_R = predicted_params['cam_rot_per_view'][v].float()  # (B, 3, 3)
+                    gt_R = gt_cam['cam_rot'].float()
+                    mask = gt_cam.get('mask', None)
+                    if mask is not None and mask.any():
+                        # Same verification: pred_R[mask] from camera_heads[camera_indices[mask, v]]
+                        # should match gt_R[mask] for the same canonical cameras.
+                        rot_loss_sum = rot_loss_sum + F.mse_loss(pred_R[mask], gt_R[mask])
+                        rot_count += 1
+                if rot_count > 0:
+                    rot_loss = rot_loss_sum / rot_count
+                    loss_components['cam_rot'] = rot_loss
+                    total_loss = total_loss + loss_weights['cam_rot'] * rot_loss
+
+            # Camera translation loss
+            if loss_weights.get('cam_trans', 0) > 0:
+                trans_loss_sum = torch.tensor(0.0, device=self.device, requires_grad=True)
+                trans_count = 0
+                for v in range(num_views):
+                    gt_cam = self._collect_view_camera_data(target_data, v, batch_size)
+                    if gt_cam is None or gt_cam.get('cam_trans') is None:
+                        continue
+                    pred_T = predicted_params['cam_trans_per_view'][v].float()  # (B, 3)
+                    gt_T = gt_cam['cam_trans'].float()
+                    mask = gt_cam.get('mask', None)
+                    if mask is not None and mask.any():
+                        # Same verification: pred_T[mask] from camera_heads[camera_indices[mask, v]]
+                        # should match gt_T[mask] for the same canonical cameras.
+                        trans_loss_sum = trans_loss_sum + F.mse_loss(pred_T[mask], gt_T[mask])
+                        trans_count += 1
+                if trans_count > 0:
+                    t_loss = trans_loss_sum / trans_count
+                    loss_components['cam_trans'] = t_loss
+                    total_loss = total_loss + loss_weights['cam_trans'] * t_loss
+
+        # =================== SHARED 3D KEYPOINT LOSS ===================
+        # If GT 3D keypoints exist, supervise predicted canonical joints in 3D.
+        if loss_weights.get('keypoint_3d', 0) > 0:
+            gt_3d = self._collect_keypoints_3d_batch(target_data)
+            if gt_3d is not None and gt_3d.get('keypoints_3d') is not None:
+                pred_joints_3d = self._predict_canonical_joints_3d(predicted_params)  # (B, J, 3)
+                target_joints_3d = gt_3d['keypoints_3d']  # (B, J, 3)
+                mask = gt_3d.get('mask', None)
+
+                if pred_joints_3d.shape == target_joints_3d.shape and mask is not None and mask.any():
+                    kp3d_loss = F.mse_loss(pred_joints_3d[mask], target_joints_3d[mask])
+                    loss_components['keypoint_3d'] = kp3d_loss
+                    total_loss = total_loss + loss_weights['keypoint_3d'] * kp3d_loss
         
         if return_components:
             return total_loss, loss_components
         return total_loss
+
+    def _collect_view_camera_data(self, target_data: List[Dict[str, Any]], view_idx: int, batch_size: int) -> Optional[Dict[str, torch.Tensor]]:
+        """
+        Collect GT camera parameters for a given view across the batch.
+
+        Expects `target_data[i]` to optionally contain:
+          - cam_fov_per_view: (num_views, 1) or (num_views,) in degrees
+          - cam_rot_per_view: (num_views, 3, 3)
+          - cam_trans_per_view: (num_views, 3)
+        """
+        fov_list = []
+        rot_list = []
+        trans_list = []
+        aspect_list = []
+        mask_list = []
+        has_any = False
+
+        for td in target_data:
+            fov_v = None
+            rot_v = None
+            trans_v = None
+            aspect_v = None
+
+            if td.get('cam_fov_per_view') is not None:
+                arr = td['cam_fov_per_view']
+                if isinstance(arr, np.ndarray):
+                    if view_idx < arr.shape[0]:
+                        fov_v = torch.from_numpy(arr[view_idx]).to(dtype=torch.float32, device=self.device)
+                else:
+                    t = safe_to_tensor(arr, device=self.device)
+                    if view_idx < t.shape[0]:
+                        fov_v = t[view_idx].to(dtype=torch.float32)
+
+            if td.get('cam_rot_per_view') is not None:
+                arr = td['cam_rot_per_view']
+                if isinstance(arr, np.ndarray):
+                    if view_idx < arr.shape[0]:
+                        rot_v = torch.from_numpy(arr[view_idx]).to(dtype=torch.float32, device=self.device)
+                else:
+                    t = safe_to_tensor(arr, device=self.device)
+                    if view_idx < t.shape[0]:
+                        rot_v = t[view_idx].to(dtype=torch.float32)
+
+            if td.get('cam_trans_per_view') is not None:
+                arr = td['cam_trans_per_view']
+                if isinstance(arr, np.ndarray):
+                    if view_idx < arr.shape[0]:
+                        trans_v = torch.from_numpy(arr[view_idx]).to(dtype=torch.float32, device=self.device)
+                else:
+                    t = safe_to_tensor(arr, device=self.device)
+                    if view_idx < t.shape[0]:
+                        trans_v = t[view_idx].to(dtype=torch.float32)
+
+            if td.get('cam_aspect_per_view') is not None:
+                arr = td['cam_aspect_per_view']
+                if isinstance(arr, np.ndarray):
+                    if view_idx < arr.shape[0]:
+                        aspect_v = torch.from_numpy(np.array(arr[view_idx])).to(dtype=torch.float32, device=self.device).reshape(-1)
+                else:
+                    t = safe_to_tensor(arr, device=self.device)
+                    if view_idx < t.shape[0]:
+                        aspect_v = t[view_idx].to(dtype=torch.float32).reshape(-1)
+
+            is_valid = (fov_v is not None) and (rot_v is not None) and (trans_v is not None)
+            mask_list.append(bool(is_valid))
+            if is_valid:
+                has_any = True
+                # Normalize shapes
+                if fov_v.dim() == 0:
+                    fov_v = fov_v.unsqueeze(0)
+                fov_list.append(fov_v.reshape(1))
+                rot_list.append(rot_v.reshape(3, 3))
+                trans_list.append(trans_v.reshape(3))
+                if aspect_v is None:
+                    aspect_list.append(torch.ones(1, dtype=torch.float32, device=self.device))
+                else:
+                    aspect_list.append(aspect_v[:1])
+            else:
+                fov_list.append(torch.zeros(1, dtype=torch.float32, device=self.device))
+                rot_list.append(torch.eye(3, dtype=torch.float32, device=self.device))
+                trans_list.append(torch.zeros(3, dtype=torch.float32, device=self.device))
+                aspect_list.append(torch.ones(1, dtype=torch.float32, device=self.device))
+
+        if not has_any:
+            return None
+
+        return {
+            'fov': torch.stack(fov_list, dim=0).reshape(batch_size, 1),
+            'cam_rot': torch.stack(rot_list, dim=0).reshape(batch_size, 3, 3),
+            'cam_trans': torch.stack(trans_list, dim=0).reshape(batch_size, 3),
+            'aspect_ratio': torch.stack(aspect_list, dim=0).reshape(batch_size, 1).squeeze(-1),  # (B,)
+            'mask': torch.tensor(mask_list, dtype=torch.bool, device=self.device),
+        }
+
+    def _collect_keypoints_3d_batch(self, target_data: List[Dict[str, Any]]) -> Optional[Dict[str, torch.Tensor]]:
+        """Collect GT 3D keypoints for the batch (if present)."""
+        kp_list = []
+        mask_list = []
+        has_any = False
+
+        for td in target_data:
+            if td.get('keypoints_3d') is not None and bool(td.get('has_3d_data', False)):
+                kp = td['keypoints_3d']
+                kp_t = safe_to_tensor(kp, device=self.device).to(dtype=torch.float32)
+                kp_list.append(kp_t)
+                mask_list.append(True)
+                has_any = True
+            else:
+                kp_list.append(None)
+                mask_list.append(False)
+
+        if not has_any:
+            return None
+
+        # Determine joint count from first valid
+        first = next(k for k in kp_list if k is not None)
+        J = first.shape[0]
+        filled = []
+        for k in kp_list:
+            if k is None:
+                filled.append(torch.zeros(J, 3, dtype=torch.float32, device=self.device))
+            else:
+                filled.append(k.reshape(J, 3))
+
+        return {
+            'keypoints_3d': torch.stack(filled, dim=0),  # (B, J, 3)
+            'mask': torch.tensor(mask_list, dtype=torch.bool, device=self.device),
+        }
+
+    def _predict_canonical_joints_3d(self, body_params: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Predict canonical 3D joints (world/model space) for 3D supervision.
+
+        This mirrors the SMAL forward + scaling/trans logic used in `_render_keypoints_with_camera`,
+        but returns 3D joints instead of rendering/projecting to 2D.
+        """
+        batch_size = body_params['global_rot'].shape[0]
+
+        # Convert rotations to axis-angle format for SMAL model
+        if self.rotation_representation == '6d':
+            global_rot_aa = rotation_6d_to_axis_angle(body_params['global_rot'])
+            joint_rot_aa = rotation_6d_to_axis_angle(body_params['joint_rot'])
+        else:
+            global_rot_aa = body_params['global_rot']
+            joint_rot_aa = body_params['joint_rot']
+
+        if global_rot_aa.dim() == 2:
+            global_rot_aa = global_rot_aa.unsqueeze(1)  # (B, 1, 3)
+        if joint_rot_aa.dim() == 2:
+            joint_rot_aa = joint_rot_aa.unsqueeze(1)
+
+        pose_tensor = torch.cat([global_rot_aa, joint_rot_aa], dim=1)  # (B, N_POSE+1, 3)
+
+        betas_logscale = None
+        betas_trans_val = None
+        if 'log_beta_scales' in body_params and body_params['log_beta_scales'] is not None:
+            if self.scale_trans_mode != 'ignore' and self.scale_trans_mode != 'separate':
+                betas_logscale = body_params['log_beta_scales']
+                betas_trans_val = body_params.get('betas_trans', None)
+
+        verts, joints, _, _ = self.smal_model(
+            body_params['betas'],
+            pose_tensor,
+            betas_logscale=betas_logscale,
+            betas_trans=betas_trans_val,
+            propagate_scaling=self.propagate_scaling
+        )
+
+        # Apply transformation consistent with `_render_keypoints_with_camera`
+        if self.use_ue_scaling:
+            root_joint = joints[:, 0:1, :]
+            joints = (joints - root_joint) * 10 + body_params['trans'].unsqueeze(1)
+        elif self.allow_mesh_scaling and 'mesh_scale' in body_params:
+            mesh_scale = body_params['mesh_scale']
+            root_joint = joints[:, 0:1, :]
+            joints = (joints - root_joint) * mesh_scale.unsqueeze(-1) + body_params['trans'].unsqueeze(1)
+        else:
+            joints = joints + body_params['trans'].unsqueeze(1)
+
+        canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]  # (B, J, 3)
+        return canonical_joints.float()
     
     def _collect_body_targets_batch(self, target_data: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         """Collect body parameter targets from batch."""
@@ -770,7 +1065,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 global_rots.append(safe_to_tensor(td['root_rot'], device=self.device))
                 global_rot_mask.append(True)
             else:
-                global_rots.append(torch.zeros(3, device=self.device))
+                global_rots.append(torch.zeros(3, dtype=torch.float32, device=self.device))
                 global_rot_mask.append(False)
         targets['global_rot'] = torch.stack(global_rots)
         targets['global_rot_mask'] = torch.tensor(global_rot_mask, device=self.device)
@@ -784,7 +1079,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 joint_rots.append(jr[1:])  # Exclude root
                 joint_rot_mask.append(True)
             else:
-                joint_rots.append(torch.zeros(config.N_POSE, 3, device=self.device))
+                joint_rots.append(torch.zeros(config.N_POSE, 3, dtype=torch.float32, device=self.device))
                 joint_rot_mask.append(False)
         targets['joint_rot'] = torch.stack(joint_rots)
         targets['joint_rot_mask'] = torch.tensor(joint_rot_mask, device=self.device)
@@ -797,7 +1092,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 betas.append(safe_to_tensor(td['shape_betas'], device=self.device))
                 betas_mask.append(True)
             else:
-                betas.append(torch.zeros(config.N_BETAS, device=self.device))
+                betas.append(torch.zeros(config.N_BETAS, dtype=torch.float32, device=self.device))
                 betas_mask.append(False)
         targets['betas'] = torch.stack(betas)
         targets['betas_mask'] = torch.tensor(betas_mask, device=self.device)
@@ -810,7 +1105,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 trans.append(safe_to_tensor(td['root_loc'], device=self.device))
                 trans_mask.append(True)
             else:
-                trans.append(torch.zeros(3, device=self.device))
+                trans.append(torch.zeros(3, dtype=torch.float32, device=self.device))
                 trans_mask.append(False)
         targets['trans'] = torch.stack(trans)
         targets['trans_mask'] = torch.tensor(trans_mask, device=self.device)
@@ -836,7 +1131,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         visibility.append(safe_to_tensor(kp_vis[view_idx], device=self.device))
                     else:
                         # Create all-visible mask
-                        visibility.append(torch.ones(kp_2d.shape[1], device=self.device))
+                        visibility.append(torch.ones(kp_2d.shape[1], dtype=torch.float32, device=self.device))
                     has_data = True
                 elif len(kp_2d.shape) == 2 and view_idx == 0:
                     # Single-view data, only valid for view_idx 0
@@ -844,18 +1139,18 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     if kp_vis is not None:
                         visibility.append(safe_to_tensor(kp_vis, device=self.device))
                     else:
-                        visibility.append(torch.ones(kp_2d.shape[0], device=self.device))
+                        visibility.append(torch.ones(kp_2d.shape[0], dtype=torch.float32, device=self.device))
                     has_data = True
                 else:
                     # No data for this view
                     n_joints = kp_2d.shape[-2] if len(kp_2d.shape) >= 2 else len(config.CANONICAL_MODEL_JOINTS)
-                    keypoints.append(torch.zeros(n_joints, 2, device=self.device))
-                    visibility.append(torch.zeros(n_joints, device=self.device))
+                    keypoints.append(torch.zeros(n_joints, 2, dtype=torch.float32, device=self.device))
+                    visibility.append(torch.zeros(n_joints, dtype=torch.float32, device=self.device))
             else:
                 # No keypoint data
                 n_joints = len(config.CANONICAL_MODEL_JOINTS)
-                keypoints.append(torch.zeros(n_joints, 2, device=self.device))
-                visibility.append(torch.zeros(n_joints, device=self.device))
+                keypoints.append(torch.zeros(n_joints, 2, dtype=torch.float32, device=self.device))
+                visibility.append(torch.zeros(n_joints, dtype=torch.float32, device=self.device))
         
         if not has_data:
             return None
@@ -868,7 +1163,8 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
     def _render_keypoints_with_camera(self, body_params: Dict[str, torch.Tensor],
                                        fov: torch.Tensor,
                                        cam_rot: torch.Tensor,
-                                       cam_trans: torch.Tensor) -> torch.Tensor:
+                                       cam_trans: torch.Tensor,
+                                       aspect_ratio: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Render 2D keypoints using body parameters and specific camera parameters.
         
@@ -932,6 +1228,12 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             root_joint = joints[:, 0:1, :]  # (batch_size, 1, 3) - safer indexing
             verts = (verts - root_joint) * 10 + body_params['trans'].unsqueeze(1)
             joints = (joints - root_joint) * 10 + body_params['trans'].unsqueeze(1)
+        elif self.allow_mesh_scaling and 'mesh_scale' in body_params:
+            # Apply predicted mesh scale - centers at root, scales, then translates
+            mesh_scale = body_params['mesh_scale']  # (batch_size, 1)
+            root_joint = joints[:, 0:1, :]  # (batch_size, 1, 3)
+            verts = (verts - root_joint) * mesh_scale.unsqueeze(-1) + body_params['trans'].unsqueeze(1)
+            joints = (joints - root_joint) * mesh_scale.unsqueeze(-1) + body_params['trans'].unsqueeze(1)
         else:
             verts = verts + body_params['trans'].unsqueeze(1)
             joints = joints + body_params['trans'].unsqueeze(1)
@@ -943,12 +1245,12 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             print(f"  CANONICAL_MODEL_JOINTS: {config.CANONICAL_MODEL_JOINTS}")
             # Return zeros as fallback
             n_canonical = len(config.CANONICAL_MODEL_JOINTS)
-            return torch.zeros(batch_size, n_canonical, 2, device=self.device)
+            return torch.zeros(batch_size, n_canonical, 2, dtype=torch.float32, device=self.device)
         
         canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
         
         # Set camera parameters for rendering
-        self.renderer.set_camera_parameters(R=cam_rot, T=cam_trans, fov=fov)
+        self.renderer.set_camera_parameters(R=cam_rot, T=cam_trans, fov=fov, aspect_ratio=aspect_ratio)
         
         # Render joints
         faces_tensor = self.smal_model.faces
@@ -956,12 +1258,18 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             faces_batch = faces_tensor.unsqueeze(0).expand(batch_size, -1, -1)
         else:
             faces_batch = faces_tensor
-        
+
+        # Defensive: SMAL model / buffers can be float64 depending on how it was loaded.
+        # Renderer + PyTorch3D ops expect float32.
+        verts = verts.float()
+        canonical_joints = canonical_joints.float()
+        faces_batch = faces_batch.long()
+
         _, rendered_joints_raw = self.renderer(verts, canonical_joints, faces_batch)
         
         # Normalize rendered joints using the actual renderer image size
         # This ensures consistency between training loss and visualization
-        rendered_image_size = self.renderer.image_size
+        rendered_image_size = float(self.renderer.image_size)
         eps = 1e-8
         rendered_joints = rendered_joints_raw / (rendered_image_size + eps)
         rendered_joints = torch.clamp(rendered_joints, 0.0, 1.0)
@@ -1110,7 +1418,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     sample_view_mask.append(True)
                 else:
                     # Pad with zeros
-                    dummy_img = torch.zeros(3, 224, 224, device=self.device)
+                    dummy_img = torch.zeros(3, 224, 224, dtype=torch.float32, device=self.device)
                     all_images_per_view[v].append(dummy_img)
                     sample_cam_indices.append(0)
                     sample_view_mask.append(False)
@@ -1162,7 +1470,7 @@ def create_multiview_regressor(device, batch_size, shape_family, use_unity_prior
     # Use input_resolution if provided, otherwise default to 224
     # This ensures the renderer is initialized with the correct size
     input_resolution = kwargs.get('input_resolution', 224)
-    data_batch = torch.zeros(batch_size, 3, input_resolution, input_resolution, device=device)
+    data_batch = torch.zeros(batch_size, 3, input_resolution, input_resolution, dtype=torch.float32, device=device)
     
     return MultiViewSMILImageRegressor(
         device=device,
