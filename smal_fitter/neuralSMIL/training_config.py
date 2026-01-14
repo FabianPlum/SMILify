@@ -124,7 +124,7 @@ class TrainingConfig:
         'weight_decay': 1e-4,  # Add weight decay for AdamW
         'seed': 1234,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': 'multiview_checkpoints/checkpoint_epoch_0069.pth', #'checkpoints/checkpoint_epoch_299.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': 'multiview_checkpoints/best_model.pth', #'checkpoints/checkpoint_epoch_299.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 16,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 8,  # Prefetch batches
@@ -200,21 +200,34 @@ class TrainingConfig:
         }
     }
     
+    # Global Mesh Scaling Configuration
+    # This allows the network to predict a single global scale factor that scales
+    # the entire mesh uniformly (similar to how UE scaling applies a fixed 10x).
+    # This is useful when 3D ground truth data has a different scale than the model.
+    # The scale is trained IMPLICITLY through 3D keypoint losses - no supervision needed.
+    MESH_SCALING_CONFIG = {
+        'allow_mesh_scaling': True,  # If True, network predicts a global mesh scale
+        'init_mesh_scale': 1.0,  # Initial scale value (1.0 = no scaling)
+        'use_log_scale': True,  # Predict log(scale) for numerical stability
+        # Note: mesh_scale is trained implicitly via 3D keypoint losses (when available).
+        # The 3D ground truth naturally constrains the scale to the correct value.
+    }
+    
     # Loss curriculum configuration (AniMer-style conservative weights)
     LOSS_CURRICULUM = {
         # Base loss weights (applied throughout training) - AniMer-style conservative
         'base_weights': {
-            'global_rot': 0.001,     # AniMer: 0.001
+            'global_rot': 0.0,     # AniMer: 0.001
             'joint_rot': 0.001,      # AniMer: 0.001  
             'betas': 0.0005,         # AniMer: 0.0005
             'trans': 0.0005,         # AniMer: 0.0005
             'fov': 0.001,
             'cam_rot': 0.01,
-            'cam_trans': 0.001,
+            'cam_trans': 0.01,
             'log_beta_scales': 0.0005,  # Conservative
             'betas_trans': 0.0005,      # Conservative
             'keypoint_2d': 0.1,        # AniMer: 0.01
-            'keypoint_3d': 0.0,        # 3D keypoint loss - start at zero
+            'keypoint_3d': 0.25,        # 3D keypoint loss - start at zero
             'silhouette': 0.0,          # Start at zero
             'joint_angle_regularization': 0.001  # Penalty for large joint angles (excluding root)
         },
@@ -222,28 +235,19 @@ class TrainingConfig:
         # Curriculum stages: (epoch_threshold, weight_updates) - AniMer-style conservative
         'curriculum_stages': [
             (1, {
-                'joint_angle_regularization': 0.00001
+                'joint_angle_regularization': 0.01
             }),
-            # Stage 1: Introduce keypoint losses gradually (AniMer-style)
-            (5, {
-                'joint_angle_regularization': 0.00001
-            }),
-            # Stage 2: Introduce keypoint losses gradually (AniMer-style)
             (10, {
                 'keypoint_2d': 0.1,    # AniMer: 0.01
-                'joint_angle_regularization': 0.000001
-            }),
-            (20, {
-                'keypoint_2d': 0.2,    # AniMer: 0.01
-                'joint_angle_regularization': 0.0000001
+                'joint_angle_regularization': 0.005
             }),
             (25, {
                 'keypoint_2d': 0.2,    # AniMer: 0.01
-                'joint_angle_regularization': 0.0
+                'joint_angle_regularization': 0.0025    
             }),
             (35, {
-                'keypoint_2d': 20,    # AniMer: 0.01
-                'joint_angle_regularization': 0.0
+                'keypoint_3d': 2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.001
             }),
             (120, {
                 'cam_trans': 0.00001,
@@ -265,19 +269,20 @@ class TrainingConfig:
     # Learning rate curriculum configuration (AniMer-style conservative)
     LEARNING_RATE_CURRICULUM = {
         # Base learning rate (applied at epoch 0) - AniMer-style
-        'base_learning_rate': 1e-4, #previous value: 1.25e-6
+        'base_learning_rate': 3e-4, #previous value: 1.25e-6
         
         # Learning rate stages: (epoch_threshold, learning_rate) - Very conservative
         'lr_stages': [
-            (50, 1e-4),      # 1e-5
+            (5, 2e-4),
+            (10, 1e-4),      # 1e-5
             # Stage 1: Slight reduction for fine-tuning
-            (100, 1e-5),      # 1e-5
+            (50, 1e-5),      # 1e-5
             
             # Stage 2: Further reduce
-            (60, 5e-7),      # 5e-7
+            (60, 5e-6),      # 5e-7
             
             # Stage 3: Very low learning rate for final convergence
-            (80, 5e-7),      # 1e-7
+            (80, 1e-6),      # 1e-7
 
             # TRAIN UNTIL HERE WITH SYNTH ONLY, THEN SWITCH TO REAL DATA
             # THE HIGH LEARNING RATE IS NEEDED TO WEIGH THE 2D KEYPOINTS HIGH ENOUGH
@@ -457,6 +462,16 @@ class TrainingConfig:
     def get_scale_trans_mode(cls):
         """Get current scale and translation mode."""
         return cls.SCALE_TRANS_BETA_CONFIG['mode']
+    
+    @classmethod
+    def get_mesh_scaling_config(cls):
+        """Get mesh scaling configuration."""
+        return cls.MESH_SCALING_CONFIG
+    
+    @classmethod
+    def is_mesh_scaling_enabled(cls) -> bool:
+        """Check if global mesh scaling is enabled."""
+        return cls.MESH_SCALING_CONFIG.get('allow_mesh_scaling', False)
     
     @classmethod
     def is_multi_dataset_enabled(cls) -> bool:
