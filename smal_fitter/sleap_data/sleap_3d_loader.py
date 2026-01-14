@@ -1003,6 +1003,9 @@ def convert_sleap_to_pytorch3d_camera(
     # Calculate FOV from intrinsic matrix
     fy = K[1, 1]
     fov_y = 2 * np.arctan(height / (2 * fy)) * 180 / np.pi
+    # Compute aspect ratio consistent with FoVPerspectiveCameras to match non-square intrinsics.
+    fx = K[0, 0]
+    aspect_ratio = float((width * fy) / (height * fx + 1e-12))
     
     # 180° rotation around Z-axis to convert from OpenCV to PyTorch3D camera coordinates
     # OpenCV camera: X-right, Y-down, Z-forward
@@ -1031,6 +1034,12 @@ def convert_sleap_to_pytorch3d_camera(
     R_torch = torch.from_numpy(R_pytorch3d).float().unsqueeze(0)  # (1, 3, 3)
     T_torch = torch.from_numpy(T_pytorch3d).float().unsqueeze(0)  # (1, 3)
     fov_torch = torch.tensor([fov_y], dtype=torch.float32)  # (1,)
+    # We don't change the return signature here to avoid breaking callers, but we attach
+    # the derived aspect ratio as an attribute for debugging/visualization callers that need it.
+    try:
+        fov_torch.aspect_ratio = torch.tensor([aspect_ratio], dtype=torch.float32)
+    except Exception:
+        pass
     
     # No coordinate flip needed for 3D points
     flip_matrix = np.eye(3, dtype=np.float32)
