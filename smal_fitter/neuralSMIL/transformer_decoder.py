@@ -117,7 +117,9 @@ class SMILTransformerDecoderHead(nn.Module):
                  mlp_dim: int = 1024, dropout: float = 0.0, 
                  ief_iters: int = 3, rotation_representation: str = 'axis_angle',
                  scales_scale_factor: float = 0.01, trans_scale_factor: float = 0.01,
-                 scale_trans_mode: str = 'separate'):
+                 scale_trans_mode: str = 'separate',
+                 allow_mesh_scaling: bool = False,
+                 mesh_scale_init: float = 1.0):
         super().__init__()
         
         self.feature_dim = feature_dim
@@ -128,6 +130,8 @@ class SMILTransformerDecoderHead(nn.Module):
         self.scales_scale_factor = scales_scale_factor
         self.trans_scale_factor = trans_scale_factor
         self.scale_trans_mode = scale_trans_mode
+        self.allow_mesh_scaling = allow_mesh_scaling
+        self.mesh_scale_init = mesh_scale_init
         
         # Calculate output dimensions for SMIL parameters
         self._calculate_output_dims()
@@ -166,6 +170,10 @@ class SMILTransformerDecoderHead(nn.Module):
             self.scales_head = nn.Linear(hidden_dim, self.scales_dim)
         if self.joint_trans_dim > 0:
             self.joint_trans_head = nn.Linear(hidden_dim, self.joint_trans_dim)
+        
+        # Optional global mesh scale (predicts log(scale) for numerical stability)
+        if self.allow_mesh_scaling:
+            self.mesh_scale_head = nn.Linear(hidden_dim, 1)
         
         # Initialize parameters
         self._initialize_parameters()
@@ -234,6 +242,10 @@ class SMILTransformerDecoderHead(nn.Module):
         if self.joint_trans_dim > 0:
             nn.init.xavier_uniform_(self.joint_trans_head.weight, gain=0.001)
             nn.init.constant_(self.joint_trans_head.bias, 0)
+        
+        if self.allow_mesh_scaling:
+            nn.init.xavier_uniform_(self.mesh_scale_head.weight, gain=0.001)
+            nn.init.constant_(self.mesh_scale_head.bias, 0)  # log(1.0) = 0
     
     def _initialize_prediction_buffers(self):
         """Initialize prediction buffers for IEF."""
@@ -254,6 +266,11 @@ class SMILTransformerDecoderHead(nn.Module):
             self.register_buffer('init_scales', torch.zeros(1, self.scales_dim))
         if self.joint_trans_dim > 0:
             self.register_buffer('init_joint_trans', torch.zeros(1, self.joint_trans_dim))
+        
+        # Initialize mesh scale to log(init_value) since we predict in log space
+        if self.allow_mesh_scaling:
+            init_log_scale = np.log(self.mesh_scale_init) if self.mesh_scale_init > 0 else 0.0
+            self.register_buffer('init_mesh_scale', torch.tensor([[init_log_scale]]))
     
     def forward(self, features: torch.Tensor, spatial_features: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """
@@ -281,6 +298,8 @@ class SMILTransformerDecoderHead(nn.Module):
             pred_scales = self.init_scales.expand(batch_size, -1).to(device)
         if self.joint_trans_dim > 0:
             pred_joint_trans = self.init_joint_trans.expand(batch_size, -1).to(device)
+        if self.allow_mesh_scaling:
+            pred_mesh_scale = self.init_mesh_scale.expand(batch_size, -1).to(device)
         
         # Store predictions for each iteration
         pred_pose_list = []
@@ -294,6 +313,8 @@ class SMILTransformerDecoderHead(nn.Module):
             pred_scales_list = []
         if self.joint_trans_dim > 0:
             pred_joint_trans_list = []
+        if self.allow_mesh_scaling:
+            pred_mesh_scale_list = []
         
         # Iterative Error Feedback (IEF)
         for i in range(self.ief_iters):
@@ -356,6 +377,12 @@ class SMILTransformerDecoderHead(nn.Module):
                 if not torch.isfinite(pred_joint_trans).all():
                     print(f"Warning: Non-finite values in pred_joint_trans at iteration {i}: {pred_joint_trans}")
                     pred_joint_trans = torch.zeros_like(pred_joint_trans)
+            if self.allow_mesh_scaling:
+                # Predict in log space for numerical stability (small updates)
+                pred_mesh_scale = pred_mesh_scale + self.mesh_scale_head(token_out) * 0.1
+                if not torch.isfinite(pred_mesh_scale).all():
+                    print(f"Warning: Non-finite values in pred_mesh_scale at iteration {i}: {pred_mesh_scale}")
+                    pred_mesh_scale = torch.zeros_like(pred_mesh_scale)
             
             # Store predictions for this iteration
             pred_pose_list.append(pred_pose.clone())
@@ -369,6 +396,8 @@ class SMILTransformerDecoderHead(nn.Module):
                 pred_scales_list.append(pred_scales.clone())
             if self.joint_trans_dim > 0:
                 pred_joint_trans_list.append(pred_joint_trans.clone())
+            if self.allow_mesh_scaling:
+                pred_mesh_scale_list.append(pred_mesh_scale.clone())
         
         # Convert pose predictions to proper format
         if self.rotation_representation == '6d':
@@ -415,6 +444,11 @@ class SMILTransformerDecoderHead(nn.Module):
         if self.joint_trans_dim > 0:
             output['betas_trans'] = pred_joint_trans.view(batch_size, -1, 3)
         
+        # Global mesh scale (convert from log space to linear)
+        if self.allow_mesh_scaling:
+            # pred_mesh_scale is in log space, convert to linear: exp(log_scale)
+            output['mesh_scale'] = torch.exp(pred_mesh_scale)  # (batch_size, 1)
+        
         # Store iteration history for analysis
         output['iteration_history'] = {
             'pose': pred_pose_list,
@@ -429,6 +463,8 @@ class SMILTransformerDecoderHead(nn.Module):
             output['iteration_history']['scales'] = pred_scales_list
         if self.joint_trans_dim > 0:
             output['iteration_history']['joint_trans'] = pred_joint_trans_list
+        if self.allow_mesh_scaling:
+            output['iteration_history']['mesh_scale'] = pred_mesh_scale_list
         
         return output
 
@@ -441,7 +477,9 @@ def build_smil_transformer_decoder_head(feature_dim: int, context_dim: int,
                                        rotation_representation: str = 'axis_angle',
                                        scales_scale_factor: float = 0.01,
                                        trans_scale_factor: float = 0.01,
-                                       scale_trans_mode: str = 'separate') -> SMILTransformerDecoderHead:
+                                       scale_trans_mode: str = 'separate',
+                                       allow_mesh_scaling: bool = False,
+                                       mesh_scale_init: float = 1.0) -> SMILTransformerDecoderHead:
     """
     Build a SMIL transformer decoder head.
     
@@ -459,6 +497,8 @@ def build_smil_transformer_decoder_head(feature_dim: int, context_dim: int,
         scales_scale_factor: Scaling factor for log_beta_scales predictions (default: 0.01)
         trans_scale_factor: Scaling factor for betas_trans predictions (default: 0.01)
         scale_trans_mode: Mode for handling scale and translation betas ('ignore', 'separate', 'entangled_with_betas')
+        allow_mesh_scaling: If True, predict a global mesh scale factor
+        mesh_scale_init: Initial value for mesh scale (default: 1.0 = no scaling)
         
     Returns:
         SMILTransformerDecoderHead instance
@@ -476,5 +516,7 @@ def build_smil_transformer_decoder_head(feature_dim: int, context_dim: int,
         rotation_representation=rotation_representation,
         scales_scale_factor=scales_scale_factor,
         trans_scale_factor=trans_scale_factor,
-        scale_trans_mode=scale_trans_mode
+        scale_trans_mode=scale_trans_mode,
+        allow_mesh_scaling=allow_mesh_scaling,
+        mesh_scale_init=mesh_scale_init
     )
