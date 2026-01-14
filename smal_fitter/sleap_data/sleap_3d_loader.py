@@ -44,6 +44,18 @@ except ImportError:
     PYTORCH3D_AVAILABLE = False
     torch = None
 
+
+def get_default_device() -> str:
+    """
+    Get the default device for PyTorch operations.
+    
+    Returns:
+        "cuda:0" if GPU is available, otherwise "cpu"
+    """
+    if torch is not None and torch.cuda.is_available():
+        return "cuda:0"
+    return "cpu"
+
 # Add paths for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -1024,7 +1036,7 @@ def convert_sleap_to_pytorch3d_camera(loader: SLEAP3DDataLoader, camera_name: st
 
 
 def create_sphere_meshes_at_points(points: np.ndarray, radius: float = 0.05, 
-                                   device: str = "cpu", color: Optional[np.ndarray] = None,
+                                   device: Optional[str] = None, color: Optional[np.ndarray] = None,
                                    use_rainbow: bool = True) -> Meshes:
     """
     Create pytorch3d sphere meshes at 3D point locations.
@@ -1032,7 +1044,7 @@ def create_sphere_meshes_at_points(points: np.ndarray, radius: float = 0.05,
     Args:
         points: (N, 3) array of 3D points
         radius: Radius of spheres
-        device: Device to place tensors on
+        device: Device to place tensors on (None = auto-detect, prefer GPU)
         color: Optional (N, 3) array of RGB colors in [0, 1], or single color
         use_rainbow: If True, use rainbow colors
         
@@ -1041,6 +1053,10 @@ def create_sphere_meshes_at_points(points: np.ndarray, radius: float = 0.05,
     """
     if not PYTORCH3D_AVAILABLE:
         raise ImportError("pytorch3d is not available. Please install it to use this function.")
+    
+    # Auto-detect device if not specified
+    if device is None:
+        device = get_default_device()
     
     if not isinstance(points, np.ndarray):
         points = np.array(points)
@@ -1115,7 +1131,7 @@ def create_sphere_meshes_at_points(points: np.ndarray, radius: float = 0.05,
 def visualize_pytorch3d_alignment(loader: SLEAP3DDataLoader, camera_name: str, 
                                   frame_idx: int, keypoints_3d: np.ndarray,
                                   original_2d: np.ndarray, visibility: np.ndarray,
-                                  output_path: str, device: str = "cpu"):
+                                  output_path: str, device: Optional[str] = None):
     """
     Visualize 3D keypoints rendered from camera perspective using pytorch3d,
     overlaid with original 2D keypoints to verify alignment.
@@ -1131,11 +1147,16 @@ def visualize_pytorch3d_alignment(loader: SLEAP3DDataLoader, camera_name: str,
         original_2d: (N, 2) array of 2D keypoints in pixel coordinates
         visibility: (N,) boolean array of keypoint visibility
         output_path: Path to save the visualization
-        device: Device to use for rendering ('cpu' or 'cuda')
+        device: Device to use for rendering (None = auto-detect, prefer GPU)
     """
     if not PYTORCH3D_AVAILABLE:
         print("Warning: pytorch3d not available, skipping pytorch3d visualization")
         return
+    
+    # Auto-detect device if not specified
+    if device is None:
+        device = get_default_device()
+        print(f"    Using device: {device}")
     
     # Get image size and camera intrinsics for reference
     width, height = loader.get_image_size(camera_name)
@@ -1172,7 +1193,7 @@ def visualize_pytorch3d_alignment(loader: SLEAP3DDataLoader, camera_name: str,
     # Create sphere meshes for 3D keypoints (in PyTorch3D coords)
     # Scale radius based on scene size
     scene_scale = np.linalg.norm(keypoints_3d_p3d, axis=1).max()
-    sphere_radius = max(0.01, scene_scale * 0.02)  # 2% of scene size, minimum 0.01
+    sphere_radius = max(0.005, scene_scale * 0.01)  # 2% of scene size, minimum 0.01
     
     sphere_meshes = create_sphere_meshes_at_points(
         keypoints_3d_p3d, 
