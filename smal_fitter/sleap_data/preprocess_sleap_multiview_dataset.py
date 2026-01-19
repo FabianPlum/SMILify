@@ -76,7 +76,8 @@ class SLEAPMultiViewPreprocessor:
                  use_reprojections: bool = False,
                  confidence_threshold: float = 0.5,
                  min_views_per_sample: int = 2,
-                 load_3d_data: bool = True):
+                 load_3d_data: bool = True,
+                 debug: bool = False):
         """
         Initialize the multi-view SLEAP dataset preprocessor.
         
@@ -95,6 +96,7 @@ class SLEAPMultiViewPreprocessor:
             confidence_threshold: Minimum confidence for keypoints
             min_views_per_sample: Minimum views required per sample (skip samples with fewer)
             load_3d_data: If True, attempt to load 3D keypoints and camera parameters from SLEAP 3D data
+            debug: If True, print detailed information about filtered outlier keypoints (default: False)
         """
         self.joint_lookup_table_path = joint_lookup_table_path
         self.shape_betas_table_path = shape_betas_table_path
@@ -110,6 +112,7 @@ class SLEAPMultiViewPreprocessor:
         self.confidence_threshold = confidence_threshold
         self.min_views_per_sample = min_views_per_sample
         self.load_3d_data = load_3d_data
+        self.debug = debug
         
         # Validate crop_mode
         if self.crop_mode not in ['default', 'centred', 'bbox_crop']:
@@ -126,7 +129,9 @@ class SLEAPMultiViewPreprocessor:
             'sessions_failed': 0,
             'views_per_sample_histogram': defaultdict(int),
             'sessions_with_3d_data': 0,
-            'samples_with_3d_data': 0
+            'samples_with_3d_data': 0,
+            'total_outlier_keypoints_filtered': 0,
+            'samples_with_outliers_filtered': 0
         }
         
         # Canonical camera ordering (will be determined from first session)
@@ -324,6 +329,8 @@ class SLEAPMultiViewPreprocessor:
             # Pre-load camera data for all cameras
             camera_data_cache: Dict[str, Dict] = {}
             video_cap_cache: Dict[str, cv2.VideoCapture] = {}
+            # Track current frame position per camera for optimized sequential reading
+            video_frame_positions: Dict[str, int] = {}
             
             for camera_name in loader.camera_views:
                 try:
@@ -333,6 +340,7 @@ class SLEAPMultiViewPreprocessor:
                         cap = cv2.VideoCapture(str(video_file))
                         if cap.isOpened():
                             video_cap_cache[camera_name] = cap
+                            video_frame_positions[camera_name] = 0  # Initialize at frame 0
                 except Exception as e:
                     print(f"Warning: Failed to load camera {camera_name}: {e}")
             
@@ -350,6 +358,7 @@ class SLEAPMultiViewPreprocessor:
                         session_path=session_path,
                         camera_data_cache=camera_data_cache,
                         video_cap_cache=video_cap_cache,
+                        video_frame_positions=video_frame_positions,
                         ground_truth_betas=ground_truth_betas,
                         loader_3d=loader_3d,
                         has_3d_data=has_3d_data
@@ -381,6 +390,7 @@ class SLEAPMultiViewPreprocessor:
                                   session_path: str,
                                   camera_data_cache: Dict[str, Dict],
                                   video_cap_cache: Dict[str, cv2.VideoCapture],
+                                  video_frame_positions: Dict[str, int],
                                   ground_truth_betas: Optional[np.ndarray],
                                   loader_3d: Optional['SLEAP3DDataLoader'] = None,
                                   has_3d_data: bool = False) -> Optional[Dict[str, Any]]:
@@ -395,6 +405,7 @@ class SLEAPMultiViewPreprocessor:
         
         # Load 3D keypoints if available
         keypoints_3d = None
+        outlier_joint_mask = None
         if has_3d_data and loader_3d is not None:
             try:
                 if frame_idx < loader_3d.n_frames:
@@ -403,9 +414,33 @@ class SLEAPMultiViewPreprocessor:
                     # 2D keypoints are already mapped via `loader.map_keypoints_to_smal_model(...)`,
                     # so 3D must match the same joint indexing/count (n_joints) for 3D supervision.
                     keypoints_3d = self._map_3d_keypoints_to_smal(loader, keypoints_3d_raw)
+                    
+                    # Filter outlier 3D keypoints (keypoints far from median)
+                    if keypoints_3d is not None:
+                        # Get joint names from loader if available
+                        joint_names = getattr(loader, 'smal_joint_names', None)
+                        if joint_names is None or len(joint_names) == 0:
+                            # Fallback: try to get from config (already imported at module level)
+                            try:
+                                if hasattr(config, 'joint_names'):
+                                    joint_names = config.joint_names
+                            except Exception:
+                                joint_names = None
+                        
+                        keypoints_3d, outlier_joint_mask = self._filter_outlier_3d_keypoints(
+                            keypoints_3d, 
+                            joint_names=joint_names
+                        )
+                        if outlier_joint_mask is not None and outlier_joint_mask.any():
+                            num_outliers = outlier_joint_mask.sum()
+                            self.stats['total_outlier_keypoints_filtered'] += num_outliers
+                            self.stats['samples_with_outliers_filtered'] += 1
+                            if self.debug:
+                                print(f"  Filtered {num_outliers} outlier 3D keypoint(s) in frame {frame_idx}")
             except Exception as e:
                 print(f"Warning: Failed to load 3D keypoints for frame {frame_idx}: {e}")
                 keypoints_3d = None
+                outlier_joint_mask = None
         
         # Collect data for each view
         view_images = []
@@ -434,11 +469,36 @@ class SLEAPMultiViewPreprocessor:
                 else:
                     cam_idx = len(self.canonical_camera_order)  # Unknown camera
                 
-                # Read video frame
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                ret, frame = cap.read()
+                # Read video frame with optimized sequential reading
+                # Since frames are processed in sorted order, we can read forward sequentially
+                # which is much faster than seeking
+                current_pos = video_frame_positions.get(camera_name, -1)
+                
+                if current_pos == frame_idx:
+                    # Already at the right position, just read
+                    ret, frame = cap.read()
+                elif current_pos < frame_idx:
+                    # Target frame is ahead - use optimal strategy based on gap size
+                    gap = frame_idx - current_pos
+                    if gap <= 10:
+                        # Small gap: read forward sequentially (very fast, no seeks)
+                        for _ in range(gap - 1):
+                            cap.read()  # Skip intermediate frames
+                        ret, frame = cap.read()  # Read target frame
+                    else:
+                        # Large gap: seek is faster than reading many frames
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                        ret, frame = cap.read()
+                else:
+                    # Target frame is behind - must seek backward (slow, but rare if sorted)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    ret, frame = cap.read()
+                
                 if not ret:
                     continue
+                
+                # Update position after successful read
+                video_frame_positions[camera_name] = frame_idx + 1
                 
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
@@ -461,6 +521,16 @@ class SLEAPMultiViewPreprocessor:
                 smal_keypoints, smal_visibility = loader.map_keypoints_to_smal_model(
                     adjusted_keypoints, visibility, preprocessed_size
                 )
+                
+                # If 3D keypoints had outliers, mark corresponding 2D joints as invisible
+                if outlier_joint_mask is not None and outlier_joint_mask.any():
+                    # Ensure mask matches the number of joints
+                    if len(outlier_joint_mask) <= len(smal_visibility):
+                        smal_visibility[:len(outlier_joint_mask)] = np.where(
+                            outlier_joint_mask[:len(smal_visibility)],
+                            0.0,  # Set visibility to 0 for outliers
+                            smal_visibility[:len(outlier_joint_mask)]
+                        )
                 
                 # Sanitize
                 smal_keypoints = self._sanitize_array(smal_keypoints, 0.0)
@@ -580,6 +650,81 @@ class SLEAPMultiViewPreprocessor:
             if sleap_idx_int < keypoints_3d.shape[0]:
                 out[int(smal_idx)] = keypoints_3d[sleap_idx_int].astype(np.float32)
         return out
+    
+    def _filter_outlier_3d_keypoints(self, keypoints_3d: np.ndarray, 
+                                     joint_names: Optional[List[str]] = None,
+                                     outlier_threshold_std: float = 4.0) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Filter outlier 3D keypoints that are far from the median position.
+        
+        Keypoints that are more than `outlier_threshold_std` standard deviations away
+        from the median of all keypoints are marked as invalid (set to NaN).
+        
+        Args:
+            keypoints_3d: (N_joints, 3) array of 3D keypoint coordinates
+            joint_names: Optional list of joint names for printing (default: None)
+            outlier_threshold_std: Number of standard deviations for outlier detection (default: 2.0)
+            
+        Returns:
+            Tuple of (filtered_keypoints_3d, outlier_mask) where:
+            - filtered_keypoints_3d: (N_joints, 3) array with outliers set to NaN
+            - outlier_mask: (N_joints,) boolean array, True for outliers
+        """
+        if keypoints_3d is None or keypoints_3d.shape[0] == 0:
+            return keypoints_3d, np.zeros(keypoints_3d.shape[0], dtype=bool) if keypoints_3d is not None else None
+        
+        # Create a copy to avoid modifying the original
+        filtered_kp3d = keypoints_3d.copy()
+        outlier_mask = np.zeros(keypoints_3d.shape[0], dtype=bool)
+        
+        # Find valid keypoints (non-zero, non-NaN, non-inf)
+        valid_mask = ~(np.isnan(keypoints_3d).any(axis=1) | 
+                      np.isinf(keypoints_3d).any(axis=1) |
+                      (keypoints_3d == 0).all(axis=1))
+        
+        if valid_mask.sum() < 2:
+            # Need at least 2 valid keypoints to compute statistics
+            return filtered_kp3d, outlier_mask
+        
+        # Get valid keypoints
+        valid_keypoints = keypoints_3d[valid_mask]
+        
+        # Compute median position of all valid keypoints
+        median_pos = np.median(valid_keypoints, axis=0)  # (3,)
+        
+        # Compute distances from each keypoint to the median
+        distances = np.linalg.norm(keypoints_3d - median_pos, axis=1)  # (N_joints,)
+        
+        # Compute median and standard deviation of distances (using only valid keypoints)
+        valid_distances = distances[valid_mask]
+        if len(valid_distances) == 0:
+            return filtered_kp3d, outlier_mask
+        
+        median_distance = np.median(valid_distances)
+        std_distance = np.std(valid_distances)
+        
+        # If std is zero or very small, all points are at the same location (unlikely but handle it)
+        if std_distance < 1e-6:
+            return filtered_kp3d, outlier_mask
+        
+        # Identify outliers: keypoints more than threshold_std standard deviations away
+        # Use median + threshold_std * std as the cutoff
+        outlier_threshold = median_distance + outlier_threshold_std * std_distance
+        
+        # Mark outliers (only among valid keypoints)
+        outlier_mask = valid_mask & (distances > outlier_threshold)
+        
+        # Print outlier joint names if available and debug mode is enabled
+        if outlier_mask.any() and joint_names is not None and self.debug:
+            outlier_indices = np.where(outlier_mask)[0]
+            outlier_names = [joint_names[i] if i < len(joint_names) else f"joint_{i}" 
+                           for i in outlier_indices]
+            print(f"    Outlier joints filtered: {', '.join(outlier_names)}")
+        
+        # Set outlier keypoints to NaN
+        filtered_kp3d[outlier_mask] = np.nan
+        
+        return filtered_kp3d, outlier_mask
     
     def _find_video_file(self, loader: SLEAPDataLoader, camera_name: str) -> Optional[Path]:
         """Find video file for a camera."""
@@ -905,7 +1050,11 @@ class SLEAPMultiViewPreprocessor:
                 
                 # 3D keypoints
                 if sample.get('keypoints_3d') is not None:
-                    keypoints_3d_list.append(sample['keypoints_3d'])
+                    kp3d = sample['keypoints_3d'].copy()
+                    # Replace NaN values (from outlier filtering) with zeros
+                    # This prevents NaN propagation during training
+                    kp3d = np.nan_to_num(kp3d, nan=0.0, posinf=0.0, neginf=0.0)
+                    keypoints_3d_list.append(kp3d.astype(np.float32))
                     has_3d_data_list.append(True)
                 else:
                     # Placeholder - use zeros with same shape as 2D keypoints
@@ -1029,6 +1178,8 @@ class SLEAPMultiViewPreprocessor:
             metadata_group.attrs['failed_samples'] = self.stats['failed_samples']
             metadata_group.attrs['sessions_with_3d_data'] = self.stats['sessions_with_3d_data']
             metadata_group.attrs['samples_with_3d_data'] = self.stats['samples_with_3d_data']
+            metadata_group.attrs['total_outlier_keypoints_filtered'] = self.stats['total_outlier_keypoints_filtered']
+            metadata_group.attrs['samples_with_outliers_filtered'] = self.stats['samples_with_outliers_filtered']
 
 
 def main():
@@ -1084,6 +1235,8 @@ Examples:
                        help="Keypoint confidence threshold (default: 0.5)")
     parser.add_argument("--quiet", action="store_true",
                        help="Suppress progress output")
+    parser.add_argument("--debug", action="store_true",
+                       help="Enable debug mode to print detailed information about filtered outlier keypoints")
     
     args = parser.parse_args()
     
@@ -1126,7 +1279,8 @@ Examples:
             crop_mode=args.crop_mode,
             confidence_threshold=args.confidence_threshold,
             min_views_per_sample=args.min_views,
-            load_3d_data=load_3d
+            load_3d_data=load_3d,
+            debug=args.debug
         )
         
         stats = preprocessor.process_dataset(
@@ -1147,6 +1301,9 @@ Examples:
             print(f"  Failed samples: {stats['failed_samples']}")
             print(f"  Sessions with 3D data: {stats['sessions_with_3d_data']}")
             print(f"  Samples with 3D data: {stats['samples_with_3d_data']}")
+            if stats.get('samples_with_outliers_filtered', 0) > 0:
+                print(f"  Outlier 3D keypoints filtered: {stats['total_outlier_keypoints_filtered']} "
+                      f"across {stats['samples_with_outliers_filtered']} samples")
             print(f"\nViews per sample distribution:")
             for num_views, count in sorted(stats['views_per_sample_histogram'].items()):
                 print(f"    {num_views} views: {count} samples")
