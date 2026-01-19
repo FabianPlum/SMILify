@@ -15,6 +15,7 @@ Key Features:
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # For 3D plotting (imported for side effects)
 
 import torch
 import torch.nn as nn
@@ -1509,7 +1510,264 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
             print(f"Warning: Failed to render view {view_idx} for sample {sample_idx}: {e}")
             continue
     
+    # Generate 3D keypoint visualization if 3D data is available
+    # This is done once per sample (body params are shared across views)
+    if y_data.get('has_3d_data', False) and y_data.get('keypoints_3d') is not None:
+        try:
+            visualize_3d_keypoints(
+                model=model,
+                predicted_params=predicted_params,
+                y_data=y_data,
+                device=device,
+                sample_idx=sample_idx,
+                epoch=epoch,
+                output_dir=output_dir
+            )
+        except Exception as e:
+            print(f"Warning: Failed to create 3D keypoint visualization for sample {sample_idx}: {e}")
+            import traceback
+            traceback.print_exc()
+    
     return views_rendered
+
+
+def visualize_3d_keypoints(model: MultiViewSMILImageRegressor,
+                            predicted_params: dict,
+                            y_data: dict,
+                            device: str,
+                            sample_idx: int,
+                            epoch: int,
+                            output_dir: str):
+    """
+    Create a 3D visualization comparing GT 3D keypoints with predicted 3D joints.
+    
+    The visualization shows:
+    - GT 3D keypoints (circles) in one color per joint
+    - Predicted 3D joints (crosses) in matching colors
+    - Thin lines connecting GT to predicted for each joint
+    
+    This helps diagnose alignment issues and understand where 3D errors originate.
+    
+    Args:
+        model: MultiViewSMILImageRegressor model
+        predicted_params: Dictionary of predicted parameters
+        y_data: Target data dictionary containing GT 3D keypoints
+        device: PyTorch device
+        sample_idx: Sample index for filename
+        epoch: Current epoch number
+        output_dir: Directory to save visualization
+    """
+    # Check if 3D data is available
+    if not y_data.get('has_3d_data', False) or y_data.get('keypoints_3d') is None:
+        return  # Skip if no 3D data
+    
+    try:
+        # Get GT 3D keypoints
+        gt_kp3d = np.array(y_data['keypoints_3d'])  # (J, 3)
+        num_joints = gt_kp3d.shape[0]
+        
+        # Get predicted 3D joints
+        base_model = model.module if hasattr(model, 'module') else model
+        with torch.no_grad():
+            pred_joints_3d = base_model._predict_canonical_joints_3d(predicted_params)  # (1, J, 3)
+            pred_joints_3d = pred_joints_3d[0].cpu().numpy()  # (J, 3)
+        
+        # Ensure same number of joints
+        min_joints = min(num_joints, pred_joints_3d.shape[0])
+        gt_kp3d = gt_kp3d[:min_joints]
+        pred_joints_3d = pred_joints_3d[:min_joints]
+        
+        # Identify filtered keypoints (NaN or all zeros - these were filtered during preprocessing)
+        gt_norms = np.linalg.norm(gt_kp3d, axis=1)
+        gt_valid = ~(np.isnan(gt_kp3d).any(axis=1) | np.isinf(gt_kp3d).any(axis=1) | (gt_norms < 1e-6))
+        
+        # Get joint names if available
+        joint_names = None
+        try:
+            if hasattr(base_model, 'smal_model') and hasattr(base_model.smal_model, 'J_names'):
+                joint_names = base_model.smal_model.J_names
+            elif hasattr(config, 'joint_names'):
+                joint_names = config.joint_names
+        except Exception:
+            pass
+        
+        # Track which joints are plotted vs suppressed
+        plotted_joint_indices = []
+        suppressed_joint_indices = []
+        
+        # Create 3D plot
+        fig = plt.figure(figsize=(12, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Generate unique colors for each joint using a colormap
+        try:
+            # Try new matplotlib API (3.5+)
+            cmap = plt.colormaps['tab20']  # 20 distinct colors
+            if min_joints > 20:
+                # Use a continuous colormap if we have more than 20 joints
+                cmap = plt.colormaps['hsv']
+        except AttributeError:
+            # Fallback to old API
+            cmap = plt.cm.get_cmap('tab20')  # 20 distinct colors
+            if min_joints > 20:
+                # Use a continuous colormap if we have more than 20 joints
+                cmap = plt.cm.get_cmap('hsv')
+        
+        # Plot GT keypoints and predicted joints with connecting lines (only valid joints)
+        for j in range(min_joints):
+            if not gt_valid[j]:
+                # Skip filtered keypoints
+                suppressed_joint_indices.append(j)
+                continue
+            
+            plotted_joint_indices.append(j)
+            color = cmap(j / max(min_joints - 1, 1))  # Normalize to [0, 1]
+            
+            # GT keypoint (circle)
+            ax.scatter(gt_kp3d[j, 0], gt_kp3d[j, 1], gt_kp3d[j, 2],
+                      c=[color], marker='o', s=100, alpha=0.8)
+            
+            # Predicted joint (cross)
+            ax.scatter(pred_joints_3d[j, 0], pred_joints_3d[j, 1], pred_joints_3d[j, 2],
+                      c=[color], marker='x', s=150, linewidths=3, alpha=0.8)
+            
+            # Line connecting GT to predicted
+            ax.plot([gt_kp3d[j, 0], pred_joints_3d[j, 0]],
+                   [gt_kp3d[j, 1], pred_joints_3d[j, 1]],
+                   [gt_kp3d[j, 2], pred_joints_3d[j, 2]],
+                   color=color, linewidth=1.5, alpha=0.6, linestyle='--')
+        
+        # Set labels and title
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.set_title(f'Sample {sample_idx:03d} - Epoch {epoch:03d}\n'
+                    f'GT 3D Keypoints (circles) vs Predicted 3D Joints (crosses)')
+        
+        # Set equal aspect ratio for better visualization
+        # Compute bounds using only valid (plotted) points
+        if len(plotted_joint_indices) > 0:
+            valid_gt = gt_kp3d[plotted_joint_indices]
+            valid_pred = pred_joints_3d[plotted_joint_indices]
+            all_points = np.concatenate([valid_gt, valid_pred], axis=0)
+            
+            if len(all_points) > 0:
+                x_range = all_points[:, 0].max() - all_points[:, 0].min()
+                y_range = all_points[:, 1].max() - all_points[:, 1].min()
+                z_range = all_points[:, 2].max() - all_points[:, 2].min()
+                max_range = max(x_range, y_range, z_range) if max(x_range, y_range, z_range) > 0 else 1.0
+                
+                x_center = all_points[:, 0].mean()
+                y_center = all_points[:, 1].mean()
+                z_center = all_points[:, 2].mean()
+                
+                ax.set_xlim([x_center - max_range/2, x_center + max_range/2])
+                ax.set_ylim([y_center - max_range/2, y_center + max_range/2])
+                ax.set_zlim([z_center - max_range/2, z_center + max_range/2])
+        
+        # Create comprehensive legend with plotted and suppressed joints
+        from matplotlib.lines import Line2D
+        legend_elements = []
+        
+        # Add marker explanations
+        legend_elements.append(Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', 
+                                     markersize=10, label='GT keypoints (○)'))
+        legend_elements.append(Line2D([0], [0], marker='x', color='gray', markersize=10, 
+                                     linewidth=3, label='Predicted joints (×)'))
+        legend_elements.append(Line2D([0], [0], color='gray', linestyle='--', linewidth=1.5, 
+                                     label='Error vectors'))
+        
+        # Add separator
+        legend_elements.append(Line2D([0], [0], linestyle='', label='---'))
+        
+        # Add plotted joints
+        if len(plotted_joint_indices) > 0:
+            plotted_names = []
+            for j in plotted_joint_indices:
+                if joint_names is not None and j < len(joint_names):
+                    plotted_names.append(f"{j}: {joint_names[j]}")
+                else:
+                    plotted_names.append(f"joint_{j}")
+            
+            # Group joints for readability (max 10 per line)
+            if len(plotted_names) <= 10:
+                legend_elements.append(Line2D([0], [0], linestyle='', 
+                                             label=f'Plotted ({len(plotted_joint_indices)}): {", ".join(plotted_names)}'))
+            else:
+                # Split into chunks
+                for i in range(0, len(plotted_names), 10):
+                    chunk = plotted_names[i:i+10]
+                    prefix = 'Plotted:' if i == 0 else ''
+                    legend_elements.append(Line2D([0], [0], linestyle='', 
+                                                 label=f'{prefix} {", ".join(chunk)}'))
+        else:
+            legend_elements.append(Line2D([0], [0], linestyle='', label='Plotted: None'))
+        
+        # Add suppressed joints
+        if len(suppressed_joint_indices) > 0:
+            suppressed_names = []
+            for j in suppressed_joint_indices:
+                if joint_names is not None and j < len(joint_names):
+                    suppressed_names.append(f"{j}: {joint_names[j]}")
+                else:
+                    suppressed_names.append(f"joint_{j}")
+            
+            # Group suppressed joints for readability
+            if len(suppressed_names) <= 10:
+                legend_elements.append(Line2D([0], [0], linestyle='', 
+                                             label=f'Suppressed ({len(suppressed_joint_indices)}): {", ".join(suppressed_names)}'))
+            else:
+                # Split into chunks
+                for i in range(0, len(suppressed_names), 10):
+                    chunk = suppressed_names[i:i+10]
+                    prefix = 'Suppressed:' if i == 0 else ''
+                    legend_elements.append(Line2D([0], [0], linestyle='', 
+                                                 label=f'{prefix} {", ".join(chunk)}'))
+        else:
+            legend_elements.append(Line2D([0], [0], linestyle='', label='Suppressed: None'))
+        
+        # Add legend
+        ax.legend(handles=legend_elements, loc='upper left', fontsize=8, 
+                 bbox_to_anchor=(1.05, 1), framealpha=0.9)
+        
+        # Add text with error statistics (only for valid joints)
+        if len(plotted_joint_indices) > 0:
+            valid_gt = gt_kp3d[plotted_joint_indices]
+            valid_pred = pred_joints_3d[plotted_joint_indices]
+            errors = np.linalg.norm(valid_gt - valid_pred, axis=1)
+            mean_error = np.mean(errors)
+            max_error = np.max(errors)
+            textstr = f'Mean error: {mean_error:.4f}\nMax error: {max_error:.4f}\nValid joints: {len(plotted_joint_indices)}/{min_joints}'
+        else:
+            textstr = 'No valid joints to plot'
+        
+        ax.text2D(0.02, 0.98, textstr, transform=ax.transAxes, 
+                 fontsize=10, verticalalignment='top',
+                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        # Save figure
+        output_path = os.path.join(output_dir, f'sample_{sample_idx:03d}_epoch_{epoch:03d}_3d_keypoints.png')
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        
+        if sample_idx == 0:
+            print(f"  Generated 3D keypoint visualization: {output_path}")
+            if len(plotted_joint_indices) > 0:
+                valid_gt = gt_kp3d[plotted_joint_indices]
+                valid_pred = pred_joints_3d[plotted_joint_indices]
+                errors = np.linalg.norm(valid_gt - valid_pred, axis=1)
+                mean_error = np.mean(errors)
+                max_error = np.max(errors)
+                print(f"  Mean 3D error: {mean_error:.4f}, Max error: {max_error:.4f}")
+                print(f"  Plotted joints: {len(plotted_joint_indices)}, Suppressed: {len(suppressed_joint_indices)}")
+            else:
+                print(f"  No valid joints to plot (all filtered)")
+        
+    except Exception as e:
+        print(f"Warning: Failed to create 3D keypoint visualization for sample {sample_idx}: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def save_checkpoint(model, optimizer, scheduler, epoch, config, metrics, filepath):
@@ -1932,7 +2190,7 @@ Examples:
     # Training configuration
     parser.add_argument("--batch_size", type=int, default=4,
                        help="Batch size")
-    parser.add_argument("--num_epochs", type=int, default=100,
+    parser.add_argument("--num_epochs", type=int, default=200,
                        help="Number of training epochs")
     parser.add_argument("--learning_rate", type=float, default=1e-4,
                        help="Learning rate")
