@@ -124,7 +124,7 @@ class TrainingConfig:
         'weight_decay': 1e-4,  # Add weight decay for AdamW
         'seed': 1234,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': 'multiview_checkpoints/best_model.pth', #'checkpoints/checkpoint_epoch_299.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': 'None', # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 16,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 8,  # Prefetch batches
@@ -249,23 +249,13 @@ class TrainingConfig:
                 'keypoint_3d': 1,    # AniMer: 0.01
                 'joint_angle_regularization': 0.001
             }),
-            (70, {
+            (50, {
                 'keypoint_3d': 2,    # AniMer: 0.01
                 'joint_angle_regularization': 0.0005
             }),
-            (120, {
-                'cam_trans': 0.00001,
-                'joint_rot': 0.001,
-                'keypoint_2d': 0.01,    # AniMer: 0.01
-                'keypoint_3d': 0.002,   # 
-                'silhouette': 0.01,
-            }),
-            (200, {
-                'cam_trans': 0.00001,
-                'joint_rot': 0.001,
-                'keypoint_2d': 0.1,    # AniMer: 0.01
-                'keypoint_3d': 0.002,   # 
-                'silhouette': 0.01,
+            (100, {
+                'keypoint_3d': 2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0001# 
             })
         ]
     }
@@ -280,23 +270,22 @@ class TrainingConfig:
             (5, 2e-4),
             (10, 1e-4),      # 1e-5
             # Stage 1: Slight reduction for fine-tuning
-            (50, 1e-5),      # 1e-5
+            (35, 2e-5),      # 1e-5
             
             # Stage 2: Further reduce
-            (60, 5e-6),      # 5e-7
+            (60, 1e-5),      # 5e-7
             
             # Stage 3: Very low learning rate for final convergence
-            (80, 1e-6),      # 1e-7
-
-            # TRAIN UNTIL HERE WITH SYNTH ONLY, THEN SWITCH TO REAL DATA
-            # THE HIGH LEARNING RATE IS NEEDED TO WEIGH THE 2D KEYPOINTS HIGH ENOUGH
-            (125, 1e-4),      # 1e-7
+            (120, 1e-6),      # 1e-7
 
             # Stage 3: Very low learning rate for final convergence
-            (200, 5e-5),      # 1e-7
+            (150, 5e-5),      # 1e-7
 
             # Stage 3: Very low learning rate for final convergence
-            (250, 1e-5),      # 1e-7
+            (170, 1e-5),      # 1e-7
+
+            # Stage 3: Very low learning rate for final convergence
+            (200, 2e-6),      # 1e-7
 
             # Stage 3: Very low learning rate for final convergence
             (300, 2e-6),      # 1e-7
