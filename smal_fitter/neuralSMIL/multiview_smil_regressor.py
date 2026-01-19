@@ -860,12 +860,40 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             if gt_3d is not None and gt_3d.get('keypoints_3d') is not None:
                 pred_joints_3d = self._predict_canonical_joints_3d(predicted_params)  # (B, J, 3)
                 target_joints_3d = gt_3d['keypoints_3d']  # (B, J, 3)
-                mask = gt_3d.get('mask', None)
+                sample_mask = gt_3d.get('mask', None)
 
-                if pred_joints_3d.shape == target_joints_3d.shape and mask is not None and mask.any():
-                    kp3d_loss = F.mse_loss(pred_joints_3d[mask], target_joints_3d[mask])
-                    loss_components['keypoint_3d'] = kp3d_loss
-                    total_loss = total_loss + loss_weights['keypoint_3d'] * kp3d_loss
+                if pred_joints_3d.shape == target_joints_3d.shape and sample_mask is not None and sample_mask.any():
+                    # Create per-joint mask: exclude joints that are all zeros (filtered outliers)
+                    # and exclude NaN/inf values (safety check)
+                    joint_norms = torch.norm(target_joints_3d, dim=-1)  # (B, J)
+                    finite_mask = torch.isfinite(target_joints_3d).all(dim=-1)  # (B, J)
+                    valid_joint_mask = (joint_norms > 1e-6) & finite_mask  # (B, J)
+                    
+                    # Combine sample mask (has 3D data) with joint mask (valid joints)
+                    combined_mask = sample_mask.unsqueeze(1) & valid_joint_mask  # (B, J)
+                    
+                    if combined_mask.any():
+                        # Use masked MSE loss
+                        diff = pred_joints_3d - target_joints_3d  # (B, J, 3)
+                        diff_squared = diff ** 2
+                        # Apply mask: only valid joints contribute to loss
+                        masked_loss = diff_squared * combined_mask.unsqueeze(-1).float()  # (B, J, 3)
+                        num_valid = combined_mask.sum().float() * 3  # *3 for x,y,z
+                        if num_valid > 0:
+                            kp3d_loss = masked_loss.sum() / num_valid
+                        else:
+                            kp3d_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+                        
+                        # Check for NaN/inf
+                        if torch.isfinite(kp3d_loss):
+                            loss_components['keypoint_3d'] = kp3d_loss
+                            total_loss = total_loss + loss_weights['keypoint_3d'] * kp3d_loss
+                        else:
+                            print(f"Warning: Non-finite 3D keypoint loss detected, skipping")
+                            loss_components['keypoint_3d'] = torch.tensor(0.0, device=self.device, requires_grad=True)
+                    else:
+                        # No valid joints in batch
+                        loss_components['keypoint_3d'] = torch.tensor(0.0, device=self.device, requires_grad=True)
         
         if return_components:
             return total_loss, loss_components
@@ -1205,10 +1233,18 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         
         if 'log_beta_scales' in body_params and body_params['log_beta_scales'] is not None:
             if self.scale_trans_mode == 'separate':
-                # In separate mode, skip scale/trans for rendering (PCA transformation often fails
-                # due to missing scaledirs/transdirs, and loss weights are typically 0)
-                # Just pass None and let SMAL model use defaults
-                pass
+                # In separate mode, convert PCA weights to per-joint values if possible
+                try:
+                    scale_weights = body_params['log_beta_scales']
+                    trans_weights = body_params.get('betas_trans', None)
+                    log_beta_scales_joint, betas_trans_joint = self._transform_separate_pca_weights_to_joint_values(
+                        scale_weights, trans_weights
+                    )
+                    betas_logscale = log_beta_scales_joint
+                    betas_trans_val = betas_trans_joint
+                except Exception:
+                    # If conversion fails (e.g., missing PCA dirs), fall back to defaults
+                    pass
             elif self.scale_trans_mode != 'ignore':
                 # In other modes (e.g., entangled_with_betas), values are already per-joint
                 betas_logscale = body_params['log_beta_scales']
