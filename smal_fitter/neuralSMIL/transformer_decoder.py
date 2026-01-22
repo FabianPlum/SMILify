@@ -206,9 +206,20 @@ class SMILTransformerDecoderHead(nn.Module):
             self.scales_dim = 0
             self.joint_trans_dim = 0
         elif self.scale_trans_mode == 'separate':
-            # In separate mode, predict PCA weights directly (same dimension as betas)
-            self.scales_dim = config.N_BETAS  # PCA weights for scaling
-            self.joint_trans_dim = config.N_BETAS  # PCA weights for translation
+            # In separate mode, check if we should use PCA or per-joint values
+            from training_config import TrainingConfig
+            scale_trans_config = TrainingConfig.get_scale_trans_config()
+            use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+            
+            if use_pca_transformation:
+                # Use PCA weights (same dimension as betas)
+                self.scales_dim = config.N_BETAS  # PCA weights for scaling
+                self.joint_trans_dim = config.N_BETAS  # PCA weights for translation
+            else:
+                # Use per-joint values directly (n_joints * 3)
+                n_joints = len(config.dd["J_names"])
+                self.scales_dim = n_joints * 3
+                self.joint_trans_dim = n_joints * 3
         elif self.scale_trans_mode == 'ignore':
             # In ignore mode, no scales or translations
             self.scales_dim = 0
@@ -440,9 +451,35 @@ class SMILTransformerDecoderHead(nn.Module):
                         print(f"    {key} scale factor: {self.scales_scale_factor if key == 'log_beta_scales' else self.trans_scale_factor}")
         
         if self.scales_dim > 0:
-            output['log_beta_scales'] = pred_scales.view(batch_size, -1, 3)
+            if self.scale_trans_mode == 'separate':
+                # Check if using PCA or per-joint
+                from training_config import TrainingConfig
+                scale_trans_config = TrainingConfig.get_scale_trans_config()
+                use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+                if use_pca_transformation:
+                    # PCA weights - keep as 1D (batch_size, N_BETAS)
+                    output['log_beta_scales'] = pred_scales  # Already (batch_size, N_BETAS)
+                else:
+                    # Per-joint values - reshape to (batch_size, n_joints, 3)
+                    output['log_beta_scales'] = pred_scales.view(batch_size, -1, 3)
+            else:
+                # Other modes - reshape to per-joint
+                output['log_beta_scales'] = pred_scales.view(batch_size, -1, 3)
         if self.joint_trans_dim > 0:
-            output['betas_trans'] = pred_joint_trans.view(batch_size, -1, 3)
+            if self.scale_trans_mode == 'separate':
+                # Check if using PCA or per-joint
+                from training_config import TrainingConfig
+                scale_trans_config = TrainingConfig.get_scale_trans_config()
+                use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+                if use_pca_transformation:
+                    # PCA weights - keep as 1D (batch_size, N_BETAS)
+                    output['betas_trans'] = pred_joint_trans  # Already (batch_size, N_BETAS)
+                else:
+                    # Per-joint values - reshape to (batch_size, n_joints, 3)
+                    output['betas_trans'] = pred_joint_trans.view(batch_size, -1, 3)
+            else:
+                # Other modes - reshape to per-joint
+                output['betas_trans'] = pred_joint_trans.view(batch_size, -1, 3)
         
         # Global mesh scale (convert from log space to linear)
         if self.allow_mesh_scaling:
