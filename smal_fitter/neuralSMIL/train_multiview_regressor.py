@@ -662,6 +662,61 @@ def create_multiview_visualization(model: MultiViewSMILImageRegressor,
     with torch.no_grad():
         predicted_params = model.forward_multiview(images_tensors, camera_indices_tensor, view_mask)
     
+    # Print joint scales with joint names
+    if 'log_beta_scales' in predicted_params:
+        try:
+            from training_config import TrainingConfig
+            scale_trans_config = TrainingConfig.get_scale_trans_config()
+            use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+            
+            if model.scale_trans_mode == 'separate' and use_pca_transformation:
+                # PCA weights - transform to per-joint values
+                scale_weights = predicted_params['log_beta_scales'][0]  # (N_BETAS,) - PCA weights
+                trans_weights = predicted_params.get('betas_trans', None)
+                if trans_weights is not None:
+                    trans_weights = trans_weights[0:1]  # (1, N_BETAS)
+                log_beta_scales_joint, _ = model._transform_separate_pca_weights_to_joint_values(
+                    scale_weights.unsqueeze(0), trans_weights
+                )
+                log_beta_scales_joint = log_beta_scales_joint[0]  # (n_joints, 3)
+            else:
+                # Already per-joint values - use directly
+                log_beta_scales_joint = predicted_params['log_beta_scales'][0]  # (n_joints, 3)
+            
+            # Convert log scales to linear scales for readability
+            scales_joint = torch.exp(log_beta_scales_joint)  # (n_joints, 3)
+            
+            # Get joint names
+            joint_names = config.dd["J_names"]
+            
+            # Print scales for each joint
+            print(f"\n=== Joint Scales for Multiview Sample ===")
+            print(f"Mode: {model.scale_trans_mode}")
+            print(f"{'Joint Name':<20} {'Scale X':>10} {'Scale Y':>10} {'Scale Z':>10} {'Mean Scale':>12}")
+            print("-" * 70)
+            
+            for joint_idx, joint_name in enumerate(joint_names):
+                if joint_idx < scales_joint.shape[0]:
+                    scale_xyz = scales_joint[joint_idx].cpu().numpy()  # (3,)
+                    mean_scale = scale_xyz.mean()
+                    print(f"{joint_name:<20} {scale_xyz[0]:>10.4f} {scale_xyz[1]:>10.4f} {scale_xyz[2]:>10.4f} {mean_scale:>12.4f}")
+            
+            # Print summary statistics
+            all_scales = scales_joint.cpu().numpy()
+            print(f"\nSummary Statistics:")
+            print(f"  Mean scale (all joints, all axes): {all_scales.mean():.4f}")
+            print(f"  Std scale (all joints, all axes): {all_scales.std():.4f}")
+            print(f"  Min scale: {all_scales.min():.4f}")
+            print(f"  Max scale: {all_scales.max():.4f}")
+            print(f"  Joints with scale > 1.1: {((all_scales > 1.1).any(axis=1).sum().item())}")
+            print(f"  Joints with scale < 0.9: {((all_scales < 0.9).any(axis=1).sum().item())}")
+            print("=" * 70 + "\n")
+            
+        except Exception as e:
+            print(f"Warning: Failed to print joint scales: {e}")
+            import traceback
+            traceback.print_exc()
+    
     # Visualization parameters
     img_size = 224  # Standard visualization size
     margin = 5
@@ -1096,6 +1151,61 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
     # Forward pass to get predictions
     with torch.no_grad():
         predicted_params = model.forward_multiview(images_tensors, camera_indices_tensor, view_mask)
+    
+    # Print joint scales with joint names (once per sample)
+    if 'log_beta_scales' in predicted_params:
+        try:
+            from training_config import TrainingConfig
+            scale_trans_config = TrainingConfig.get_scale_trans_config()
+            use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+            
+            if model.scale_trans_mode == 'separate' and use_pca_transformation:
+                # PCA weights - transform to per-joint values
+                scale_weights = predicted_params['log_beta_scales'][0]  # (N_BETAS,) - PCA weights
+                trans_weights = predicted_params.get('betas_trans', None)
+                if trans_weights is not None:
+                    trans_weights = trans_weights[0:1]  # (1, N_BETAS)
+                log_beta_scales_joint, _ = model._transform_separate_pca_weights_to_joint_values(
+                    scale_weights.unsqueeze(0), trans_weights
+                )
+                log_beta_scales_joint = log_beta_scales_joint[0]  # (n_joints, 3)
+            else:
+                # Already per-joint values - use directly
+                log_beta_scales_joint = predicted_params['log_beta_scales'][0]  # (n_joints, 3)
+            
+            # Convert log scales to linear scales for readability
+            scales_joint = torch.exp(log_beta_scales_joint)  # (n_joints, 3)
+            
+            # Get joint names
+            joint_names = config.dd["J_names"]
+            
+            # Print scales for each joint
+            print(f"\n=== Joint Scales for Sample {sample_idx} (Single-View Renders) ===")
+            print(f"Mode: {model.scale_trans_mode}")
+            print(f"{'Joint Name':<20} {'Scale X':>10} {'Scale Y':>10} {'Scale Z':>10} {'Mean Scale':>12}")
+            print("-" * 70)
+            
+            for joint_idx, joint_name in enumerate(joint_names):
+                if joint_idx < scales_joint.shape[0]:
+                    scale_xyz = scales_joint[joint_idx].cpu().numpy()  # (3,)
+                    mean_scale = scale_xyz.mean()
+                    print(f"{joint_name:<20} {scale_xyz[0]:>10.4f} {scale_xyz[1]:>10.4f} {scale_xyz[2]:>10.4f} {mean_scale:>12.4f}")
+            
+            # Print summary statistics
+            all_scales = scales_joint.cpu().numpy()
+            print(f"\nSummary Statistics:")
+            print(f"  Mean scale (all joints, all axes): {all_scales.mean():.4f}")
+            print(f"  Std scale (all joints, all axes): {all_scales.std():.4f}")
+            print(f"  Min scale: {all_scales.min():.4f}")
+            print(f"  Max scale: {all_scales.max():.4f}")
+            print(f"  Joints with scale > 1.1: {((all_scales > 1.1).any(axis=1).sum().item())}")
+            print(f"  Joints with scale < 0.9: {((all_scales < 0.9).any(axis=1).sum().item())}")
+            print("=" * 70 + "\n")
+            
+        except Exception as e:
+            print(f"Warning: Failed to print joint scales for sample {sample_idx}: {e}")
+            import traceback
+            traceback.print_exc()
     
     # Render each view separately using SMALFitter
     views_rendered = 0
@@ -1996,10 +2106,14 @@ def main(config: dict):
         if os.path.exists(config['resume_checkpoint']):
             if rank == 0:
                 print(f"Resuming from checkpoint: {config['resume_checkpoint']}")
-            start_epoch, metrics = load_checkpoint(
+            loaded_epoch, metrics = load_checkpoint(
                 config['resume_checkpoint'], model, optimizer, scheduler, device
             )
+            # Start from the next epoch since the checkpoint epoch has already been completed
+            start_epoch = loaded_epoch + 1
             best_val_loss = metrics.get('best_val_loss', float('inf'))
+            if rank == 0:
+                print(f"Resuming training from epoch {start_epoch} (checkpoint was at epoch {loaded_epoch})")
     
     # Training loop
     if rank == 0:
