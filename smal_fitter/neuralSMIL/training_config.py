@@ -124,7 +124,7 @@ class TrainingConfig:
         'weight_decay': 1e-4,  # Add weight decay for AdamW
         'seed': 1234,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': 'None', # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': None,#'multiview_checkpoints/checkpoint_epoch_0099.pth', # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 16,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 8,  # Prefetch batches
@@ -167,7 +167,7 @@ class TrainingConfig:
     
     # Scale and Translation Beta Handling Configuration
     SCALE_TRANS_BETA_CONFIG = {
-        'mode': 'ignore',  # Options: 'ignore', 'separate', 'entangled_with_betas'
+        'mode': 'separate',  # Options: 'ignore', 'separate', 'entangled_with_betas'
         
         # Mode-specific configurations
         'ignore': {
@@ -180,7 +180,7 @@ class TrainingConfig:
         },
         
         'separate': {
-            'use_pca_transformation': True,
+            'use_pca_transformation': False,
             'transformer_scale_factors': {
                 'trans_scale_factor': 0.01
             },
@@ -229,33 +229,54 @@ class TrainingConfig:
             'keypoint_2d': 0.1,        # AniMer: 0.01
             'keypoint_3d': 0.25,        # 3D keypoint loss - start at zero
             'silhouette': 0.0,          # Start at zero
-            'joint_angle_regularization': 0.001  # Penalty for large joint angles (excluding root)
+            'joint_angle_regularization': 0.001,  # Penalty for large joint angles (excluding root)
+            'limb_scale_regularization': 0.01,    # Penalty for deviations from scale=1 (log_beta_scales)
+            'limb_trans_regularization': 1      # Heavy penalty for translation changes (betas_trans) - prevents artifacts
         },
         
         # Curriculum stages: (epoch_threshold, weight_updates) - AniMer-style conservative
         'curriculum_stages': [
             (1, {
-                'joint_angle_regularization': 0.01
+                'joint_angle_regularization': 0.01,
+                'limb_scale_regularization': 0.1,   # Start with higher penalty
+                'limb_trans_regularization': 1     # Very high penalty for translation early on, essentially prohibit any translation at thsi stage
             }),
             (10, {
                 'keypoint_2d': 0.1,    # AniMer: 0.01
-                'joint_angle_regularization': 0.005
+                'joint_angle_regularization': 0.005,
+                'limb_scale_regularization': 0.05,
+                'limb_trans_regularization': 1
             }),
             (25, {
                 'keypoint_2d': 0.2,    # AniMer: 0.01
-                'joint_angle_regularization': 0.0025    
+                'joint_angle_regularization': 0.0025,
+                'limb_scale_regularization': 0.02,
+                'limb_trans_regularization': 1
             }),
             (35, {
                 'keypoint_3d': 1,    # AniMer: 0.01
-                'joint_angle_regularization': 0.001
+                'joint_angle_regularization': 0.001,
+                'limb_scale_regularization': 0.01,
+                'limb_trans_regularization': 1
+            }),
+            (45, {
+                'keypoint_3d': 1,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0001,
+                'limb_scale_regularization': 0.005,  # Keep at reasonable level to allow scales while preventing extreme values
+                'limb_trans_regularization': 1
             }),
             (50, {
                 'keypoint_3d': 2,    # AniMer: 0.01
-                'joint_angle_regularization': 0.0005
+                'joint_angle_regularization': 0.00005,
+                'limb_scale_regularization': 0.001,  # Gradually reduce but keep meaningful
+                'limb_trans_regularization': 0.5
             }),
             (100, {
                 'keypoint_3d': 2,    # AniMer: 0.01
-                'joint_angle_regularization': 0.0001# 
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.00001,
+                'limb_scale_regularization': 0.0000001,  # Keep small but non-zero to prevent extreme scales
+                'limb_trans_regularization': 0.1
             })
         ]
     }
@@ -276,13 +297,16 @@ class TrainingConfig:
             (60, 1e-5),      # 5e-7
             
             # Stage 3: Very low learning rate for final convergence
-            (120, 1e-6),      # 1e-7
+            (100, 2e-5),      # 1e-7
 
             # Stage 3: Very low learning rate for final convergence
-            (150, 5e-5),      # 1e-7
+            (120, 1.5e-5),      # 1e-7
 
             # Stage 3: Very low learning rate for final convergence
-            (170, 1e-5),      # 1e-7
+            (150, 1e-5),      # 1e-7
+
+            # Stage 3: Very low learning rate for final convergence
+            (170, 5e-6),      # 1e-7
 
             # Stage 3: Very low learning rate for final convergence
             (200, 2e-6),      # 1e-7
