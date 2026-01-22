@@ -491,8 +491,18 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             # Joint scales (if available)
             if self.scales_dim > 0:
                 if self.scale_trans_mode == 'separate':
-                    # In separate mode, these are PCA weights, keep as 1D
-                    params['log_beta_scales'] = output[:, idx:idx + self.scales_dim]  # (batch_size, N_BETAS)
+                    # Check if using PCA or per-joint
+                    from training_config import TrainingConfig
+                    scale_trans_config = TrainingConfig.get_scale_trans_config()
+                    use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+                    if use_pca_transformation:
+                        # PCA weights - keep as 1D
+                        params['log_beta_scales'] = output[:, idx:idx + self.scales_dim]  # (batch_size, N_BETAS)
+                    else:
+                        # Per-joint values - reshape to (batch_size, n_joints, 3)
+                        scales_flat = output[:, idx:idx + self.scales_dim]
+                        n_joints = self.scales_dim // 3
+                        params['log_beta_scales'] = scales_flat.view(batch_size, n_joints, 3)
                 else:
                     # In other modes, reshape to per-joint values
                     scales_flat = output[:, idx:idx + self.scales_dim]
@@ -503,8 +513,18 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             # Joint translations (if available)
             if self.joint_trans_dim > 0:
                 if self.scale_trans_mode == 'separate':
-                    # In separate mode, these are PCA weights, keep as 1D
-                    params['betas_trans'] = output[:, idx:idx + self.joint_trans_dim]  # (batch_size, N_BETAS)
+                    # Check if using PCA or per-joint
+                    from training_config import TrainingConfig
+                    scale_trans_config = TrainingConfig.get_scale_trans_config()
+                    use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+                    if use_pca_transformation:
+                        # PCA weights - keep as 1D
+                        params['betas_trans'] = output[:, idx:idx + self.joint_trans_dim]  # (batch_size, N_BETAS)
+                    else:
+                        # Per-joint values - reshape to (batch_size, n_joints, 3)
+                        trans_flat = output[:, idx:idx + self.joint_trans_dim]
+                        n_joints = self.joint_trans_dim // 3
+                        params['betas_trans'] = trans_flat.view(batch_size, n_joints, 3)
                 else:
                     # In other modes, reshape to per-joint values
                     trans_flat = output[:, idx:idx + self.joint_trans_dim]
@@ -619,6 +639,8 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 'cam_rot': 0.0,
                 'cam_trans': 0.0,
                 'joint_angle_regularization': 0.0001,  # Penalty for large joint angles
+                'limb_scale_regularization': 0.01,      # Penalty for deviations from scale=1 (log_beta_scales)
+                'limb_trans_regularization': 0.1,       # Heavy penalty for translation changes (betas_trans)
             }
         
         batch_size = predicted_params['global_rot'].shape[0]
@@ -706,18 +728,89 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             loss_components['trans'] = loss
             total_loss = total_loss + loss_weights['trans'] * loss
         
-        # Scale/trans losses if available
+        # Scale/trans losses if available (supervised losses against targets)
         if 'log_beta_scales' in predicted_params and loss_weights.get('log_beta_scales', 0) > 0:
             if body_targets.get('log_beta_scales') is not None:
-                loss = F.mse_loss(predicted_params['log_beta_scales'], body_targets['log_beta_scales'])
-                loss_components['log_beta_scales'] = loss
-                total_loss = total_loss + loss_weights['log_beta_scales'] * loss
+                # Only supervise when we have real targets (not all zeros) to allow model to learn scales for keypoint fitting
+                target_norm = torch.norm(body_targets['log_beta_scales'], dim=-1).mean()
+                if target_norm > 1e-6:  # Only supervise if targets are non-zero (real ground truth)
+                    loss = F.mse_loss(predicted_params['log_beta_scales'], body_targets['log_beta_scales'])
+                    loss_components['log_beta_scales'] = loss
+                    total_loss = total_loss + loss_weights['log_beta_scales'] * loss
+                else:
+                    # Targets are all zeros - don't supervise, let model learn scales from keypoint losses
+                    loss_components['log_beta_scales'] = torch.tensor(eps, device=self.device, requires_grad=True)
         
         if 'betas_trans' in predicted_params and loss_weights.get('betas_trans', 0) > 0:
             if body_targets.get('betas_trans') is not None:
                 loss = F.mse_loss(predicted_params['betas_trans'], body_targets['betas_trans'])
                 loss_components['betas_trans'] = loss
                 total_loss = total_loss + loss_weights['betas_trans'] * loss
+        
+        # Limb scale regularization: penalize deviations from scale=1 (log_beta_scales close to 0)
+        # This encourages the model to keep joint scales close to their original values
+        if (loss_weights.get('limb_scale_regularization', 0) > 0 and 
+            'log_beta_scales' in predicted_params and 
+            self.scale_trans_mode == 'separate'):
+            log_scales = predicted_params['log_beta_scales']  # (batch_size, ...)
+            
+            # Check if using PCA or per-joint
+            from training_config import TrainingConfig
+            scale_trans_config = TrainingConfig.get_scale_trans_config()
+            use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+            
+            if use_pca_transformation:
+                # PCA weights - convert to per-joint values for regularization
+                try:
+                    scale_weights = log_scales
+                    trans_weights = predicted_params.get('betas_trans', None)
+                    log_beta_scales_joint, _ = self._transform_separate_pca_weights_to_joint_values(
+                        scale_weights, trans_weights
+                    )
+                except Exception as e:
+                    print(f"Warning: Failed to convert PCA scale weights to joint values for regularization: {e}")
+                    log_beta_scales_joint = torch.zeros_like(log_scales.view(batch_size, -1, 3))
+            else:
+                # Already per-joint values - use directly
+                log_beta_scales_joint = log_scales  # (batch_size, n_joints, 3)
+            
+            # Penalize squared norm to encourage values close to 0 (log(1) = 0 means scale=1)
+            scale_reg = torch.mean(log_beta_scales_joint ** 2)
+            loss_components['limb_scale_regularization'] = scale_reg
+            total_loss = total_loss + loss_weights['limb_scale_regularization'] * scale_reg
+        
+        # Limb translation regularization: heavily penalize translation changes (betas_trans)
+        # This prevents the model from using translation to "cheat" by dragging bones to desired positions
+        # without learning proper joint angles. Translation can lead to odd artifacts.
+        if (loss_weights.get('limb_trans_regularization', 0) > 0 and 
+            'betas_trans' in predicted_params and 
+            self.scale_trans_mode == 'separate'):
+            trans_params = predicted_params['betas_trans']  # (batch_size, ...)
+            
+            # Check if using PCA or per-joint
+            from training_config import TrainingConfig
+            scale_trans_config = TrainingConfig.get_scale_trans_config()
+            use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+            
+            if use_pca_transformation:
+                # PCA weights - convert to per-joint values for regularization
+                try:
+                    scale_weights = predicted_params.get('log_beta_scales', None)
+                    trans_weights = trans_params
+                    _, betas_trans_joint = self._transform_separate_pca_weights_to_joint_values(
+                        scale_weights, trans_weights
+                    )
+                except Exception as e:
+                    print(f"Warning: Failed to convert PCA trans weights to joint values for regularization: {e}")
+                    betas_trans_joint = torch.zeros_like(trans_params.view(batch_size, -1, 3))
+            else:
+                # Already per-joint values - use directly
+                betas_trans_joint = trans_params  # (batch_size, n_joints, 3)
+            
+            # Heavy penalty: squared norm to strongly encourage values close to 0
+            trans_reg = torch.mean(betas_trans_joint ** 2)
+            loss_components['limb_trans_regularization'] = trans_reg
+            total_loss = total_loss + loss_weights['limb_trans_regularization'] * trans_reg
         
         # =================== PER-VIEW 2D KEYPOINT LOSS ===================
         # This is the core multi-view loss: render 2D keypoints for each view using
