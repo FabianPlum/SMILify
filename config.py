@@ -44,7 +44,7 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 #SMAL_FILE = join("3D_model_prep", 'SMIL_OmniAnt.pkl') # USING LATEST SMIL DATA
 #SMAL_FILE = join("3D_model_prep", 'SMILy_STICK.pkl')
 #SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_REPOSE_LONG.pkl') #UPDATED JOINT LOCS
-# SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_Falkner_conv_.pkl') #UPDATED JOINT LOCS
+# SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_Falkner_conv.pkl') #UPDATED JOINT LOCS
 # the model below has slightly re-positioned the hind legs, moving the knee lower
 SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl')
 
