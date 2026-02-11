@@ -11,6 +11,23 @@ Key Features:
 - Per-view 2D keypoint loss with visibility weighting
 """
 
+# ===== CRITICAL: Force IPv4 BEFORE any other imports =====
+# This prevents "Address family not supported by protocol" (errno: 97) errors
+# on HPC systems that don't have full IPv6 support
+import socket
+_original_getaddrinfo = socket.getaddrinfo
+
+def _getaddrinfo_ipv4_only(*args, **kwargs):
+    """Force getaddrinfo to return only IPv4 results."""
+    responses = _original_getaddrinfo(*args, **kwargs)
+    # Filter to only IPv4 (AF_INET) results
+    ipv4_responses = [r for r in responses if r[0] == socket.AF_INET]
+    # If we have IPv4 results, use them; otherwise fall back to original
+    return ipv4_responses if ipv4_responses else responses
+
+socket.getaddrinfo = _getaddrinfo_ipv4_only
+# ===== End IPv4 forcing =====
+
 # Set matplotlib backend BEFORE any other imports
 import matplotlib
 matplotlib.use('Agg')
@@ -31,7 +48,7 @@ import sys
 import random
 import json
 from tqdm import tqdm
-from datetime import datetime
+from datetime import datetime, timedelta
 import argparse
 import imageio
 from typing import Optional
@@ -60,29 +77,216 @@ def set_random_seeds(seed: int = 0):
     torch.backends.cudnn.benchmark = False
 
 
-def is_torchrun_launched():
-    """Check if launched via torchrun."""
+def is_distributed_launch():
+    """
+    Check if the script was launched in distributed mode (via torchrun, SLURM, etc.).
+    
+    When launched via torchrun or SLURM with proper setup, environment variables 
+    RANK, LOCAL_RANK, and WORLD_SIZE are set automatically.
+    
+    Returns:
+        bool: True if launched in distributed mode, False otherwise
+    """
     return all(var in os.environ for var in ['RANK', 'LOCAL_RANK', 'WORLD_SIZE'])
 
 
+# Keep old name for backwards compatibility
+is_torchrun_launched = is_distributed_launch
+
+
 def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int = None):
-    """Initialize DDP environment."""
-    if 'MASTER_ADDR' not in os.environ:
-        os.environ['MASTER_ADDR'] = 'localhost'
-    if 'MASTER_PORT' not in os.environ:
-        os.environ['MASTER_PORT'] = port
+    """
+    Initialize DDP environment with robust IPv4-only TCP store.
     
-    if not dist.is_initialized():
-        dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    Args:
+        rank: Current process rank (global rank across all nodes)
+        world_size: Total number of processes
+        port: Master port for communication (default: 12345, ignored if MASTER_PORT env var is set)
+        local_rank: Local rank within the node (for GPU assignment). If None, uses rank.
+    """
+    import re
     
+    # Get master address and port from environment
+    master_addr = os.environ.get('MASTER_ADDR', 'localhost')
+    master_port = int(os.environ.get('MASTER_PORT', port or '12345'))
+    
+    # Validate that master_addr is an IPv4 address (not a hostname)
+    ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+    if not re.match(ipv4_pattern, master_addr):
+        print(f"WARNING: MASTER_ADDR '{master_addr}' is not an IPv4 address!")
+        print(f"  Attempting to resolve to IPv4...")
+        try:
+            # Force IPv4 resolution
+            import socket
+            result = socket.getaddrinfo(master_addr, master_port, socket.AF_INET, socket.SOCK_STREAM)
+            if result:
+                master_addr = result[0][4][0]
+                print(f"  Resolved to: {master_addr}")
+            else:
+                print(f"  ERROR: Could not resolve {master_addr} to IPv4!")
+        except Exception as e:
+            print(f"  ERROR resolving hostname: {e}")
+    
+    # Use local_rank for GPU assignment (important for multi-node setups)
+    # Do this BEFORE init_process_group so NCCL binds to the correct GPU
     gpu_rank = local_rank if local_rank is not None else rank
+    
+    # Debug: show available CUDA devices
+    if rank == 0:
+        print(f"CUDA devices available: {torch.cuda.device_count()}")
+        print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
+    
     torch.cuda.set_device(gpu_rank)
+    
+    # Initialize process group if not already initialized
+    if not dist.is_initialized():
+        print(f"[Rank {rank}] Initializing distributed: WORLD_SIZE={world_size}, "
+              f"LOCAL_RANK/GPU={gpu_rank}, MASTER={master_addr}:{master_port}")
+        
+        try:
+            # Create explicit TCPStore with IPv4 address to avoid IPv6 issues
+            # This bypasses the default hostname resolution that can return IPv6
+            is_master = (rank == 0)
+            
+            # Create TCP store with explicit timeout
+            store = dist.TCPStore(
+                host_name=master_addr,
+                port=master_port,
+                world_size=world_size,
+                is_master=is_master,
+                timeout=timedelta(seconds=1800),
+                use_libuv=False  # Disable libuv to avoid potential IPv6 issues
+            )
+            
+            # Initialize process group with explicit store (bypasses env:// which can use IPv6)
+            dist.init_process_group(
+                backend="nccl",
+                store=store,
+                rank=rank,
+                world_size=world_size,
+                timeout=timedelta(seconds=1800)
+            )
+            print(f"[Rank {rank}] Successfully initialized NCCL process group")
+            
+        except Exception as e:
+            print(f"Error initializing process group with NCCL + TCPStore: {e}")
+            print(f"  MASTER_ADDR: {master_addr}")
+            print(f"  MASTER_PORT: {master_port}")
+            print(f"  RANK: {rank}, WORLD_SIZE: {world_size}")
+            print(f"  LOCAL_RANK: {local_rank}, GPU_RANK: {gpu_rank}")
+            
+            # Try gloo backend as fallback with explicit store
+            print("Attempting fallback to gloo backend with TCPStore...")
+            try:
+                is_master = (rank == 0)
+                store = dist.TCPStore(
+                    host_name=master_addr,
+                    port=master_port + 1,  # Use different port for gloo
+                    world_size=world_size,
+                    is_master=is_master,
+                    timeout=timedelta(seconds=1800),
+                    use_libuv=False
+                )
+                dist.init_process_group(
+                    backend="gloo",
+                    store=store,
+                    rank=rank,
+                    world_size=world_size,
+                    timeout=timedelta(seconds=1800)
+                )
+                print(f"[Rank {rank}] Successfully initialized with gloo backend!")
+            except Exception as e2:
+                print(f"Gloo fallback also failed: {e2}")
+                raise e  # Re-raise original NCCL error
 
 
 def cleanup_ddp():
     """Clean up DDP environment."""
     if dist.is_initialized():
         dist.destroy_process_group()
+
+
+def create_fractional_train_loader(train_set, 
+                                   epoch: int,
+                                   config: dict,
+                                   is_distributed: bool,
+                                   collate_fn) -> DataLoader:
+    """
+    Create a DataLoader that samples a fraction of the training dataset.
+    
+    This function enables efficient training on very large datasets by sampling
+    a random subset of training examples at each epoch. The sampling is deterministic
+    based on (config['seed'] + epoch), ensuring all DDP processes use the same subset.
+    
+    Args:
+        train_set: The full training dataset (or Subset)
+        epoch: Current epoch number (used for deterministic sampling seed)
+        config: Training configuration dictionary containing:
+            - 'dataset_fraction': Fraction of data to use (0 < fraction <= 1)
+            - 'seed': Base random seed
+            - 'batch_size': Batch size
+            - 'num_workers': Number of data loading workers
+            - 'pin_memory': Whether to pin memory
+        is_distributed: Whether training is distributed (DDP)
+        collate_fn: Collate function for the DataLoader
+        
+    Returns:
+        DataLoader configured with the fractional subset for this epoch
+    """
+    dataset_fraction = config.get('dataset_fraction', 1.0)
+    
+    if dataset_fraction >= 1.0:
+        # Use full dataset - create standard sampler
+        if is_distributed:
+            sampler = DistributedSampler(train_set, shuffle=True)
+            sampler.set_epoch(epoch)
+        else:
+            sampler = None
+        
+        return DataLoader(
+            train_set,
+            batch_size=config['batch_size'],
+            shuffle=(sampler is None),
+            sampler=sampler,
+            num_workers=config['num_workers'],
+            pin_memory=config['pin_memory'],
+            collate_fn=collate_fn,
+            drop_last=True
+        )
+    
+    # Fractional sampling: create a deterministic subset for this epoch
+    # All processes use the same seed to get the same subset
+    subset_seed = config['seed'] + epoch
+    rng = torch.Generator()
+    rng.manual_seed(subset_seed)
+    
+    # Compute number of samples to use
+    full_size = len(train_set)
+    n_samples = max(1, int(full_size * dataset_fraction))
+    
+    # Generate random permutation and take first n_samples indices
+    all_indices = torch.randperm(full_size, generator=rng)[:n_samples].tolist()
+    
+    # Create a Subset view of the training data
+    epoch_subset = torch.utils.data.Subset(train_set, all_indices)
+    
+    # Create sampler for the subset
+    if is_distributed:
+        sampler = DistributedSampler(epoch_subset, shuffle=True)
+        sampler.set_epoch(epoch)
+    else:
+        sampler = None
+    
+    return DataLoader(
+        epoch_subset,
+        batch_size=config['batch_size'],
+        shuffle=(sampler is None),
+        sampler=sampler,
+        num_workers=config['num_workers'],
+        pin_memory=config['pin_memory'],
+        collate_fn=collate_fn,
+        drop_last=True
+    )
 
 
 def _print_component_metrics(train_components: dict, val_components: dict, indent: str = "    "):
@@ -138,8 +342,8 @@ class MultiViewTrainingConfig:
         'num_visualization_samples': 3,
         
         # Split ratios
-        'train_ratio': 0.8,
-        'val_ratio': 0.1,
+        'train_ratio': 0.85,
+        'val_ratio': 0.05,
         'test_ratio': 0.1,
         
         # Mesh scaling - allows network to predict global mesh scale
@@ -202,6 +406,12 @@ class MultiViewTrainingConfig:
         mesh_scaling_config = TrainingConfig.get_mesh_scaling_config()
         merged['allow_mesh_scaling'] = mesh_scaling_config.get('allow_mesh_scaling', False)
         merged['mesh_scale_init'] = mesh_scaling_config.get('init_mesh_scale', 1.0)
+        
+        # Dataset fraction for large datasets (fraction of training data per epoch)
+        merged['dataset_fraction'] = TrainingConfig.get_dataset_fraction()
+
+        # Optional GT camera initialization (predict deltas around GT if available)
+        merged['use_gt_camera_init'] = TrainingConfig.use_gt_camera_init
         
         return merged
     
@@ -486,7 +696,22 @@ def validate(model: MultiViewSMILImageRegressor,
             except Exception as e:
                 print(f"Validation error: {e}")
                 continue
-    
+
+    # Reduce validation metrics across ranks (mean over all batches across all GPUs)
+    if dist.is_initialized():
+        device_t = torch.device(device)
+        stats = torch.tensor([total_loss, float(num_batches)], device=device_t, dtype=torch.float32)
+        dist.all_reduce(stats, op=dist.ReduceOp.SUM)
+        total_loss = stats[0].item()
+        num_batches = int(stats[1].item())
+
+        if loss_components_sum:
+            keys = sorted(loss_components_sum.keys())
+            comp_tensor = torch.tensor([loss_components_sum[k] for k in keys],
+                                       device=device_t, dtype=torch.float32)
+            dist.all_reduce(comp_tensor, op=dist.ReduceOp.SUM)
+            loss_components_sum = {k: comp_tensor[i].item() for i, k in enumerate(keys)}
+
     if num_batches > 0:
         avg_loss = total_loss / num_batches
         avg_components = {k: v / num_batches for k, v in loss_components_sum.items()}
@@ -660,7 +885,12 @@ def create_multiview_visualization(model: MultiViewSMILImageRegressor,
     
     # Forward pass through model (no gradient needed for visualization)
     with torch.no_grad():
-        predicted_params = model.forward_multiview(images_tensors, camera_indices_tensor, view_mask)
+        predicted_params = model.forward_multiview(
+            images_tensors,
+            camera_indices_tensor,
+            view_mask,
+            target_data=[y_data]
+        )
     
     # Print joint scales with joint names
     if 'log_beta_scales' in predicted_params:
@@ -761,11 +991,19 @@ def create_multiview_visualization(model: MultiViewSMILImageRegressor,
         
         # === BOTTOM ROW: Rendered mesh with keypoints ===
         try:
+            # Extract aspect ratio for this view if available
+            aspect_ratio = None
+            try:
+                if y_data.get('cam_aspect_per_view') is not None:
+                    aspect_ratio = float(np.array(y_data['cam_aspect_per_view'][v]).reshape(-1)[0])
+            except Exception:
+                aspect_ratio = None
+            
             # Create rendered image with keypoint overlays
             rendered_img = create_rendered_view_with_keypoints(
                 model, predicted_params, v, 
                 target_keypoints, target_visibility,
-                device, img_size
+                device, img_size, aspect_ratio=aspect_ratio
             )
             
             canvas[2 * margin + img_size:2 * margin + 2 * img_size, 
@@ -813,7 +1051,8 @@ def create_rendered_view_with_keypoints(model: MultiViewSMILImageRegressor,
                                          target_keypoints: np.ndarray,
                                          target_visibility: np.ndarray,
                                          device: str,
-                                         img_size: int) -> np.ndarray:
+                                         img_size: int,
+                                         aspect_ratio: Optional[float] = None) -> np.ndarray:
     """
     Create a rendered view with keypoint overlays.
     
@@ -825,6 +1064,7 @@ def create_rendered_view_with_keypoints(model: MultiViewSMILImageRegressor,
         target_visibility: Ground truth visibility (num_views, n_joints) or (n_joints,)
         device: PyTorch device
         img_size: Output image size
+        aspect_ratio: Optional camera aspect ratio for correct projection
         
     Returns:
         Rendered image with keypoint overlays (img_size, img_size, 3) uint8
@@ -839,8 +1079,13 @@ def create_rendered_view_with_keypoints(model: MultiViewSMILImageRegressor,
     # Render 2D keypoints using body params + view camera
     try:
         with torch.no_grad():
+            # Convert aspect_ratio to tensor if provided
+            aspect_tensor = None
+            if aspect_ratio is not None:
+                aspect_tensor = torch.tensor([aspect_ratio], dtype=torch.float32, device=device)
+            
             rendered_joints = model._render_keypoints_with_camera(
-                predicted_params, fov, cam_rot, cam_trans
+                predicted_params, fov, cam_rot, cam_trans, aspect_ratio=aspect_tensor
             )  # (batch_size, n_joints, 2)
         
         # Convert to numpy for visualization
@@ -852,12 +1097,15 @@ def create_rendered_view_with_keypoints(model: MultiViewSMILImageRegressor,
         pred_kps = None
     
     # Create base image (gray background for now, could be rendered mesh later)
-    # For now, use a simple gradient to indicate the view
-    img = np.ones((img_size, img_size, 3), dtype=np.uint8) * 60
+    # Use a subtle blue gradient to differentiate views (avoids conflict with red pred markers)
+    img = np.ones((img_size, img_size, 3), dtype=np.uint8) * 50
     
-    # Add a subtle gradient to differentiate views
-    for i in range(img_size):
-        img[i, :, 0] = min(255, 60 + view_idx * 30)  # Slightly different tint per view
+    # Add a pleasant blue tint that increases with view index
+    # Blue channel increases, slight decrease in red to create cooler tones
+    blue_intensity = min(255, 70 + view_idx * 25)
+    img[:, :, 2] = blue_intensity  # Blue channel
+    img[:, :, 1] = min(255, 55 + view_idx * 8)  # Slight green for pleasant tone
+    img[:, :, 0] = 45  # Keep red low for cool blue appearance
     
     # Get target keypoints for this view
     gt_kps = None
@@ -1091,6 +1339,9 @@ def visualize_singleview_renders(model: MultiViewSMILImageRegressor,
                 import traceback
                 traceback.print_exc()
                 continue
+            finally:
+                # Clear GPU memory between samples to prevent accumulation
+                torch.cuda.empty_cache()
         
         print(f"Generated single-view renders for {num_rendered} samples (epoch {epoch}) in {epoch_dir}")
     
@@ -1150,7 +1401,12 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
     
     # Forward pass to get predictions
     with torch.no_grad():
-        predicted_params = model.forward_multiview(images_tensors, camera_indices_tensor, view_mask)
+        predicted_params = model.forward_multiview(
+            images_tensors,
+            camera_indices_tensor,
+            view_mask,
+            target_data=[y_data]
+        )
     
     # Print joint scales with joint names (once per sample)
     if 'log_beta_scales' in predicted_params:
@@ -1315,6 +1571,11 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 rgb_only=rgb_only
             )
             
+            # CRITICAL: Match propagate_scaling to the training model's setting.
+            # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
+            # so visualization must also use propagate_scaling=True for consistent geometry.
+            temp_fitter.propagate_scaling = model.propagate_scaling
+            
             # Set target joints for visualization
             if view_keypoints is not None and view_visibility is not None:
                 pixel_coords = view_keypoints.copy()
@@ -1358,19 +1619,38 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
             
             # Set scale and translation parameters if available
             #
-            # IMPORTANT:
-            # In `separate` mode these are PCA weights; in training we intentionally *do not* apply
-            # them in the renderer path (`_render_keypoints_with_camera`) because they require PCA
-            # dirs and are typically unsupervised (loss weights often 0).
-            #
-            # Applying them here in visualization can make the mesh look severely deformed even
-            # though training is not actually optimizing those degrees of freedom.
+            # IMPORTANT: Scales ARE applied during training loss computation in `_predict_canonical_joints_3d`
+            # and `_render_keypoints_with_camera` for 'separate' mode. The model learns scales implicitly
+            # through 2D/3D keypoint supervision. We must apply them here to match training behavior.
             if 'log_beta_scales' in predicted_params and 'betas_trans' in predicted_params:
-                if model.scale_trans_mode in ['separate', 'ignore']:
-                    # Mirror training behavior: skip unsupervised per-joint scaling/translation.
-                    # This keeps visualizations consistent with what the loss is optimizing.
+                if model.scale_trans_mode == 'ignore':
+                    # 'ignore' mode: scales/translations are not used
                     pass
+                elif model.scale_trans_mode == 'separate':
+                    # 'separate' mode: check if using PCA or per-joint values
+                    scale_trans_config = TrainingConfig.get_scale_trans_config()
+                    use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+                    
+                    scales = predicted_params['log_beta_scales'][0:1].detach()
+                    trans = predicted_params['betas_trans'][0:1].detach()
+                    
+                    if use_pca_transformation:
+                        # PCA weights - convert to per-joint values for SMALFitter
+                        try:
+                            scales, trans = model._transform_separate_pca_weights_to_joint_values(scales, trans)
+                        except Exception as e:
+                            print(f"Warning: Failed to convert PCA limb scales for visualization: {e}")
+                            # Fall back to not applying scales
+                            scales = None
+                            trans = None
+                    # else: Already per-joint values (batch_size, n_joints, 3) - use directly
+                    
+                    if scales is not None:
+                        temp_fitter.log_beta_scales.data = scales.to(device)
+                    if trans is not None:
+                        temp_fitter.betas_trans.data = trans.to(device)
                 else:
+                    # 'entangled_with_betas' mode: values are already per-joint
                     temp_fitter.log_beta_scales.data = predicted_params['log_beta_scales'][0:1].detach().to(device)
                     temp_fitter.betas_trans.data = predicted_params['betas_trans'][0:1].detach().to(device)
             
@@ -1459,9 +1739,28 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                             except Exception:
                                 gt_aspect = None
                             temp_fitter.renderer.set_camera_parameters(R=gt_R, T=gt_T, fov=gt_fov, aspect_ratio=gt_aspect)
-                            screen_size = torch.ones(1, 2, dtype=torch.float32, device=device) * float(target_size)
+                            
+                            # Get original image dimensions for correct aspect ratio projection
+                            # The camera intrinsics are calibrated for the original (potentially non-square) image
+                            if isinstance(original_image, np.ndarray):
+                                orig_H, orig_W = original_image.shape[:2]
+                            else:
+                                # Tensor case (C, H, W) or (H, W, C)
+                                if original_image.shape[0] in [1, 3, 4]:  # Likely (C, H, W)
+                                    orig_H, orig_W = original_image.shape[1], original_image.shape[2]
+                                else:  # Likely (H, W, C)
+                                    orig_H, orig_W = original_image.shape[0], original_image.shape[1]
+                            
+                            # Use original image dimensions for projection to account for aspect ratio
+                            # transform_points_screen expects image_size as (W, H)
+                            screen_size = torch.tensor([[orig_W, orig_H]], dtype=torch.float32, device=device)
                             proj = temp_fitter.renderer.cameras.transform_points_screen(pts3d, image_size=screen_size)[:, :, [1, 0]]  # (1,J,2) (y,x)
                             proj_np = proj[0].detach().cpu().numpy()
+                            
+                            # Scale projected coordinates from original image space to resized (square) image space
+                            # proj_np is (J, 2) with (y, x) coordinates in original image pixels
+                            proj_np[:, 0] = proj_np[:, 0] * target_size / orig_H  # y coordinates
+                            proj_np[:, 1] = proj_np[:, 1] * target_size / orig_W  # x coordinates
 
                             # Restore predicted camera for SMALFitter visualization
                             temp_fitter.renderer.set_camera_parameters(R=cam_rot, T=cam_trans, fov=view_fov, aspect_ratio=aspect)
@@ -1541,9 +1840,8 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 # - If use_ue_scaling: apply 10x scaling
                 # - If allow_mesh_scaling: apply predicted mesh_scale
                 # - Otherwise: just translation
-                # NOTE: generate_visualization uses apply_UE_transform=False, which only applies translation.
-                # However, training rendering (_render_keypoints_with_camera) applies mesh scaling if enabled.
-                # We apply the same logic here for OBJ export consistency.
+                # NOTE: generate_visualization now correctly uses apply_UE_transform=model.use_ue_scaling
+                # to match the 3D keypoint computation. We apply the same logic here for OBJ export consistency.
                 if model.use_ue_scaling:
                     root_joint = mesh_joints[:, 0:1, :]
                     mesh_verts = (mesh_verts - root_joint) * 10 + temp_fitter.trans[0:1].unsqueeze(1)
@@ -1601,15 +1899,16 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
             # Create image exporter for this view
             image_exporter = SingleViewImageExporter(output_dir, sample_idx, view_idx, epoch)
             
-            # Generate visualization - use apply_UE_transform=False to match training
-            # (training uses use_ue_scaling=False by default)
+            # Generate visualization - apply_UE_transform MUST match model.use_ue_scaling
+            # to ensure 2D rendering uses the same transformation as 3D keypoint computation.
+            # This is critical for consistency between visualize_3d_keypoints() and 2D mesh renders.
             # Pass mesh_scale if allow_mesh_scaling is enabled to match training render path
             vis_mesh_scale = None
             if model.allow_mesh_scaling and 'mesh_scale' in predicted_params:
                 vis_mesh_scale = predicted_params['mesh_scale'][0:1].detach()
             temp_fitter.generate_visualization(
                 image_exporter, 
-                apply_UE_transform=False, 
+                apply_UE_transform=model.use_ue_scaling,  # MUST match model setting!
                 img_idx=view_idx,
                 mesh_scale=vis_mesh_scale
             )
@@ -1619,6 +1918,12 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
         except Exception as e:
             print(f"Warning: Failed to render view {view_idx} for sample {sample_idx}: {e}")
             continue
+        finally:
+            # Clean up GPU memory after each view to prevent OOM
+            # The SMALFitter creates a renderer with GPU resources that need to be freed
+            if 'temp_fitter' in locals():
+                del temp_fitter
+            torch.cuda.empty_cache()
     
     # Generate 3D keypoint visualization if 3D data is available
     # This is done once per sample (body params are shared across views)
@@ -1895,13 +2200,21 @@ def save_checkpoint(model, optimizer, scheduler, epoch, config, metrics, filepat
 
 
 def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cuda'):
-    """Load training checkpoint."""
+    """
+    Load training checkpoint.
+    
+    Note: The model architecture should already match the checkpoint (max_views, etc.)
+    since model creation uses checkpoint config when resuming. This function just loads
+    the state dict and optimizer/scheduler states.
+    """
     checkpoint = torch.load(filepath, map_location=device)
     
+    # Load model state dict with strict=False to allow some flexibility
+    # (e.g., if some parameters were added/removed, but architecture matches)
     if hasattr(model, 'module'):
-        model.module.load_state_dict(checkpoint['model_state_dict'])
+        model.module.load_state_dict(checkpoint['model_state_dict'], strict=False)
     else:
-        model.load_state_dict(checkpoint['model_state_dict'])
+        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
     
     if optimizer and 'optimizer_state_dict' in checkpoint:
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -1970,13 +2283,64 @@ def main(config: dict):
     if rank == 0:
         dataset.print_dataset_summary()
     
-    # Get canonical camera order from dataset
-    canonical_camera_order = dataset.get_canonical_camera_order()
-    max_views = dataset.get_max_views_in_dataset()
+    # Get canonical camera order and max_views from dataset
+    dataset_canonical_camera_order = dataset.get_canonical_camera_order()
+    dataset_max_views = dataset.get_max_views_in_dataset()
     
     if rank == 0:
-        print(f"Max views in dataset: {max_views}")
-        print(f"Canonical camera order: {canonical_camera_order}")
+        print(f"Max views in dataset: {dataset_max_views}")
+        print(f"Dataset canonical camera order: {dataset_canonical_camera_order}")
+    
+    # If resuming from checkpoint, get max_views and canonical_camera_order from checkpoint
+    # CRITICAL: The model architecture must match the checkpoint, not the dataset.
+    # The model can still handle samples with fewer views than max_views via view_mask.
+    resume_checkpoint_path = config.get('resume_checkpoint')
+    if resume_checkpoint_path and os.path.exists(resume_checkpoint_path):
+        if rank == 0:
+            print(f"\nResuming from checkpoint - inferring model architecture from checkpoint...")
+        checkpoint = torch.load(resume_checkpoint_path, map_location='cpu')  # Load on CPU first
+        ckpt_config = checkpoint.get("config", {})
+        state_dict = checkpoint.get("model_state_dict", checkpoint)
+        
+        # Infer max_views from checkpoint state dict
+        if 'view_embeddings.weight' in state_dict:
+            max_views = state_dict['view_embeddings.weight'].shape[0]
+            if rank == 0:
+                print(f"Inferred max_views={max_views} from checkpoint view_embeddings.weight shape")
+        else:
+            # Fall back to config or dataset
+            max_views = ckpt_config.get("max_views", dataset_max_views)
+            if rank == 0:
+                print(f"Using max_views={max_views} from checkpoint config or dataset")
+        
+        # Get canonical_camera_order from checkpoint
+        canonical_camera_order = ckpt_config.get("canonical_camera_order", None)
+        if canonical_camera_order is None:
+            # Fall back to dataset or create placeholder
+            canonical_camera_order = dataset_canonical_camera_order
+            if len(canonical_camera_order) != max_views:
+                # Create placeholder if lengths don't match
+                canonical_camera_order = [f"Camera{i}" for i in range(max_views)]
+                if rank == 0:
+                    print(f"Created placeholder canonical camera order (indices 0-{max_views-1})")
+        else:
+            if rank == 0:
+                print(f"Loaded canonical camera order from checkpoint: {canonical_camera_order}")
+        
+        if rank == 0:
+            print(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
+            if max_views > dataset_max_views:
+                print(f"Note: Model supports {max_views} views, dataset has up to {dataset_max_views} views")
+                print(f"      Model will handle samples with fewer views via view_mask")
+            elif max_views < dataset_max_views:
+                print(f"WARNING: Model supports {max_views} views but dataset has up to {dataset_max_views} views")
+                print(f"         Samples with >{max_views} views will be truncated")
+    else:
+        # Not resuming - use dataset values
+        max_views = dataset_max_views
+        canonical_camera_order = dataset_canonical_camera_order
+        if rank == 0:
+            print(f"\nCreating new model with max_views={max_views} from dataset")
     
     # Split dataset
     total_size = len(dataset)
@@ -1989,30 +2353,25 @@ def main(config: dict):
         generator=torch.Generator().manual_seed(config['seed'])
     )
     
+    # Get dataset fraction config
+    dataset_fraction = config.get('dataset_fraction', 1.0)
+    
     if rank == 0:
         print(f"\nDataset split:")
         print(f"  Train: {len(train_set)}")
         print(f"  Val: {len(val_set)}")
         print(f"  Test: {len(test_set)}")
+        if dataset_fraction < 1.0:
+            samples_per_epoch = max(1, int(len(train_set) * dataset_fraction))
+            print(f"\n  Dataset fraction: {dataset_fraction:.1%}")
+            print(f"  Samples per epoch: {samples_per_epoch} (of {len(train_set)} total)")
+            print(f"  Note: Different random subset sampled each epoch for diversity")
     
-    # Create data loaders
+    # Create validation data loader (always uses full validation set)
     if is_distributed:
-        train_sampler = DistributedSampler(train_set, shuffle=True)
         val_sampler = DistributedSampler(val_set, shuffle=False)
     else:
-        train_sampler = None
         val_sampler = None
-    
-    train_loader = DataLoader(
-        train_set,
-        batch_size=config['batch_size'],
-        shuffle=(train_sampler is None),
-        sampler=train_sampler,
-        num_workers=config['num_workers'],
-        pin_memory=config['pin_memory'],
-        collate_fn=multiview_collate_fn,
-        drop_last=True
-    )
     
     val_loader = DataLoader(
         val_set,
@@ -2023,6 +2382,9 @@ def main(config: dict):
         pin_memory=config['pin_memory'],
         collate_fn=multiview_collate_fn
     )
+    
+    # Note: train_loader is created per-epoch to support fractional dataset sampling
+    # See create_fractional_train_loader() and the training loop below
     
     # Create model
     if rank == 0:
@@ -2065,14 +2427,18 @@ def main(config: dict):
         use_ue_scaling=config.get('use_ue_scaling', False),
         input_resolution=input_resolution,
         allow_mesh_scaling=allow_mesh_scaling,
-        mesh_scale_init=mesh_scale_init
+        mesh_scale_init=mesh_scale_init,
+        use_gt_camera_init=config.get('use_gt_camera_init', False)
     )
     
     model = model.to(device)
     
     # Wrap in DDP if distributed
     if is_distributed:
-        model = DDP(model, device_ids=[int(device.split(':')[1])])
+        # Extract GPU index from device string (e.g., "cuda:0" -> 0)
+        # In single-node multi-GPU, this matches local_rank
+        gpu_idx = int(device.split(':')[1]) if ':' in device else rank
+        model = DDP(model, device_ids=[gpu_idx], find_unused_parameters=True)
     
     # Count parameters
     if rank == 0:
@@ -2131,9 +2497,15 @@ def main(config: dict):
     }
     
     for epoch in range(start_epoch, config['num_epochs']):
-        # Update sampler for distributed training
-        if is_distributed:
-            train_sampler.set_epoch(epoch)
+        # Create train_loader for this epoch (supports fractional dataset sampling)
+        # This ensures DDP processes use the same random subset when dataset_fraction < 1
+        train_loader = create_fractional_train_loader(
+            train_set=train_set,
+            epoch=epoch,
+            config=config,
+            is_distributed=is_distributed,
+            collate_fn=multiview_collate_fn
+        )
         
         # Update learning rate based on curriculum from TrainingConfig
         curriculum_lr = MultiViewTrainingConfig.get_learning_rate_for_epoch(epoch)
@@ -2241,24 +2613,43 @@ def main(config: dict):
         print(f"Checkpoints saved to: {config['checkpoint_dir']}")
 
 
-def ddp_main(rank, world_size, config, port):
-    """DDP wrapper for main training function."""
+def ddp_main(rank, world_size, config, master_port):
+    """
+    DDP wrapper around existing main() function.
+    
+    Supports two launch modes:
+    1. mp.spawn (single-node): rank is passed by spawn, local_rank == rank
+    2. torchrun/SLURM (multi-node): environment variables are auto-detected and used
+    
+    When torchrun (or other distributed training frameworks) environment is detected, the environment variables take precedence
+    over the passed arguments for rank/world_size/local_rank.
+    
+    Args:
+        rank: Current process rank (may be overridden by env vars if torchrun detected)
+        world_size: Total number of processes (may be overridden by env vars)
+        config: Training configuration dictionary
+        master_port: Master port for DDP communication (ignored if MASTER_PORT env var is set)
+    """
+    # Check if running under torchrun/SLURM - if so, use environment variables
     if is_torchrun_launched():
         rank = int(os.environ['RANK'])
         local_rank = int(os.environ['LOCAL_RANK'])
         world_size = int(os.environ['WORLD_SIZE'])
         gpu_rank = local_rank
     else:
+        # mp.spawn mode (single-node) - local_rank == rank
         gpu_rank = rank
     
-    setup_ddp(rank, world_size, port, local_rank=gpu_rank)
+    setup_ddp(rank, world_size, master_port, local_rank=gpu_rank)
     
+    # Modify config for distributed training
     config['device_override'] = f"cuda:{gpu_rank}"
     config['is_distributed'] = True
     config['rank'] = rank
     config['world_size'] = world_size
     
     try:
+        # Call existing main() with minimal modifications
         main(config)
     finally:
         cleanup_ddp()
@@ -2302,9 +2693,9 @@ Examples:
                        help="Number of cross-attention heads")
     
     # Training configuration
-    parser.add_argument("--batch_size", type=int, default=4,
+    parser.add_argument("--batch_size", type=int, default=3,
                        help="Batch size")
-    parser.add_argument("--num_epochs", type=int, default=200,
+    parser.add_argument("--num_epochs", type=int, default=600,
                        help="Number of training epochs")
     parser.add_argument("--learning_rate", type=float, default=1e-4,
                        help="Learning rate")
@@ -2314,6 +2705,9 @@ Examples:
                        help="Gradient clipping norm")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed")
+    parser.add_argument("--dataset_fraction", type=float, default=None,
+                       help="Fraction of training data to use per epoch (0-1, default: from config). "
+                            "Useful for large datasets - samples different subset each epoch.")
     
     # Multi-view specific
     parser.add_argument("--num_views_to_use", type=int, default=None,
@@ -2341,13 +2735,15 @@ Examples:
     
     # Distributed training
     parser.add_argument("--num_gpus", type=int, default=1,
-                       help="Number of GPUs for distributed training")
-    parser.add_argument("--port", type=str, default='12355',
-                       help="Port for distributed training")
+                       help="Number of GPUs to use for training (default: 1, ignored when using torchrun)")
+    parser.add_argument("--master-port", type=str, default=None,
+                       help="Master port for distributed training (default: from MASTER_PORT env var or 12355)")
     
     # Mixed precision
     parser.add_argument("--use_mixed_precision", action="store_true",
                        help="Use mixed precision training")
+    parser.add_argument("--use_gt_camera_init", action="store_true", default=None,
+                       help="Use GT camera params (when available) as base and predict deltas")
     
     args = parser.parse_args()
     
@@ -2361,20 +2757,58 @@ Examples:
     else:
         training_config = MultiViewTrainingConfig.from_args(args)
     
-    # Check for distributed training
+    # Get master port from args or environment variable
+    master_port = args.master_port or os.environ.get('MASTER_PORT', '12355')
+    
+    # Check if launched via torchrun/torch.distributed.launch (HPC environment)
+    # This is detected by the presence of RANK, LOCAL_RANK, and WORLD_SIZE env vars
     if is_torchrun_launched():
-        # Launched via torchrun - use environment variables
-        ddp_main(0, 1, training_config, args.port)
+        # Launched via torchrun - processes are already spawned by the launcher
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        
+        # Only print from rank 0 to avoid duplicate output
+        if rank == 0:
+            local_rank = int(os.environ['LOCAL_RANK'])
+            print(f"Detected torchrun/HPC launch environment:")
+            print(f"  Global rank: {rank}")
+            print(f"  Local rank (GPU): {local_rank}")
+            print(f"  World size: {world_size}")
+            print(f"  MASTER_ADDR: {os.environ.get('MASTER_ADDR', 'not set')}")
+            print(f"  MASTER_PORT: {os.environ.get('MASTER_PORT', 'not set')}")
+        
+        # Call ddp_main directly - it will read LOCAL_RANK from env internally
+        ddp_main(
+            rank,
+            world_size,
+            training_config,
+            master_port
+        )
+    
     elif args.num_gpus > 1:
-        # Multi-GPU single node
-        print(f"Launching distributed training with {args.num_gpus} GPUs")
+        # Manual multi-GPU launch using mp.spawn
+        if not torch.cuda.is_available():
+            print("ERROR: Multi-GPU training requested but CUDA is not available!")
+            exit(1)
+        available_gpus = torch.cuda.device_count()
+        if args.num_gpus > available_gpus:
+            print(f"ERROR: Requested {args.num_gpus} GPUs but only {available_gpus} available!")
+            exit(1)
+            
+        print(f"Launching multi-GPU training on {args.num_gpus} GPUs (using mp.spawn)...")
+        print(f"Master port: {master_port}")
+        print(f"Batch size per GPU: {args.batch_size if args.batch_size else 'from config'}")
+        print(f"Total effective batch size: {args.batch_size * args.num_gpus if args.batch_size else 'config_batch_size * num_gpus'}")
+        
+        # Launch multi-GPU training using spawn
         mp.spawn(
             ddp_main,
-            args=(args.num_gpus, training_config, args.port),
+            args=(args.num_gpus, training_config, master_port),
             nprocs=args.num_gpus,
             join=True
         )
     else:
-        # Single GPU training
+        # Single GPU training (existing path)
+        print("Launching single-GPU training...")
         main(training_config)
 
