@@ -77,7 +77,9 @@ class SLEAPMultiViewPreprocessor:
                  confidence_threshold: float = 0.5,
                  min_views_per_sample: int = 2,
                  load_3d_data: bool = True,
-                 debug: bool = False):
+                 frame_skip: int = 1,
+                 debug: bool = False,
+                 undistort_images: bool = True):
         """
         Initialize the multi-view SLEAP dataset preprocessor.
         
@@ -96,7 +98,9 @@ class SLEAPMultiViewPreprocessor:
             confidence_threshold: Minimum confidence for keypoints
             min_views_per_sample: Minimum views required per sample (skip samples with fewer)
             load_3d_data: If True, attempt to load 3D keypoints and camera parameters from SLEAP 3D data
+            frame_skip: Process every Nth synchronized frame (default: 1, process all frames)
             debug: If True, print detailed information about filtered outlier keypoints (default: False)
+            undistort_images: If True, undistort images and 2D keypoints using camera calibration (default: True)
         """
         self.joint_lookup_table_path = joint_lookup_table_path
         self.shape_betas_table_path = shape_betas_table_path
@@ -112,11 +116,17 @@ class SLEAPMultiViewPreprocessor:
         self.confidence_threshold = confidence_threshold
         self.min_views_per_sample = min_views_per_sample
         self.load_3d_data = load_3d_data
+        self.frame_skip = frame_skip
         self.debug = debug
+        self.undistort_images = undistort_images
         
         # Validate crop_mode
         if self.crop_mode not in ['default', 'centred', 'bbox_crop']:
             raise ValueError(f"crop_mode must be 'default', 'centred', or 'bbox_crop', got: {self.crop_mode}")
+        
+        # Validate frame_skip
+        if self.frame_skip < 1:
+            raise ValueError(f"frame_skip must be >= 1, got: {self.frame_skip}")
         
         # Statistics tracking
         self.stats = {
@@ -131,7 +141,26 @@ class SLEAPMultiViewPreprocessor:
             'sessions_with_3d_data': 0,
             'samples_with_3d_data': 0,
             'total_outlier_keypoints_filtered': 0,
-            'samples_with_outliers_filtered': 0
+            'samples_with_outliers_filtered': 0,
+            # 3D data coverage statistics
+            'frames_3d_available': 0,  # Total frames in 3D data file
+            'samples_with_3d_in_range': 0,  # Samples with frame_idx < 3D frame count
+            'samples_3d_out_of_range': 0,  # Samples with frame_idx >= 3D frame count
+            'min_frame_idx_requested': float('inf'),
+            'max_frame_idx_requested': 0,
+            # View exclusion reasons (for dataset quality tracking)
+            'total_cameras': 0,  # Maximum cameras available in session
+            'total_potential_views': 0,  # total_cameras × num_samples (ideal case)
+            'views_missing_annotations': 0,  # Views not in available_cameras (no SLEAP annotation)
+            'views_excluded_no_camera_data': 0,
+            'views_excluded_no_video_capture': 0,
+            'views_excluded_video_read_failed': 0,
+            'views_excluded_position_correction_failed': 0,
+            'views_excluded_no_keypoints': 0,
+            'views_excluded_processing_error': 0,
+            'total_views_attempted': 0,  # Views in available_cameras that we tried to process
+            'total_views_included': 0,  # Views successfully included
+            'views_undistorted': 0  # Views that were undistorted
         }
         
         # Canonical camera ordering (will be determined from first session)
@@ -255,7 +284,11 @@ class SLEAPMultiViewPreprocessor:
                     'num_views': len(available_cameras)
                 })
         
-        # Apply frame limit if specified
+        # Apply frame skip (process every Nth synchronized frame)
+        if self.frame_skip > 1:
+            multiview_frames = multiview_frames[::self.frame_skip]
+        
+        # Apply frame limit if specified (after frame skip)
         if self.max_frames_per_session is not None:
             multiview_frames = multiview_frames[:self.max_frames_per_session]
         
@@ -306,16 +339,23 @@ class SLEAPMultiViewPreprocessor:
             # Try to load 3D data if enabled
             loader_3d = None
             has_3d_data = False
+            n_frames_3d = 0
             if self.load_3d_data:
                 try:
                     loader_3d = SLEAP3DDataLoader(session_path, session_idx=0)
                     has_3d_data = True
+                    n_frames_3d = loader_3d.n_frames
                     self.stats['sessions_with_3d_data'] += 1
-                    print(f"Loaded 3D data for {Path(session_path).name}: {loader_3d.n_frames} frames, {loader_3d.n_keypoints} keypoints")
+                    self.stats['frames_3d_available'] = max(self.stats['frames_3d_available'], n_frames_3d)
+                    print(f"Loaded 3D data for {Path(session_path).name}: {n_frames_3d} frames, {loader_3d.n_keypoints} keypoints")
                 except Exception as e:
                     print(f"Warning: Could not load 3D data for {session_path}: {e}")
                     loader_3d = None
                     has_3d_data = False
+            
+            # Track total cameras for this session
+            num_cameras = len(loader.camera_views)
+            self.stats['total_cameras'] = max(self.stats['total_cameras'], num_cameras)
             
             # Discover multi-view frames
             multiview_frames = self._discover_multiview_frames(loader, session_path)
@@ -324,7 +364,25 @@ class SLEAPMultiViewPreprocessor:
                 print(f"No multi-view frames found in {session_path}")
                 return []
             
-            print(f"Found {len(multiview_frames)} multi-view frames in {Path(session_path).name}")
+            print(f"Found {len(multiview_frames)} multi-view frames in {Path(session_path).name} ({num_cameras} cameras)")
+            
+            # Print 3D data coverage diagnostic
+            if has_3d_data and loader_3d is not None and len(multiview_frames) > 0:
+                frame_indices = [f['frame_idx'] for f in multiview_frames]
+                min_idx = min(frame_indices)
+                max_idx = max(frame_indices)
+                frames_in_range = sum(1 for idx in frame_indices if idx < n_frames_3d)
+                frames_out_of_range = len(frame_indices) - frames_in_range
+                
+                print(f"  3D data coverage:")
+                print(f"    - 3D data file contains frames 0 to {n_frames_3d - 1} ({n_frames_3d} frames)")
+                print(f"    - Requested frame indices: {min_idx} to {max_idx}")
+                if frames_out_of_range > 0:
+                    print(f"    - Frames WITH 3D data: {frames_in_range} (indices < {n_frames_3d})")
+                    print(f"    - Frames WITHOUT 3D data: {frames_out_of_range} (indices >= {n_frames_3d})")
+                    print(f"    - 3D coverage: {100.0 * frames_in_range / len(frame_indices):.1f}%")
+                else:
+                    print(f"    - All {len(frame_indices)} frames have 3D data available")
             
             # Pre-load camera data for all cameras
             camera_data_cache: Dict[str, Dict] = {}
@@ -403,12 +461,23 @@ class SLEAPMultiViewPreprocessor:
         frame_idx = frame_info['frame_idx']
         available_cameras = frame_info['available_cameras']
         
+        # Track view statistics
+        # total_cameras is the number of cameras in canonical_camera_order (all cameras across sessions)
+        total_cameras_for_frame = len(self.canonical_camera_order) if self.canonical_camera_order else len(available_cameras)
+        self.stats['total_potential_views'] += total_cameras_for_frame
+        self.stats['views_missing_annotations'] += (total_cameras_for_frame - len(available_cameras))
+        
+        # Track frame index range
+        self.stats['min_frame_idx_requested'] = min(self.stats['min_frame_idx_requested'], frame_idx)
+        self.stats['max_frame_idx_requested'] = max(self.stats['max_frame_idx_requested'], frame_idx)
+        
         # Load 3D keypoints if available
         keypoints_3d = None
         outlier_joint_mask = None
         if has_3d_data and loader_3d is not None:
             try:
                 if frame_idx < loader_3d.n_frames:
+                    self.stats['samples_with_3d_in_range'] += 1
                     keypoints_3d_raw = loader_3d.get_3d_keypoints(frame_idx)  # (N_sleap, 3)
                     # IMPORTANT: Map 3D keypoints to the SMAL joint order used by training.
                     # 2D keypoints are already mapped via `loader.map_keypoints_to_smal_model(...)`,
@@ -437,6 +506,9 @@ class SLEAPMultiViewPreprocessor:
                             self.stats['samples_with_outliers_filtered'] += 1
                             if self.debug:
                                 print(f"  Filtered {num_outliers} outlier 3D keypoint(s) in frame {frame_idx}")
+                else:
+                    # Frame index is beyond the 3D data range
+                    self.stats['samples_3d_out_of_range'] += 1
             except Exception as e:
                 print(f"Warning: Failed to load 3D keypoints for frame {frame_idx}: {e}")
                 keypoints_3d = None
@@ -454,9 +526,13 @@ class SLEAPMultiViewPreprocessor:
         view_image_sizes = []  # Original image sizes (width, height)
         
         for camera_name in available_cameras:
+            self.stats['total_views_attempted'] += 1
+            
             if camera_name not in camera_data_cache:
+                self.stats['views_excluded_no_camera_data'] += 1
                 continue
             if camera_name not in video_cap_cache:
+                self.stats['views_excluded_no_video_capture'] += 1
                 continue
             
             camera_data = camera_data_cache[camera_name]
@@ -482,9 +558,23 @@ class SLEAPMultiViewPreprocessor:
                     gap = frame_idx - current_pos
                     if gap <= 10:
                         # Small gap: read forward sequentially (very fast, no seeks)
-                        for _ in range(gap - 1):
-                            cap.read()  # Skip intermediate frames
-                        ret, frame = cap.read()  # Read target frame
+                        # But check for errors during skip reads
+                        # Note: if current_pos=1 and frame_idx=10, gap=9
+                        # We need to skip frames 1-9 (9 reads) then read frame 10
+                        skip_failed = False
+                        for _ in range(gap):
+                            ret_skip, _ = cap.read()
+                            if not ret_skip:
+                                skip_failed = True
+                                break
+                        
+                        if skip_failed:
+                            # Fallback to seeking if sequential skip failed
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                            ret, frame = cap.read()
+                        else:
+                            # Now positioned at frame_idx, read the target frame
+                            ret, frame = cap.read()
                     else:
                         # Large gap: seek is faster than reading many frames
                         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
@@ -495,7 +585,20 @@ class SLEAPMultiViewPreprocessor:
                     ret, frame = cap.read()
                 
                 if not ret:
+                    self.stats['views_excluded_video_read_failed'] += 1
                     continue
+                
+                # Verify we actually read the correct frame (safety check)
+                # cap.get() returns the next frame to be read, so subtract 1 to get current frame
+                actual_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
+                if actual_pos != frame_idx:
+                    print(f"Warning: Position mismatch for {camera_name}! Expected frame {frame_idx}, got {actual_pos}. Seeking to correct position.")
+                    # Try to correct by seeking
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    ret, frame = cap.read()
+                    if not ret:
+                        self.stats['views_excluded_position_correction_failed'] += 1
+                        continue
                 
                 # Update position after successful read
                 video_frame_positions[camera_name] = frame_idx + 1
@@ -505,10 +608,27 @@ class SLEAPMultiViewPreprocessor:
                 # Extract keypoints
                 keypoints_2d, visibility = loader.extract_2d_keypoints(camera_data, frame_idx)
                 if len(keypoints_2d) == 0:
+                    self.stats['views_excluded_no_keypoints'] += 1
                     continue
                 
                 # Get image size for mapping
                 image_size = loader.get_camera_image_size(camera_name)
+                
+                # Undistort image and keypoints if enabled and camera calibration is available
+                if self.undistort_images and has_3d_data and loader_3d is not None:
+                    try:
+                        cam_params = loader_3d.get_camera_parameters(camera_name)
+                        K = cam_params['intrinsic']['K']
+                        distortion_coeffs = cam_params['intrinsic'].get('distortion', None)
+                        
+                        if distortion_coeffs is not None and len(distortion_coeffs) > 0:
+                            frame_rgb, keypoints_2d = self._undistort_image_and_keypoints(
+                                frame_rgb, keypoints_2d, K, distortion_coeffs
+                            )
+                            self.stats['views_undistorted'] += 1
+                    except Exception as e:
+                        if self.debug:
+                            print(f"    Warning: Failed to undistort for camera {camera_name}: {e}")
                 
                 # Preprocess image
                 processed_image, transform_info = self._preprocess_image(frame_rgb, keypoints_2d)
@@ -544,6 +664,7 @@ class SLEAPMultiViewPreprocessor:
                 view_visibility.append(smal_visibility.astype(np.float32))
                 view_camera_names.append(camera_name)
                 view_camera_indices.append(cam_idx)
+                self.stats['total_views_included'] += 1
                 
                 # Extract camera parameters if 3D data is available
                 if has_3d_data and loader_3d is not None:
@@ -575,6 +696,7 @@ class SLEAPMultiViewPreprocessor:
                 
             except Exception as e:
                 print(f"Warning: Failed to process camera {camera_name} frame {frame_idx}: {e}")
+                self.stats['views_excluded_processing_error'] += 1
                 continue
         
         # Check minimum views
@@ -726,11 +848,75 @@ class SLEAPMultiViewPreprocessor:
         
         return filtered_kp3d, outlier_mask
     
+    def _undistort_image_and_keypoints(self, 
+                                        image: np.ndarray, 
+                                        keypoints_2d: np.ndarray,
+                                        K: np.ndarray, 
+                                        distortion_coeffs: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Undistort an image and its corresponding 2D keypoints using camera calibration.
+        
+        This corrects for lens distortion so that:
+        - The undistorted image follows a perfect pinhole camera model
+        - 3D point reprojections using K matrix will match the undistorted 2D keypoints
+        
+        Args:
+            image: Input image (H, W, 3) in BGR or RGB format
+            keypoints_2d: 2D keypoint coordinates (N, 2) in (x, y) pixel format
+            K: Camera intrinsic matrix (3, 3)
+            distortion_coeffs: Distortion coefficients (k1, k2, p1, p2, k3, ...) for OpenCV
+            
+        Returns:
+            Tuple of (undistorted_image, undistorted_keypoints):
+            - undistorted_image: (H, W, 3) undistorted image
+            - undistorted_keypoints: (N, 2) undistorted keypoint coordinates
+        """
+        if distortion_coeffs is None or len(distortion_coeffs) == 0:
+            # No distortion coefficients available, return original
+            return image, keypoints_2d
+        
+        # Check if distortion coefficients are all zero (no distortion)
+        if np.allclose(distortion_coeffs, 0):
+            return image, keypoints_2d
+        
+        # Ensure distortion coefficients have the right shape for OpenCV
+        # OpenCV expects at least 4 coefficients (k1, k2, p1, p2) or 5 (k1, k2, p1, p2, k3)
+        # or more for higher-order distortion models
+        dist_coeffs = np.array(distortion_coeffs).flatten().astype(np.float64)
+        K_float = K.astype(np.float64)
+        
+        # Undistort the image
+        # We use the same K matrix for the output (newCameraMatrix=K)
+        # This keeps the principal point and focal length the same
+        undistorted_image = cv2.undistort(image, K_float, dist_coeffs, newCameraMatrix=K_float)
+        
+        # Undistort the keypoints
+        if keypoints_2d is not None and len(keypoints_2d) > 0:
+            # cv2.undistortPoints expects input shape (N, 1, 2)
+            keypoints_reshaped = keypoints_2d.reshape(-1, 1, 2).astype(np.float64)
+            
+            # Undistort points
+            # When P=K, the output is in pixel coordinates (same as input)
+            undistorted_keypoints = cv2.undistortPoints(
+                keypoints_reshaped, 
+                K_float, 
+                dist_coeffs,
+                P=K_float  # Project back to pixel coordinates using same K
+            )
+            
+            # Reshape back to (N, 2)
+            undistorted_keypoints = undistorted_keypoints.reshape(-1, 2).astype(np.float32)
+        else:
+            undistorted_keypoints = keypoints_2d
+        
+        return undistorted_image, undistorted_keypoints
+    
     def _find_video_file(self, loader: SLEAPDataLoader, camera_name: str) -> Optional[Path]:
         """Find video file for a camera."""
         if loader.data_structure_type == 'camera_dirs':
             camera_dir = loader.project_path / camera_name
             
+            # Try h5 files first
             try:
                 h5_candidates = list(camera_dir.glob("*.analysis.h5"))
                 if not h5_candidates:
@@ -751,6 +937,11 @@ class SLEAPMultiViewPreprocessor:
                                 return candidate_path
             except Exception:
                 pass
+            
+            # Try .slp files as fallback
+            video_from_slp = self._find_video_from_slp(camera_dir, camera_name)
+            if video_from_slp:
+                return video_from_slp
             
             video_files = list(camera_dir.glob("*.mp4"))
             return video_files[0] if video_files else None
@@ -775,9 +966,94 @@ class SLEAPMultiViewPreprocessor:
                                     return candidate_path
                     except Exception:
                         pass
+                else:
+                    # Try .slp files as fallback when h5 not found
+                    video_from_slp = self._find_video_from_slp(session_dir, camera_name)
+                    if video_from_slp:
+                        return video_from_slp
             
             video_files = list(loader.project_path.glob(f"*_cam{camera_name}.mp4"))
+            if not video_files:
+                video_files = list(loader.project_path.glob(f"*{camera_name}*.mp4"))
             return video_files[0] if video_files else None
+        
+        return None
+    
+    def _find_video_from_slp(self, search_dir: Path, camera_name: str) -> Optional[Path]:
+        """
+        Find video file path from a .slp file's metadata.
+        
+        Args:
+            search_dir: Directory to search for .slp files
+            camera_name: Camera name to match
+            
+        Returns:
+            Path to video file if found, None otherwise
+        """
+        # Search patterns for .slp files
+        slp_patterns = [
+            f"*{camera_name}*.predictions.slp",
+            f"*cam{camera_name}*.predictions.slp",
+            "*.predictions.slp",
+            "*.slp",
+        ]
+        
+        slp_file = None
+        for pattern in slp_patterns:
+            candidates = list(search_dir.glob(pattern))
+            if candidates:
+                # Prefer files with camera name
+                for c in candidates:
+                    if camera_name.lower() in c.name.lower():
+                        slp_file = c
+                        break
+                if slp_file is None and candidates:
+                    slp_file = candidates[0]
+                break
+        
+        if slp_file is None:
+            return None
+        
+        try:
+            with h5py.File(slp_file, 'r') as f:
+                if 'videos_json' in f:
+                    videos_json = f['videos_json'][()]
+                    # Decode the JSON data
+                    if isinstance(videos_json, np.ndarray):
+                        if len(videos_json) > 0:
+                            videos_str = videos_json[0]
+                            if isinstance(videos_str, bytes):
+                                videos_str = videos_str.decode('utf-8')
+                        else:
+                            return None
+                    elif isinstance(videos_json, bytes):
+                        videos_str = videos_json.decode('utf-8')
+                    else:
+                        videos_str = str(videos_json)
+                    
+                    videos_data = json.loads(videos_str)
+                    
+                    # Extract video filename from backend
+                    if isinstance(videos_data, dict) and 'backend' in videos_data:
+                        video_path_str = videos_data['backend'].get('filename', '')
+                    elif isinstance(videos_data, list) and len(videos_data) > 0:
+                        video_path_str = videos_data[0].get('backend', {}).get('filename', '')
+                    else:
+                        video_path_str = ''
+                    
+                    if video_path_str:
+                        video_filename = Path(video_path_str).name
+                        # Try to find video in same directory as .slp file
+                        candidate_path = slp_file.parent / video_filename
+                        if candidate_path.exists():
+                            return candidate_path
+                        
+                        # Try search_dir
+                        candidate_path = search_dir / video_filename
+                        if candidate_path.exists():
+                            return candidate_path
+        except Exception as e:
+            print(f"Warning: Failed to get video path from .slp file {slp_file}: {e}")
         
         return None
     
@@ -1158,10 +1434,12 @@ class SLEAPMultiViewPreprocessor:
             metadata_group.attrs['n_pose'] = config.N_POSE
             metadata_group.attrs['n_betas'] = config.N_BETAS
             metadata_group.attrs['min_views_per_sample'] = self.min_views_per_sample
+            metadata_group.attrs['frame_skip'] = self.frame_skip
             metadata_group.attrs['canonical_camera_order'] = json.dumps(self.canonical_camera_order)
             metadata_group.attrs['has_camera_parameters'] = True
             metadata_group.attrs['has_3d_keypoints'] = any(has_3d_data_list)
             metadata_group.attrs['load_3d_data'] = self.load_3d_data
+            metadata_group.attrs['undistort_images'] = self.undistort_images
             # Store mapping info for downstream consumers/debugging
             try:
                 metadata_group.attrs['keypoints_3d_joint_order'] = 'smal'
@@ -1178,8 +1456,29 @@ class SLEAPMultiViewPreprocessor:
             metadata_group.attrs['failed_samples'] = self.stats['failed_samples']
             metadata_group.attrs['sessions_with_3d_data'] = self.stats['sessions_with_3d_data']
             metadata_group.attrs['samples_with_3d_data'] = self.stats['samples_with_3d_data']
+            # 3D data coverage
+            metadata_group.attrs['frames_3d_available'] = self.stats['frames_3d_available']
+            metadata_group.attrs['samples_with_3d_in_range'] = self.stats['samples_with_3d_in_range']
+            metadata_group.attrs['samples_3d_out_of_range'] = self.stats['samples_3d_out_of_range']
+            min_frame = self.stats['min_frame_idx_requested']
+            max_frame = self.stats['max_frame_idx_requested']
+            metadata_group.attrs['min_frame_idx_requested'] = min_frame if min_frame != float('inf') else 0
+            metadata_group.attrs['max_frame_idx_requested'] = max_frame
             metadata_group.attrs['total_outlier_keypoints_filtered'] = self.stats['total_outlier_keypoints_filtered']
             metadata_group.attrs['samples_with_outliers_filtered'] = self.stats['samples_with_outliers_filtered']
+            # View exclusion statistics
+            metadata_group.attrs['total_cameras'] = self.stats['total_cameras']
+            metadata_group.attrs['total_potential_views'] = self.stats['total_potential_views']
+            metadata_group.attrs['views_missing_annotations'] = self.stats['views_missing_annotations']
+            metadata_group.attrs['total_views_attempted'] = self.stats['total_views_attempted']
+            metadata_group.attrs['total_views_included'] = self.stats['total_views_included']
+            metadata_group.attrs['views_excluded_no_camera_data'] = self.stats['views_excluded_no_camera_data']
+            metadata_group.attrs['views_excluded_no_video_capture'] = self.stats['views_excluded_no_video_capture']
+            metadata_group.attrs['views_excluded_video_read_failed'] = self.stats['views_excluded_video_read_failed']
+            metadata_group.attrs['views_excluded_position_correction_failed'] = self.stats['views_excluded_position_correction_failed']
+            metadata_group.attrs['views_excluded_no_keypoints'] = self.stats['views_excluded_no_keypoints']
+            metadata_group.attrs['views_excluded_processing_error'] = self.stats['views_excluded_processing_error']
+            metadata_group.attrs['views_undistorted'] = self.stats['views_undistorted']
 
 
 def main():
@@ -1196,6 +1495,10 @@ Examples:
     --joint_lookup_table /path/to/joint_lookup.csv \\
     --shape_betas_table /path/to/shape_betas.csv \\
     --min_views 3
+  
+  # Process every 5th frame to reduce dataset size
+  python preprocess_sleap_multiview_dataset.py /path/to/sleap/sessions multiview_sleap.h5 \\
+    --frame_skip 5
         """
     )
     
@@ -1225,10 +1528,17 @@ Examples:
                        help="Minimum views required per sample (default: 2)")
     parser.add_argument("--max_frames_per_session", type=int, default=None,
                        help="Maximum frames to process per session (default: all)")
+    parser.add_argument("--frame_skip", type=int, default=1,
+                       help="Process every Nth synchronized frame (default: 1, process all frames)")
     
     # 3D data options
     parser.add_argument("--no_3d_data", action="store_true",
                        help="Skip loading 3D keypoints and camera parameters (default: load if available)")
+    
+    # Undistortion options
+    parser.add_argument("--no_undistort", action="store_true",
+                       help="Skip undistorting images and 2D keypoints using camera calibration "
+                            "(default: undistort if calibration is available)")
     
     # Other options
     parser.add_argument("--confidence_threshold", type=float, default=0.5,
@@ -1258,8 +1568,10 @@ Examples:
         print(f"Sessions directory: {args.sessions_dir}")
         print(f"Output file: {args.output_path}")
         print(f"Minimum views per sample: {args.min_views}")
+        print(f"Frame skip: {args.frame_skip} (process every {args.frame_skip} frame(s))")
         print(f"Target resolution: {args.target_resolution}x{args.target_resolution}")
         print(f"Crop mode: {args.crop_mode}")
+        print(f"Undistort images: {not args.no_undistort}")
         print("="*60)
     
     # Start preprocessing
@@ -1268,6 +1580,8 @@ Examples:
     try:
         # Load 3D data by default unless explicitly disabled
         load_3d = not args.no_3d_data
+        # Undistort by default unless explicitly disabled
+        undistort = not args.no_undistort
         
         preprocessor = SLEAPMultiViewPreprocessor(
             joint_lookup_table_path=args.joint_lookup_table,
@@ -1280,7 +1594,9 @@ Examples:
             confidence_threshold=args.confidence_threshold,
             min_views_per_sample=args.min_views,
             load_3d_data=load_3d,
-            debug=args.debug
+            frame_skip=args.frame_skip,
+            debug=args.debug,
+            undistort_images=undistort
         )
         
         stats = preprocessor.process_dataset(
@@ -1301,9 +1617,73 @@ Examples:
             print(f"  Failed samples: {stats['failed_samples']}")
             print(f"  Sessions with 3D data: {stats['sessions_with_3d_data']}")
             print(f"  Samples with 3D data: {stats['samples_with_3d_data']}")
+            
+            # 3D data coverage details
+            frames_3d = stats.get('frames_3d_available', 0)
+            samples_in_range = stats.get('samples_with_3d_in_range', 0)
+            samples_out_of_range = stats.get('samples_3d_out_of_range', 0)
+            min_frame = stats.get('min_frame_idx_requested', 0)
+            max_frame = stats.get('max_frame_idx_requested', 0)
+            if min_frame == float('inf'):
+                min_frame = 0
+            
+            if frames_3d > 0 and (samples_in_range > 0 or samples_out_of_range > 0):
+                print(f"\n3D data coverage:")
+                print(f"  3D keypoints file contains: {frames_3d} frames (indices 0-{frames_3d - 1})")
+                print(f"  Requested frame index range: {min_frame} to {max_frame}")
+                print(f"  Samples with frame_idx < {frames_3d}: {samples_in_range} (have 3D data)")
+                print(f"  Samples with frame_idx >= {frames_3d}: {samples_out_of_range} (NO 3D data)")
+                if samples_in_range + samples_out_of_range > 0:
+                    coverage_pct = 100.0 * samples_in_range / (samples_in_range + samples_out_of_range)
+                    print(f"  3D coverage rate: {coverage_pct:.1f}%")
+            
             if stats.get('samples_with_outliers_filtered', 0) > 0:
                 print(f"  Outlier 3D keypoints filtered: {stats['total_outlier_keypoints_filtered']} "
                       f"across {stats['samples_with_outliers_filtered']} samples")
+            
+            # View exclusion statistics
+            total_cameras = stats.get('total_cameras', 0)
+            total_potential = stats.get('total_potential_views', 0)
+            views_missing_annotations = stats.get('views_missing_annotations', 0)
+            total_attempted = stats.get('total_views_attempted', 0)
+            total_included = stats.get('total_views_included', 0)
+            total_excluded_processing = total_attempted - total_included
+            total_excluded_all = total_potential - total_included
+            
+            print(f"\nView statistics:")
+            print(f"  Total cameras: {total_cameras}")
+            print(f"  Total potential views (cameras × samples): {total_potential}")
+            print(f"  Total views included: {total_included}")
+            if total_potential > 0:
+                inclusion_rate = 100.0 * total_included / total_potential
+                print(f"  Overall view inclusion rate: {inclusion_rate:.1f}%")
+            
+            # Undistortion statistics
+            views_undistorted = stats.get('views_undistorted', 0)
+            if views_undistorted > 0:
+                print(f"  Views undistorted: {views_undistorted}")
+                if total_included > 0:
+                    undistort_rate = 100.0 * views_undistorted / total_included
+                    print(f"  Undistortion rate: {undistort_rate:.1f}%")
+            
+            if total_excluded_all > 0:
+                print(f"\n  Views excluded breakdown ({total_excluded_all} total):")
+                if views_missing_annotations > 0:
+                    pct = 100.0 * views_missing_annotations / total_excluded_all
+                    print(f"    - Missing SLEAP annotations: {views_missing_annotations} ({pct:.1f}%)")
+                if stats.get('views_excluded_no_camera_data', 0) > 0:
+                    print(f"    - No camera data loaded: {stats['views_excluded_no_camera_data']}")
+                if stats.get('views_excluded_no_video_capture', 0) > 0:
+                    print(f"    - No video capture: {stats['views_excluded_no_video_capture']}")
+                if stats.get('views_excluded_video_read_failed', 0) > 0:
+                    print(f"    - Video read failed: {stats['views_excluded_video_read_failed']}")
+                if stats.get('views_excluded_position_correction_failed', 0) > 0:
+                    print(f"    - Position correction failed: {stats['views_excluded_position_correction_failed']}")
+                if stats.get('views_excluded_no_keypoints', 0) > 0:
+                    print(f"    - No keypoints extracted: {stats['views_excluded_no_keypoints']}")
+                if stats.get('views_excluded_processing_error', 0) > 0:
+                    print(f"    - Processing error: {stats['views_excluded_processing_error']}")
+            
             print(f"\nViews per sample distribution:")
             for num_views, count in sorted(stats['views_per_sample_histogram'].items()):
                 print(f"    {num_views} views: {count} samples")
