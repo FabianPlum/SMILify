@@ -722,6 +722,11 @@ def render_model_only(model: SMILImageRegressor, predicted_params: Dict[str, tor
             rgb_only=True
         )
         
+        # CRITICAL: Match propagate_scaling to the training model's setting.
+        # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
+        # so visualization must also use propagate_scaling=True for consistent geometry.
+        temp_fitter.propagate_scaling = model.propagate_scaling
+        
         # Set the predicted parameters
         temp_fitter.global_rotation.data = global_rot_aa.to(device)
         temp_fitter.joint_rotations.data = joint_rot_aa.to(device)
@@ -839,6 +844,11 @@ def render_prediction_on_frame(model: SMILImageRegressor, predicted_params: Dict
             use_unity_prior=False,
             rgb_only=True
         )
+        
+        # CRITICAL: Match propagate_scaling to the training model's setting.
+        # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
+        # so visualization must also use propagate_scaling=True for consistent geometry.
+        temp_fitter.propagate_scaling = model.propagate_scaling
         
         # Set the predicted parameters
         temp_fitter.global_rotation.data = global_rot_aa.to(device)
@@ -993,6 +1003,11 @@ def generate_visualization(model: SMILImageRegressor, predicted_params: Dict[str
             rgb_only=True
         )
         
+        # CRITICAL: Match propagate_scaling to the training model's setting.
+        # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
+        # so visualization must also use propagate_scaling=True for consistent geometry.
+        temp_fitter.propagate_scaling = model.propagate_scaling
+        
         # Set the predicted parameters (ensure they're on the right device)
         temp_fitter.global_rotation.data = global_rot_aa.to(device)
         temp_fitter.joint_rotations.data = joint_rot_aa.to(device)
@@ -1032,7 +1047,7 @@ def generate_visualization(model: SMILImageRegressor, predicted_params: Dict[str
                 )
         
         named_exporter = NamedImageExporter(image_exporter, image_name)
-        temp_fitter.generate_visualization(named_exporter, apply_UE_transform=True, img_idx=0)
+        temp_fitter.generate_visualization(named_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=0)
         
         print(f"Generated visualization for {image_name}")
         
