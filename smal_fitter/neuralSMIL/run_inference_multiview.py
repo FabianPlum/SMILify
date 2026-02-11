@@ -1115,6 +1115,11 @@ def render_mesh_for_view(model: MultiViewSMILImageRegressor,
             rgb_only=True
         )
         
+        # CRITICAL: Match propagate_scaling to the training model's setting.
+        # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
+        # so visualization must also use propagate_scaling=True for consistent geometry.
+        temp_fitter.propagate_scaling = model.propagate_scaling
+        
         # Convert 6D rotation to axis-angle if needed
         if model.rotation_representation == '6d':
             global_rot_aa = rotation_6d_to_axis_angle(predicted_params['global_rot'][0:1].detach())
