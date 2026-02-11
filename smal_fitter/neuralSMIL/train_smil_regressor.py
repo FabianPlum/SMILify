@@ -755,6 +755,10 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                     use_unity_prior=False,
                     rgb_only=False
                 )
+                # CRITICAL: Match propagate_scaling to the training model's setting.
+                # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
+                # so visualization must also use propagate_scaling=True for consistent geometry.
+                temp_fitter.propagate_scaling = model.propagate_scaling
             else:
                 temp_fitter = SMALFitter(
                     device=device,
@@ -764,6 +768,10 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                     use_unity_prior=False,
                     rgb_only=True
                 )
+                # CRITICAL: Match propagate_scaling to the training model's setting.
+                # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
+                # so visualization must also use propagate_scaling=True for consistent geometry.
+                temp_fitter.propagate_scaling = model.propagate_scaling
             
             # Set proper target joints and visibility for visualization
             # Convert normalized keypoints back to pixel coordinates for visualization
@@ -868,8 +876,8 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                         fov=fov_tensor
                     )
             
-            # Generate visualization
-            temp_fitter.generate_visualization(image_exporter, apply_UE_transform=True, img_idx=sample_count)
+            # Generate visualization - match model's UE scaling setting
+            temp_fitter.generate_visualization(image_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=sample_count)
             
             sample_count += 1
         
