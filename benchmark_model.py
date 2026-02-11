@@ -389,6 +389,47 @@ def main():
     for line in _collect_dataset_summary(dataset):
         log(line)
 
+    # Get dataset max_views and canonical_camera_order
+    dataset_max_views = dataset.get_max_views_in_dataset()
+    dataset_canonical_camera_order = dataset.get_canonical_camera_order()
+    log(f"\nDataset max_views: {dataset_max_views}")
+    log(f"Dataset canonical camera order: {dataset_canonical_camera_order}")
+
+    # CRITICAL: Infer max_views and canonical_camera_order from checkpoint
+    # The model architecture must match the checkpoint, not the dataset.
+    # The model can still handle samples with fewer views than max_views via view_mask.
+    log(f"\nInferring model architecture from checkpoint...")
+    state_dict = checkpoint.get("model_state_dict", checkpoint)
+    
+    # Infer max_views from checkpoint state dict
+    if 'view_embeddings.weight' in state_dict:
+        max_views = state_dict['view_embeddings.weight'].shape[0]
+        log(f"Inferred max_views={max_views} from checkpoint view_embeddings.weight shape")
+    else:
+        # Fall back to config or dataset
+        max_views = config_from_ckpt.get("max_views", dataset_max_views)
+        log(f"Using max_views={max_views} from checkpoint config or dataset")
+    
+    # Get canonical_camera_order from checkpoint
+    canonical_camera_order = config_from_ckpt.get("canonical_camera_order", None)
+    if canonical_camera_order is None:
+        # Fall back to dataset or create placeholder
+        canonical_camera_order = dataset_canonical_camera_order
+        if len(canonical_camera_order) != max_views:
+            # Create placeholder if lengths don't match
+            canonical_camera_order = [f"Camera{i}" for i in range(max_views)]
+            log(f"Created placeholder canonical camera order (indices 0-{max_views-1})")
+    else:
+        log(f"Loaded canonical camera order from checkpoint: {canonical_camera_order}")
+    
+    log(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
+    if max_views > dataset_max_views:
+        log(f"Note: Model supports {max_views} views, dataset has up to {dataset_max_views} views")
+        log(f"      Model will handle samples with fewer views via view_mask")
+    elif max_views < dataset_max_views:
+        log(f"WARNING: Model supports {max_views} views but dataset has up to {dataset_max_views} views")
+        log(f"         Samples with >{max_views} views will be truncated")
+
     log(f"\nLoaded data resolution (target): {dataset.target_resolution}x{dataset.target_resolution}")
     log(f"Original world scale: {dataset.world_scale}")
     if dataset.world_scale != 0.0:
@@ -437,16 +478,23 @@ def main():
 
     allow_mesh_scaling = config_from_ckpt.get("allow_mesh_scaling", False)
     mesh_scale_init = config_from_ckpt.get("mesh_scale_init", 1.0)
+    use_gt_camera_init = config_from_ckpt.get("use_gt_camera_init", False)
     if allow_mesh_scaling:
         log(f"Mesh scaling enabled with init={mesh_scale_init}")
+    if use_gt_camera_init:
+        log(f"GT camera initialization enabled - model predicts deltas from GT camera params")
 
+    # Create model with architecture from checkpoint (not dataset)
+    # CRITICAL: max_views and canonical_camera_order come from checkpoint to ensure
+    # model architecture matches the trained checkpoint. The model can still handle
+    # samples with fewer views than max_views via view_mask.
     model = create_multiview_regressor(
         device=device,
         batch_size=config_from_ckpt["batch_size"],
         shape_family=config_from_ckpt.get("shape_family", config.SHAPE_FAMILY),
         use_unity_prior=config_from_ckpt.get("use_unity_prior", False),
-        max_views=dataset.get_max_views_in_dataset(),
-        canonical_camera_order=dataset.get_canonical_camera_order(),
+        max_views=max_views,  # From checkpoint, not dataset
+        canonical_camera_order=canonical_camera_order,  # From checkpoint, not dataset
         cross_attention_layers=config_from_ckpt["cross_attention_layers"],
         cross_attention_heads=config_from_ckpt["cross_attention_heads"],
         cross_attention_dropout=config_from_ckpt["cross_attention_dropout"],
@@ -459,7 +507,8 @@ def main():
         use_ue_scaling=config_from_ckpt.get("use_ue_scaling", False),
         input_resolution=input_resolution,
         allow_mesh_scaling=allow_mesh_scaling,
-        mesh_scale_init=mesh_scale_init
+        mesh_scale_init=mesh_scale_init,
+        use_gt_camera_init=use_gt_camera_init
     )
     model = model.to(device)
 
