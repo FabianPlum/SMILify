@@ -46,7 +46,7 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 #SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_REPOSE_LONG.pkl') #UPDATED JOINT LOCS
 # SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_Falkner_conv.pkl') #UPDATED JOINT LOCS
 # the model below has slightly re-positioned the hind legs, moving the knee lower
-SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl')
+SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs_fix_eyes.pkl')
 
 ignore_sym = True  # ignore provided symmetry file, when using custom models
 ignore_hardcoded_body = True  # ignore model joints in config file and use what's contained in the SMPL file
