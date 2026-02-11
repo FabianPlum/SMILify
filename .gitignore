@@ -172,6 +172,7 @@ venv.bak/
 .mypy_cache/
 
 # custom
+dev_notes/
 checkpoints/
 smal/
 extra_videos/
