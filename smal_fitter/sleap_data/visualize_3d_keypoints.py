@@ -1,402 +1,282 @@
 #!/usr/bin/env python3
 """
-Visualize 3D Keypoints from SLEAP Datasets
+3D Keypoints Visualization Script
 
-This script loads 3D coordinates from SLEAP datasets and creates an animated
-3D visualization to check data quality.
+Loads a preprocessed multi-view SLEAP dataset and visualizes 3D keypoints
+as an animated 3D plot using matplotlib.
 
 Usage:
-    python visualize_3d_keypoints.py sessions_dir [options]
+    python visualize_3d_keypoints.py dataset.h5 [options]
 
 Example:
-    python visualize_3d_keypoints.py /path/to/sleap/sessions --session_idx 0 --max_frames 500
+    python visualize_3d_keypoints.py multiview_sleap.h5 --fps 10 --sample_skip 1
 """
 
-import os
-import sys
 import argparse
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.animation as animation
 from pathlib import Path
-from typing import List, Optional, Tuple
-
-# Add paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-try:
-    from sleap_data_loader import SLEAPDataLoader
-except ImportError:
-    sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-    from sleap_data_loader import SLEAPDataLoader
 
 
-def discover_sleap_sessions(sessions_dir: str) -> List[str]:
+def load_3d_keypoints(h5_path: str):
     """
-    Discover all SLEAP session directories.
+    Load 3D keypoints from preprocessed HDF5 dataset.
     
     Args:
-        sessions_dir: Path to directory containing SLEAP sessions
+        h5_path: Path to HDF5 file
         
     Returns:
-        List of session directory paths
+        Tuple of (keypoints_3d, has_3d_data, num_samples, n_joints)
     """
-    sessions_dir = Path(sessions_dir)
-    sessions = []
-    
-    for item in sessions_dir.iterdir():
-        if item.is_dir() and not item.name.startswith('.'):
-            # Check for points3d.h5 file (indicates 3D data available)
-            if (item / "points3d.h5").exists():
-                sessions.append(str(item))
-    
-    sessions.sort()
-    return sessions
+    with h5py.File(h5_path, 'r') as f:
+        # Load 3D keypoints
+        keypoints_3d = f['multiview_keypoints/keypoints_3d'][:]  # (num_samples, n_joints, 3)
+        has_3d_data = f['auxiliary/has_3d_data'][:]  # (num_samples,)
+        
+        # Get metadata
+        num_samples = keypoints_3d.shape[0]
+        n_joints = keypoints_3d.shape[1]
+        
+        # Filter to only samples with 3D data
+        valid_mask = has_3d_data.astype(bool)
+        keypoints_3d_valid = keypoints_3d[valid_mask]
+        
+        print(f"Loaded dataset: {h5_path}")
+        print(f"  Total samples: {num_samples}")
+        print(f"  Samples with 3D data: {valid_mask.sum()}")
+        print(f"  Number of joints: {n_joints}")
+        
+        return keypoints_3d_valid, valid_mask, num_samples, n_joints
 
 
-def load_3d_trajectory(session_path: str) -> Optional[np.ndarray]:
+def compute_axis_limits(keypoints_3d: np.ndarray, padding: float = 0.1):
     """
-    Load all 3D keypoints for a session.
+    Compute axis limits with padding.
     
     Args:
-        session_path: Path to SLEAP session directory
+        keypoints_3d: (num_samples, n_joints, 3) array of 3D keypoints
+        padding: Padding factor (0.1 = 10%)
         
     Returns:
-        Array of shape (n_frames, n_keypoints, 3) or None if failed
+        Tuple of (xlim, ylim, zlim) where each is (min, max)
     """
-    points3d_file = Path(session_path) / "points3d.h5"
+    # Find valid (non-zero, non-NaN) keypoints across all samples
+    valid_mask = ~(np.isnan(keypoints_3d).any(axis=2) | 
+                   np.isinf(keypoints_3d).any(axis=2) |
+                   (keypoints_3d == 0).all(axis=2))
     
-    if not points3d_file.exists():
-        print(f"Warning: No points3d.h5 found in {session_path}")
-        return None
+    if valid_mask.sum() == 0:
+        # Fallback: use all keypoints
+        valid_keypoints = keypoints_3d.reshape(-1, 3)
+    else:
+        # Extract valid keypoints
+        valid_keypoints = keypoints_3d[valid_mask].reshape(-1, 3)
     
-    try:
-        with h5py.File(points3d_file, 'r') as f:
-            if 'tracks' not in f:
-                print(f"Warning: No 'tracks' dataset in {points3d_file}")
-                return None
-            
-            tracks = f['tracks'][:]  # Shape: (n_frames, n_tracks, n_keypoints, 3)
-            
-            # Extract first track (assuming single animal)
-            if tracks.shape[1] > 0:
-                trajectory = tracks[:, 0, :, :]  # (n_frames, n_keypoints, 3)
-                return trajectory
-            else:
-                print(f"Warning: No tracks found in {points3d_file}")
-                return None
-                
-    except Exception as e:
-        print(f"Error loading 3D data from {session_path}: {e}")
-        return None
-
-
-def get_keypoint_names(session_path: str) -> List[str]:
-    """
-    Get keypoint names from a session.
+    # Compute min/max for each axis
+    x_min, y_min, z_min = valid_keypoints.min(axis=0)
+    x_max, y_max, z_max = valid_keypoints.max(axis=0)
     
-    Args:
-        session_path: Path to SLEAP session directory
-        
-    Returns:
-        List of keypoint names
-    """
-    try:
-        loader = SLEAPDataLoader(project_path=session_path)
-        keypoint_names = loader.get_keypoint_names()
-        return keypoint_names
-    except Exception as e:
-        print(f"Warning: Could not load keypoint names: {e}")
-        # Return generic names based on number of keypoints
-        trajectory = load_3d_trajectory(session_path)
-        if trajectory is not None:
-            n_keypoints = trajectory.shape[1]
-            return [f'kp_{i}' for i in range(n_keypoints)]
-        return []
+    # Compute ranges
+    x_range = x_max - x_min
+    y_range = y_max - y_min
+    z_range = z_max - z_min
+    
+    # Use the maximum range for all axes (equal-sized axes)
+    max_range = max(x_range, y_range, z_range)
+    
+    # Compute center
+    x_center = (x_min + x_max) / 2.0
+    y_center = (y_min + y_max) / 2.0
+    z_center = (z_min + z_max) / 2.0
+    
+    # Apply padding
+    half_range = max_range / 2.0 * (1 + padding)
+    
+    xlim = (x_center - half_range, x_center + half_range)
+    ylim = (y_center - half_range, y_center + half_range)
+    zlim = (z_center - half_range, z_center + half_range)
+    
+    return xlim, ylim, zlim
 
 
-def get_skeleton_edges(session_path: str) -> List[Tuple[int, int]]:
+def create_3d_animation(keypoints_3d: np.ndarray, 
+                       fps: int = 10,
+                       sample_skip: int = 1,
+                       padding: float = 0.1,
+                       point_size: float = 20.0):
     """
-    Get skeleton edge connections from a session.
+    Create animated 3D visualization of keypoints.
     
     Args:
-        session_path: Path to SLEAP session directory
-        
-    Returns:
-        List of (from_idx, to_idx) tuples
-    """
-    try:
-        loader = SLEAPDataLoader(project_path=session_path)
-        edge_indices, _ = loader.get_skeleton_structure()
-        return edge_indices
-    except Exception as e:
-        print(f"Warning: Could not load skeleton structure: {e}")
-        return []
-
-
-def visualize_3d_trajectory(trajectory: np.ndarray,
-                            keypoint_names: List[str],
-                            skeleton_edges: List[Tuple[int, int]],
-                            session_name: str,
-                            fps: int = 30,
-                            save_path: Optional[str] = None):
-    """
-    Create animated 3D visualization of keypoint trajectory.
-    
-    Args:
-        trajectory: Array of shape (n_frames, n_keypoints, 3)
-        keypoint_names: List of keypoint names
-        skeleton_edges: List of (from_idx, to_idx) tuples for skeleton connections
-        session_name: Name of the session (for title)
+        keypoints_3d: (num_samples, n_joints, 3) array of 3D keypoints
         fps: Frames per second for animation
-        save_path: Optional path to save animation as GIF
+        sample_skip: Process every Nth sample (default: 1, all samples)
+        padding: Padding factor for axes (default: 0.1 = 10%)
+        point_size: Size of scatter plot points (default: 20.0)
     """
-    n_frames, n_keypoints, _ = trajectory.shape
+    # Apply sample skip
+    if sample_skip > 1:
+        keypoints_3d = keypoints_3d[::sample_skip]
     
-    # Compute bounding box for consistent axes
-    all_points = trajectory.reshape(-1, 3)
-    x_min, x_max = all_points[:, 0].min(), all_points[:, 0].max()
-    y_min, y_max = all_points[:, 1].min(), all_points[:, 1].max()
-    z_min, z_max = all_points[:, 2].min(), all_points[:, 2].max()
+    num_samples = keypoints_3d.shape[0]
+    n_joints = keypoints_3d.shape[1]
     
-    # Add padding
-    padding = max(x_max - x_min, y_max - y_min, z_max - z_min) * 0.1
-    x_center = (x_min + x_max) / 2
-    y_center = (y_min + y_max) / 2
-    z_center = (z_min + z_max) / 2
-    max_range = max(x_max - x_min, y_max - y_min, z_max - z_min) / 2 + padding
+    # Compute axis limits
+    xlim, ylim, zlim = compute_axis_limits(keypoints_3d, padding=padding)
     
     # Create figure and 3D axis
-    fig = plt.figure(figsize=(12, 10))
+    fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
     
-    # Set axis labels and limits (set once, will be maintained)
-    ax.set_xlabel('X (mm)', fontsize=12)
-    ax.set_ylabel('Y (mm)', fontsize=12)
-    ax.set_zlabel('Z (mm)', fontsize=12)
-    ax.set_xlim(x_center - max_range, x_center + max_range)
-    ax.set_ylim(y_center - max_range, y_center + max_range)
-    ax.set_zlim(z_center - max_range, z_center + max_range)
+    # Initialize scatter plot
+    scatter = ax.scatter([], [], [], s=point_size, c='blue', alpha=0.7)
     
-    # Animation update function
+    # Set equal aspect ratio and limits
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_zlim(zlim)
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title('3D Keypoints Animation')
+    
+    # Store current sample index
+    current_sample = [0]
+    
     def update(frame):
-        # Clear previous data
+        """Update function for animation."""
+        sample_idx = current_sample[0]
+        
+        if sample_idx >= num_samples:
+            sample_idx = 0  # Loop back to start
+        
+        # Get keypoints for current sample
+        kp3d = keypoints_3d[sample_idx]  # (n_joints, 3)
+        
+        # Filter out invalid keypoints (NaN, inf, or all zeros)
+        valid_mask = ~(np.isnan(kp3d).any(axis=1) | 
+                      np.isinf(kp3d).any(axis=1) |
+                      (kp3d == 0).all(axis=1))
+        
+        if valid_mask.sum() > 0:
+            valid_kp = kp3d[valid_mask]
+            x, y, z = valid_kp[:, 0], valid_kp[:, 1], valid_kp[:, 2]
+        else:
+            x, y, z = [], [], []
+        
+        # Clear previous plot
         ax.clear()
         
-        # Get current frame data
-        keypoints_3d = trajectory[frame]  # (n_keypoints, 3)
+        # Recreate scatter plot
+        if len(x) > 0:
+            ax.scatter(x, y, z, s=point_size, c='blue', alpha=0.7)
         
-        # Plot keypoints
-        ax.scatter(keypoints_3d[:, 0], keypoints_3d[:, 1], keypoints_3d[:, 2],
-                  s=50, c='red', alpha=0.8, label='Keypoints')
+        # Reset limits and labels
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.set_zlim(zlim)
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.set_title(f'3D Keypoints - Sample {sample_idx + 1}/{num_samples} '
+                    f'({valid_mask.sum()}/{n_joints} valid joints)')
         
-        # Plot skeleton lines
-        if skeleton_edges:
-            for edge in skeleton_edges:
-                from_idx, to_idx = edge
-                if from_idx < n_keypoints and to_idx < n_keypoints:
-                    x_coords = [keypoints_3d[from_idx, 0], keypoints_3d[to_idx, 0]]
-                    y_coords = [keypoints_3d[from_idx, 1], keypoints_3d[to_idx, 1]]
-                    z_coords = [keypoints_3d[from_idx, 2], keypoints_3d[to_idx, 2]]
-                    ax.plot(x_coords, y_coords, z_coords, 'b-', linewidth=2, alpha=0.6)
+        # Update sample index
+        current_sample[0] = (sample_idx + 1) % num_samples
         
-        # Update axis labels and limits
-        ax.set_xlabel('X (mm)', fontsize=12)
-        ax.set_ylabel('Y (mm)', fontsize=12)
-        ax.set_zlabel('Z (mm)', fontsize=12)
-        ax.set_title(f'3D Keypoint Trajectory: {session_name}\nFrame: {frame}/{n_frames-1}', 
-                     fontsize=14, fontweight='bold')
-        ax.set_xlim(x_center - max_range, x_center + max_range)
-        ax.set_ylim(y_center - max_range, y_center + max_range)
-        ax.set_zlim(z_center - max_range, z_center + max_range)
-        
-        # Add legend
-        if skeleton_edges:
-            ax.plot([], [], [], 'b-', linewidth=2, alpha=0.6, label='Skeleton')
-        ax.legend(loc='upper right')
+        return []
     
     # Create animation
-    interval = 1000 / fps  # milliseconds per frame
-    anim = FuncAnimation(fig, update, frames=n_frames, interval=interval, 
-                        blit=False, repeat=True)
+    interval_ms = 1000 / fps  # Convert fps to interval in milliseconds
+    anim = animation.FuncAnimation(
+        fig, 
+        update, 
+        interval=interval_ms,
+        blit=False,
+        repeat=True
+    )
     
-    if save_path:
-        print(f"Saving animation to {save_path}...")
-        anim.save(save_path, writer='pillow', fps=fps)
-        print(f"Animation saved!")
-    else:
-        plt.show()
+    print(f"\nStarting animation...")
+    print(f"  Samples: {num_samples}")
+    print(f"  FPS: {fps}")
+    print(f"  Close the window to stop")
+    
+    plt.show()
     
     return anim
 
 
-def print_trajectory_stats(trajectory: np.ndarray, session_name: str):
-    """
-    Print statistics about the 3D trajectory.
-    
-    Args:
-        trajectory: Array of shape (n_frames, n_keypoints, 3)
-        session_name: Name of the session
-    """
-    n_frames, n_keypoints, _ = trajectory.shape
-    
-    print(f"\n{'='*60}")
-    print(f"3D Trajectory Statistics: {session_name}")
-    print(f"{'='*60}")
-    print(f"Number of frames: {n_frames}")
-    print(f"Number of keypoints: {n_keypoints}")
-    
-    # Compute statistics
-    all_points = trajectory.reshape(-1, 3)
-    
-    print(f"\nCoordinate ranges:")
-    print(f"  X: [{trajectory[:, :, 0].min():.2f}, {trajectory[:, :, 0].max():.2f}] mm")
-    print(f"  Y: [{trajectory[:, :, 1].min():.2f}, {trajectory[:, :, 1].max():.2f}] mm")
-    print(f"  Z: [{trajectory[:, :, 2].min():.2f}, {trajectory[:, :, 2].max():.2f}] mm")
-    
-    # Check for NaN or invalid values
-    nan_count = np.isnan(all_points).sum()
-    inf_count = np.isinf(all_points).sum()
-    zero_count = (np.abs(all_points) < 1e-6).sum()
-    
-    print(f"\nData quality:")
-    print(f"  NaN values: {nan_count} ({nan_count / all_points.size * 100:.2f}%)")
-    print(f"  Inf values: {inf_count} ({inf_count / all_points.size * 100:.2f}%)")
-    print(f"  Near-zero values: {zero_count} ({zero_count / all_points.size * 100:.2f}%)")
-    
-    # Compute velocity statistics (frame-to-frame differences)
-    if n_frames > 1:
-        velocities = np.diff(trajectory, axis=0)  # (n_frames-1, n_keypoints, 3)
-        speeds = np.linalg.norm(velocities, axis=2)  # (n_frames-1, n_keypoints)
-        mean_speed = speeds.mean()
-        max_speed = speeds.max()
-        
-        print(f"\nMotion statistics:")
-        print(f"  Mean speed: {mean_speed:.2f} mm/frame")
-        print(f"  Max speed: {max_speed:.2f} mm/frame")
-    
-    print(f"{'='*60}\n")
-
-
 def main():
     parser = argparse.ArgumentParser(
-        description="Visualize 3D keypoints from SLEAP datasets",
+        description="Visualize 3D keypoints from preprocessed multi-view SLEAP dataset",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Visualize first session
-  python visualize_3d_keypoints.py /path/to/sleap/sessions --session_idx 0
+  # Basic visualization
+  python visualize_3d_keypoints.py multiview_sleap.h5
   
-  # Visualize specific session with limited frames
-  python visualize_3d_keypoints.py /path/to/sleap/sessions --session_idx 2 --max_frames 200
+  # Faster animation with sample skipping
+  python visualize_3d_keypoints.py multiview_sleap.h5 --fps 20 --sample_skip 5
   
-  # Save animation as GIF
-  python visualize_3d_keypoints.py /path/to/sleap/sessions --session_idx 0 --save output.gif
+  # Larger points
+  python visualize_3d_keypoints.py multiview_sleap.h5 --point_size 50
         """
     )
     
-    parser.add_argument("sessions_dir", help="Directory containing SLEAP sessions")
-    parser.add_argument("--session_idx", type=int, default=0,
-                       help="Index of session to visualize (default: 0)")
-    parser.add_argument("--max_frames", type=int, default=None,
-                       help="Maximum number of frames to visualize (default: all)")
-    parser.add_argument("--fps", type=int, default=30,
-                       help="Frames per second for animation (default: 30)")
-    parser.add_argument("--save", type=str, default=None,
-                       help="Path to save animation as GIF (default: display interactively)")
-    parser.add_argument("--list_sessions", action="store_true",
-                       help="List all available sessions and exit")
+    parser.add_argument("dataset_path", help="Path to preprocessed HDF5 dataset")
+    parser.add_argument("--fps", type=int, default=10,
+                       help="Animation frames per second (default: 10)")
+    parser.add_argument("--sample_skip", type=int, default=1,
+                       help="Process every Nth sample (default: 1, all samples)")
+    parser.add_argument("--padding", type=float, default=0.1,
+                       help="Axis padding factor (default: 0.1 = 10%%)")
+    parser.add_argument("--point_size", type=float, default=20.0,
+                       help="Size of scatter plot points (default: 20.0)")
     
     args = parser.parse_args()
     
-    # Discover sessions
-    sessions = discover_sleap_sessions(args.sessions_dir)
+    # Validate input file
+    if not Path(args.dataset_path).exists():
+        print(f"Error: Dataset file does not exist: {args.dataset_path}")
+        return 1
     
-    if len(sessions) == 0:
-        print(f"Error: No SLEAP sessions with 3D data found in {args.sessions_dir}")
-        print("Sessions must contain a points3d.h5 file.")
-        sys.exit(1)
-    
-    # List sessions if requested
-    if args.list_sessions:
-        print(f"\nFound {len(sessions)} sessions with 3D data:")
-        for i, session in enumerate(sessions):
-            print(f"  [{i}] {Path(session).name}")
-        sys.exit(0)
-    
-    # Validate session index
-    if args.session_idx < 0 or args.session_idx >= len(sessions):
-        print(f"Error: Session index {args.session_idx} out of range (0-{len(sessions)-1})")
-        print(f"\nAvailable sessions:")
-        for i, session in enumerate(sessions):
-            print(f"  [{i}] {Path(session).name}")
-        sys.exit(1)
-    
-    # Select session
-    session_path = sessions[args.session_idx]
-    session_name = Path(session_path).name
-    
-    print(f"\n{'='*60}")
-    print(f"VISUALIZING 3D KEYPOINTS")
-    print(f"{'='*60}")
-    print(f"Session: {session_name}")
-    print(f"Path: {session_path}")
-    print(f"{'='*60}\n")
-    
-    # Load 3D trajectory
-    print("Loading 3D trajectory...")
-    trajectory = load_3d_trajectory(session_path)
-    
-    if trajectory is None:
-        print(f"Error: Failed to load 3D trajectory from {session_path}")
-        sys.exit(1)
-    
-    # Limit frames if requested
-    if args.max_frames is not None and args.max_frames < trajectory.shape[0]:
-        trajectory = trajectory[:args.max_frames]
-        print(f"Limited to {args.max_frames} frames")
-    
-    # Print statistics
-    print_trajectory_stats(trajectory, session_name)
-    
-    # Get keypoint names and skeleton structure
-    print("Loading keypoint names and skeleton structure...")
-    keypoint_names = get_keypoint_names(session_path)
-    skeleton_edges = get_skeleton_edges(session_path)
-    
-    print(f"Keypoints: {len(keypoint_names)}")
-    if skeleton_edges:
-        print(f"Skeleton edges: {len(skeleton_edges)}")
-    
-    # Create visualization
-    print("\nCreating 3D visualization...")
-    print("Close the window or press Ctrl+C to stop the animation.")
-    
+    # Load 3D keypoints
     try:
-        anim = visualize_3d_trajectory(
-            trajectory=trajectory,
-            keypoint_names=keypoint_names,
-            skeleton_edges=skeleton_edges,
-            session_name=session_name,
-            fps=args.fps,
-            save_path=args.save
-        )
-        
-        if args.save is None:
-            # Keep animation running
-            plt.show()
-        
-    except KeyboardInterrupt:
-        print("\nAnimation interrupted by user")
+        keypoints_3d, has_3d_mask, num_samples, n_joints = load_3d_keypoints(args.dataset_path)
     except Exception as e:
-        print(f"\nError during visualization: {e}")
+        print(f"Error loading dataset: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
+        return 1
+    
+    if len(keypoints_3d) == 0:
+        print("Error: No samples with 3D data found in dataset")
+        return 1
+    
+    # Create animation
+    try:
+        create_3d_animation(
+            keypoints_3d,
+            fps=args.fps,
+            sample_skip=args.sample_skip,
+            padding=args.padding,
+            point_size=args.point_size
+        )
+    except KeyboardInterrupt:
+        print("\nAnimation interrupted by user")
+        return 0
+    except Exception as e:
+        print(f"Error creating animation: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+    
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(main())
