@@ -267,8 +267,11 @@ class SLEAPDataLoader:
         
         # Find the camera-specific .h5 file
         camera_h5_files = list(session_dir.glob(f"*_cam{camera_name}.h5"))
+        
+        # If no .h5 file found, try to fall back to .slp files
         if not camera_h5_files:
-            raise ValueError(f"No .h5 file found for camera {camera_name} in {session_dir}")
+            print(f"No .h5 file found for camera {camera_name} in {session_dir}, trying .slp fallback...")
+            return self._load_slp_fallback_data(session_dir, camera_name)
             
         camera_h5_file = camera_h5_files[0]
         print(f"Loading camera data from: {camera_h5_file}")
@@ -313,6 +316,128 @@ class SLEAPDataLoader:
             
         return data
         
+    def _load_slp_fallback_data(self, search_dir: Path, camera_name: str) -> Dict[str, Any]:
+        """
+        Load data from .slp files as a fallback when .h5 files are not found.
+        
+        This method searches for .predictions.slp files and extracts the same data
+        that would normally be read from .h5 analysis files.
+        
+        Args:
+            search_dir: Directory to search for .slp files
+            camera_name: Camera name to match in filenames
+            
+        Returns:
+            Dict containing camera data in the same format as _load_camera_dirs_data
+        """
+        # Search patterns for .slp files
+        slp_patterns = [
+            f"*{camera_name}*.predictions.proofread.slp",
+            f"*{camera_name}*.predictions.slp",
+            f"*cam{camera_name}*.predictions.slp",
+            f"*Camera{camera_name}*.predictions.slp",
+            "*.predictions.proofread.slp",
+            "*.predictions.slp",
+        ]
+        
+        slp_file = None
+        for pattern in slp_patterns:
+            candidates = list(search_dir.glob(pattern))
+            if candidates:
+                # If multiple files match, prefer ones with camera name
+                for c in candidates:
+                    if camera_name.lower() in c.name.lower():
+                        slp_file = c
+                        break
+                if slp_file is None:
+                    slp_file = candidates[0]
+                break
+        
+        # Also check parent directory if not found
+        if slp_file is None:
+            parent_dir = search_dir.parent
+            for pattern in slp_patterns:
+                candidates = list(parent_dir.glob(pattern))
+                if candidates:
+                    for c in candidates:
+                        if camera_name.lower() in c.name.lower():
+                            slp_file = c
+                            break
+                    if slp_file is None:
+                        slp_file = candidates[0]
+                    break
+        
+        if slp_file is None:
+            raise ValueError(f"No .slp file found for camera {camera_name} in {search_dir} or parent directory")
+        
+        print(f"Loading camera data from .slp fallback: {slp_file}")
+        
+        # Load the .slp file (which is HDF5 format)
+        with h5py.File(slp_file, 'r') as f:
+            data = {}
+            
+            # Load key data structures (same as camera_dirs format)
+            if 'instances' in f:
+                data['instances'] = f['instances'][:]
+                
+            if 'frames' in f:
+                data['frames'] = f['frames'][:]
+                
+            if 'points' in f:
+                data['points'] = f['points'][:]
+                
+            if 'pred_points' in f:
+                data['pred_points'] = f['pred_points'][:]
+                
+            # Load metadata
+            if 'videos_json' in f:
+                try:
+                    videos_json = f['videos_json'][()]
+                    data['videos'] = json.loads(self._decode_json_data(videos_json))
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"Warning: Could not parse videos_json metadata: {e}")
+                    
+            if 'tracks_json' in f:
+                try:
+                    tracks_json = f['tracks_json'][()]
+                    data['tracks_metadata'] = json.loads(self._decode_json_data(tracks_json))
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"Warning: Could not parse tracks_json metadata: {e}")
+            
+            # Extract skeleton info from metadata attributes
+            if 'metadata' in f:
+                metadata_group = f['metadata']
+                if 'json' in metadata_group.attrs:
+                    try:
+                        metadata_json = metadata_group.attrs['json']
+                        if isinstance(metadata_json, bytes):
+                            metadata_json = metadata_json.decode('utf-8')
+                        metadata = json.loads(metadata_json)
+                        
+                        # Extract node names from skeleton definition
+                        if 'nodes' in metadata:
+                            node_names = [node.get('name', f'node_{i}') 
+                                         for i, node in enumerate(metadata['nodes'])]
+                            data['node_names_from_slp'] = node_names
+                            
+                        # Store full skeleton metadata for later use
+                        data['skeleton_metadata'] = metadata
+                    except Exception as e:
+                        print(f"Warning: Could not parse skeleton metadata: {e}")
+            
+            # Store the source file path for video file lookup
+            data['slp_source_file'] = str(slp_file)
+                    
+        # Load calibration data for this camera
+        calibration_entry = self._get_calibration_entry(camera_name)
+        if calibration_entry:
+            data['calibration'] = calibration_entry
+            
+        # Mark this as slp-loaded data so extraction methods know the format
+        data['_data_source'] = 'slp'
+            
+        return data
+
     def _get_calibration_entry(self, camera_name: str) -> Optional[Dict]:
         """Get calibration data for a camera."""
         if not self.calibration_data:
@@ -381,7 +506,10 @@ class SLEAPDataLoader:
             - keypoints_2d: (N, 2) array of 2D coordinates
             - visibility: (N,) boolean array indicating keypoint visibility
         """
-        if self.data_structure_type == 'camera_dirs':
+        # Check if data was loaded from .slp fallback (uses camera_dirs format)
+        if camera_data.get('_data_source') == 'slp':
+            return self._extract_2d_keypoints_camera_dirs(camera_data, frame_idx)
+        elif self.data_structure_type == 'camera_dirs':
             return self._extract_2d_keypoints_camera_dirs(camera_data, frame_idx)
         elif self.data_structure_type == 'session_dirs':
             return self._extract_2d_keypoints_session_dirs(camera_data, frame_idx)
@@ -626,9 +754,17 @@ class SLEAPDataLoader:
                             print(f"Warning: Expected video file not found next to {camera_h5_file}: {candidate_path}")
                 except Exception as e:
                     print(f"Warning: Failed to read video_path from {camera_h5_file}: {e}")
+            else:
+                # Try .slp file fallback for video path
+                video_frame = self._load_video_frame_from_slp(session_dir, camera_name, frame_idx)
+                if video_frame is not None:
+                    return video_frame
 
         # Fallback: find video file in main directory by pattern
         video_files = list(self.project_path.glob(f"*_cam{camera_name}.mp4"))
+        if not video_files:
+            # Try more flexible patterns
+            video_files = list(self.project_path.glob(f"*{camera_name}*.mp4"))
         if not video_files:
             print(f"No video file found for camera {camera_name} in {self.project_path}")
             return None
@@ -636,6 +772,72 @@ class SLEAPDataLoader:
         video_file = video_files[0]
         print(f"Using fallback video file for camera {camera_name}: {video_file}")
         return self._read_video_frame(video_file, frame_idx)
+    
+    def _load_video_frame_from_slp(self, search_dir: Path, camera_name: str, frame_idx: int) -> Optional[np.ndarray]:
+        """
+        Load video frame using video path from a .slp file.
+        
+        Args:
+            search_dir: Directory to search for .slp files
+            camera_name: Camera name to match
+            frame_idx: Frame index to load
+            
+        Returns:
+            Video frame as RGB numpy array, or None if not found
+        """
+        # Find .slp file
+        slp_patterns = [
+            f"*{camera_name}*.predictions.slp",
+            f"*cam{camera_name}*.predictions.slp",
+            "*.predictions.slp",
+        ]
+        
+        slp_file = None
+        for pattern in slp_patterns:
+            candidates = list(search_dir.glob(pattern))
+            if candidates:
+                for c in candidates:
+                    if camera_name.lower() in c.name.lower():
+                        slp_file = c
+                        break
+                if slp_file is None and candidates:
+                    slp_file = candidates[0]
+                break
+        
+        if slp_file is None:
+            return None
+        
+        try:
+            with h5py.File(slp_file, 'r') as f:
+                if 'videos_json' in f:
+                    videos_json = f['videos_json'][()]
+                    videos_data = json.loads(self._decode_json_data(videos_json))
+                    
+                    # Extract video filename from backend
+                    if isinstance(videos_data, dict) and 'backend' in videos_data:
+                        video_path_str = videos_data['backend'].get('filename', '')
+                    elif isinstance(videos_data, list) and len(videos_data) > 0:
+                        video_path_str = videos_data[0].get('backend', {}).get('filename', '')
+                    else:
+                        return None
+                    
+                    if video_path_str:
+                        video_filename = Path(video_path_str).name
+                        # Try to find video in same directory as .slp file
+                        candidate_path = slp_file.parent / video_filename
+                        if candidate_path.exists():
+                            print(f"Using video file from .slp metadata: {candidate_path}")
+                            return self._read_video_frame(candidate_path, frame_idx)
+                        
+                        # Try search_dir
+                        candidate_path = search_dir / video_filename
+                        if candidate_path.exists():
+                            print(f"Using video file from .slp metadata: {candidate_path}")
+                            return self._read_video_frame(candidate_path, frame_idx)
+        except Exception as e:
+            print(f"Warning: Failed to get video path from .slp file {slp_file}: {e}")
+        
+        return None
         
     def _read_video_frame(self, video_file: Path, frame_idx: int) -> Optional[np.ndarray]:
         """Read a frame from a video file."""
@@ -851,6 +1053,7 @@ class SLEAPDataLoader:
         """
         # Try to find an analysis file to extract keypoint names
         analysis_file = None
+        slp_file = None
         
         if self.data_structure_type == 'camera_dirs':
             # Look for analysis files in any camera directory
@@ -880,30 +1083,99 @@ class SLEAPDataLoader:
                     analysis_file = predictions_files[0]
                     print(f"Using predictions file for keypoint names: {analysis_file}")
                     break
-
+        
+        # If still no file found, try .slp files
         if analysis_file is None:
-            print("Warning: No analysis or predictions file found, using generic keypoint names")
+            for camera_name in self.camera_views:
+                if self.data_structure_type == 'camera_dirs':
+                    camera_dir = self.project_path / camera_name
+                else:
+                    camera_dir = self.project_path / self.session_name if self.session_name else self.project_path
+                
+                # Look for .slp files
+                slp_files = list(camera_dir.glob("*.predictions.slp"))
+                if not slp_files:
+                    slp_files = list(camera_dir.glob("*.slp"))
+                if slp_files:
+                    slp_file = slp_files[0]
+                    print(f"Using .slp file for keypoint names: {slp_file}")
+                    break
+            
+            # Also check parent directory
+            if slp_file is None:
+                slp_files = list(self.project_path.glob("*.predictions.slp"))
+                if not slp_files:
+                    slp_files = list(self.project_path.glob("*.slp"))
+                if slp_files:
+                    slp_file = slp_files[0]
+                    print(f"Using .slp file for keypoint names: {slp_file}")
+
+        if analysis_file is None and slp_file is None:
+            print("Warning: No analysis, predictions, or .slp file found, using generic keypoint names")
             # Fallback to generic names if no analysis/predictions file found
             num_keypoints = 15  # Based on the data structure we observed
             return [f'keypoint_{i}' for i in range(num_keypoints)]
-            
-        try:
-            # Extract keypoint names from the analysis file
-            with h5py.File(analysis_file, 'r') as f:
-                if 'node_names' in f:
-                    node_names = f['node_names'][:]
-                    keypoint_names = [name.decode('utf-8') for name in node_names]
-                    print(f"Loaded keypoint names from: {analysis_file}")
+        
+        # Try to extract from .slp file first (has skeleton info in metadata)
+        if slp_file is not None:
+            try:
+                keypoint_names = self._extract_keypoint_names_from_slp(slp_file)
+                if keypoint_names:
                     return keypoint_names
-                else:
-                    print("Warning: No node_names found in analysis file")
-                    num_keypoints = 15
-                    return [f'keypoint_{i}' for i in range(num_keypoints)]
+            except Exception as e:
+                print(f"Warning: Failed to read keypoint names from .slp file {slp_file}: {e}")
+        
+        # Fall back to analysis file
+        if analysis_file is not None:
+            try:
+                # Extract keypoint names from the analysis file
+                with h5py.File(analysis_file, 'r') as f:
+                    if 'node_names' in f:
+                        node_names = f['node_names'][:]
+                        keypoint_names = [name.decode('utf-8') for name in node_names]
+                        print(f"Loaded keypoint names from: {analysis_file}")
+                        return keypoint_names
+                    else:
+                        print("Warning: No node_names found in analysis file")
+                        num_keypoints = 15
+                        return [f'keypoint_{i}' for i in range(num_keypoints)]
+                        
+            except Exception as e:
+                print(f"Warning: Failed to read analysis file {analysis_file}: {e}")
+                num_keypoints = 15
+                return [f'keypoint_{i}' for i in range(num_keypoints)]
+        
+        # Final fallback
+        num_keypoints = 15
+        return [f'keypoint_{i}' for i in range(num_keypoints)]
+    
+    def _extract_keypoint_names_from_slp(self, slp_file: Path) -> List[str]:
+        """
+        Extract keypoint names from a .slp file's metadata.
+        
+        Args:
+            slp_file: Path to the .slp file
+            
+        Returns:
+            List of keypoint names, or empty list if extraction fails
+        """
+        with h5py.File(slp_file, 'r') as f:
+            if 'metadata' in f:
+                metadata_group = f['metadata']
+                if 'json' in metadata_group.attrs:
+                    metadata_json = metadata_group.attrs['json']
+                    if isinstance(metadata_json, bytes):
+                        metadata_json = metadata_json.decode('utf-8')
+                    metadata = json.loads(metadata_json)
                     
-        except Exception as e:
-            print(f"Warning: Failed to read analysis file {analysis_file}: {e}")
-            num_keypoints = 15
-            return [f'keypoint_{i}' for i in range(num_keypoints)]
+                    # Extract node names from skeleton definition
+                    if 'nodes' in metadata:
+                        node_names = [node.get('name', f'node_{i}') 
+                                     for i, node in enumerate(metadata['nodes'])]
+                        print(f"Loaded {len(node_names)} keypoint names from .slp metadata")
+                        return node_names
+        
+        return []
             
     def get_skeleton_structure(self) -> Tuple[List[Tuple[int, int]], List[Tuple[str, str]]]:
         """
@@ -916,6 +1188,7 @@ class SLEAPDataLoader:
         """
         # Try to find an analysis file to extract skeleton structure
         analysis_file = None
+        slp_file = None
         
         if self.data_structure_type == 'camera_dirs':
             # Look for analysis files in any camera directory
@@ -947,32 +1220,114 @@ class SLEAPDataLoader:
                         analysis_file = predictions_files[0]
                         print(f"Using predictions file for skeleton structure: {analysis_file}")
                         break
-
-            if analysis_file is None:
-                print("Warning: No analysis or predictions file found for skeleton structure")
-                return [], []
+        
+        # If still no file, try .slp files
+        if analysis_file is None:
+            for camera_name in self.camera_views:
+                if self.data_structure_type == 'camera_dirs':
+                    camera_dir = self.project_path / camera_name
+                else:
+                    camera_dir = self.project_path / self.session_name if self.session_name else self.project_path
+                
+                slp_files = list(camera_dir.glob("*.predictions.slp"))
+                if not slp_files:
+                    slp_files = list(camera_dir.glob("*.slp"))
+                if slp_files:
+                    slp_file = slp_files[0]
+                    break
             
-        try:
-            # Extract skeleton structure from the analysis file
-            with h5py.File(analysis_file, 'r') as f:
-                edge_indices = []
-                edge_names = []
-                
-                if 'edge_inds' in f:
-                    edge_inds_data = f['edge_inds'][:]
-                    edge_indices = [(int(edge[0]), int(edge[1])) for edge in edge_inds_data]
-                    
-                if 'edge_names' in f:
-                    edge_names_data = f['edge_names'][:]
-                    edge_names = [(edge[0].decode('utf-8'), edge[1].decode('utf-8')) 
-                                for edge in edge_names_data]
-                    
-                print(f"Loaded skeleton structure from: {analysis_file}")
-                return edge_indices, edge_names
-                
-        except Exception as e:
-            print(f"Warning: Failed to read skeleton structure from {analysis_file}: {e}")
+            # Also check parent directory
+            if slp_file is None:
+                slp_files = list(self.project_path.glob("*.predictions.slp"))
+                if not slp_files:
+                    slp_files = list(self.project_path.glob("*.slp"))
+                if slp_files:
+                    slp_file = slp_files[0]
+
+        if analysis_file is None and slp_file is None:
+            print("Warning: No analysis, predictions, or .slp file found for skeleton structure")
             return [], []
+        
+        # Try to extract from .slp file first
+        if slp_file is not None:
+            try:
+                edge_indices, edge_names = self._extract_skeleton_from_slp(slp_file)
+                if edge_indices:
+                    return edge_indices, edge_names
+            except Exception as e:
+                print(f"Warning: Failed to read skeleton structure from .slp file {slp_file}: {e}")
+        
+        # Fall back to analysis file
+        if analysis_file is not None:
+            try:
+                # Extract skeleton structure from the analysis file
+                with h5py.File(analysis_file, 'r') as f:
+                    edge_indices = []
+                    edge_names = []
+                    
+                    if 'edge_inds' in f:
+                        edge_inds_data = f['edge_inds'][:]
+                        edge_indices = [(int(edge[0]), int(edge[1])) for edge in edge_inds_data]
+                        
+                    if 'edge_names' in f:
+                        edge_names_data = f['edge_names'][:]
+                        edge_names = [(edge[0].decode('utf-8'), edge[1].decode('utf-8')) 
+                                    for edge in edge_names_data]
+                        
+                    print(f"Loaded skeleton structure from: {analysis_file}")
+                    return edge_indices, edge_names
+                    
+            except Exception as e:
+                print(f"Warning: Failed to read skeleton structure from {analysis_file}: {e}")
+                return [], []
+        
+        return [], []
+    
+    def _extract_skeleton_from_slp(self, slp_file: Path) -> Tuple[List[Tuple[int, int]], List[Tuple[str, str]]]:
+        """
+        Extract skeleton structure from a .slp file's metadata.
+        
+        Args:
+            slp_file: Path to the .slp file
+            
+        Returns:
+            Tuple of (edge_indices, edge_names)
+        """
+        edge_indices = []
+        edge_names = []
+        
+        with h5py.File(slp_file, 'r') as f:
+            if 'metadata' in f:
+                metadata_group = f['metadata']
+                if 'json' in metadata_group.attrs:
+                    metadata_json = metadata_group.attrs['json']
+                    if isinstance(metadata_json, bytes):
+                        metadata_json = metadata_json.decode('utf-8')
+                    metadata = json.loads(metadata_json)
+                    
+                    # Get node names for edge name lookup
+                    node_names = {}
+                    if 'nodes' in metadata:
+                        for i, node in enumerate(metadata['nodes']):
+                            node_names[i] = node.get('name', f'node_{i}')
+                    
+                    # Extract edges from skeleton definition
+                    if 'skeletons' in metadata and len(metadata['skeletons']) > 0:
+                        skeleton = metadata['skeletons'][0]
+                        if 'links' in skeleton:
+                            for link in skeleton['links']:
+                                source = link.get('source')
+                                target = link.get('target')
+                                if source is not None and target is not None:
+                                    edge_indices.append((int(source), int(target)))
+                                    source_name = node_names.get(source, f'node_{source}')
+                                    target_name = node_names.get(target, f'node_{target}')
+                                    edge_names.append((source_name, target_name))
+                    
+                    if edge_indices:
+                        print(f"Loaded {len(edge_indices)} skeleton edges from .slp metadata")
+        
+        return edge_indices, edge_names
         
     def print_data_summary(self):
         """Print a summary of the loaded data."""
