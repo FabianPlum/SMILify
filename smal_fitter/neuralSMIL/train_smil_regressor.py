@@ -1845,6 +1845,9 @@ if __name__ == "__main__":
                        help='Number of GPUs to use for training (default: 1, ignored when using torchrun)')
     parser.add_argument('--master-port', type=str, default=None,
                        help='Master port for distributed training (default: from MASTER_PORT env var or 12345)')
+    parser.add_argument('--scale-trans-mode', type=str, default=None,
+                       choices=['ignore', 'separate', 'entangled_with_betas'],
+                       help='Scale/translation beta mode (overrides config default)')
     args = parser.parse_args()
     
     # Create config override dictionary for any provided arguments
@@ -1867,7 +1870,11 @@ if __name__ == "__main__":
             config_override['model_config'] = {'backbone_name': args.backbone}
         if args.data_path is not None:
             config_override['data_path'] = args.data_path
-    
+
+    # Apply scale_trans_mode override directly to TrainingConfig
+    if args.scale_trans_mode is not None:
+        TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = args.scale_trans_mode
+
     # Get master port from args or environment variable
     master_port = args.master_port or os.environ.get('MASTER_PORT', '12345')
     
