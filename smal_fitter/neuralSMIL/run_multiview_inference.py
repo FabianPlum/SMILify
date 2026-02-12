@@ -1341,7 +1341,7 @@ def main():
     parser.add_argument("--fps", type=int, default=60, help="Output video FPS (default: 60)")
     parser.add_argument("--max_frames", type=int, default=None, help="Maximum number of frames to process (default: all frames). Useful for quick testing.")
     parser.add_argument("--disable_scaling", action="store_true", help="Disable part scaling (log_beta_scales) for comparison/debugging")
-    parser.add_argument("--disable_translation", action="store_true", help="Disable part translation (betas_trans) for comparison/debugging")
+    parser.add_argument("--disable_translation", action="store_true", default=True, help="Disable part translation (betas_trans) for comparison/debugging")
     parser.add_argument("--view_indices", type=str, default="0", help="Comma-separated list of camera view indices to render for singleview output (default: '0'). E.g., '0,4,11' renders views 0, 4, and 11.")
     parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs to use (default: 1, ignored when using torchrun)")
     parser.add_argument("--master-port", type=str, default=None, help="Master port for distributed processing (default: from MASTER_PORT env var or 12355)")
