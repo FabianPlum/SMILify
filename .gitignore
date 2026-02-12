@@ -70,6 +70,7 @@ custom_processing/proof_read_WIP.blend1
 #pycharm dev
 .idea/
 .vscode/
+.cursor/
 __pycache__/
 fitter_3d/__pycache__/
 
