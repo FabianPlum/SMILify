@@ -70,6 +70,7 @@ custom_processing/proof_read_WIP.blend1
 #pycharm dev
 .idea/
 .vscode/
+.cursor/
 __pycache__/
 fitter_3d/__pycache__/
 
@@ -171,7 +172,11 @@ venv.bak/
 # mypy
 .mypy_cache/
 
+# benchmark outputs
+benchmark_*/
+
 # custom
+dev_notes/
 checkpoints/
 smal/
 extra_videos/

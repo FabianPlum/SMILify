@@ -52,7 +52,7 @@ For now, I'll focus on insects, hence **SMIL**.
    
 5. Test your installation
    ```
-   pytest tests/pipeline_tests.py -v -s
+   pytest tests/test_pipeline.py -v -s
    ```
 
 

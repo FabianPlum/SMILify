@@ -755,6 +755,10 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                     use_unity_prior=False,
                     rgb_only=False
                 )
+                # CRITICAL: Match propagate_scaling to the training model's setting.
+                # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
+                # so visualization must also use propagate_scaling=True for consistent geometry.
+                temp_fitter.propagate_scaling = model.propagate_scaling
             else:
                 temp_fitter = SMALFitter(
                     device=device,
@@ -764,6 +768,10 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                     use_unity_prior=False,
                     rgb_only=True
                 )
+                # CRITICAL: Match propagate_scaling to the training model's setting.
+                # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
+                # so visualization must also use propagate_scaling=True for consistent geometry.
+                temp_fitter.propagate_scaling = model.propagate_scaling
             
             # Set proper target joints and visibility for visualization
             # Convert normalized keypoints back to pixel coordinates for visualization
@@ -868,8 +876,8 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                         fov=fov_tensor
                     )
             
-            # Generate visualization
-            temp_fitter.generate_visualization(image_exporter, apply_UE_transform=True, img_idx=sample_count)
+            # Generate visualization - match model's UE scaling setting
+            temp_fitter.generate_visualization(image_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=sample_count)
             
             sample_count += 1
         
@@ -1837,6 +1845,9 @@ if __name__ == "__main__":
                        help='Number of GPUs to use for training (default: 1, ignored when using torchrun)')
     parser.add_argument('--master-port', type=str, default=None,
                        help='Master port for distributed training (default: from MASTER_PORT env var or 12345)')
+    parser.add_argument('--scale-trans-mode', type=str, default=None,
+                       choices=['ignore', 'separate', 'entangled_with_betas'],
+                       help='Scale/translation beta mode (overrides config default)')
     args = parser.parse_args()
     
     # Create config override dictionary for any provided arguments
@@ -1859,7 +1870,11 @@ if __name__ == "__main__":
             config_override['model_config'] = {'backbone_name': args.backbone}
         if args.data_path is not None:
             config_override['data_path'] = args.data_path
-    
+
+    # Apply scale_trans_mode override directly to TrainingConfig
+    if args.scale_trans_mode is not None:
+        TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = args.scale_trans_mode
+
     # Get master port from args or environment variable
     master_port = args.master_port or os.environ.get('MASTER_PORT', '12345')
     
