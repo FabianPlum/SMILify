@@ -886,8 +886,8 @@ class SMILImageRegressor(SMALFitter):
             # In separate mode, use PCA weights directly as targets
             if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
                 # Use the PCA weights directly (5 parameters each)
-                targets['log_beta_scales'] = torch.from_numpy(y_data['scale_weights']).float().to(self.device)
-                targets['betas_trans'] = torch.from_numpy(y_data['trans_weights']).float().to(self.device)
+                targets['log_beta_scales'] = safe_to_tensor(y_data['scale_weights'], device=self.device)
+                targets['betas_trans'] = safe_to_tensor(y_data['trans_weights'], device=self.device)
             else:
                 # No PCA weights available, use zeros
                 targets['log_beta_scales'] = torch.zeros(config.N_BETAS).to(self.device)
