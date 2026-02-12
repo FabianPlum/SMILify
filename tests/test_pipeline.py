@@ -48,44 +48,39 @@ def test_smal_fitter_optimize_to_joints(capsys):
     print(captured.out)
 
 def test_neural_smil_config_validation():
-    """Test neural SMIL training configuration validation without running full training."""
-    import sys
-    sys.path.append(os.path.join(parent_dir, 'smal_fitter', 'neuralSMIL'))
-    
-    # Test that the configuration can be imported and used
-    try:
-        # Import from the correct path
-        sys.path.insert(0, os.path.join(parent_dir, 'smal_fitter', 'neuralSMIL'))
-        from training_config import TrainingConfig
-        
-        # Test dataset path resolution
-        test_textured_path = TrainingConfig.get_data_path('test_textured')
-        assert test_textured_path == "data/replicAnt_trials/replicAnt-x-SMIL-TEX"
-        
-        # Test that the dataset directory exists
-        full_path = os.path.join(parent_dir, test_textured_path)
-        assert os.path.exists(full_path), f"Test dataset directory not found: {full_path}"
-        
-   
-        # Test train/val/test split calculation
-        train_size, val_size, test_size = TrainingConfig.get_train_val_test_sizes(100)
-        assert train_size == 85, f"Expected train size 85, got {train_size}"
-        assert val_size == 5, f"Expected val size 5, got {val_size}"
-        assert test_size == 10, f"Expected test size 10, got {test_size}"
-        
-        print("✅ Neural SMIL configuration validation passed")
-        
-    except ImportError as e:
-        pytest.fail(f"Failed to import training configuration: {e}")
-    except Exception as e:
-        pytest.fail(f"Configuration validation failed: {e}")
+    """Test neural SMIL training configuration logic (pure, no filesystem dependencies)."""
+    sys.path.insert(0, os.path.join(parent_dir, 'smal_fitter', 'neuralSMIL'))
+    from training_config import TrainingConfig
+
+    # Test dataset path resolution
+    test_textured_path = TrainingConfig.get_data_path('test_textured')
+    assert test_textured_path == "data/replicAnt_trials/replicAnt-x-SMIL-TEX"
+
+    # Test that requesting an unknown dataset raises ValueError
+    with pytest.raises(ValueError):
+        TrainingConfig.get_data_path('nonexistent_dataset')
+
+    # Test train/val/test split calculation
+    train_size, val_size, test_size = TrainingConfig.get_train_val_test_sizes(100)
+    assert train_size == 85, f"Expected train size 85, got {train_size}"
+    assert val_size == 5, f"Expected val size 5, got {val_size}"
+    assert test_size == 10, f"Expected test size 10, got {test_size}"
+
+    # Test loss curriculum returns weights dict
+    weights = TrainingConfig.get_loss_weights_for_epoch(0)
+    assert isinstance(weights, dict)
+    assert 'keypoint_2d' in weights
+
+    # Test learning rate curriculum
+    lr = TrainingConfig.get_learning_rate_for_epoch(0)
+    assert lr > 0
 
 @pytest.mark.slow
 def test_neural_smil_training_pipeline(capsys):
     """Test neural SMIL training pipeline with minimal configuration.
     
     This test is marked as slow and requires PyTorch dependencies.
-    Run with: pytest -m slow tests/pipeline_tests.py::test_neural_smil_training_pipeline
+    Run with: pytest -m slow tests/test_pipeline.py::test_neural_smil_training_pipeline
     """
     import tempfile
     import shutil
