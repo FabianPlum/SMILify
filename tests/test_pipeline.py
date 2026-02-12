@@ -101,7 +101,8 @@ def test_neural_smil_training_pipeline(capsys):
             '--dataset', 'test_textured',
             '--num-epochs', '2',  # Very minimal training for integration test
             '--batch-size', '4',  # Small batch size for testing
-            '--checkpoint', 'DISABLE_CHECKPOINT_LOADING'  # Disable checkpoint loading for test
+            '--checkpoint', 'DISABLE_CHECKPOINT_LOADING',  # Disable checkpoint loading for test
+            '--scale-trans-mode', 'entangled_with_betas'  # Compatible with test_textured dataset
         ], test_env)
     
     finally:
