@@ -24,20 +24,20 @@ Use the provided test script which handles environment activation automatically:
 conda activate pytorch3d
 
 # All tests (excluding slow tests)
-pytest tests/pipeline_tests.py -v -s
+pytest tests/test_pipeline.py -v -s
 
 # Specific test functions
-pytest tests/pipeline_tests.py::test_neural_smil_config_validation -v -s
-pytest tests/pipeline_tests.py::test_neural_smil_training_pipeline -v -s
+pytest tests/test_pipeline.py::test_neural_smil_config_validation -v -s
+pytest tests/test_pipeline.py::test_neural_smil_training_pipeline -v -s
 ```
 
 ### Including Slow Tests
 ```bash
 # Run all tests including slow ones
-pytest tests/pipeline_tests.py -v -s -m "slow or not slow"
+pytest tests/test_pipeline.py -v -s -m "slow or not slow"
 
 # Run only slow tests
-pytest tests/pipeline_tests.py -v -s -m "slow"
+pytest tests/test_pipeline.py -v -s -m "slow"
 ```
 
 ## Test Descriptions
@@ -93,12 +93,12 @@ For continuous integration, it's recommended to:
 
 1. **Run fast tests by default**:
    ```bash
-   pytest tests/pipeline_tests.py -v -m "not slow"
+   pytest tests/test_pipeline.py -v -m "not slow"
    ```
 
 2. **Run slow tests on scheduled builds or manual triggers**:
    ```bash
-   pytest tests/pipeline_tests.py -v -m "slow"
+   pytest tests/test_pipeline.py -v -m "slow"
    ```
 
 This approach ensures fast feedback for regular development while still validating the full pipeline periodically.

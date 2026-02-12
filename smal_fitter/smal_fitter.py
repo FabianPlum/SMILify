@@ -120,14 +120,16 @@ class SMALFitter(nn.Module):
             
         else:
             if config.ignore_hardcoded_body:
-                print("Using shape prior learned from 3D scanned models")
+                if config.DEBUG:
+                    print("Using shape prior learned from 3D scanned models")
                 try:
                     model_covs = config.dd["shape_cov"]
                     self.mean_betas = torch.FloatTensor(config.dd["shape_mean_betas"])[:config.N_BETAS].to(
                         device)
                     self.pose_prior = Prior(device)
                 except KeyError:
-                    print("WARNING: model_covs or shapedirs not found in config.dd")
+                    if config.DEBUG:
+                        print("WARNING: model_covs or shapedirs not found in config.dd")
                     model_covs = np.eye(1)
                     self.mean_betas = torch.FloatTensor([1.0]).to(device)
                     self.pose_prior = Prior(device)
@@ -354,7 +356,19 @@ class SMALFitter(nn.Module):
         self.betas = torch.nn.Parameter(torch.from_numpy(np.mean(beta_list, axis=0)).float().to(self.device))
         self.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.mean(scale_list, axis=0)).float().to(self.device))
 
-    def generate_visualization(self, image_exporter, apply_UE_transform=False, img_idx=0):
+    def generate_visualization(self, image_exporter, apply_UE_transform=False, img_idx=0, mesh_scale=None):
+        """
+        Generate visualization images with rendered mesh overlay.
+        
+        Args:
+            image_exporter: Image exporter instance for saving outputs
+            apply_UE_transform: If True, apply 10x scaling (Unreal Engine convention)
+            img_idx: Image index for naming
+            mesh_scale: Optional mesh scale factor (float or tensor). If provided,
+                       mesh is centered at root joint, scaled, then translated.
+                       This should match the scale used in training when
+                       allow_mesh_scaling is enabled.
+        """
         # rotation matrix here only used to produce alternative rotated view
         rot_matrix = torch.from_numpy(R.from_euler('y', 180.0, degrees=True).as_matrix()).float().to(self.device)
         for j in range(0, self.num_images, self.batch_size):
@@ -405,11 +419,31 @@ class SMALFitter(nn.Module):
                     # needed to align the model at the root joint and scale it to the replicAnt model size
                     verts = (verts - joints[:, 0, :]) * 10 + batch_params['trans'].unsqueeze(1)
                     joints = (joints - joints[:, 0, :]) * 10 + batch_params['trans'].unsqueeze(1)
+                elif mesh_scale is not None:
+                    # Apply mesh scaling (used when allow_mesh_scaling is enabled in training)
+                    # Center at root joint, scale, then translate - matches _render_keypoints_with_camera
+                    scale_val = mesh_scale
+                    if isinstance(scale_val, (int, float)):
+                        scale_val = torch.tensor([[scale_val]], device=self.device, dtype=torch.float32)
+                    else:
+                        # Ensure tensor is float32
+                        scale_val = scale_val.to(device=self.device, dtype=torch.float32)
+                        if scale_val.dim() == 0:
+                            scale_val = scale_val.unsqueeze(0).unsqueeze(0)
+                        elif scale_val.dim() == 1:
+                            scale_val = scale_val.unsqueeze(1)
+                    root_joint = joints[:, 0:1, :]
+                    verts = (verts - root_joint) * scale_val.unsqueeze(-1) + batch_params['trans'].unsqueeze(1)
+                    joints = (joints - root_joint) * scale_val.unsqueeze(-1) + batch_params['trans'].unsqueeze(1)
                 else:
                     verts = verts + batch_params['trans'].unsqueeze(1)
                     joints = joints + batch_params['trans'].unsqueeze(1)
 
                 canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
+                
+                # Ensure float32 for rendering (SMAL model can output float64 from some buffers)
+                verts = verts.float()
+                canonical_joints = canonical_joints.float()
 
                 rendered_silhouettes, rendered_joints, rendered_images = self.renderer(
                     verts, canonical_joints,
@@ -420,8 +454,8 @@ class SMALFitter(nn.Module):
 
                 # render image with camera rotated 180 degrees to provide a separate view
                 _, rev_joints, rev_images = self.renderer(
-                    (rot_matrix @ verts_mean.unsqueeze(-1)).squeeze(-1),
-                    (rot_matrix @ joints_mean.unsqueeze(-1)).squeeze(-1),
+                    (rot_matrix @ verts_mean.unsqueeze(-1)).squeeze(-1).float(),
+                    (rot_matrix @ joints_mean.unsqueeze(-1)).squeeze(-1).float(),
                     self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1), render_texture=True)
 
                 overlay_image = (rendered_images * 0.5) + (rgb_imgs * 0.5)

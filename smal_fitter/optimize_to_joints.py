@@ -59,7 +59,7 @@ def main():
     args = parser.parse_args()
 
     if args.test:
-        from tests import test_config as config
+        from tests import config_test as config
     else:
         import config
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"

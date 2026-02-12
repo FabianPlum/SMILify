@@ -12,6 +12,10 @@ from typing import Dict, Any, Optional, Tuple, List
 class TrainingConfig:
     """Configuration class for SMIL training."""
     
+    # Camera head initialization
+    # If True, use GT camera params (when available) as base and predict deltas.
+    use_gt_camera_init = True
+    
     # Dataset configuration
     # TODO: remove all that were used for debugging only during development
     DATA_PATHS = {
@@ -35,12 +39,12 @@ class TrainingConfig:
         'SMILyMouseSYNTH': "SMILyMouseSYNTH.h5",
         'RealSMILyMouse': "/home/fabi/dev/SMILify/RealSMILyMouse.h5",
         'RealSMILyMouseFalkner': "RealSMILyMouseFalknerFROM3D.h5",
-        'RealSMILyMouseFalknerFROM3D_no_crop': "RealSMILyMouseFalknerFROM3D_no_crop.h5"
-
+        'RealSMILyMouseFalknerFROM3D_no_crop': "RealSMILyMouseFalknerFROM3D_no_crop.h5",
+        'RealSMILyMouseFalknerREAL3D': "RealSMILyMouseFalknerFROM3D_no_crop_REAL3D.h5"
     }
     
     # Default dataset to use (legacy single-dataset mode)
-    DEFAULT_DATASET = 'RealSMILyMouseFalkner'#'bbox_center_STICKY' #'SMILySLEAPySTICKS-cropped'
+    DEFAULT_DATASET = 'RealSMILyMouseFalknerFROM3D_no_crop'
     
     # Multi-dataset configuration for combined training
     # Set use_multi_dataset=True to enable training with multiple datasets
@@ -113,6 +117,15 @@ class TrainingConfig:
         'test_size': 0.1,      # 10% for testing
         'val_size': 0.05,      # 5% for validation
         # Training size is automatically: 1 - test_size - val_size = 0.85 (85%)
+        
+        # Dataset fraction for large datasets: fraction of training data to use per epoch
+        # If 1.0, use full training dataset each epoch (default behavior)
+        # If < 1.0 (e.g., 0.1), randomly sample that fraction of training examples at the
+        # start of each epoch. Different samples are drawn each epoch for diversity.
+        # Validation and test sets are NOT affected - they always use full data.
+        # Note: The random sampling is deterministic per epoch (uses epoch as seed),
+        # ensuring all DDP processes use the same subset.
+        'dataset_fraction': 0.5,
     }
     
     # Training hyperparameters (AniMer-style conservative settings)
@@ -123,10 +136,10 @@ class TrainingConfig:
         'weight_decay': 1e-4,  # Add weight decay for AdamW
         'seed': 1234,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': 'checkpoints/checkpoint_epoch_169.pth', #None, # Path to checkpoint file to resume training from (None for training from scratch)
-        'num_workers': 16,  # Number of data loading workers (reduced to prevent tkinter issues)
+        'resume_checkpoint': None, # Path to checkpoint file to resume training from (None for training from scratch)
+        'num_workers': 8,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
-        'prefetch_factor': 8,  # Prefetch batches
+        'prefetch_factor': 4,  # Prefetch batches
     }
     
     # Model configuration
@@ -166,7 +179,7 @@ class TrainingConfig:
     
     # Scale and Translation Beta Handling Configuration
     SCALE_TRANS_BETA_CONFIG = {
-        'mode': 'ignore',  # Options: 'ignore', 'separate', 'entangled_with_betas'
+        'mode': 'entangled_with_betas',  # Options: 'ignore', 'separate', 'entangled_with_betas'
         
         # Mode-specific configurations
         'ignore': {
@@ -179,7 +192,7 @@ class TrainingConfig:
         },
         
         'separate': {
-            'use_pca_transformation': True,
+            'use_pca_transformation': False,
             'transformer_scale_factors': {
                 'trans_scale_factor': 0.01
             },
@@ -193,65 +206,184 @@ class TrainingConfig:
             'use_unified_betas': True,  # Same betas for shape, scale, and trans
             'loss_weights': {
                 'betas': 0.0005,  # Single weight for all three components
-                'log_beta_scales': 0.0,  # Disabled
-                'betas_trans': 0.0       # Disabled
+                'log_beta_scales': 0.01,  # Disabled
+                'betas_trans': 0.01       # Disabled
             }
         }
+    }
+    
+    # Global Mesh Scaling Configuration
+    # This allows the network to predict a single global scale factor that scales
+    # the entire mesh uniformly (similar to how UE scaling applies a fixed 10x).
+    # This is useful when 3D ground truth data has a different scale than the model.
+    # The scale is trained IMPLICITLY through 3D keypoint losses - no supervision needed.
+    MESH_SCALING_CONFIG = {
+        'allow_mesh_scaling': True,  # If True, network predicts a global mesh scale
+        'init_mesh_scale': 1.0,  # Initial scale value (1.0 = no scaling)
+        'use_log_scale': True,  # Predict log(scale) for numerical stability
+        # Note: mesh_scale is trained implicitly via 3D keypoint losses (when available).
+        # The 3D ground truth naturally constrains the scale to the correct value.
+    }
+    
+    # Joint Importance Weighting Configuration
+    # Allows certain joints to have higher weight in 2D and 3D keypoint losses.
+    # This is crucial when learning joint angles implicitly from keypoint supervision,
+    # as it incentivizes the model to prioritize getting specific joints correct.
+    JOINT_IMPORTANCE_CONFIG = {
+        'enabled': True,  # Set to True to enable per-joint importance weighting
+        
+        # List of joint names (from the SMAL model pkl file) to emphasize.
+        # These joints will receive higher loss weight in 2D and 3D keypoint losses.
+        # Example for mouse: ['nose', 'l_ear', 'r_ear', 'tail_tip']
+        # Example for ant: ['b_h', 'ma_l', 'ma_r', 'b_a_5']
+        # Check config.joint_names for available names in your model.
+        'important_joint_names': ["Nose", "paw_L_tip", "paw_R_tip", "Foot_L_tip", "Foot_R_tip", "Tail_07"],
+        
+        # Weight multiplier applied to important joints.
+        # Other joints receive weight 1.0, important joints receive this value.
+        # Higher values = stronger emphasis on these joints.
+        # Typical range: 2.0 - 10.0
+        'weight_multiplier': 10.0,
     }
     
     # Loss curriculum configuration (AniMer-style conservative weights)
     LOSS_CURRICULUM = {
         # Base loss weights (applied throughout training) - AniMer-style conservative
         'base_weights': {
-            'global_rot': 0.001,     # AniMer: 0.001
+            'global_rot': 0.0,     # AniMer: 0.001
             'joint_rot': 0.001,      # AniMer: 0.001  
             'betas': 0.0005,         # AniMer: 0.0005
             'trans': 0.0005,         # AniMer: 0.0005
             'fov': 0.001,
             'cam_rot': 0.01,
-            'cam_trans': 0.001,
+            'cam_trans': 0.01,
             'log_beta_scales': 0.0005,  # Conservative
             'betas_trans': 0.0005,      # Conservative
-            'keypoint_2d': 0.0,        # AniMer: 0.01
-            'keypoint_3d': 0.0,        # 3D keypoint loss - start at zero
-            'silhouette': 0.0           # Start at zero
+            'keypoint_2d': 0.1,        # AniMer: 0.01
+            'keypoint_3d': 0.25,        # 3D keypoint loss - start at zero
+            'silhouette': 0.0,          # Start at zero
+            'joint_angle_regularization': 0.001,  # Penalty for large joint angles (excluding root)
+            'limb_scale_regularization': 0.01,    # Penalty for deviations from scale=1 (log_beta_scales)
+            'limb_trans_regularization': 1      # Heavy penalty for translation changes (betas_trans) - prevents artifacts
         },
         
         # Curriculum stages: (epoch_threshold, weight_updates) - AniMer-style conservative
         'curriculum_stages': [
-            # Stage 1: Introduce keypoint losses gradually (AniMer-style)
+            (1, {
+                'joint_angle_regularization': 0.01,
+                'limb_scale_regularization': 0.1,   # Start with higher penalty
+                'limb_trans_regularization': 1     # Very high penalty for translation early on, essentially prohibit any translation at thsi stage
+            }),
             (10, {
-                'cam_trans': 0.00001, # decrease cam_trans once suitable extrinsics are found otherwise the error is overpowering
-                'joint_rot': 0.002,
+                'keypoint_2d': 0.1,    # AniMer: 0.01
+                'joint_angle_regularization': 0.005,
+                'limb_scale_regularization': 0.05,
+                'limb_trans_regularization': 1
             }),
-            # Stage 2: Introduce keypoint losses gradually (AniMer-style)
-            (20, {
-                'cam_trans': 0.00001,
-                'joint_rot': 0.001,
-                'keypoint_2d': 0.01,    # AniMer: 0.01
-                'keypoint_3d': 0.005,   # 
-                'silhouette': 0.01,
+            (25, {
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0025,
+                'limb_scale_regularization': 0.02,
+                'limb_trans_regularization': 1
             }),
-            (80, {
-                'cam_trans': 0.00001,
-                'joint_rot': 0.001,
-                'keypoint_2d': 0.5,    # AniMer: 0.01
-                'keypoint_3d': 0.005,   # 
-                'silhouette': 0.01,
+            (35, {
+                'keypoint_3d': 1,    # AniMer: 0.01
+                'joint_angle_regularization': 0.001,
+                'limb_scale_regularization': 0.01,
+                'limb_trans_regularization': 1
             }),
-            (120, {
-                'cam_trans': 0.00001,
-                'joint_rot': 0.001,
-                'keypoint_2d': 0.01,    # AniMer: 0.01
-                'keypoint_3d': 0.002,   # 
-                'silhouette': 0.01,
+            (45, {
+                'keypoint_3d': 1,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0001,
+                'limb_scale_regularization': 0.005,  # Keep at reasonable level to allow scales while preventing extreme values
+                'limb_trans_regularization': 1
             }),
-            (200, {
-                'cam_trans': 0.00001,
-                'joint_rot': 0.001,
-                'keypoint_2d': 0.01,    # AniMer: 0.01
-                'keypoint_3d': 0.002,   # 
-                'silhouette': 0.01,
+            (50, {
+                'keypoint_3d': 2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.00005,
+                'limb_scale_regularization': 0.001,  # Gradually reduce but keep meaningful
+                'limb_trans_regularization': 0.5
+            }),
+            (100, {
+                'keypoint_3d': 2,    # AniMer: 0.01
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.00001,
+                'limb_scale_regularization': 0.0000001,  # Keep small but non-zero to prevent extreme scales
+                'limb_trans_regularization': 0.1
+            }),
+            (300, {
+                'keypoint_3d': 2,    # AniMer: 0.01
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.00001,
+                'limb_scale_regularization': 0.0000001,  # Keep small but non-zero to prevent extreme scales
+                'limb_trans_regularization': 0.1,
+                'fov': 0.0000001, # reduce influence to allow for looser camera parameters
+                'cam_rot': 0.00000001, # reduce influence to allow for looser camera parameters
+                'cam_trans': 0.00000001 # reduce influence to allow for looser camera parameters
+            }),
+
+            (400, {
+                'keypoint_3d': 2,    # AniMer: 0.01
+                'keypoint_2d': 0.4,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0001,
+                'limb_scale_regularization': 0.00001,  # Keep small but non-zero to prevent extreme scales
+                'limb_trans_regularization': 0.1,
+                'fov': 0.0000001, # reduce influence to allow for looser camera parameters
+                'cam_rot': 0.00000001, # reduce influence to allow for looser camera parameters
+                'cam_trans': 0.00000001 # reduce influence to allow for looser camera parameters
+            }),
+
+            (460, {
+                'keypoint_3d': 2,    # AniMer: 0.01
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.00001,
+                'limb_scale_regularization': 0.001,  # Keep small but non-zero to prevent extreme scales
+                'limb_trans_regularization': 0.1,
+                'fov': 0.0000001, # reduce influence to allow for looser camera parameters
+                'cam_rot': 0.00000001, # reduce influence to allow for looser camera parameters
+                'cam_trans': 0.00000001 # reduce influence to allow for looser camera parameters
+            }),
+            (490, {
+                'keypoint_3d': 2,    # AniMer: 0.01
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.000001,
+                'limb_scale_regularization': 0.0001,  # Keep small but non-zero to prevent extreme scales
+                'limb_trans_regularization': 0.1,
+                'fov': 0.0000001, # reduce influence to allow for looser camera parameters
+                'cam_rot': 0.00000001, # reduce influence to allow for looser camera parameters
+                'cam_trans': 0.00000001 # reduce influence to allow for looser camera parameters
+            }),
+            (500, {
+                'keypoint_3d': 20,    # AniMer: 0.01
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0000001,
+                'limb_scale_regularization': 0.00001,  # Keep small but non-zero to prevent extreme scales
+                'limb_trans_regularization': 0.1,
+                'fov': 0.000001, # reduce influence to allow for looser camera parameters
+                'cam_rot': 0.0000001, # reduce influence to allow for looser camera parameters
+                'cam_trans': 0.0000001 # reduce influence to allow for looser camera parameters
+            }),
+
+            (560, {
+                'keypoint_3d': 20,    # AniMer: 0.01
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0000001,
+                'limb_scale_regularization': 0.001,  # Keep small but non-zero to prevent extreme scales
+                'limb_trans_regularization': 1.0,
+                'fov': 0.000001, # reduce influence to allow for looser camera parameters
+                'cam_rot': 0.0000001, # reduce influence to allow for looser camera parameters
+                'cam_trans': 0.0000001 # reduce influence to allow for looser camera parameters
+            }),
+
+            (575, {
+                'keypoint_3d': 20,    # AniMer: 0.01
+                'keypoint_2d': 0.2,    # AniMer: 0.01
+                'joint_angle_regularization': 0.0000001,
+                'limb_scale_regularization': 0.0025,  # Keep small but non-zero to prevent extreme scales
+                'limb_trans_regularization': 1.0,
+                'fov': 0.000001, # reduce influence to allow for looser camera parameters
+                'cam_rot': 0.0000001, # reduce influence to allow for looser camera parameters
+                'cam_trans': 0.0000001 # reduce influence to allow for looser camera parameters
             })
         ]
     }
@@ -259,35 +391,45 @@ class TrainingConfig:
     # Learning rate curriculum configuration (AniMer-style conservative)
     LEARNING_RATE_CURRICULUM = {
         # Base learning rate (applied at epoch 0) - AniMer-style
-        'base_learning_rate': 1e-4, #previous value: 1.25e-6
+        'base_learning_rate': 5e-5, #previous value: 1.25e-6
         
         # Learning rate stages: (epoch_threshold, learning_rate) - Very conservative
         'lr_stages': [
-            (5, 1e-5),      # 1e-5
             # Stage 1: Slight reduction for fine-tuning
-            (40, 1e-6),      # 1e-5
+            (10, 3e-5),      # 1e-5
+
+            # Stage 1: Slight reduction for fine-tuning
+            (20, 2e-5),      # 1e-5
             
             # Stage 2: Further reduce
-            (60, 5e-7),      # 5e-7
-            
-            # Stage 3: Very low learning rate for final convergence
-            (80, 5e-7),      # 1e-7
-
-            # TRAIN UNTIL HERE WITH SYNTH ONLY, THEN SWITCH TO REAL DATA
-            # THE HIGH LEARNING RATE IS NEEDED TO WEIGH THE 2D KEYPOINTS HIGH ENOUGH
-            (125, 1e-4),      # 1e-7
+            (60, 1e-5),      # 5e-7
 
             # Stage 3: Very low learning rate for final convergence
-            (200, 5e-5),      # 1e-7
+            (100, 1e-5),      # 1e-7
 
             # Stage 3: Very low learning rate for final convergence
-            (250, 1e-5),      # 1e-7
+            (150, 2e-6),      # 1e-7
 
             # Stage 3: Very low learning rate for final convergence
-            (300, 2e-6),      # 1e-7
+            (200, 2e-6),      # 1e-7
+
+            # Stage 3: Very low learning rate for final convergence
+            (250, 1e-6),      # 1e-7
+
+            (300, 1e-5),      # 1e-7
+
+            (350, 1e-6),      # 1e-7
+
+            (400, 1e-5),      # 1e-7
+
+            (475, 1e-6),      # 1e-7
+
+            (490, 5e-7),      # 1e-7
 
             # It's save to use high learning rates when using ONLY 2D loss here!
-            (500, 1e-6),
+            (500, 5e-6),
+
+            (550, 1e-6),
 
             # It's save to use high learning rates when using ONLY 2D loss here!
             (718, 1e-5)      # 1e-5
@@ -301,8 +443,8 @@ class TrainingConfig:
         'visualizations_dir': 'visualizations',
         'train_visualizations_dir': 'visualizations_train',
         'save_checkpoint_every': 10,        # Save checkpoint every N epochs
-        'generate_visualizations_every': 5, # Generate visualizations every N epochs
-        'plot_history_every': 5,          # Plot training history every N epochs
+        'generate_visualizations_every': 10, # Generate visualizations every N epochs
+        'plot_history_every': 10,          # Plot training history every N epochs
         'num_visualization_samples': 10,    # Number of samples to visualize
     }
     
@@ -451,6 +593,49 @@ class TrainingConfig:
     def get_scale_trans_mode(cls):
         """Get current scale and translation mode."""
         return cls.SCALE_TRANS_BETA_CONFIG['mode']
+    
+    @classmethod
+    def get_mesh_scaling_config(cls):
+        """Get mesh scaling configuration."""
+        return cls.MESH_SCALING_CONFIG
+    
+    @classmethod
+    def is_mesh_scaling_enabled(cls) -> bool:
+        """Check if global mesh scaling is enabled."""
+        return cls.MESH_SCALING_CONFIG.get('allow_mesh_scaling', False)
+    
+    @classmethod
+    def get_joint_importance_config(cls) -> Dict[str, Any]:
+        """Get joint importance weighting configuration."""
+        return cls.JOINT_IMPORTANCE_CONFIG
+    
+    @classmethod
+    def is_joint_importance_enabled(cls) -> bool:
+        """Check if joint importance weighting is enabled."""
+        config = cls.JOINT_IMPORTANCE_CONFIG
+        return (config.get('enabled', False) and 
+                len(config.get('important_joint_names', [])) > 0 and
+                config.get('weight_multiplier', 1.0) != 1.0)
+    
+    @classmethod
+    def get_important_joint_names(cls) -> List[str]:
+        """Get list of joint names that should have higher importance."""
+        return cls.JOINT_IMPORTANCE_CONFIG.get('important_joint_names', [])
+    
+    @classmethod
+    def get_joint_importance_multiplier(cls) -> float:
+        """Get the weight multiplier for important joints."""
+        return cls.JOINT_IMPORTANCE_CONFIG.get('weight_multiplier', 1.0)
+    
+    @classmethod
+    def get_dataset_fraction(cls) -> float:
+        """
+        Get the fraction of training data to use per epoch.
+        
+        Returns:
+            Float between 0 and 1 (1.0 = full dataset)
+        """
+        return cls.SPLIT_CONFIG.get('dataset_fraction', 1.0)
     
     @classmethod
     def is_multi_dataset_enabled(cls) -> bool:
