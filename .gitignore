@@ -172,6 +172,9 @@ venv.bak/
 # mypy
 .mypy_cache/
 
+# benchmark outputs
+benchmark_*/
+
 # custom
 dev_notes/
 checkpoints/
