@@ -120,14 +120,16 @@ class SMALFitter(nn.Module):
             
         else:
             if config.ignore_hardcoded_body:
-                print("Using shape prior learned from 3D scanned models")
+                if config.DEBUG:
+                    print("Using shape prior learned from 3D scanned models")
                 try:
                     model_covs = config.dd["shape_cov"]
                     self.mean_betas = torch.FloatTensor(config.dd["shape_mean_betas"])[:config.N_BETAS].to(
                         device)
                     self.pose_prior = Prior(device)
                 except KeyError:
-                    print("WARNING: model_covs or shapedirs not found in config.dd")
+                    if config.DEBUG:
+                        print("WARNING: model_covs or shapedirs not found in config.dd")
                     model_covs = np.eye(1)
                     self.mean_betas = torch.FloatTensor([1.0]).to(device)
                     self.pose_prior = Prior(device)
