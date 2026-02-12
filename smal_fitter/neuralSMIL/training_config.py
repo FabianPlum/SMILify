@@ -41,11 +41,10 @@ class TrainingConfig:
         'RealSMILyMouseFalkner': "RealSMILyMouseFalknerFROM3D.h5",
         'RealSMILyMouseFalknerFROM3D_no_crop': "RealSMILyMouseFalknerFROM3D_no_crop.h5",
         'RealSMILyMouseFalknerREAL3D': "RealSMILyMouseFalknerFROM3D_no_crop_REAL3D.h5"
-
     }
     
     # Default dataset to use (legacy single-dataset mode)
-    DEFAULT_DATASET = 'RealSMILyMouseFalknerFROM3D_no_crop'#'bbox_center_STICKY' #'SMILySLEAPySTICKS-cropped'
+    DEFAULT_DATASET = 'RealSMILyMouseFalknerFROM3D_no_crop'
     
     # Multi-dataset configuration for combined training
     # Set use_multi_dataset=True to enable training with multiple datasets
@@ -131,13 +130,13 @@ class TrainingConfig:
     
     # Training hyperparameters (AniMer-style conservative settings)
     TRAINING_PARAMS = {
-        'batch_size': 1,
+        'batch_size': 8,
         'num_epochs': 1000,
         'learning_rate': 1.25e-6,  # AniMer-style very conservative learning rate
         'weight_decay': 1e-4,  # Add weight decay for AdamW
         'seed': 1234,
         'rotation_representation': '6d',  # '6d' or 'axis_angle'
-        'resume_checkpoint': 'multiview_checkpoints/checkpoint_epoch_0574.pth', # Path to checkpoint file to resume training from (None for training from scratch)
+        'resume_checkpoint': None, # Path to checkpoint file to resume training from (None for training from scratch)
         'num_workers': 8,  # Number of data loading workers (reduced to prevent tkinter issues)
         'pin_memory': True,  # Faster GPU transfer
         'prefetch_factor': 4,  # Prefetch batches
@@ -180,7 +179,7 @@ class TrainingConfig:
     
     # Scale and Translation Beta Handling Configuration
     SCALE_TRANS_BETA_CONFIG = {
-        'mode': 'separate',  # Options: 'ignore', 'separate', 'entangled_with_betas'
+        'mode': 'entangled_with_betas',  # Options: 'ignore', 'separate', 'entangled_with_betas'
         
         # Mode-specific configurations
         'ignore': {
@@ -207,8 +206,8 @@ class TrainingConfig:
             'use_unified_betas': True,  # Same betas for shape, scale, and trans
             'loss_weights': {
                 'betas': 0.0005,  # Single weight for all three components
-                'log_beta_scales': 0.0,  # Disabled
-                'betas_trans': 0.0       # Disabled
+                'log_beta_scales': 0.01,  # Disabled
+                'betas_trans': 0.01       # Disabled
             }
         }
     }
@@ -343,10 +342,7 @@ class TrainingConfig:
                 'fov': 0.0000001, # reduce influence to allow for looser camera parameters
                 'cam_rot': 0.00000001, # reduce influence to allow for looser camera parameters
                 'cam_trans': 0.00000001 # reduce influence to allow for looser camera parameters
-            })
-
-            ,
-
+            }),
             (490, {
                 'keypoint_3d': 2,    # AniMer: 0.01
                 'keypoint_2d': 0.2,    # AniMer: 0.01
