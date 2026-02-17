@@ -2806,17 +2806,17 @@ Examples:
                 expected_mode='multiview',
             )
 
-            # Apply legacy overrides (SMAL_FILE / SHAPE_FAMILY).
+            # Apply smal_model overrides (SMAL_FILE / SHAPE_FAMILY).
             # apply_smal_file_override re-reads the pickle and patches config.dd,
             # config.N_POSE, config.N_BETAS, config.joint_names, etc.
-            if getattr(new_config, "legacy", None) is not None:
-                if new_config.legacy.smal_file:
+            if getattr(new_config, "smal_model", None) is not None:
+                if new_config.smal_model.smal_file:
                     apply_smal_file_override(
-                        new_config.legacy.smal_file,
-                        shape_family=new_config.legacy.shape_family,
+                        new_config.smal_model.smal_file,
+                        shape_family=new_config.smal_model.shape_family,
                     )
-                elif new_config.legacy.shape_family is not None:
-                    config.SHAPE_FAMILY = int(new_config.legacy.shape_family)
+                elif new_config.smal_model.shape_family is not None:
+                    config.SHAPE_FAMILY = int(new_config.smal_model.shape_family)
 
             # Sync scale_trans_mode to legacy TrainingConfig
             TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = new_config.scale_trans_beta.mode
@@ -2824,13 +2824,13 @@ Examples:
             # Convert to legacy flat dict for existing main()
             training_config = new_config.to_multiview_legacy_dict()
             training_config['shape_family'] = (
-                int(new_config.legacy.shape_family)
-                if getattr(new_config, "legacy", None) is not None and new_config.legacy.shape_family is not None
+                int(new_config.smal_model.shape_family)
+                if getattr(new_config, "smal_model", None) is not None and new_config.smal_model.shape_family is not None
                 else config.SHAPE_FAMILY
             )
             training_config['smal_file'] = (
-                new_config.legacy.smal_file
-                if getattr(new_config, "legacy", None) is not None and new_config.legacy.smal_file
+                new_config.smal_model.smal_file
+                if getattr(new_config, "smal_model", None) is not None and new_config.smal_model.smal_file
                 else getattr(config, 'SMAL_FILE', None)
             )
             training_config['scale_trans_config'] = TrainingConfig.get_scale_trans_config()
