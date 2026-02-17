@@ -178,6 +178,9 @@ def load_config(
     # Merge JSON overrides
     if json_config:
         clean = {k: v for k, v in json_config.items() if k != 'mode'}
+        # Support "smal_model" as alias for "legacy" (example configs use smal_model)
+        if 'smal_model' in clean and clean['smal_model'] is not None:
+            clean['legacy'] = clean.pop('smal_model')
         _deep_merge_into_dataclass(config, clean)
 
     # Merge CLI overrides (highest priority)
