@@ -37,6 +37,7 @@ from smal_fitter import SMALFitter
 from Unreal2Pytorch3D import return_placeholder_data
 import config
 from training_config import TrainingConfig
+from configs import SingleViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
 from memory_optimization import MemoryOptimizer, recommend_training_config, MixedPrecisionTrainer
 
 # Import SLEAP dataset to enable patching of UnifiedSMILDataset
@@ -1163,11 +1164,14 @@ def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=Fa
 
 
 def save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
-                   train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss, 
-                   checkpoint_path):
+                   train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
+                   checkpoint_path, checkpoint_config=None):
     """
     Save training checkpoint with complete state.
-    
+
+    When checkpoint_config is provided, it is saved so run_inference can load
+    model config, scale_trans, and shape_family from the checkpoint.
+
     Args:
         epoch: Current epoch number
         model: SMILImageRegressor model
@@ -1182,8 +1186,10 @@ def save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_e
         val_param_errors: Full validation parameter error history
         best_val_loss: Best validation loss so far
         checkpoint_path: Path to save checkpoint
+        checkpoint_config: Optional dict with 'model_config', 'training_params' (at least
+            'rotation_representation'), 'scale_trans_mode', 'scale_trans_config', 'shape_family'.
     """
-    torch.save({
+    state = {
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
@@ -1196,7 +1202,10 @@ def save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_e
         'train_param_errors_history': train_param_errors,
         'val_param_errors_history': val_param_errors,
         'best_val_loss': best_val_loss,
-    }, checkpoint_path)
+    }
+    if checkpoint_config is not None:
+        state['config'] = checkpoint_config
+    torch.save(state, checkpoint_path)
 
 
 def main(dataset_name=None, checkpoint_path=None, config_override=None):
@@ -1238,6 +1247,18 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     training_params = training_config['training_params']
     model_config = training_config['model_config']
     output_config = training_config['output_config']
+
+    # Build config to save in checkpoints so run_inference can load without training_config
+    checkpoint_config = {
+        'model_config': model_config.copy(),
+        'training_params': {
+            'rotation_representation': training_params.get('rotation_representation', '6d'),
+        },
+        'scale_trans_mode': TrainingConfig.get_scale_trans_mode(),
+        'scale_trans_config': TrainingConfig.get_scale_trans_config(),
+        'shape_family': config.SHAPE_FAMILY,
+        'smal_file': getattr(config, 'SMAL_FILE', None),
+    }
     
     # Use checkpoint from config if not provided as argument
     if checkpoint_path is None:
@@ -1747,7 +1768,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                 model_to_save = model.module if is_distributed else model
                 save_checkpoint(epoch, model_to_save, optimizer, train_loss, val_loss, train_param_err, val_param_err,
                               train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
-                              best_model_path)
+                              best_model_path, checkpoint_config=checkpoint_config)
                 print(f'  New best model saved with validation loss: {val_loss:.6f}')
             elif not is_distributed or rank == 0:
                 print(f'  New best validation loss: {val_loss:.6f} (checkpoint saving disabled in test mode)')
@@ -1760,7 +1781,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                 model_to_save = model.module if is_distributed else model
                 save_checkpoint(epoch, model_to_save, optimizer, train_loss, val_loss, train_param_err, val_param_err,
                               train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
-                              checkpoint_path_save)
+                              checkpoint_path_save, checkpoint_config=checkpoint_config)
                 print(f'  Checkpoint saved at epoch {epoch}')
             else:
                 print(f'  Checkpoint saving disabled in test mode (epoch {epoch})')
@@ -1841,6 +1862,9 @@ if __name__ == "__main__":
                        help='Backbone network to use (overrides config default)')
     parser.add_argument('--data_path', type=str, default=None,
                        help='Path to dataset (overrides config default). Can be a directory or HDF5 file.')
+    parser.add_argument('--config', type=str, default=None,
+                       help='Path to JSON config file (must include "mode": "singleview"). '
+                            'See configs/examples/singleview_baseline.json for a template.')
     parser.add_argument('--num-gpus', type=int, default=1,
                        help='Number of GPUs to use for training (default: 1, ignored when using torchrun)')
     parser.add_argument('--master-port', type=str, default=None,
@@ -1849,31 +1873,95 @@ if __name__ == "__main__":
                        choices=['ignore', 'separate', 'entangled_with_betas'],
                        help='Scale/translation beta mode (overrides config default)')
     args = parser.parse_args()
-    
-    # Create config override dictionary for any provided arguments
-    config_override = {}
-    if args.seed is not None or args.rotation_representation is not None or \
-       args.batch_size is not None or args.learning_rate is not None or args.num_epochs is not None or args.backbone is not None or \
-       args.data_path is not None:
-        config_override['training_params'] = {}
-        if args.seed is not None:
-            config_override['training_params']['seed'] = args.seed
-        if args.rotation_representation is not None:
-            config_override['training_params']['rotation_representation'] = args.rotation_representation
-        if args.batch_size is not None:
-            config_override['training_params']['batch_size'] = args.batch_size
-        if args.learning_rate is not None:
-            config_override['training_params']['learning_rate'] = args.learning_rate
-        if args.num_epochs is not None:
-            config_override['training_params']['num_epochs'] = args.num_epochs
-        if args.backbone is not None:
-            config_override['model_config'] = {'backbone_name': args.backbone}
-        if args.data_path is not None:
-            config_override['data_path'] = args.data_path
 
-    # Apply scale_trans_mode override directly to TrainingConfig
-    if args.scale_trans_mode is not None:
-        TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = args.scale_trans_mode
+    # ---------------------------------------------------------------
+    # Configuration loading: new JSON config system or legacy CLI args
+    # ---------------------------------------------------------------
+    config_override = {}
+
+    if args.config is not None:
+        # New config system: load from JSON, apply CLI overrides
+        cli_overrides = {}
+        if args.seed is not None:
+            cli_overrides['training'] = cli_overrides.get('training', {})
+            cli_overrides['training']['seed'] = args.seed
+        if args.rotation_representation is not None:
+            cli_overrides['training'] = cli_overrides.get('training', {})
+            cli_overrides['training']['rotation_representation'] = args.rotation_representation
+        if args.batch_size is not None:
+            cli_overrides['training'] = cli_overrides.get('training', {})
+            cli_overrides['training']['batch_size'] = args.batch_size
+        if args.learning_rate is not None:
+            cli_overrides['optimizer'] = cli_overrides.get('optimizer', {})
+            cli_overrides['optimizer']['learning_rate'] = args.learning_rate
+        if args.num_epochs is not None:
+            cli_overrides['training'] = cli_overrides.get('training', {})
+            cli_overrides['training']['num_epochs'] = args.num_epochs
+        if args.backbone is not None:
+            cli_overrides['model'] = cli_overrides.get('model', {})
+            cli_overrides['model']['backbone_name'] = args.backbone
+        if args.data_path is not None:
+            cli_overrides['dataset'] = cli_overrides.get('dataset', {})
+            cli_overrides['dataset']['data_path'] = args.data_path
+        if args.scale_trans_mode is not None:
+            cli_overrides['scale_trans_beta'] = cli_overrides.get('scale_trans_beta', {})
+            cli_overrides['scale_trans_beta']['mode'] = args.scale_trans_mode
+
+        new_config = load_config(
+            config_file=args.config,
+            cli_overrides=cli_overrides,
+            expected_mode='singleview',
+        )
+
+        # Apply legacy overrides (SMAL_FILE / SHAPE_FAMILY).
+        # apply_smal_file_override re-reads the pickle and patches config.dd,
+        # config.N_POSE, config.N_BETAS, config.joint_names, etc.
+        if getattr(new_config, "legacy", None) is not None:
+            if new_config.legacy.smal_file:
+                apply_smal_file_override(
+                    new_config.legacy.smal_file,
+                    shape_family=new_config.legacy.shape_family,
+                )
+            elif new_config.legacy.shape_family is not None:
+                config.SHAPE_FAMILY = int(new_config.legacy.shape_family)
+
+        # Sync scale_trans_mode to legacy TrainingConfig (still read by some code paths)
+        TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = new_config.scale_trans_beta.mode
+
+        # Convert to legacy dict format for existing main()
+        config_override = new_config.to_legacy_dict()
+
+        # Save resolved config for reproducibility
+        os.makedirs(new_config.output.checkpoint_dir, exist_ok=True)
+        save_config_json(new_config, os.path.join(new_config.output.checkpoint_dir, 'config.json'))
+
+        print(f"Loaded config from: {args.config}")
+        print(f"Resolved config saved to: {os.path.join(new_config.output.checkpoint_dir, 'config.json')}")
+
+    else:
+        # Legacy config flow: build config_override from CLI args
+        if args.seed is not None or args.rotation_representation is not None or \
+           args.batch_size is not None or args.learning_rate is not None or args.num_epochs is not None or args.backbone is not None or \
+           args.data_path is not None:
+            config_override['training_params'] = {}
+            if args.seed is not None:
+                config_override['training_params']['seed'] = args.seed
+            if args.rotation_representation is not None:
+                config_override['training_params']['rotation_representation'] = args.rotation_representation
+            if args.batch_size is not None:
+                config_override['training_params']['batch_size'] = args.batch_size
+            if args.learning_rate is not None:
+                config_override['training_params']['learning_rate'] = args.learning_rate
+            if args.num_epochs is not None:
+                config_override['training_params']['num_epochs'] = args.num_epochs
+            if args.backbone is not None:
+                config_override['model_config'] = {'backbone_name': args.backbone}
+            if args.data_path is not None:
+                config_override['data_path'] = args.data_path
+
+        # Apply scale_trans_mode override directly to TrainingConfig
+        if args.scale_trans_mode is not None:
+            TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = args.scale_trans_mode
 
     # Get master port from args or environment variable
     master_port = args.master_port or os.environ.get('MASTER_PORT', '12345')

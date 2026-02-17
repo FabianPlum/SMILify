@@ -359,19 +359,44 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
         # Load checkpoint
         checkpoint = torch.load(checkpoint_path, map_location=device)
         print("Checkpoint loaded successfully")
-        
-        # Use training configuration as base - this contains the correct model settings
-        print("Using training configuration from training_config.py")
-        training_config = TrainingConfig.get_all_config()
-        model_config = training_config['model_config'].copy()
-        rotation_representation = training_config['training_params']['rotation_representation']
-        scale_trans_mode = TrainingConfig.get_scale_trans_mode()
-        
-        print(f"Configuration from training_config.py:")
+
+        # Prefer config from checkpoint so inference matches training; fall back to training_config if missing
+        ckpt_config = checkpoint.get("config", {})
+        training_config_fallback = TrainingConfig.get_all_config()
+        fallback_model = training_config_fallback["model_config"].copy()
+        fallback_params = training_config_fallback["training_params"]
+
+        if ckpt_config:
+            model_config = {**fallback_model, **ckpt_config.get("model_config", {})}
+            rotation_representation = (
+                (ckpt_config.get("training_params") or {}).get("rotation_representation")
+                or fallback_params.get("rotation_representation", "6d")
+            )
+            scale_trans_mode = ckpt_config.get("scale_trans_mode") or TrainingConfig.get_scale_trans_mode()
+            shape_family = ckpt_config.get("shape_family", config.SHAPE_FAMILY)
+            config_source = "checkpoint (fallback: training_config for missing keys)"
+        else:
+            model_config = fallback_model
+            rotation_representation = fallback_params["rotation_representation"]
+            scale_trans_mode = TrainingConfig.get_scale_trans_mode()
+            shape_family = config.SHAPE_FAMILY
+            config_source = "training_config.py (no config in checkpoint)"
+
+        print(f"Configuration from {config_source}:")
         print(f"  backbone_name: {model_config['backbone_name']}")
-        print(f"  head_type: {model_config['head_type']}")
+        print(f"  head_type: {model_config.get('head_type', 'mlp')}")
         print(f"  rotation_representation: {rotation_representation}")
         print(f"  scale_trans_mode: {scale_trans_mode}")
+        print(f"  shape_family: {shape_family}")
+
+        # If the checkpoint specifies a SMAL/SMIL model file, re-derive
+        # config.dd, N_POSE, N_BETAS, joint_names, etc. from that file.
+        if ckpt_config and ckpt_config.get("smal_file"):
+            from configs import apply_smal_file_override
+            apply_smal_file_override(
+                ckpt_config["smal_file"],
+                shape_family=shape_family,
+            )
         
         # Verify this matches the checkpoint by checking state dict keys
         state_dict = checkpoint['model_state_dict']
@@ -448,7 +473,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
             device=device,
             data_batch=placeholder_data,
             batch_size=batch_size,
-            shape_family=config.SHAPE_FAMILY,
+            shape_family=shape_family,
             use_unity_prior=model_config.get('use_unity_prior', False),
             rgb_only=model_config.get('rgb_only', True),
             freeze_backbone=model_config.get('freeze_backbone', True),

@@ -1127,7 +1127,6 @@ config = load_config(config_file='experiments/my_config.json')
 - [ ] Phase 3.1-3.4: Integration testing
 - [ ] Phase 4.1-4.3: Deprecation and cleanup
 - [ ] Documentation review
-- [ ] Team communication about changes
 - [ ] Deployment to production
 
 ---
@@ -1153,6 +1152,68 @@ config = load_config(config_file='experiments/my_config.json')
 ### 5. Mode Detection from JSON (Not Script Argument)
 - **Why**: Config file self-documents intended mode, catches mismatches
 - **Implementation**: JSON must include `"mode"` field, validated against script
+
+---
+
+## Implementation Notes (Actual Strategy Employed)
+
+This section records what was actually implemented on the `config-refactor` branch: which files changed and how the plan was applied.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| **New: `smal_fitter/neuralSMIL/configs/__init__.py`** | Package init; re-exports all public config classes and utilities. |
+| **New: `smal_fitter/neuralSMIL/configs/base_config.py`** | Shared dataclasses: `DatasetConfig`, `ModelConfig`, `OptimizerConfig`, `LossCurriculumConfig`, `ScaleTransBetaConfig`, `MeshScalingConfig`, `JointImportanceConfig`, `IgnoredJointsConfig`, `MultiDatasetConfig`, `OutputConfig`, `TrainingHyperparameters`, `BaseTrainingConfig`, plus **`LegacyOverridesConfig`** (`legacy.smal_file`, `legacy.shape_family`). Full loss/LR curriculum data ported from `training_config.py`. `BaseTrainingConfig.to_legacy_dict()` bridges to the dict format expected by `train_smil_regressor.main()`, and now also exposes `smal_file` / `shape_family` for checkpoint + inference use. |
+| **New: `smal_fitter/neuralSMIL/configs/singleview_config.py`** | `SingleViewConfig(BaseTrainingConfig)`; minimal extension, inherits base and validation. |
+| **New: `smal_fitter/neuralSMIL/configs/multiview_config.py`** | `MultiViewConfig(BaseTrainingConfig)` with multi-view fields (`num_views_to_use`, `min_views_per_sample`, cross-attention params). `MultiViewOutputConfig` for output dirs. `to_multiview_legacy_dict()` produces the flat dict expected by `train_multiview_regressor` main, and now also includes `smal_file` / `shape_family` from `legacy` (when provided). |
+| **New: `smal_fitter/neuralSMIL/configs/config_utils.py`** | `load_from_json()` (mode required, epoch key string→int conversion), `_deep_merge_into_dataclass()`, `load_config(config_file=..., cli_overrides=...)`, `save_config_json()`, `validate_json_mode(path, expected_mode)`, `ConfigurationError`. |
+| **New: `smal_fitter/neuralSMIL/configs/README.md`** | User-facing docs: precedence, quick start, JSON requirements, API table, backward compatibility. Now documents optional `legacy` overrides (`smal_file`, `shape_family`). |
+| **New: `smal_fitter/neuralSMIL/configs/examples/README.md`** | Guide to example JSON configs and top-level sections. Now includes `legacy` overrides section. |
+| **New: `smal_fitter/neuralSMIL/configs/examples/singleview_baseline.json`** | Full single-view example (mode, **legacy overrides**, dataset, model, optimizer, loss_curriculum, training, output, scale_trans_beta, mesh_scaling). |
+| **New: `smal_fitter/neuralSMIL/configs/examples/multiview_6cam.json`** | Full multi-view example (mode, **legacy overrides**, dataset, model, optimizer, loss_curriculum, training, output, scale_trans_beta, mesh_scaling) plus cross-attention params and multi-view output dirs. |
+| **New: `smal_fitter/neuralSMIL/configs/test_config_load.py`** | Minimal test: load singleview + multiview JSON, validate, call `to_legacy_dict` / `to_multiview_legacy_dict`; plus test that JSON without `mode` raises `ConfigurationError`. Run from `smal_fitter/neuralSMIL`: `python configs/test_config_load.py`. |
+| **Modified: `smal_fitter/neuralSMIL/train_smil_regressor.py`** | Added `--config` CLI arg. When `--config` is set: load via `load_config()`, apply optional `legacy` overrides (reload `config` if `smal_file` is set; override `SHAPE_FAMILY`), convert to legacy dict with `to_legacy_dict()`, pass to existing `main()`; saves resolved config.json. **Checkpoints now include `checkpoint[\"config\"]`** (model_config, rotation_representation, scale_trans_mode/config, shape_family, smal_file) so inference can be checkpoint-driven. When `--config` is omitted, existing legacy path unchanged. |
+| **Modified: `smal_fitter/neuralSMIL/train_multiview_regressor.py`** | Config loading detects new-style JSON by presence of `"mode"` in file. When new-style: load with `load_config()`, apply optional `legacy` overrides (reload `config` if `smal_file` is set; override `SHAPE_FAMILY`), convert with `to_multiview_legacy_dict()` and ensure `shape_family`, `smal_file`, and `scale_trans_config` are present for checkpoints. When legacy (no `mode`): keep `MultiViewTrainingConfig.from_file()` / from_args path, but still inject `shape_family`, `smal_file`, and `scale_trans_config` so checkpoints are self-contained. |
+| **Modified: `smal_fitter/neuralSMIL/training_config.py`** | Deprecation notice in module docstring: point users to `configs/` and JSON configs. No functional removal; legacy code still works. |
+| **Modified: `smal_fitter/neuralSMIL/run_inference.py`** | Now prefers config from `checkpoint[\"config\"]` (model_config, rotation_representation, scale_trans_mode/config, shape_family, smal_file). If `smal_file` is present, reloads `config` so `dd`, `N_POSE`, `N_BETAS` reflect the checkpoint model. Falls back to `TrainingConfig.get_all_config()` only if checkpoint config is missing/incomplete. |
+| **Modified: `smal_fitter/neuralSMIL/run_inference_BBOX.py`** | Same as `run_inference.py`: checkpoint-first config load with fallback to `training_config.py`, and `config` reload when `smal_file` is specified in the checkpoint. |
+| **Unchanged: `config.py`** | No edits; remains the single source for legacy SMAL paths, `SHAPE_FAMILY`, `N_BETAS`, `N_POSE`, etc., for fitter_3d and optimize_to_joints. |
+
+### Implementation Strategy Summary
+
+1. **Incremental, backward-compatible**  
+   No breaking changes. Both training scripts support the new path only when the user opts in (single-view: `--config <file>`; multi-view: config file contains `"mode"`). Without that, behavior matches the pre-refactor code.
+
+2. **Bridge pattern**  
+   New config is never forced into the rest of the training pipeline. `to_legacy_dict()` and `to_multiview_legacy_dict()` produce the exact dict shapes that existing `main()` already expect. Training loops, dataset construction, and checkpointing are unchanged.
+
+3. **JSON as source of truth**  
+   Mode is taken from JSON (`"mode": "singleview"` or `"multiview"`). Curriculum epoch keys are strings in JSON and converted to integers in `load_from_json()` so `lr_schedule` and `curriculum_stages` work as intended.
+
+4. **CLI overrides**  
+   Single-view maps flat CLI args (e.g. `--batch-size`, `--dataset`) into a nested override dict that `load_config()` merges on top of the JSON-loaded config before conversion to legacy dict. Multi-view can be extended the same way if needed.
+
+5. **Validation**  
+   Config dataclasses expose `validate()` (split ratios, head_type, scale_trans mode, etc.). Called after load/merge; optional save of resolved config supports reproducibility.
+
+6. **Documentation and testing**  
+   `configs/README.md` and `configs/examples/README.md` document usage and structure. `configs/test_config_load.py` verifies load + validate + legacy dict conversion for both modes and the required `mode` field.
+
+### Inference and benchmark scripts (impact of new config system)
+
+| Script | How it gets config | Affected? | Notes |
+|--------|--------------------|-----------|--------|
+| **`benchmark_multiview_model.py`** | Reads `checkpoint["config"]`; if missing, falls back to `MultiViewTrainingConfig.get_config()`. Uses `config` (legacy) for `SHAPE_FAMILY`. | **No change required.** | Multiview training saves the same flat dict into the checkpoint (from `to_multiview_legacy_dict()` when using new JSON). So `config_from_ckpt` has the same keys as before. The fallback to `MultiViewTrainingConfig.get_config()` still works because that class was not removed. Optional future: add `--config` to run benchmark with a JSON config when no checkpoint config is present. |
+| **`run_multiview_inference.py`** | Reads all model/config from `checkpoint["config"]` (flat dict), including `shape_family`, `smal_file`, and `scale_trans_config` (now stored). One visualization path still calls `TrainingConfig.get_scale_trans_config()` because that function doesn’t have checkpoint context. | **No change required.** | Checkpoint config now contains `shape_family`, `smal_file`, and `scale_trans_config`. Optional future: thread `scale_trans_config` through the loader/model so visualization can avoid importing `training_config.py`. |
+| **`run_inference.py`** | Prefers `checkpoint["config"]` (model_config, rotation_representation, scale_trans, shape_family, smal_file). Falls back to `TrainingConfig.get_all_config()` only if missing. Reloads `config` if `smal_file` is specified so `N_POSE`/`N_BETAS` match the model file. | **Updated.** | This enables fully checkpoint-driven inference when training saved `checkpoint["config"]` (new single-view and multi-view checkpoints). |
+| **`run_inference_BBOX.py`** | Same as `run_inference.py`: checkpoint-first config load with fallback, plus `config` reload when `smal_file` is present. | **Updated.** | Same behavior for BBOX pipeline. |
+
+**Summary**
+
+- **Multiview**: Benchmark and run_multiview_inference are **not broken** by the new config system; they consume the flat dict in the checkpoint, which the new system still produces. Checkpoints now also include `shape_family`, `smal_file`, and `scale_trans_config` for inference parity.
+- **Single-view**: run_inference and run_inference_BBOX are now **checkpoint-first** (when `checkpoint["config"]` exists) with a safe fallback to `training_config.py` for older checkpoints.
+- **Optional follow-ups**: Thread `scale_trans_config` through `run_multiview_inference.py` visualization helpers (e.g. attach to model) to remove the remaining `training_config` import in that visualization path.
 
 ---
 
@@ -1187,4 +1248,4 @@ A: Yes. Legacy code using config.py is unaffected. Existing checkpoints can be r
 A: Print the config object: `print(config)` shows all values. Check the saved `config.json` in checkpoint directory.
 
 **Q: Can I share configs between single-view and multi-view?**
-A: The JSON must specify the mode, but most parameters (dataset, model, optimizer) are shared.
+A: The JSON must specify the mode, but most parameters (dataset, model, optimizer) are shared. For Multiview models, additional arguments are required regarding the number of views and cross-attention layers.

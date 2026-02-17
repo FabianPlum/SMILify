@@ -1,0 +1,234 @@
+{
+  "mode": "multiview",
+
+  "legacy": {
+    "smal_file": null,
+    "shape_family": null
+  },
+
+  "dataset": {
+    "data_path": null,
+    "train_ratio": 0.85,
+    "val_ratio": 0.05,
+    "test_ratio": 0.1,
+    "dataset_fraction": 1.0
+  },
+
+  "model": {
+    "backbone_name": "vit_large_patch16_224",
+    "freeze_backbone": true,
+    "hidden_dim": 1024,
+    "head_type": "transformer_decoder",
+    "use_unity_prior": false,
+    "rgb_only": false,
+    "transformer_depth": 6,
+    "transformer_heads": 8,
+    "transformer_dim_head": 64,
+    "transformer_mlp_dim": 1024,
+    "transformer_dropout": 0.1,
+    "transformer_ief_iters": 3,
+    "transformer_trans_scale_factor": 1
+  },
+
+  "optimizer": {
+    "learning_rate": 5e-5,
+    "weight_decay": 1e-4,
+    "gradient_clip_norm": 1.0,
+    "optimizer_type": "adamw",
+    "lr_schedule": {
+      "0": 5e-5,
+      "10": 3e-5,
+      "20": 2e-5,
+      "60": 1e-5,
+      "100": 1e-5,
+      "150": 2e-6,
+      "200": 2e-6,
+      "250": 1e-6,
+      "300": 1e-5,
+      "350": 1e-6,
+      "400": 1e-5,
+      "475": 1e-6,
+      "490": 5e-7,
+      "500": 5e-6,
+      "550": 1e-6
+    }
+  },
+
+  "loss_curriculum": {
+    "base_weights": {
+      "global_rot": 0.0,
+      "joint_rot": 0.001,
+      "betas": 0.0005,
+      "trans": 0.0005,
+      "fov": 0.001,
+      "cam_rot": 0.01,
+      "cam_trans": 0.01,
+      "log_beta_scales": 0.0005,
+      "betas_trans": 0.0005,
+      "keypoint_2d": 0.1,
+      "keypoint_3d": 0.25,
+      "silhouette": 0.0,
+      "joint_angle_regularization": 0.001,
+      "limb_scale_regularization": 0.01,
+      "limb_trans_regularization": 1
+    },
+    "curriculum_stages": {
+      "1": {
+        "joint_angle_regularization": 0.01,
+        "limb_scale_regularization": 0.1,
+        "limb_trans_regularization": 1
+      },
+      "10": {
+        "keypoint_2d": 0.1,
+        "joint_angle_regularization": 0.005,
+        "limb_scale_regularization": 0.05,
+        "limb_trans_regularization": 1
+      },
+      "25": {
+        "keypoint_2d": 0.2,
+        "joint_angle_regularization": 0.0025,
+        "limb_scale_regularization": 0.02,
+        "limb_trans_regularization": 1
+      },
+      "35": {
+        "keypoint_3d": 1,
+        "joint_angle_regularization": 0.001,
+        "limb_scale_regularization": 0.01,
+        "limb_trans_regularization": 1
+      },
+      "45": {
+        "keypoint_3d": 1,
+        "joint_angle_regularization": 0.0001,
+        "limb_scale_regularization": 0.005,
+        "limb_trans_regularization": 1
+      },
+      "50": {
+        "keypoint_3d": 2,
+        "joint_angle_regularization": 5e-5,
+        "limb_scale_regularization": 0.001,
+        "limb_trans_regularization": 0.5
+      },
+      "100": {
+        "keypoint_3d": 2,
+        "keypoint_2d": 0.2,
+        "joint_angle_regularization": 1e-5,
+        "limb_scale_regularization": 1e-7,
+        "limb_trans_regularization": 0.1
+      },
+      "300": {
+        "keypoint_3d": 2,
+        "keypoint_2d": 0.2,
+        "joint_angle_regularization": 1e-5,
+        "limb_scale_regularization": 1e-7,
+        "limb_trans_regularization": 0.1,
+        "fov": 1e-7,
+        "cam_rot": 1e-8,
+        "cam_trans": 1e-8
+      },
+      "400": {
+        "keypoint_3d": 2,
+        "keypoint_2d": 0.4,
+        "joint_angle_regularization": 0.0001,
+        "limb_scale_regularization": 1e-5,
+        "limb_trans_regularization": 0.1,
+        "fov": 1e-7,
+        "cam_rot": 1e-8,
+        "cam_trans": 1e-8
+      },
+      "460": {
+        "keypoint_3d": 2,
+        "keypoint_2d": 0.2,
+        "joint_angle_regularization": 1e-5,
+        "limb_scale_regularization": 0.001,
+        "limb_trans_regularization": 0.1,
+        "fov": 1e-7,
+        "cam_rot": 1e-8,
+        "cam_trans": 1e-8
+      },
+      "490": {
+        "keypoint_3d": 2,
+        "keypoint_2d": 0.2,
+        "joint_angle_regularization": 1e-6,
+        "limb_scale_regularization": 0.0001,
+        "limb_trans_regularization": 0.1,
+        "fov": 1e-7,
+        "cam_rot": 1e-8,
+        "cam_trans": 1e-8
+      },
+      "500": {
+        "keypoint_3d": 20,
+        "keypoint_2d": 0.2,
+        "joint_angle_regularization": 1e-7,
+        "limb_scale_regularization": 1e-5,
+        "limb_trans_regularization": 0.1,
+        "fov": 1e-6,
+        "cam_rot": 1e-7,
+        "cam_trans": 1e-7
+      },
+      "560": {
+        "keypoint_3d": 20,
+        "keypoint_2d": 0.2,
+        "joint_angle_regularization": 1e-7,
+        "limb_scale_regularization": 0.001,
+        "limb_trans_regularization": 1.0,
+        "fov": 1e-6,
+        "cam_rot": 1e-7,
+        "cam_trans": 1e-7
+      },
+      "575": {
+        "keypoint_3d": 20,
+        "keypoint_2d": 0.2,
+        "joint_angle_regularization": 1e-7,
+        "limb_scale_regularization": 0.0025,
+        "limb_trans_regularization": 1.0,
+        "fov": 1e-6,
+        "cam_rot": 1e-7,
+        "cam_trans": 1e-7
+      }
+    }
+  },
+
+  "scale_trans_beta": {
+    "mode": "separate"
+  },
+
+  "mesh_scaling": {
+    "allow_mesh_scaling": true,
+    "init_mesh_scale": 1.0,
+    "use_log_scale": true
+  },
+
+  "joint_importance": {
+    "enabled": true,
+    "important_joint_names": ["Nose", "paw_L_tip", "paw_R_tip", "Foot_L_tip", "Foot_R_tip", "Tail_07"],
+    "weight_multiplier": 10.0
+  },
+
+  "output": {
+    "checkpoint_dir": "multiview_checkpoints",
+    "plots_dir": "plots",
+    "visualizations_dir": "multiview_visualizations",
+    "singleview_visualizations_dir": "multiview_singleview_renders",
+    "save_checkpoint_every": 10,
+    "generate_visualizations_every": 10,
+    "num_visualization_samples": 3
+  },
+
+  "training": {
+    "batch_size": 3,
+    "num_epochs": 600,
+    "seed": 42,
+    "rotation_representation": "6d",
+    "num_workers": 8,
+    "pin_memory": true,
+    "prefetch_factor": 4,
+    "resume_checkpoint": null,
+    "use_gt_camera_init": true
+  },
+
+  "num_views_to_use": null,
+  "min_views_per_sample": 2,
+  "cross_attention_layers": 2,
+  "cross_attention_heads": 8,
+  "cross_attention_dropout": 0.1
+}

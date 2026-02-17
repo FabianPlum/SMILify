@@ -1,8 +1,16 @@
 """
 Training Configuration for SMIL Image Regressor
 
-This file contains all configuration parameters for training the SMILImageRegressor,
-including dataset paths, training splits, loss curriculum, and hyperparameters.
+DEPRECATED: This file is maintained for backward compatibility.
+The canonical configuration system is now in configs/ (see configs/README.md).
+
+Use the new system instead:
+    from configs import SingleViewConfig, MultiViewConfig, load_config
+
+Or load from a JSON config file:
+    python train_smil_regressor.py --config configs/examples/singleview_baseline.json
+
+This file continues to work for existing code that imports TrainingConfig directly.
 """
 
 import os
