@@ -41,8 +41,8 @@ SMAL_MODEL_PATH = join(data_path, 'SMALST', 'smpl_models')
 
 # custom elements added:
 # SMAL_FILE = join("3D_model_prep", 'smpl_ATTA.pkl') #  BASE ANT MODEL
-#SMAL_FILE = join("3D_model_prep", 'SMIL_OmniAnt.pkl') # LATEST TEXTURED ANT MODEL WITH ALL VARIATION
-SMAL_FILE = join("3D_model_prep", 'SMILy_STICK.pkl') # LATEST STICK INSECT MODEL
+SMAL_FILE = join("3D_model_prep", 'SMIL_OmniAnt.pkl') # LATEST TEXTURED ANT MODEL WITH ALL VARIATION
+#SMAL_FILE = join("3D_model_prep", 'SMILy_STICK.pkl') # LATEST STICK INSECT MODEL
 #SMAL_FILE = join("3D_model_prep", 'SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs_fix_eyes.pkl') # LATEST MOUSE MODEL
 
 ignore_sym = True  # ignore provided symmetry file, when using custom models
