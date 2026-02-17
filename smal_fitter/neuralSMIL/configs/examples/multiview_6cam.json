@@ -1,7 +1,13 @@
 {
   "mode": "multiview",
 
-  "legacy": {
+  "num_views_to_use": null,
+  "min_views_per_sample": 2,
+  "cross_attention_layers": 2,
+  "cross_attention_heads": 8,
+  "cross_attention_dropout": 0.1,
+
+  "smal_model": {
     "smal_file": null,
     "shape_family": null
   },
@@ -224,11 +230,5 @@
     "prefetch_factor": 4,
     "resume_checkpoint": null,
     "use_gt_camera_init": true
-  },
-
-  "num_views_to_use": null,
-  "min_views_per_sample": 2,
-  "cross_attention_layers": 2,
-  "cross_attention_heads": 8,
-  "cross_attention_dropout": 0.1
+  }
 }
