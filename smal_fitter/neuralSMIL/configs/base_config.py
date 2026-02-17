@@ -379,12 +379,13 @@ class TrainingHyperparameters:
 
 
 @dataclass
-class LegacyOverridesConfig:
+class SmalModelConfig:
     """
-    Optional legacy overrides for inference/training.
+    SMAL/SMIL model configuration overrides for inference and training.
 
-    These allow specifying values that are otherwise sourced from `config.py`,
-    without modifying `config.py` itself.
+    Allows specifying the SMAL model file and shape family without modifying
+    `config.py` itself. These values are used by `apply_smal_file_override()`
+    to reload `config.dd`, `config.N_POSE`, `config.N_BETAS`, etc.
 
     Notes:
     - `smal_file`: path to the SMAL/SMIL model pickle used by `config.py` to
@@ -415,7 +416,7 @@ class BaseTrainingConfig:
     multi_dataset: MultiDatasetConfig = field(default_factory=MultiDatasetConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     training: TrainingHyperparameters = field(default_factory=TrainingHyperparameters)
-    legacy: LegacyOverridesConfig = field(default_factory=LegacyOverridesConfig)
+    smal_model: SmalModelConfig = field(default_factory=SmalModelConfig)
 
     def validate(self):
         """Validate entire configuration for consistency."""
@@ -455,11 +456,11 @@ class BaseTrainingConfig:
         hidden_dim = self.model.get_adjusted_hidden_dim()
 
         legacy_shape_family = (
-            self.legacy.shape_family
-            if self.legacy is not None and self.legacy.shape_family is not None
+            self.smal_model.shape_family
+            if self.smal_model is not None and self.smal_model.shape_family is not None
             else None
         )
-        legacy_smal_file = self.legacy.smal_file if self.legacy is not None else None
+        legacy_smal_file = self.smal_model.smal_file if self.smal_model is not None else None
 
         return {
             'data_path': self.dataset.data_path,

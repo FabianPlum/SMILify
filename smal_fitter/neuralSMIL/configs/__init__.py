@@ -36,7 +36,7 @@ from .base_config import (
     MultiDatasetConfig,
     OutputConfig,
     TrainingHyperparameters,
-    LegacyOverridesConfig,
+    SmalModelConfig,
 )
 from .singleview_config import SingleViewConfig
 from .multiview_config import MultiViewConfig, MultiViewOutputConfig
@@ -63,7 +63,7 @@ __all__ = [
     'MultiDatasetConfig',
     'OutputConfig',
     'TrainingHyperparameters',
-    'LegacyOverridesConfig',
+    'SmalModelConfig',
     # Mode-specific
     'SingleViewConfig',
     'MultiViewConfig',

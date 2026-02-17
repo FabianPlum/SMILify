@@ -113,13 +113,13 @@ class MultiViewConfig(BaseTrainingConfig):
             # Dataset fraction
             'dataset_fraction': self.dataset.dataset_fraction,
 
-            # Legacy fields
+            # SMAL model configuration
             'shape_family': (
-                self.legacy.shape_family
-                if self.legacy is not None and self.legacy.shape_family is not None
+                self.smal_model.shape_family
+                if self.smal_model is not None and self.smal_model.shape_family is not None
                 else -1
             ),  # May be overridden by training script at runtime
-            'smal_file': self.legacy.smal_file if self.legacy is not None else None,
+            'smal_file': self.smal_model.smal_file if self.smal_model is not None else None,
             'loss_weights': self.get_loss_weights_for_epoch(0),
             'use_gt_camera_init': self.training.use_gt_camera_init,
         }
