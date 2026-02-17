@@ -1,7 +1,7 @@
 {
   "mode": "singleview",
 
-  "legacy": {
+  "smal_model": {
     "smal_file": "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl",
     "shape_family": -1
   },
