@@ -63,6 +63,7 @@ from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_
 from smal_fitter import SMALFitter
 import config
 from training_config import TrainingConfig
+from configs import MultiViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
 
 
 def set_random_seeds(seed: int = 0):
@@ -2746,17 +2747,117 @@ Examples:
                        help="Use GT camera params (when available) as base and predict deltas")
     
     args = parser.parse_args()
-    
-    # Load configuration
+
+    # ---------------------------------------------------------------
+    # Configuration loading: new JSON config system or legacy CLI args
+    # ---------------------------------------------------------------
+    _is_new_config = False
+
     if args.config:
-        training_config = MultiViewTrainingConfig.from_file(args.config)
-        # Override with command line args
-        for key, value in vars(args).items():
-            if value is not None and key != 'config':
-                training_config[key] = value
+        # Detect whether this is a new-style config (has "mode" field) or legacy
+        import json as _json
+        with open(args.config) as _f:
+            _raw = _json.load(_f)
+
+        if 'mode' in _raw:
+            # New config system: load via unified config, apply CLI overrides
+            _is_new_config = True
+            cli_overrides = {}
+            if args.batch_size is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['batch_size'] = args.batch_size
+            if args.num_epochs is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['num_epochs'] = args.num_epochs
+            if args.learning_rate is not None:
+                cli_overrides['optimizer'] = cli_overrides.get('optimizer', {})
+                cli_overrides['optimizer']['learning_rate'] = args.learning_rate
+            if args.weight_decay is not None:
+                cli_overrides['optimizer'] = cli_overrides.get('optimizer', {})
+                cli_overrides['optimizer']['weight_decay'] = args.weight_decay
+            if args.seed is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['seed'] = args.seed
+            if args.dataset_path is not None:
+                cli_overrides['dataset'] = cli_overrides.get('dataset', {})
+                cli_overrides['dataset']['data_path'] = args.dataset_path
+            if args.backbone_name is not None:
+                cli_overrides['model'] = cli_overrides.get('model', {})
+                cli_overrides['model']['backbone_name'] = args.backbone_name
+            if args.num_views_to_use is not None:
+                cli_overrides['num_views_to_use'] = args.num_views_to_use
+            if args.cross_attention_layers is not None:
+                cli_overrides['cross_attention_layers'] = args.cross_attention_layers
+            if args.cross_attention_heads is not None:
+                cli_overrides['cross_attention_heads'] = args.cross_attention_heads
+            if args.checkpoint_dir is not None:
+                cli_overrides['output'] = cli_overrides.get('output', {})
+                cli_overrides['output']['checkpoint_dir'] = args.checkpoint_dir
+            if args.resume_checkpoint is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['resume_checkpoint'] = args.resume_checkpoint
+            if args.use_gt_camera_init is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['use_gt_camera_init'] = args.use_gt_camera_init
+
+            new_config = load_config(
+                config_file=args.config,
+                cli_overrides=cli_overrides,
+                expected_mode='multiview',
+            )
+
+            # Apply legacy overrides (SMAL_FILE / SHAPE_FAMILY).
+            # apply_smal_file_override re-reads the pickle and patches config.dd,
+            # config.N_POSE, config.N_BETAS, config.joint_names, etc.
+            if getattr(new_config, "legacy", None) is not None:
+                if new_config.legacy.smal_file:
+                    apply_smal_file_override(
+                        new_config.legacy.smal_file,
+                        shape_family=new_config.legacy.shape_family,
+                    )
+                elif new_config.legacy.shape_family is not None:
+                    config.SHAPE_FAMILY = int(new_config.legacy.shape_family)
+
+            # Sync scale_trans_mode to legacy TrainingConfig
+            TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = new_config.scale_trans_beta.mode
+
+            # Convert to legacy flat dict for existing main()
+            training_config = new_config.to_multiview_legacy_dict()
+            training_config['shape_family'] = (
+                int(new_config.legacy.shape_family)
+                if getattr(new_config, "legacy", None) is not None and new_config.legacy.shape_family is not None
+                else config.SHAPE_FAMILY
+            )
+            training_config['smal_file'] = (
+                new_config.legacy.smal_file
+                if getattr(new_config, "legacy", None) is not None and new_config.legacy.smal_file
+                else getattr(config, 'SMAL_FILE', None)
+            )
+            training_config['scale_trans_config'] = TrainingConfig.get_scale_trans_config()
+
+            # Save resolved config for reproducibility
+            os.makedirs(new_config.output.checkpoint_dir, exist_ok=True)
+            save_config_json(new_config, os.path.join(new_config.output.checkpoint_dir, 'config.json'))
+
+            print(f"Loaded config from: {args.config}")
+            print(f"Resolved config saved to: {os.path.join(new_config.output.checkpoint_dir, 'config.json')}")
+        else:
+            # Legacy JSON config (no "mode" field)
+            training_config = MultiViewTrainingConfig.from_file(args.config)
+            for key, value in vars(args).items():
+                if value is not None and key != 'config':
+                    training_config[key] = value
     else:
         training_config = MultiViewTrainingConfig.from_args(args)
-    
+
+    # Ensure checkpoint will contain smal_file, shape_family and scale_trans_config for inference
+    if 'shape_family' not in training_config:
+        training_config['shape_family'] = config.SHAPE_FAMILY
+    if 'smal_file' not in training_config:
+        training_config['smal_file'] = getattr(config, 'SMAL_FILE', None)
+    if 'scale_trans_config' not in training_config:
+        training_config['scale_trans_config'] = TrainingConfig.get_scale_trans_config()
+
     # Get master port from args or environment variable
     master_port = args.master_port or os.environ.get('MASTER_PORT', '12355')
     
