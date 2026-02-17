@@ -22,7 +22,7 @@ The loader uses `mode` to choose the config class and to validate the file.
 
 ### Shared (both modes)
 
-- **`legacy`** — Optional overrides for values otherwise sourced from `config.py`:
+- **`smal_model`** — Optional overrides for values otherwise sourced from `config.py`:
   - `smal_file`: path to the SMAL/SMIL model pickle (used by `config.py` to populate `dd`, `N_POSE`, `N_BETAS`, etc.). If set, training/inference should reload `config` so derived fields update.
   - `shape_family`: integer shape family passed into SMAL/SMIL code (overrides `config.SHAPE_FAMILY` for the run).
 - **`dataset`** — `data_path`, `train_ratio`, `val_ratio`, `test_ratio`, `dataset_fraction`. For multiview, `data_path` is often set at runtime via CLI.

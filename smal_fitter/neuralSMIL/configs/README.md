@@ -37,7 +37,7 @@ If you omit `--config`, the scripts fall back to the previous behavior (e.g. `Tr
 ## JSON config requirements
 
 - The JSON file **must** include a top-level `"mode"` field: `"singleview"` or `"multiview"`.
-- Optional: include a top-level `"legacy"` section to override values otherwise sourced from `config.py`:
+- Optional: include a top-level `"smal_model"` section to override values otherwise sourced from `config.py`:
   - `"smal_file"`: SMAL/SMIL model pickle path. When used, callers should reload `config` so `dd`, `N_POSE`, `N_BETAS`, etc. match that file.
   - `"shape_family"`: integer shape family passed into SMAL/SMIL code (overrides `config.SHAPE_FAMILY` for the run).
 - Curriculum parameters (loss weights and learning rate schedules) use **string keys** for epoch thresholds in JSON (e.g. `"10": 3e-5`). These are converted to integer keys when loaded.
