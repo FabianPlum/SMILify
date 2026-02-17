@@ -1249,3 +1249,79 @@ A: Print the config object: `print(config)` shows all values. Check the saved `c
 
 **Q: Can I share configs between single-view and multi-view?**
 A: The JSON must specify the mode, but most parameters (dataset, model, optimizer) are shared. For Multiview models, additional arguments are required regarding the number of views and cross-attention layers.
+
+---
+
+## Recent Implementation Updates
+
+### Standalone Script SMAL Model Override (Latest)
+
+**Problem**: Standalone preprocessing and testing scripts (`dataset_preprocessing.py`, `test_smil_regressor_ground_truth.py`) had no way to override the default SMAL model from `config.py`, causing silent failures when run against datasets generated with non-default models.
+
+**Solution**:
+- Added `--smal-file` and `--shape-family` CLI arguments to both scripts
+- Both scripts call `apply_smal_file_override()` immediately after argument parsing, before any code that depends on `config.dd`, `config.ROOT_JOINT`, or `config.N_BETAS`
+- This ensures joint names, shape dimensions, and root joint identification match the model used to generate the dataset
+- Implementation: `dataset_preprocessing.py` lines 706-736, `test_smil_regressor_ground_truth.py` lines 1141-1155
+
+**Example usage**:
+```bash
+# Preprocess dataset with custom SMAL model
+python dataset_preprocessing.py input_dir output.h5 \
+    --smal-file "3D_model_prep/SMILy_Mouse.pkl"
+
+# Test inference with custom model
+python test_smil_regressor_ground_truth.py \
+    --smal-file "3D_model_prep/SMILy_Mouse.pkl"
+```
+
+### Config JSON Naming Convention (`smal_model` alias)
+
+**Change**: JSON example configs now use `"smal_model"` instead of `"legacy"` for the SMAL/SMIL model override section.
+
+**Rationale**: The `legacy` term is confusing; `smal_model` clearly indicates this section specifies which SMAL model file and shape family to use.
+
+**Implementation**:
+- `config_utils.py`: Added automatic alias support in `load_config()` — if JSON contains `"smal_model"` key with non-null value, it's transparently renamed to `"legacy"` before merging
+- Example configs (`singleview_baseline.json`, `multiview_6cam.json`) now use the clearer `"smal_model"` key
+- Fully backward compatible: existing JSON configs with `"legacy"` key continue to work
+
+**JSON Example**:
+```json
+{
+  "mode": "singleview",
+  "smal_model": {
+    "smal_file": "3D_model_prep/SMILy_Mouse.pkl",
+    "shape_family": -1
+  },
+  ...
+}
+```
+
+### Example Config Reorganization (multiview_6cam.json)
+
+**Changes**:
+- Moved multiview-specific fields (`num_views_to_use`, `cross_attention_*`) to the top of the file (right after `"mode"`) for better discoverability
+- Renamed `"legacy"` to `"smal_model"` for clarity
+- Improved overall file organization for readability
+
+**Benefit**: Users can quickly see which parameters are specific to multi-view training without scrolling to the bottom of the config file.
+
+### Expanded Test Coverage (test_config_system.py)
+
+**New test classes**:
+- `TestSmalModelSingleView`: Verifies smal_model (legacy) arguments pass through JSON → dataclass → legacy dict correctly for single-view
+- `TestSmalModelMultiView`: Same for multi-view, including default shape_family = -1 when not specified
+
+**Test coverage includes**:
+- Example config values appear in `to_legacy_dict()` output
+- CLI overrides for `smal_file` and `shape_family` work correctly
+- Legacy dict values match `config.legacy` fields for downstream use
+- Full chain from JSON → `apply_smal_file_override()` → updated `config.py` globals works correctly
+- Config precedence (CLI > JSON > defaults) respected throughout
+
+### Default SMAL Model Switch
+
+**Change**: `config.py` default SMAL_FILE changed from `SMILy_STICK.pkl` to `SMIL_OmniAnt.pkl` (the latest textured ant model).
+
+**Rationale**: OmniAnt is the maintained, feature-complete model for ant experiments. STICK remains available as a commented-out option for historical use.
