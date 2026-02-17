@@ -2,7 +2,9 @@
 Tests for the unified configuration system (smal_fitter/neuralSMIL/configs/).
 
 Verifies JSON loading, dataclass merging, validation, legacy dict conversion,
-curriculum application, CLI override precedence, and round-trip serialization.
+curriculum application, CLI override precedence, round-trip serialization,
+singleview/multiview smal_model (legacy) argument passing, and downstream
+overwrite of config.py (SMAL_FILE, SHAPE_FAMILY) via apply_smal_file_override.
 """
 
 import json
@@ -28,6 +30,7 @@ from configs import (
     load_from_json,
     save_config_json,
     validate_json_mode,
+    apply_smal_file_override,
     ConfigurationError,
 )
 
@@ -163,6 +166,108 @@ class TestLegacyDictMultiView:
         d = multiview_config.to_multiview_legacy_dict()
         assert d["checkpoint_dir"] == "multiview_checkpoints"
         assert d["visualizations_dir"] == "multiview_visualizations"
+
+
+# ---------------------------------------------------------------------------
+# SMAL model argument passing (singleview / multiview) and downstream overwrite
+# ---------------------------------------------------------------------------
+
+class TestSmalModelSingleView:
+    """Singleview smal_model (legacy) argument passing and legacy dict output."""
+
+    def test_example_config_smal_file_and_shape_family_in_legacy_dict(self, singleview_config):
+        """Values from examples/singleview_baseline.json smal_model appear in to_legacy_dict()."""
+        d = singleview_config.to_legacy_dict()
+        assert d["smal_file"] == "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl"
+        assert d["shape_family"] == -1
+
+    def test_cli_override_legacy_smal_file_shape_family(self):
+        """CLI overrides for legacy.smal_file and legacy.shape_family are in legacy dict."""
+        config = load_config(
+            config_file=SINGLEVIEW_JSON,
+            cli_overrides={
+                "legacy": {
+                    "smal_file": "path/to/custom_model.pkl",
+                    "shape_family": 2,
+                },
+            },
+        )
+        d = config.to_legacy_dict()
+        assert d["smal_file"] == "path/to/custom_model.pkl"
+        assert d["shape_family"] == 2
+
+    def test_legacy_dict_values_match_config_legacy_for_downstream(self):
+        """Legacy dict smal_file/shape_family match config.legacy so scripts can pass them to config.py."""
+        config = load_config(
+            config_file=SINGLEVIEW_JSON,
+            cli_overrides={"legacy": {"smal_file": "custom.pkl", "shape_family": -1}},
+        )
+        d = config.to_legacy_dict()
+        assert config.legacy.smal_file == d["smal_file"] == "custom.pkl"
+        assert config.legacy.shape_family == d["shape_family"] == -1
+
+
+class TestSmalModelMultiView:
+    """Multiview smal_model (legacy) argument passing and legacy dict output."""
+
+    def test_example_config_smal_file_shape_family_in_multiview_legacy_dict(self, multiview_config):
+        """Example multiview_6cam.json has null smal_model; legacy dict has None / default shape_family."""
+        d = multiview_config.to_multiview_legacy_dict()
+        assert d["smal_file"] is None
+        assert d["shape_family"] == -1  # multiview uses -1 when legacy.shape_family is None
+
+    def test_cli_override_legacy_smal_file_shape_family_multiview(self):
+        """CLI overrides for legacy (smal_file, shape_family) appear in multiview legacy dict."""
+        config = load_config(
+            config_file=MULTIVIEW_JSON,
+            cli_overrides={
+                "legacy": {
+                    "smal_file": "path/to/multiview_model.pkl",
+                    "shape_family": 0,
+                },
+            },
+        )
+        d = config.to_multiview_legacy_dict()
+        assert d["smal_file"] == "path/to/multiview_model.pkl"
+        assert d["shape_family"] == 0
+
+    def test_multiview_legacy_dict_values_match_config_legacy_for_downstream(self):
+        """Multiview legacy dict smal_file/shape_family match config so scripts overwrite config.py correctly."""
+        config = load_config(
+            config_file=MULTIVIEW_JSON,
+            cli_overrides={"legacy": {"smal_file": "multi.pkl", "shape_family": 1}},
+        )
+        d = config.to_multiview_legacy_dict()
+        assert config.legacy.smal_file == d["smal_file"] == "multi.pkl"
+        assert config.legacy.shape_family == d["shape_family"] == 1
+
+
+@pytest.mark.filterwarnings("ignore: numpy.core.numeric is deprecated:DeprecationWarning")
+class TestSmalModelDownstreamOverwrite:
+    """Downstream overwrite of config.py via apply_smal_file_override (scripts reference config.SMAL_FILE, etc.)."""
+
+    def test_apply_smal_file_override_sets_smal_file_and_shape_family(self):
+        """apply_smal_file_override overwrites config.SMAL_FILE and config.SHAPE_FAMILY as used by scripts."""
+        # Ensure repo root is on path so "import config" in apply_smal_file_override finds project config.py
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+        import config as project_config
+        original_smal = getattr(project_config, "SMAL_FILE", None)
+        original_shape = getattr(project_config, "SHAPE_FAMILY", -1)
+        # Use a path that exists: try example from singleview_baseline.json, else skip
+        smal_path = os.path.join(repo_root, "3D_model_prep", "SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl")
+        if not os.path.isfile(smal_path):
+            smal_path = os.path.join(repo_root, "3D_model_prep", "SMIL_OmniAnt.pkl")
+        if not os.path.isfile(smal_path):
+            pytest.skip("No SMAL pickle found for apply_smal_file_override test")
+        try:
+            apply_smal_file_override(smal_path, shape_family=42)
+            assert project_config.SMAL_FILE == smal_path
+            assert project_config.SHAPE_FAMILY == 42
+        finally:
+            project_config.SMAL_FILE = original_smal
+            project_config.SHAPE_FAMILY = original_shape
 
 
 # ---------------------------------------------------------------------------
