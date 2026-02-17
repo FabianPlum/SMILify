@@ -3,7 +3,7 @@ Tests for the unified configuration system (smal_fitter/neuralSMIL/configs/).
 
 Verifies JSON loading, dataclass merging, validation, legacy dict conversion,
 curriculum application, CLI override precedence, round-trip serialization,
-singleview/multiview smal_model (legacy) argument passing, and downstream
+singleview/multiview smal_model argument passing, and downstream
 overwrite of config.py (SMAL_FILE, SHAPE_FAMILY) via apply_smal_file_override.
 """
 
@@ -173,7 +173,7 @@ class TestLegacyDictMultiView:
 # ---------------------------------------------------------------------------
 
 class TestSmalModelSingleView:
-    """Singleview smal_model (legacy) argument passing and legacy dict output."""
+    """Singleview smal_model argument passing and legacy dict output."""
 
     def test_example_config_smal_file_and_shape_family_in_legacy_dict(self, singleview_config):
         """Values from examples/singleview_baseline.json smal_model appear in to_legacy_dict()."""
@@ -181,12 +181,12 @@ class TestSmalModelSingleView:
         assert d["smal_file"] == "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl"
         assert d["shape_family"] == -1
 
-    def test_cli_override_legacy_smal_file_shape_family(self):
-        """CLI overrides for legacy.smal_file and legacy.shape_family are in legacy dict."""
+    def test_cli_override_smal_model_smal_file_shape_family(self):
+        """CLI overrides for smal_model.smal_file and smal_model.shape_family are in legacy dict."""
         config = load_config(
             config_file=SINGLEVIEW_JSON,
             cli_overrides={
-                "legacy": {
+                "smal_model": {
                     "smal_file": "path/to/custom_model.pkl",
                     "shape_family": 2,
                 },
@@ -196,32 +196,32 @@ class TestSmalModelSingleView:
         assert d["smal_file"] == "path/to/custom_model.pkl"
         assert d["shape_family"] == 2
 
-    def test_legacy_dict_values_match_config_legacy_for_downstream(self):
-        """Legacy dict smal_file/shape_family match config.legacy so scripts can pass them to config.py."""
+    def test_smal_model_dict_values_match_config_smal_model_for_downstream(self):
+        """Legacy dict smal_file/shape_family match config.smal_model so scripts can pass them to config.py."""
         config = load_config(
             config_file=SINGLEVIEW_JSON,
-            cli_overrides={"legacy": {"smal_file": "custom.pkl", "shape_family": -1}},
+            cli_overrides={"smal_model": {"smal_file": "custom.pkl", "shape_family": -1}},
         )
         d = config.to_legacy_dict()
-        assert config.legacy.smal_file == d["smal_file"] == "custom.pkl"
-        assert config.legacy.shape_family == d["shape_family"] == -1
+        assert config.smal_model.smal_file == d["smal_file"] == "custom.pkl"
+        assert config.smal_model.shape_family == d["shape_family"] == -1
 
 
 class TestSmalModelMultiView:
-    """Multiview smal_model (legacy) argument passing and legacy dict output."""
+    """Multiview smal_model argument passing and legacy dict output."""
 
     def test_example_config_smal_file_shape_family_in_multiview_legacy_dict(self, multiview_config):
         """Example multiview_6cam.json has null smal_model; legacy dict has None / default shape_family."""
         d = multiview_config.to_multiview_legacy_dict()
         assert d["smal_file"] is None
-        assert d["shape_family"] == -1  # multiview uses -1 when legacy.shape_family is None
+        assert d["shape_family"] == -1  # multiview uses -1 when smal_model.shape_family is None
 
-    def test_cli_override_legacy_smal_file_shape_family_multiview(self):
-        """CLI overrides for legacy (smal_file, shape_family) appear in multiview legacy dict."""
+    def test_cli_override_smal_model_smal_file_shape_family_multiview(self):
+        """CLI overrides for smal_model (smal_file, shape_family) appear in multiview legacy dict."""
         config = load_config(
             config_file=MULTIVIEW_JSON,
             cli_overrides={
-                "legacy": {
+                "smal_model": {
                     "smal_file": "path/to/multiview_model.pkl",
                     "shape_family": 0,
                 },
@@ -231,15 +231,15 @@ class TestSmalModelMultiView:
         assert d["smal_file"] == "path/to/multiview_model.pkl"
         assert d["shape_family"] == 0
 
-    def test_multiview_legacy_dict_values_match_config_legacy_for_downstream(self):
+    def test_multiview_smal_model_dict_values_match_config_smal_model_for_downstream(self):
         """Multiview legacy dict smal_file/shape_family match config so scripts overwrite config.py correctly."""
         config = load_config(
             config_file=MULTIVIEW_JSON,
-            cli_overrides={"legacy": {"smal_file": "multi.pkl", "shape_family": 1}},
+            cli_overrides={"smal_model": {"smal_file": "multi.pkl", "shape_family": 1}},
         )
         d = config.to_multiview_legacy_dict()
-        assert config.legacy.smal_file == d["smal_file"] == "multi.pkl"
-        assert config.legacy.shape_family == d["shape_family"] == 1
+        assert config.smal_model.smal_file == d["smal_file"] == "multi.pkl"
+        assert config.smal_model.shape_family == d["shape_family"] == 1
 
 
 @pytest.mark.filterwarnings("ignore: numpy.core.numeric is deprecated:DeprecationWarning")
