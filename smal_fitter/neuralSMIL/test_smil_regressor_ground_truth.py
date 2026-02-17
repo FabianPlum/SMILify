@@ -33,6 +33,7 @@ from smil_datasets import replicAntSMILDataset
 from smal_fitter import SMALFitter
 from Unreal2Pytorch3D import load_SMIL_Unreal_sample
 import config
+from configs import apply_smal_file_override
 
 
 def extract_target_parameters(y_data, device, rotation_representation='axis_angle'):
@@ -1137,9 +1138,22 @@ def main():
     parser.add_argument('--backbone', type=str, default='resnet152',
                        choices=['resnet50', 'resnet101', 'resnet152', 'vit_base_patch16_224', 'vit_large_patch16_224'],
                        help='Backbone network to use (default: resnet152)')
-    
+    parser.add_argument('--smal-file', type=str, default=None,
+                       help='Path to SMAL/SMIL model pickle. Overrides config.py so that '
+                            'joint names, N_BETAS, and ROOT_JOINT match the model the '
+                            'dataset was generated with.')
+    parser.add_argument('--shape-family', type=int, default=None,
+                       help='Shape family index (overrides config.SHAPE_FAMILY). '
+                            'Only needed if --smal-file is not provided.')
+
     args = parser.parse_args()
-    
+
+    # Apply SMAL model override before any code touches config.dd / config.ROOT_JOINT / config.N_BETAS.
+    if args.smal_file:
+        apply_smal_file_override(args.smal_file, shape_family=args.shape_family)
+    elif args.shape_family is not None:
+        config.SHAPE_FAMILY = args.shape_family
+
     # Set up environment
     if args.device == 'cuda':
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
