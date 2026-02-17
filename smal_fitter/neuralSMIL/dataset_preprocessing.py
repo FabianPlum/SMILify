@@ -30,6 +30,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from Unreal2Pytorch3D import load_SMIL_Unreal_sample, compute_keypoint_visibility
 import config
+from configs import apply_smal_file_override
 
 
 class DatasetPreprocessor:
@@ -702,6 +703,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Preprocess SMIL dataset to HDF5 format")
     parser.add_argument("input_dir", help="Input dataset directory")
     parser.add_argument("output_path", help="Output HDF5 file path")
+    parser.add_argument("--smal-file", type=str, default=None,
+                       help="Path to SMAL/SMIL model pickle. Overrides config.py so that "
+                            "joint names, N_BETAS, and ROOT_JOINT match the model used for "
+                            "the dataset being preprocessed.")
+    parser.add_argument("--shape-family", type=int, default=None,
+                       help="Shape family index (overrides config.SHAPE_FAMILY). "
+                            "Only needed if --smal-file is not provided.")
     parser.add_argument("--silhouette_threshold", type=float, default=0.1,
                        help="Minimum silhouette coverage (default: 0.1)")
     parser.add_argument("--target_resolution", type=int, default=224,
@@ -720,7 +728,13 @@ if __name__ == "__main__":
                        help="JPEG compression quality (1-100)")
     
     args = parser.parse_args()
-    
+
+    # Apply SMAL model override before anything touches config.dd / config.ROOT_JOINT / config.N_BETAS.
+    if args.smal_file:
+        apply_smal_file_override(args.smal_file, shape_family=args.shape_family)
+    elif args.shape_family is not None:
+        config.SHAPE_FAMILY = args.shape_family
+
     # Create preprocessor
     preprocessor = DatasetPreprocessor(
         silhouette_threshold=args.silhouette_threshold,
