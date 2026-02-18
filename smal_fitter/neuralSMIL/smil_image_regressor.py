@@ -1702,7 +1702,25 @@ class SMILImageRegressor(SMALFitter):
                 total_loss = total_loss + loss_weights['limb_trans_regularization'] * trans_reg
             else:
                 loss_components['limb_trans_regularization'] = torch.tensor(eps, device=self.device, requires_grad=True)
-        
+
+        # Joint angle regularization: penalize deviations from default (0,0,0) angles
+        # This helps prevent extreme joint angles and encourages natural poses
+        if loss_weights.get('joint_angle_regularization', 0) > 0 and 'joint_rot' in predicted_params and num_valid_samples > 0:
+            joint_rot_pred = predicted_params['joint_rot'][sample_validity_mask]  # (valid, N_POSE, 6 or 3)
+
+            if self.rotation_representation == '6d':
+                joint_rot_aa = rotation_6d_to_axis_angle(joint_rot_pred)  # (valid, N_POSE, 3)
+            else:
+                joint_rot_aa = joint_rot_pred  # already axis-angle
+
+            joint_angle_norms = torch.norm(joint_rot_aa, dim=-1)  # (valid, N_POSE)
+            joint_angle_reg = torch.mean(joint_angle_norms ** 2)
+
+            loss_components['joint_angle_regularization'] = joint_angle_reg
+            total_loss = total_loss + loss_weights['joint_angle_regularization'] * joint_angle_reg
+        else:
+            loss_components['joint_angle_regularization'] = torch.tensor(eps, device=self.device, requires_grad=True)
+
         # Batched 2D keypoint loss (only for valid samples with available 2D keypoints)
         if need_keypoint_loss and rendered_joints is not None and auxiliary_data['keypoint_data'] and num_valid_samples > 0:
             # Apply availability mask - only compute loss for samples with real 2D keypoint ground truth
