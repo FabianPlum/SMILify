@@ -1230,11 +1230,14 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                 _smal_file,
                 shape_family=config_override.get('shape_family'),
             )
-        # Re-apply joint importance config in spawned workers (mp.spawn starts
-        # fresh processes where TrainingConfig has its default joint names).
+        # Re-apply joint importance / ignore configs in spawned workers (mp.spawn starts
+        # fresh processes where TrainingConfig has its default values).
         _ji = config_override.get('joint_importance')
         if _ji:
             TrainingConfig.JOINT_IMPORTANCE_CONFIG = _ji
+        _ijl = config_override.get('ignored_joint_locations')
+        if _ijl:
+            TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = _ijl
 
     # Load training configuration
     training_config = TrainingConfig.get_all_config(dataset_name)
@@ -1952,6 +1955,12 @@ if __name__ == "__main__":
             'enabled': new_config.joint_importance.enabled,
             'important_joint_names': list(new_config.joint_importance.important_joint_names),
             'weight_multiplier': new_config.joint_importance.weight_multiplier,
+        }
+
+        # Sync ignored_joint_locations to legacy TrainingConfig
+        TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = {
+            'enabled': new_config.ignored_joint_locations.enabled,
+            'ignored_joint_names': list(new_config.ignored_joint_locations.ignored_joint_names),
         }
 
         # Convert to legacy dict format for existing main()
