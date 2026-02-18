@@ -2609,7 +2609,12 @@ def main(config: dict):
                 num_samples=config.get('num_visualization_samples', 3),
                 rank=rank
             )
-    
+
+        # Sync all ranks after rank-0-only operations (visualization, checkpointing)
+        # so non-zero ranks don't race ahead into the next epoch and deadlock.
+        if is_distributed:
+            dist.barrier()
+
     # Save final model
     if rank == 0:
         save_checkpoint(

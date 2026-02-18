@@ -1830,7 +1830,12 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                 param_errors_path = os.path.join(output_config['plots_dir'], f'parameter_errors_epoch_{epoch}.png')
                 plot_training_history(train_losses, val_losses, history_path)
                 plot_parameter_errors(train_param_errors, val_param_errors, param_errors_path)
-    
+
+        # Sync all ranks after rank-0-only operations (visualization, plotting, checkpointing)
+        # so non-zero ranks don't race ahead into the next epoch's train_epoch() and deadlock.
+        if is_distributed:
+            dist.barrier()
+
     if not is_distributed or rank == 0:
         print("Training completed!")
     
