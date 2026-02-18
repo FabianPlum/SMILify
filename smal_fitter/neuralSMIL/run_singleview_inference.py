@@ -1415,15 +1415,15 @@ def main():
         epilog="""
 Examples:
   # Process images
-  python run_inference.py --checkpoint checkpoints/best_model.pth --input-folder test_images --output-folder results
-  python run_inference.py -c model.pth -i images/ -o output/ --crop-mode centred
-  
+  python run_singleview_inference.py --checkpoint checkpoints/best_model.pth --input_folder test_images --output_folder results
+  python run_singleview_inference.py -c model.pth -i images/ -o output/ --crop_mode centred
+
   # Process video
-  python run_inference.py --checkpoint model.pth --input-video video.mp4 --output-folder results
-  python run_inference.py -c model.pth -v video.mp4 -o output/ --save-frames --fps 30
-  
+  python run_singleview_inference.py --checkpoint model.pth --input_video video.mp4 --output_folder results
+  python run_singleview_inference.py -c model.pth -v video.mp4 -o output/ --save_frames --fps 30
+
   # With different preprocessing
-  python run_inference.py -c model.pth -i images/ -o output/ --crop-mode default
+  python run_singleview_inference.py -c model.pth -i images/ -o output/ --crop_mode default
 
 Supported image formats: jpg, jpeg, png, bmp, tiff, tif (case-insensitive)
 Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
@@ -1435,23 +1435,23 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
     
     # Input options (mutually exclusive)
     input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument('-i', '--input-folder', type=str,
+    input_group.add_argument('-i', '--input_folder', type=str,
                             help='Path to folder containing input images')
-    input_group.add_argument('-v', '--input-video', type=str,
+    input_group.add_argument('-v', '--input_video', type=str,
                             help='Path to input video file')
     
-    parser.add_argument('-o', '--output-folder', type=str, required=True,
+    parser.add_argument('-o', '--output_folder', type=str, required=True,
                        help='Path to folder for saving results')
     
     # Preprocessing options
-    parser.add_argument('--crop-mode', type=str, default='centred',
+    parser.add_argument('--crop_mode', type=str, default='centred',
                        choices=['centred', 'default', 'bbox_crop'],
                        help='Image preprocessing mode: centred=center crop (preserves aspect ratio), '
                             'default=direct resize (may distort), bbox_crop=SLEAP-driven bounding box crop. '
                             'Should match training preprocessing. (default: centred)')
     
     # Processing options
-    parser.add_argument('--batch-size', type=int, default=1,
+    parser.add_argument('--batch_size', type=int, default=1,
                        help='Batch size for processing (default: 1, currently only 1 is supported)')
     parser.add_argument('--device', type=str, default='auto',
                        choices=['auto', 'cuda', 'cpu'],
@@ -1460,21 +1460,21 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
     # Video-specific options
     parser.add_argument('--fps', type=int, default=None,
                        help='Output video FPS (default: same as input)')
-    parser.add_argument('--save-frames', action='store_true',
+    parser.add_argument('--save_frames', action='store_true',
                        help='Save individual frame results when processing video')
-    parser.add_argument('--max-frames', type=int, default=-1,
+    parser.add_argument('--max_frames', type=int, default=-1,
                        help='Maximum number of frames to process from video (default: -1 for all frames)')
-    parser.add_argument('--camera-smoothing', type=int, default=10,
+    parser.add_argument('--camera_smoothing', type=int, default=10,
                        help='Moving average window size for camera parameter smoothing (default: 10, set to 0 to disable)')
-    parser.add_argument('--video-export-mode', type=str, default='overlay',
+    parser.add_argument('--video_export_mode', type=str, default='overlay',
                        choices=['overlay', 'side_by_side'],
                        help='Video export mode: overlay=blend model onto input (default), '
                             'side_by_side=display input and rendered model side by side at same resolution')
     
     # SLEAP-specific options
-    parser.add_argument('--sleap-project', type=str, default=None,
+    parser.add_argument('--sleap_project', type=str, default=None,
                        help='Path to SLEAP project directory (required for bbox_crop)')
-    parser.add_argument('--sleap-camera', type=str, default=None,
+    parser.add_argument('--sleap_camera', type=str, default=None,
                        help='Optional camera name override when using bbox_crop with SLEAP data')
     
     args = parser.parse_args()
