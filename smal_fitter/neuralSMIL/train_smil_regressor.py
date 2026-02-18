@@ -1862,14 +1862,14 @@ if __name__ == "__main__":
                        help='Path to checkpoint file to resume training from (overrides config setting, default: None)')
     parser.add_argument('--seed', type=int, default=None,
                        help='Random seed for reproducibility (overrides config default)')
-    parser.add_argument('--rotation-representation', type=str, default=None, 
+    parser.add_argument('--rotation_representation', type=str, default=None,
                        choices=['6d', 'axis_angle'],
                        help='Rotation representation for joint rotations (overrides config default)')
-    parser.add_argument('--batch-size', type=int, default=None,
+    parser.add_argument('--batch_size', type=int, default=None,
                        help='Batch size (overrides config default)')
-    parser.add_argument('--learning-rate', type=float, default=None,
+    parser.add_argument('--learning_rate', type=float, default=None,
                        help='Learning rate (overrides config default)')
-    parser.add_argument('--num-epochs', type=int, default=None,
+    parser.add_argument('--num_epochs', type=int, default=None,
                        help='Number of epochs (overrides config default)')
     parser.add_argument('--backbone', type=str, default=None,
                        choices=['resnet50', 'resnet101', 'resnet152', 'vit_base_patch16_224', 'vit_large_patch16_224'],
@@ -1879,11 +1879,11 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default=None,
                        help='Path to JSON config file (must include "mode": "singleview"). '
                             'See configs/examples/singleview_baseline.json for a template.')
-    parser.add_argument('--num-gpus', type=int, default=1,
+    parser.add_argument('--num_gpus', type=int, default=1,
                        help='Number of GPUs to use for training (default: 1, ignored when using torchrun)')
-    parser.add_argument('--master-port', type=str, default=None,
+    parser.add_argument('--master_port', type=str, default=None,
                        help='Master port for distributed training (default: from MASTER_PORT env var or 12345)')
-    parser.add_argument('--scale-trans-mode', type=str, default=None,
+    parser.add_argument('--scale_trans_mode', type=str, default=None,
                        choices=['ignore', 'separate', 'entangled_with_betas'],
                        help='Scale/translation beta mode (overrides config default)')
     args = parser.parse_args()
