@@ -2238,12 +2238,25 @@ def main(config: dict):
     Args:
         config: Training configuration dictionary (from MultiViewTrainingConfig)
     """
+    # Re-apply SMAL model override in this process.
+    # When using mp.spawn, each worker is a fresh Python process that imports
+    # config.py with its defaults.  The parent process may have already called
+    # apply_smal_file_override(), but that only patched the parent's globals.
+    # We must re-apply here so config.N_POSE, config.N_BETAS, config.dd, etc.
+    # match the checkpoint / JSON config in every worker.
+    _smal_file = config.get('smal_file')
+    if _smal_file:
+        apply_smal_file_override(
+            _smal_file,
+            shape_family=config.get('shape_family'),
+        )
+
     # Extract distributed training config
     is_distributed = config.get('is_distributed', False)
     rank = config.get('rank', 0)
     world_size = config.get('world_size', 1)
     device_override = config.get('device_override', None)
-    
+
     # Set random seeds
     set_random_seeds(config['seed'])
     
@@ -2661,22 +2674,32 @@ if __name__ == "__main__":
         description="Train Multi-View SMIL Image Regressor",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Basic training
-  python train_multiview_regressor.py --dataset_path multiview_sleap.h5
-  
-  # With custom configuration
-  python train_multiview_regressor.py --dataset_path multiview_sleap.h5 \\
-      --batch_size 16 --num_epochs 200 --learning_rate 5e-5
-  
-  # Distributed training (single node, 4 GPUs)
-  torchrun --nproc_per_node=4 train_multiview_regressor.py --dataset_path multiview_sleap.h5
+            Examples:
+            # Training with JSON config (dataset path in config file)
+            python train_multiview_regressor.py --config configs/examples/multiview_baseline.json
+
+            # Training with explicit dataset path
+            python train_multiview_regressor.py --dataset_path multiview_sleap.h5
+
+            # JSON config with CLI dataset override
+            python train_multiview_regressor.py --config configs/examples/multiview_baseline.json \\
+                --dataset_path /path/to/other_dataset.h5
+
+            # With custom configuration
+            python train_multiview_regressor.py --dataset_path multiview_sleap.h5 \\
+                --batch_size 16 --num_epochs 200 --learning_rate 5e-5
+
+            # Distributed training (single node, 4 GPUs)
+            torchrun --nproc_per_node=4 train_multiview_regressor.py \\
+                --config configs/examples/multiview_baseline.json
         """
     )
     
-    # Required arguments
-    parser.add_argument("--dataset_path", type=str, required=True,
-                       help="Path to multi-view SLEAP HDF5 dataset")
+    # Dataset (optional when using --config with dataset.data_path set)
+    parser.add_argument("--dataset_path", type=str, default=None,
+                       help="Path to multi-view SLEAP HDF5 dataset. "
+                            "Optional when using --config with dataset.data_path set. "
+                            "CLI value overrides config file.")
     
     # Model configuration
     parser.add_argument("--backbone_name", type=str, default='vit_large_patch16_224',
@@ -2849,6 +2872,16 @@ Examples:
                     training_config[key] = value
     else:
         training_config = MultiViewTrainingConfig.from_args(args)
+
+    # Validate dataset path: must be provided via CLI or config file
+    _dataset_path = training_config.get('dataset_path') if isinstance(training_config, dict) else getattr(training_config, 'dataset_path', None)
+    if not _dataset_path:
+        print("ERROR: No dataset path provided. Specify one via --dataset_path or in your "
+              "config file under dataset.data_path.", file=sys.stderr)
+        sys.exit(1)
+    if not os.path.exists(_dataset_path):
+        print(f"ERROR: Dataset path does not exist: {_dataset_path}", file=sys.stderr)
+        sys.exit(1)
 
     # Ensure checkpoint will contain smal_file, shape_family and scale_trans_config for inference
     if 'shape_family' not in training_config:
