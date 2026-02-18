@@ -2844,6 +2844,13 @@ if __name__ == "__main__":
             # Sync scale_trans_mode to legacy TrainingConfig
             TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = new_config.scale_trans_beta.mode
 
+            # Sync joint_importance to legacy TrainingConfig
+            TrainingConfig.JOINT_IMPORTANCE_CONFIG = {
+                'enabled': new_config.joint_importance.enabled,
+                'important_joint_names': list(new_config.joint_importance.important_joint_names),
+                'weight_multiplier': new_config.joint_importance.weight_multiplier,
+            }
+
             # Convert to legacy flat dict for existing main()
             training_config = new_config.to_multiview_legacy_dict()
             training_config['shape_family'] = (

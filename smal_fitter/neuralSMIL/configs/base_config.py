@@ -530,4 +530,9 @@ class BaseTrainingConfig:
                 'plot_history_every': self.output.plot_history_every,
                 'num_visualization_samples': self.output.num_visualization_samples,
             },
+            'joint_importance': {
+                'enabled': self.joint_importance.enabled,
+                'important_joint_names': list(self.joint_importance.important_joint_names),
+                'weight_multiplier': self.joint_importance.weight_multiplier,
+            },
         }
