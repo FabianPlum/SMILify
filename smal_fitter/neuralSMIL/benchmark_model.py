@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-Benchmark a Multi-View SMIL model checkpoint on a multi-view SLEAP dataset.
+Benchmark a SMIL model checkpoint (single-view or multi-view) on an HDF5 dataset.
+
+The model type is auto-detected from the checkpoint state dict:
+  - If ``view_embeddings.weight`` is present → multi-view
+  - Otherwise → single-view
 
 Outputs:
   - PCK@5 (pixel threshold on original image size)
   - PCK curve over multiple thresholds
-  - MPJPE in mm (after converting back to original world scale)
+  - MPJPE in mm (after converting back to original world scale) [multi-view only, when 3D GT available]
   - Dataset stats and HDF5 key inventory
   - Plots and a text report in a dedicated output directory
 """
@@ -32,10 +36,30 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+from configs import apply_smal_file_override
+
+# Multi-view imports (always available)
 from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
 from multiview_smil_regressor import create_multiview_regressor
 from train_multiview_regressor import MultiViewTrainingConfig, load_checkpoint, set_random_seeds
-from configs import apply_smal_file_override
+
+# Single-view imports
+from smil_image_regressor import SMILImageRegressor
+from smil_datasets import UnifiedSMILDataset
+from training_config import TrainingConfig
+from train_smil_regressor import custom_collate_fn, set_random_seeds as sv_set_random_seeds
+
+
+def _detect_model_type(checkpoint: dict) -> str:
+    """Detect whether a checkpoint is from a multi-view or single-view model.
+
+    Multi-view checkpoints contain ``view_embeddings.weight`` in their state
+    dict; single-view checkpoints do not.
+    """
+    state_dict = checkpoint.get("model_state_dict", checkpoint)
+    if "view_embeddings.weight" in state_dict:
+        return "multiview"
+    return "singleview"
 
 
 def _safe_stem(path: str) -> str:
@@ -311,18 +335,379 @@ def _plot_3d_keypoints_by_percentile(
         plt.close()
 
 
+# ---------------------------------------------------------------------------
+# Single-view helpers
+# ---------------------------------------------------------------------------
+
+def _create_singleview_model(
+    checkpoint: dict,
+    device: torch.device,
+    smal_file_override: Optional[str],
+    shape_family_override: Optional[int],
+    log_fn=print,
+) -> Tuple[SMILImageRegressor, dict]:
+    """Create and load a single-view SMILImageRegressor from *checkpoint*.
+
+    Returns ``(model, resolved_config)`` where *resolved_config* is the flat
+    dict produced by merging checkpoint config with ``TrainingConfig`` defaults.
+    """
+    ckpt_config = checkpoint.get("config", {})
+    training_config_fallback = TrainingConfig.get_all_config()
+    fallback_model = training_config_fallback["model_config"].copy()
+    fallback_params = training_config_fallback["training_params"]
+
+    if ckpt_config:
+        model_config = {**fallback_model, **ckpt_config.get("model_config", {})}
+        rotation_representation = (
+            (ckpt_config.get("training_params") or {}).get("rotation_representation")
+            or fallback_params.get("rotation_representation", "6d")
+        )
+        scale_trans_mode = ckpt_config.get("scale_trans_mode") or TrainingConfig.get_scale_trans_mode()
+        shape_family = ckpt_config.get("shape_family", config.SHAPE_FAMILY)
+    else:
+        model_config = fallback_model
+        rotation_representation = fallback_params["rotation_representation"]
+        scale_trans_mode = TrainingConfig.get_scale_trans_mode()
+        shape_family = config.SHAPE_FAMILY
+
+    # CLI overrides
+    smal_file = smal_file_override or ckpt_config.get("smal_file")
+    if shape_family_override is not None:
+        shape_family = shape_family_override
+
+    if not smal_file or not os.path.exists(smal_file):
+        print(
+            f"ERROR: Cannot resolve SMAL model file.\n"
+            f"  From checkpoint config: {ckpt_config.get('smal_file', '(not stored)')}\n"
+            f"  From --smal-file arg:   {smal_file_override or '(not provided)'}\n"
+            f"  Resolved path:          {smal_file or '(none)'}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    apply_smal_file_override(smal_file, shape_family=shape_family)
+
+    backbone_name = model_config["backbone_name"]
+    input_resolution = 224 if backbone_name.startswith("vit") else 512
+
+    log_fn(f"Singleview model config:")
+    log_fn(f"  backbone: {backbone_name}")
+    log_fn(f"  head_type: {model_config.get('head_type', 'mlp')}")
+    log_fn(f"  rotation_representation: {rotation_representation}")
+    log_fn(f"  scale_trans_mode: {scale_trans_mode}")
+    log_fn(f"  shape_family: {shape_family}")
+    log_fn(f"  input_resolution: {input_resolution}")
+
+    # CRITICAL: Placeholder must be 512x512 regardless of backbone. The renderer
+    # (SMALFitter) derives its image_size from data_batch.shape, and
+    # _compute_rendered_outputs normalises projected joints by a hardcoded 512.
+    # Training always uses 512x512 placeholder data (create_placeholder_data_batch),
+    # so we must match that here to keep the rendering coordinate system consistent.
+    placeholder_data = torch.zeros((1, 3, 512, 512))
+    model = SMILImageRegressor(
+        device=device,
+        data_batch=placeholder_data,
+        batch_size=1,
+        shape_family=shape_family,
+        use_unity_prior=model_config.get("use_unity_prior", False),
+        rgb_only=model_config.get("rgb_only", True),
+        freeze_backbone=model_config.get("freeze_backbone", True),
+        hidden_dim=model_config.get("hidden_dim", 1024),
+        use_ue_scaling=True,
+        rotation_representation=rotation_representation,
+        input_resolution=input_resolution,
+        backbone_name=backbone_name,
+        head_type=model_config.get("head_type", "mlp"),
+        transformer_config=model_config.get("transformer_config", {}),
+        scale_trans_mode=scale_trans_mode,
+    ).to(device)
+
+    # Load weights (filter out SMAL optimization params, same as inference script)
+    state_dict = checkpoint["model_state_dict"]
+    smal_optimization_params = [
+        "global_rotation", "joint_rotations", "trans", "log_beta_scales",
+        "betas_trans", "betas", "fov", "target_joints", "target_visibility",
+    ]
+    nn_state_dict = {
+        k: v for k, v in state_dict.items()
+        if not any(k == p or k.startswith(p + ".") for p in smal_optimization_params)
+    }
+    missing, unexpected = model.load_state_dict(nn_state_dict, strict=False)
+    if missing:
+        log_fn(f"  Missing keys (will use init): {missing[:5]}{'...' if len(missing) > 5 else ''}")
+    if unexpected:
+        log_fn(f"  Unexpected keys (ignored):    {unexpected[:5]}{'...' if len(unexpected) > 5 else ''}")
+    model.eval()
+    log_fn(f"Loaded singleview model ({sum(p.numel() for p in model.parameters()):,} params)")
+
+    # Build a flat resolved config dict for the benchmark loop
+    resolved = {
+        "model_config": model_config,
+        "rotation_representation": rotation_representation,
+        "scale_trans_mode": scale_trans_mode,
+        "shape_family": shape_family,
+        "backbone_name": backbone_name,
+        "input_resolution": input_resolution,
+        "batch_size": ckpt_config.get("training_params", {}).get("batch_size",
+                      fallback_params.get("batch_size", 4)),
+        "seed": ckpt_config.get("training_params", {}).get("seed",
+                fallback_params.get("seed", 0)),
+        "train_ratio": training_config_fallback.get("split_config", {}).get("train_size",
+                       1.0 - training_config_fallback.get("split_config", {}).get("val_size", 0.1)
+                             - training_config_fallback.get("split_config", {}).get("test_size", 0.1)),
+        "val_ratio": training_config_fallback.get("split_config", {}).get("val_size", 0.1),
+    }
+    return model, resolved
+
+
+def _compute_pck_errors_singleview(
+    model: SMILImageRegressor,
+    x_data_batch: list,
+    y_data_batch: list,
+    default_resolution: int,
+    override_size: Optional[Tuple[int, int]],
+) -> List[float]:
+    """Compute per-joint 2D pixel errors for a single-view batch.
+
+    Uses the model's own ``predict_from_batch`` and ``_compute_rendered_outputs``
+    to obtain normalised predicted joint positions, then compares against the
+    ground-truth ``keypoints_2d`` and ``keypoint_visibility`` stored in
+    *y_data_batch*.
+    """
+    result = model.predict_from_batch(x_data_batch, y_data_batch)
+    if result[0] is None:
+        return []
+
+    predicted_params, _, _ = result
+
+    # Render predicted 2D joints (normalised [0, 1] in [y, x] order)
+    rendered_joints, _, _ = model._compute_rendered_outputs(
+        predicted_params, compute_joints=True, compute_silhouette=False, compute_joints_3d=False,
+    )
+    if rendered_joints is None:
+        return []
+
+    rendered_np = rendered_joints.detach().cpu().numpy()  # (B, J, 2)
+
+    errors_px: List[float] = []
+    for b_idx, y_data in enumerate(y_data_batch):
+        gt = y_data.get("keypoints_2d")
+        vis = y_data.get("keypoint_visibility")
+        if gt is None or vis is None:
+            continue
+
+        gt = np.asarray(gt, dtype=np.float32)
+        vis = np.asarray(vis, dtype=np.float32)
+        pred = rendered_np[b_idx]
+
+        J = min(gt.shape[0], pred.shape[0])
+        if J == 0:
+            continue
+
+        gt = gt[:J]
+        pred = pred[:J]
+        vis = vis[:J]
+
+        if override_size is not None:
+            H, W = override_size
+        else:
+            H = W = default_resolution
+
+        # Both are normalised [0, 1]; scale to pixel space
+        pred_y = pred[:, 0] * H
+        pred_x = pred[:, 1] * W
+        gt_y = gt[:, 0] * H
+        gt_x = gt[:, 1] * W
+
+        gt_zero_mask = (np.abs(gt_y) < 1e-6) & (np.abs(gt_x) < 1e-6)
+        valid = np.isfinite(gt_y) & np.isfinite(gt_x) & (vis > 0.5) & (~gt_zero_mask)
+        if not np.any(valid):
+            continue
+
+        dy = pred_y[valid] - gt_y[valid]
+        dx = pred_x[valid] - gt_x[valid]
+        dist = np.sqrt(dy * dy + dx * dx)
+        errors_px.extend(dist.tolist())
+
+    return errors_px
+
+
+def _run_singleview_benchmark(
+    args,
+    checkpoint: dict,
+    device: torch.device,
+    output_dir: str,
+    log_fn,
+    override_size: Optional[Tuple[int, int]],
+):
+    """Full benchmark loop for a single-view checkpoint."""
+    model, sv_config = _create_singleview_model(
+        checkpoint, device,
+        smal_file_override=args.smal_file,
+        shape_family_override=args.shape_family,
+        log_fn=log_fn,
+    )
+
+    # Override batch size / workers from CLI
+    batch_size = args.batch_size if args.batch_size is not None else sv_config["batch_size"]
+    num_workers = args.num_workers if args.num_workers is not None else 4
+
+    sv_set_random_seeds(sv_config["seed"])
+
+    # Dataset
+    log_fn("\nHDF5 INVENTORY:")
+    for line in _collect_hdf5_inventory(args.dataset_path):
+        log_fn(line)
+
+    backbone_name = sv_config["backbone_name"]
+    rotation_representation = sv_config["rotation_representation"]
+    dataset = UnifiedSMILDataset.from_path(
+        args.dataset_path,
+        rotation_representation=rotation_representation,
+        backbone_name=backbone_name,
+    )
+    target_resolution = dataset.get_target_resolution()
+    log_fn(f"\nDataset size: {len(dataset)}")
+    log_fn(f"Target resolution: {target_resolution}x{target_resolution}")
+
+    _log_keypoint_rescaling_info_sv(log_fn, target_resolution, override_size)
+
+    # Split (mirror training script)
+    total_size = len(dataset)
+    train_ratio = sv_config["train_ratio"]
+    val_ratio = sv_config["val_ratio"]
+    train_size = int(total_size * train_ratio)
+    val_size = int(total_size * val_ratio)
+    test_size = total_size - train_size - val_size
+
+    train_set, val_set, test_set = torch.utils.data.random_split(
+        dataset, [train_size, val_size, test_size],
+        generator=torch.Generator().manual_seed(sv_config["seed"]),
+    )
+    log_fn(f"\nDataset split sizes:")
+    log_fn(f"  Train: {len(train_set)}")
+    log_fn(f"  Val:   {len(val_set)}")
+    log_fn(f"  Test:  {len(test_set)}")
+
+    test_loader = DataLoader(
+        test_set,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+        collate_fn=custom_collate_fn,
+    )
+
+    pixel_scale = target_resolution
+    if override_size is not None:
+        pixel_scale = max(override_size)
+    log_fn(f"\nPCK pixel scale: {pixel_scale}px (resolution used for error → pixel conversion)")
+
+    # Benchmark loop
+    all_2d_errors_px: List[float] = []
+    with torch.no_grad():
+        for batch_idx, (x_data_batch, y_data_batch) in enumerate(test_loader):
+            if args.max_batches is not None and batch_idx >= args.max_batches:
+                break
+            batch_errors = _compute_pck_errors_singleview(
+                model, x_data_batch, y_data_batch,
+                default_resolution=target_resolution,
+                override_size=override_size,
+            )
+            all_2d_errors_px.extend(batch_errors)
+
+    # Compute PCK metrics
+    errors_px = np.array(all_2d_errors_px, dtype=np.float32)
+    pck_thresholds = np.array([1, 2, 5, 10, 20, 30, 40, 50], dtype=np.float32)
+    if errors_px.size > 0:
+        pck_values = [(errors_px <= t).mean() for t in pck_thresholds]
+        pck_at_5 = float((errors_px <= 5.0).mean())
+        mean_2d_error = float(np.mean(errors_px))
+        median_2d_error = float(np.median(errors_px))
+    else:
+        pck_values = [0.0 for _ in pck_thresholds]
+        pck_at_5 = 0.0
+        mean_2d_error = 0.0
+        median_2d_error = 0.0
+
+    log_fn("\n==== BENCHMARK RESULTS (TEST SPLIT) ====")
+    log_fn(f"PCK@5px: {pck_at_5:.4f}")
+    log_fn(f"Mean 2D error (px): {mean_2d_error:.4f}")
+    log_fn(f"Median 2D error (px): {median_2d_error:.4f}")
+    log_fn(f"2D joint errors count: {errors_px.size}")
+
+    log_fn("\nPCK curve:")
+    for t, v in zip(pck_thresholds, pck_values):
+        log_fn(f"  PCK@{int(t)}px: {v:.4f}")
+
+    # Plots
+    _save_pck_plot(pck_thresholds, pck_values, output_dir)
+    _save_error_histogram(errors_px, output_dir)
+
+    # Save raw errors
+    np.save(os.path.join(output_dir, "errors_2d_px.npy"), errors_px)
+
+    log_fn(f"\nSaved outputs to: {output_dir}")
+    log_fn(f"  PCK plot: {os.path.join(output_dir, 'pck_curve.png')}")
+    log_fn(f"  Error histogram: {os.path.join(output_dir, 'error_histogram.png')}")
+
+    return errors_px
+
+
+def _log_keypoint_rescaling_info_sv(log_fn, target_resolution: int, override_size: Optional[Tuple[int, int]]):
+    if override_size is not None:
+        log_fn(f"2D keypoint scaling: using override size {override_size[1]}x{override_size[0]}")
+    else:
+        log_fn(
+            f"2D keypoint scaling: using target_resolution "
+            f"{target_resolution}x{target_resolution}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Shared plotting helpers
+# ---------------------------------------------------------------------------
+
+def _save_pck_plot(pck_thresholds, pck_values, output_dir: str):
+    pck_plot_path = os.path.join(output_dir, "pck_curve.png")
+    plt.figure(figsize=(8, 5))
+    plt.plot(pck_thresholds, pck_values, marker="o")
+    plt.title("PCK vs Pixel Threshold")
+    plt.xlabel("Threshold (px)")
+    plt.ylabel("PCK")
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.savefig(pck_plot_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def _save_error_histogram(errors_px: np.ndarray, output_dir: str):
+    hist_plot_path = os.path.join(output_dir, "error_histogram.png")
+    plt.figure(figsize=(8, 5))
+    if errors_px.size > 0:
+        max_err = max(50.0, float(np.max(errors_px)))
+        bins = np.arange(0, max_err + 1, 1.0)
+        plt.hist(errors_px, bins=bins, color="#4C72B0", alpha=0.8)
+    plt.title("2D Keypoint Error Histogram (px)")
+    plt.xlabel("Error (px)")
+    plt.ylabel("Count")
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.savefig(hist_plot_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Benchmark Multi-View SMIL Model",
+        description="Benchmark SMIL Model (auto-detects single-view vs multi-view)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to model checkpoint")
-    parser.add_argument("--dataset_path", type=str, required=True, help="Path to multi-view HDF5 dataset")
+    parser.add_argument("--dataset_path", type=str, required=True, help="Path to HDF5 dataset")
     parser.add_argument("--batch_size", type=int, default=None, help="Override batch size for evaluation")
     parser.add_argument("--num_workers", type=int, default=None, help="Override DataLoader workers")
     parser.add_argument("--device", type=str, default=None, help="Device override, e.g. cuda:0 or cpu")
-    parser.add_argument("--num_views_to_use", type=int, default=None, help="Override num views per sample")
-    parser.add_argument("--no_random_view_sampling", action="store_true", help="Disable random view sampling")
     parser.add_argument("--max_batches", type=int, default=None, help="Limit number of test batches")
     parser.add_argument("--orig_width", type=int, default=None, help="Override original image width (pixels)")
     parser.add_argument("--orig_height", type=int, default=None, help="Override original image height (pixels)")
@@ -331,13 +716,26 @@ def main():
                             "Required if checkpoint does not contain smal_file.")
     parser.add_argument("--shape-family", type=int, default=None,
                        help="Shape family index (overrides checkpoint value)")
+    # Multi-view only options
+    parser.add_argument("--num_views_to_use", type=int, default=None, help="Override num views per sample (multi-view only)")
+    parser.add_argument("--no_random_view_sampling", action="store_true", help="Disable random view sampling (multi-view only)")
     args = parser.parse_args()
 
-    # Output directory
+    # Device setup
+    if args.device:
+        device = torch.device(args.device)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Load checkpoint and detect model type
+    checkpoint = torch.load(args.checkpoint, map_location=device)
+    model_type = _detect_model_type(checkpoint)
+
+    # Output directory (includes model type for clarity)
     ckpt_stem = _safe_stem(args.checkpoint)
     dataset_stem = _safe_stem(args.dataset_path)
     output_dir = os.path.join(
-        os.getcwd(), f"benchmark_multiview_model_{ckpt_stem}_on_{dataset_stem}"
+        os.getcwd(), f"benchmark_{model_type}_{ckpt_stem}_on_{dataset_stem}"
     )
     os.makedirs(output_dir, exist_ok=True)
 
@@ -347,22 +745,49 @@ def main():
         log_lines.append(str(msg))
 
     log("=" * 60)
-    log("SMILify Multi-View Benchmark")
+    log(f"SMILify Benchmark ({model_type})")
     log("=" * 60)
+    log(f"Model type: {model_type}")
     log(f"Checkpoint: {args.checkpoint}")
     log(f"Dataset: {args.dataset_path}")
     log(f"Output dir: {output_dir}")
     log(f"Timestamp: {datetime.now().isoformat(timespec='seconds')}")
-
-    # Device setup (mirrors training behavior)
-    if args.device:
-        device = torch.device(args.device)
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"Device: {device}")
 
-    # Load checkpoint (use TrainingConfig logic from training script)
-    checkpoint = torch.load(args.checkpoint, map_location=device)
+    # Parse override size (shared)
+    override_size = None
+    if args.orig_width is not None or args.orig_height is not None:
+        if args.orig_width is None or args.orig_height is None:
+            raise ValueError("Both --orig_width and --orig_height must be provided when overriding size.")
+        override_size = (int(args.orig_height), int(args.orig_width))
+        log(f"Override original image size: {args.orig_width}x{args.orig_height}")
+
+    # ---------------------------------------------------------------
+    # Dispatch to model-specific benchmark
+    # ---------------------------------------------------------------
+    if model_type == "singleview":
+        _run_singleview_benchmark(args, checkpoint, device, output_dir, log, override_size)
+    else:
+        _run_multiview_benchmark(args, checkpoint, device, output_dir, log, override_size)
+
+    # Write report to txt
+    report_path = os.path.join(output_dir, "benchmark_report.txt")
+    with open(report_path, "w") as f:
+        f.write("\n".join(log_lines))
+        f.write("\n")
+
+    log(f"\nReport saved to: {report_path}")
+
+
+def _run_multiview_benchmark(
+    args,
+    checkpoint: dict,
+    device: torch.device,
+    output_dir: str,
+    log_fn,
+    override_size: Optional[Tuple[int, int]],
+):
+    """Full benchmark loop for a multi-view checkpoint (original behaviour)."""
     config_from_ckpt = checkpoint.get("config", {})
     if not config_from_ckpt:
         config_from_ckpt = MultiViewTrainingConfig.get_config()
@@ -397,9 +822,9 @@ def main():
     set_random_seeds(int(config_from_ckpt.get("seed", 0)))
 
     # Dataset inventory and summary
-    log("\nHDF5 INVENTORY:")
+    log_fn("\nHDF5 INVENTORY:")
     for line in _collect_hdf5_inventory(args.dataset_path):
-        log(line)
+        log_fn(line)
 
     dataset = SLEAPMultiViewDataset(
         hdf5_path=args.dataset_path,
@@ -408,63 +833,50 @@ def main():
         random_view_sampling=random_view_sampling,
     )
 
-    log("\nDATASET SUMMARY:")
+    log_fn("\nDATASET SUMMARY:")
     for line in _collect_dataset_summary(dataset):
-        log(line)
+        log_fn(line)
 
     # Get dataset max_views and canonical_camera_order
     dataset_max_views = dataset.get_max_views_in_dataset()
     dataset_canonical_camera_order = dataset.get_canonical_camera_order()
-    log(f"\nDataset max_views: {dataset_max_views}")
-    log(f"Dataset canonical camera order: {dataset_canonical_camera_order}")
+    log_fn(f"\nDataset max_views: {dataset_max_views}")
+    log_fn(f"Dataset canonical camera order: {dataset_canonical_camera_order}")
 
     # CRITICAL: Infer max_views and canonical_camera_order from checkpoint
-    # The model architecture must match the checkpoint, not the dataset.
-    # The model can still handle samples with fewer views than max_views via view_mask.
-    log(f"\nInferring model architecture from checkpoint...")
+    log_fn(f"\nInferring model architecture from checkpoint...")
     state_dict = checkpoint.get("model_state_dict", checkpoint)
 
-    # Infer max_views from checkpoint state dict
     if 'view_embeddings.weight' in state_dict:
         max_views = state_dict['view_embeddings.weight'].shape[0]
-        log(f"Inferred max_views={max_views} from checkpoint view_embeddings.weight shape")
+        log_fn(f"Inferred max_views={max_views} from checkpoint view_embeddings.weight shape")
     else:
-        # Fall back to config or dataset
         max_views = config_from_ckpt.get("max_views", dataset_max_views)
-        log(f"Using max_views={max_views} from checkpoint config or dataset")
+        log_fn(f"Using max_views={max_views} from checkpoint config or dataset")
 
-    # Get canonical_camera_order from checkpoint
     canonical_camera_order = config_from_ckpt.get("canonical_camera_order", None)
     if canonical_camera_order is None:
-        # Fall back to dataset or create placeholder
         canonical_camera_order = dataset_canonical_camera_order
         if len(canonical_camera_order) != max_views:
-            # Create placeholder if lengths don't match
             canonical_camera_order = [f"Camera{i}" for i in range(max_views)]
-            log(f"Created placeholder canonical camera order (indices 0-{max_views-1})")
+            log_fn(f"Created placeholder canonical camera order (indices 0-{max_views-1})")
     else:
-        log(f"Loaded canonical camera order from checkpoint: {canonical_camera_order}")
+        log_fn(f"Loaded canonical camera order from checkpoint: {canonical_camera_order}")
 
-    log(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
+    log_fn(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
     if max_views > dataset_max_views:
-        log(f"Note: Model supports {max_views} views, dataset has up to {dataset_max_views} views")
-        log(f"      Model will handle samples with fewer views via view_mask")
+        log_fn(f"Note: Model supports {max_views} views, dataset has up to {dataset_max_views} views")
+        log_fn(f"      Model will handle samples with fewer views via view_mask")
     elif max_views < dataset_max_views:
-        log(f"WARNING: Model supports {max_views} views but dataset has up to {dataset_max_views} views")
-        log(f"         Samples with >{max_views} views will be truncated")
+        log_fn(f"WARNING: Model supports {max_views} views but dataset has up to {dataset_max_views} views")
+        log_fn(f"         Samples with >{max_views} views will be truncated")
 
-    log(f"\nLoaded data resolution (target): {dataset.target_resolution}x{dataset.target_resolution}")
-    log(f"Original world scale: {dataset.world_scale}")
+    log_fn(f"\nLoaded data resolution (target): {dataset.target_resolution}x{dataset.target_resolution}")
+    log_fn(f"Original world scale: {dataset.world_scale}")
     if dataset.world_scale != 0.0:
-        log(f"World scale conversion factor to original units: {1.0 / dataset.world_scale:.6f}")
-    override_size = None
-    if args.orig_width is not None or args.orig_height is not None:
-        if args.orig_width is None or args.orig_height is None:
-            raise ValueError("Both --orig_width and --orig_height must be provided when overriding size.")
-        override_size = (int(args.orig_height), int(args.orig_width))
-        log(f"Override original image size: {args.orig_width}x{args.orig_height}")
+        log_fn(f"World scale conversion factor to original units: {1.0 / dataset.world_scale:.6f}")
 
-    _log_keypoint_rescaling_info(log, dataset, override_size)
+    _log_keypoint_rescaling_info(log_fn, dataset, override_size)
 
     # Data splits (mirror train_multiview_regressor.py)
     total_size = len(dataset)
@@ -477,10 +889,10 @@ def main():
         generator=torch.Generator().manual_seed(config_from_ckpt["seed"])
     )
 
-    log("\nDataset split sizes:")
-    log(f"  Train: {len(train_set)}")
-    log(f"  Val: {len(val_set)}")
-    log(f"  Test: {len(test_set)}")
+    log_fn("\nDataset split sizes:")
+    log_fn(f"  Train: {len(train_set)}")
+    log_fn(f"  Val: {len(val_set)}")
+    log_fn(f"  Test: {len(test_set)}")
 
     test_loader = DataLoader(
         test_set,
@@ -497,27 +909,23 @@ def main():
         input_resolution = 224
     else:
         input_resolution = 512
-    log(f"\nUsing input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
+    log_fn(f"\nUsing input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
 
     allow_mesh_scaling = config_from_ckpt.get("allow_mesh_scaling", False)
     mesh_scale_init = config_from_ckpt.get("mesh_scale_init", 1.0)
     use_gt_camera_init = config_from_ckpt.get("use_gt_camera_init", False)
     if allow_mesh_scaling:
-        log(f"Mesh scaling enabled with init={mesh_scale_init}")
+        log_fn(f"Mesh scaling enabled with init={mesh_scale_init}")
     if use_gt_camera_init:
-        log(f"GT camera initialization enabled - model predicts deltas from GT camera params")
+        log_fn(f"GT camera initialization enabled - model predicts deltas from GT camera params")
 
-    # Create model with architecture from checkpoint (not dataset)
-    # CRITICAL: max_views and canonical_camera_order come from checkpoint to ensure
-    # model architecture matches the trained checkpoint. The model can still handle
-    # samples with fewer views than max_views via view_mask.
     model = create_multiview_regressor(
         device=device,
         batch_size=config_from_ckpt["batch_size"],
         shape_family=config_from_ckpt.get("shape_family", config.SHAPE_FAMILY),
         use_unity_prior=config_from_ckpt.get("use_unity_prior", False),
-        max_views=max_views,  # From checkpoint, not dataset
-        canonical_camera_order=canonical_camera_order,  # From checkpoint, not dataset
+        max_views=max_views,
+        canonical_camera_order=canonical_camera_order,
         cross_attention_layers=config_from_ckpt["cross_attention_layers"],
         cross_attention_heads=config_from_ckpt["cross_attention_heads"],
         cross_attention_dropout=config_from_ckpt["cross_attention_dropout"],
@@ -535,7 +943,6 @@ def main():
     )
     model = model.to(device)
 
-    # Load model weights (exactly as training script)
     _ = load_checkpoint(args.checkpoint, model, optimizer=None, scheduler=None, device=device)
     model.eval()
 
@@ -555,7 +962,6 @@ def main():
             )
             pred_joints_np = model._predict_canonical_joints_3d(predicted_params).detach().cpu().numpy()
 
-            # PCK errors
             batch_errors_px = _compute_pck_errors(
                 model=model,
                 predicted_params=predicted_params,
@@ -566,7 +972,6 @@ def main():
             )
             all_2d_errors_px.extend(batch_errors_px)
 
-            # MPJPE errors
             batch_errors_mm, batch_samples_with_3d = _compute_mpjpe_mm(
                 model=model,
                 predicted_params=predicted_params,
@@ -576,7 +981,6 @@ def main():
             all_3d_errors_mm.extend(batch_errors_mm)
             samples_with_3d += batch_samples_with_3d
 
-            # Collect first 5 samples with 3D data for percentile-colored plotting
             if len(samples_3d_for_plot) < 5:
                 for b_idx, y_data in enumerate(y_data_batch):
                     if len(samples_3d_for_plot) >= 5:
@@ -632,27 +1036,27 @@ def main():
         mpjpe_mm = 0.0
         median_mpjpe_mm = 0.0
 
-    log("\n==== BENCHMARK RESULTS (TEST SPLIT) ====")
-    log(f"PCK@5px: {pck_at_5:.4f}")
-    log(f"Mean 2D error (px): {mean_2d_error:.4f}")
-    log(f"Median 2D error (px): {median_2d_error:.4f}")
-    log(f"MPJPE (mm): {mpjpe_mm:.4f}")
-    log(f"Median MPJPE (mm): {median_mpjpe_mm:.4f}")
+    log_fn("\n==== BENCHMARK RESULTS (TEST SPLIT) ====")
+    log_fn(f"PCK@5px: {pck_at_5:.4f}")
+    log_fn(f"Mean 2D error (px): {mean_2d_error:.4f}")
+    log_fn(f"Median 2D error (px): {median_2d_error:.4f}")
+    log_fn(f"MPJPE (mm): {mpjpe_mm:.4f}")
+    log_fn(f"Median MPJPE (mm): {median_mpjpe_mm:.4f}")
     if errors_mm.size > 0:
         percentiles = [50, 75, 90, 95, 99]
         pct_values = np.percentile(errors_mm, percentiles).tolist()
-        log("MPJPE percentiles (mm):")
+        log_fn("MPJPE percentiles (mm):")
         for p, v in zip(percentiles, pct_values):
-            log(f"  P{p}: {v:.4f}")
-    log(f"3D samples with GT: {samples_with_3d}")
-    log(f"2D joint errors count: {errors_px.size}")
-    log(f"3D joint errors count: {errors_mm.size}")
+            log_fn(f"  P{p}: {v:.4f}")
+    log_fn(f"3D samples with GT: {samples_with_3d}")
+    log_fn(f"2D joint errors count: {errors_px.size}")
+    log_fn(f"3D joint errors count: {errors_mm.size}")
 
-    log("\nPCK curve:")
+    log_fn("\nPCK curve:")
     for t, v in zip(pck_thresholds, pck_values):
-        log(f"  PCK@{int(t)}px: {v:.4f}")
+        log_fn(f"  PCK@{int(t)}px: {v:.4f}")
 
-    # Plot first 5 3D keypoint sets colored by percentile bins
+    # 3D percentile plots
     if errors_mm.size > 0 and samples_3d_for_plot:
         percentile_thresholds = np.percentile(errors_mm, [50, 75, 90, 95, 99]).tolist()
         _plot_3d_keypoints_by_percentile(
@@ -661,30 +1065,11 @@ def main():
             output_dir=output_dir,
         )
 
-    # Save plots
-    pck_plot_path = os.path.join(output_dir, "pck_curve.png")
-    plt.figure(figsize=(8, 5))
-    plt.plot(pck_thresholds, pck_values, marker="o")
-    plt.title("PCK vs Pixel Threshold (Original Image Size)")
-    plt.xlabel("Threshold (px)")
-    plt.ylabel("PCK")
-    plt.grid(True, linestyle="--", alpha=0.5)
-    plt.savefig(pck_plot_path, dpi=150, bbox_inches="tight")
-    plt.close()
+    # Shared plots
+    _save_pck_plot(pck_thresholds, pck_values, output_dir)
+    _save_error_histogram(errors_px, output_dir)
 
-    hist_plot_path = os.path.join(output_dir, "error_histogram.png")
-    plt.figure(figsize=(8, 5))
-    if errors_px.size > 0:
-        max_err = max(50.0, float(np.max(errors_px)))
-        bins = np.arange(0, max_err + 1, 1.0)
-        plt.hist(errors_px, bins=bins, color="#4C72B0", alpha=0.8)
-    plt.title("2D Keypoint Error Histogram (px)")
-    plt.xlabel("Error (px)")
-    plt.ylabel("Count")
-    plt.grid(True, linestyle="--", alpha=0.5)
-    plt.savefig(hist_plot_path, dpi=150, bbox_inches="tight")
-    plt.close()
-
+    # MPJPE histogram (multi-view only)
     mpjpe_hist_path = os.path.join(output_dir, "mpjpe_histogram.png")
     plt.figure(figsize=(8, 5))
     if errors_mm.size > 0:
@@ -698,23 +1083,16 @@ def main():
     plt.savefig(mpjpe_hist_path, dpi=150, bbox_inches="tight")
     plt.close()
 
-    # Save raw error arrays for later comparison
+    # Save raw error arrays
     np.save(os.path.join(output_dir, "errors_2d_px.npy"), errors_px)
     np.save(os.path.join(output_dir, "errors_3d_mm.npy"), errors_mm)
 
-    # Write report to txt
-    report_path = os.path.join(output_dir, "benchmark_report.txt")
-    with open(report_path, "w") as f:
-        f.write("\n".join(log_lines))
-        f.write("\n")
-
-    log(f"\nSaved outputs to: {output_dir}")
-    log(f"  Report: {report_path}")
-    log(f"  PCK plot: {pck_plot_path}")
-    log(f"  Error histogram: {hist_plot_path}")
-    log(f"  MPJPE histogram: {mpjpe_hist_path}")
+    log_fn(f"\nSaved outputs to: {output_dir}")
+    log_fn(f"  PCK plot: {os.path.join(output_dir, 'pck_curve.png')}")
+    log_fn(f"  Error histogram: {os.path.join(output_dir, 'error_histogram.png')}")
+    log_fn(f"  MPJPE histogram: {mpjpe_hist_path}")
     if errors_mm.size > 0 and samples_3d_for_plot:
-        log(f"  3D percentile plots: {os.path.join(output_dir, 'sample_00_3d_keypoints_percentiles.png')} (and next 4)")
+        log_fn(f"  3D percentile plots: {os.path.join(output_dir, 'sample_00_3d_keypoints_percentiles.png')} (and next 4)")
 
 
 if __name__ == "__main__":
