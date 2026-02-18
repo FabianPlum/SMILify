@@ -1217,9 +1217,23 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         checkpoint_path (str): Path to checkpoint file to resume training from (default: None)
         config_override (dict): Dictionary to override specific config values (default: None)
     """
+    # Re-apply SMAL model override in this process.
+    # When using mp.spawn, each worker is a fresh Python process that imports
+    # config.py with its defaults.  The parent process may have already called
+    # apply_smal_file_override(), but that only patched the parent's globals.
+    # We must re-apply here so config.N_POSE, config.N_BETAS, config.dd, etc.
+    # match the checkpoint / JSON config in every worker.
+    if config_override:
+        _smal_file = config_override.get('smal_file')
+        if _smal_file:
+            apply_smal_file_override(
+                _smal_file,
+                shape_family=config_override.get('shape_family'),
+            )
+
     # Load training configuration
     training_config = TrainingConfig.get_all_config(dataset_name)
-    
+
     # Extract DDP configuration from config_override
     is_distributed = config_override.get('is_distributed', False) if config_override else False
     rank = config_override.get('rank', 0) if config_override else 0
