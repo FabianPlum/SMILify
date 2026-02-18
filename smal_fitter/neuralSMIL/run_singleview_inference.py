@@ -1499,7 +1499,6 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
             print(f"Max frames: {args.max_frames}")
         else:
             print(f"Max frames: All frames")
-    print(f"Batch size: {args.batch_size}")
     
     # Set device
     if args.device == 'auto':
