@@ -1462,8 +1462,8 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
                        help='Save individual frame results when processing video')
     parser.add_argument('--max_frames', type=int, default=-1,
                        help='Maximum number of frames to process from video (default: -1 for all frames)')
-    parser.add_argument('--camera_smoothing', type=int, default=2,
-                       help='Moving average window size for camera parameter smoothing (default: 2, set to 0 to disable)')
+    parser.add_argument('--camera_smoothing', type=int, default=0,
+                       help='Moving average window size for camera parameter smoothing (default: 0, set to 0 to disable)')
     parser.add_argument('--video_export_mode', type=str, default='overlay',
                        choices=['overlay', 'side_by_side'],
                        help='Video export mode: overlay=blend model onto input (default), '
