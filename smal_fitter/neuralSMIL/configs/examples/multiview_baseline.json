@@ -8,12 +8,12 @@
   "cross_attention_dropout": 0.1,
 
   "smal_model": {
-    "smal_file": null,
+    "smal_file": "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl",
     "shape_family": null
   },
 
   "dataset": {
-    "data_path": null,
+    "data_path": "SMILymice_3D_6_cam_undistort.h5",
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
@@ -216,7 +216,7 @@
     "visualizations_dir": "multiview_visualizations",
     "singleview_visualizations_dir": "multiview_singleview_renders",
     "save_checkpoint_every": 10,
-    "generate_visualizations_every": 10,
+    "generate_visualizations_every": 1,
     "num_visualization_samples": 3
   },
 
@@ -228,7 +228,7 @@
     "num_workers": 8,
     "pin_memory": true,
     "prefetch_factor": 4,
-    "resume_checkpoint": null,
+    "resume_checkpoint": "best_model.pth",
     "use_gt_camera_init": true
   }
 }
