@@ -35,6 +35,7 @@ import config
 from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
 from multiview_smil_regressor import create_multiview_regressor
 from train_multiview_regressor import MultiViewTrainingConfig, load_checkpoint, set_random_seeds
+from configs import apply_smal_file_override
 
 
 def _safe_stem(path: str) -> str:
@@ -325,6 +326,11 @@ def main():
     parser.add_argument("--max_batches", type=int, default=None, help="Limit number of test batches")
     parser.add_argument("--orig_width", type=int, default=None, help="Override original image width (pixels)")
     parser.add_argument("--orig_height", type=int, default=None, help="Override original image height (pixels)")
+    parser.add_argument("--smal-file", type=str, default=None,
+                       help="Path to SMAL/SMIL model pickle. Overrides checkpoint value. "
+                            "Required if checkpoint does not contain smal_file.")
+    parser.add_argument("--shape-family", type=int, default=None,
+                       help="Shape family index (overrides checkpoint value)")
     args = parser.parse_args()
 
     # Output directory
@@ -360,6 +366,24 @@ def main():
     config_from_ckpt = checkpoint.get("config", {})
     if not config_from_ckpt:
         config_from_ckpt = MultiViewTrainingConfig.get_config()
+
+    # Resolve SMAL model: CLI arg > checkpoint config > abort
+    smal_file = args.smal_file or config_from_ckpt.get("smal_file")
+    shape_family = args.shape_family if args.shape_family is not None else config_from_ckpt.get("shape_family")
+    if not smal_file or not os.path.exists(smal_file):
+        print(
+            f"ERROR: Cannot resolve SMAL model file.\n"
+            f"  From checkpoint config: {config_from_ckpt.get('smal_file', '(not stored)')}\n"
+            f"  From --smal-file arg:   {args.smal_file or '(not provided)'}\n"
+            f"  Resolved path:          {smal_file or '(none)'}\n\n"
+            f"Provide a valid path via --smal-file, e.g.:\n"
+            f"  python benchmark_multiview_model.py --checkpoint {args.checkpoint} "
+            f"--dataset_path {args.dataset_path} --smal-file path/to/model.pkl",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    apply_smal_file_override(smal_file, shape_family=shape_family)
+
     config_from_ckpt["dataset_path"] = args.dataset_path
     if args.batch_size is not None:
         config_from_ckpt["batch_size"] = args.batch_size
