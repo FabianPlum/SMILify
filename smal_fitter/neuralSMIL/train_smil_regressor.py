@@ -1230,8 +1230,11 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                 _smal_file,
                 shape_family=config_override.get('shape_family'),
             )
-        # Re-apply joint importance / ignore configs in spawned workers (mp.spawn starts
+        # Re-apply TrainingConfig overrides in spawned workers (mp.spawn starts
         # fresh processes where TrainingConfig has its default values).
+        _stb = config_override.get('scale_trans_beta')
+        if _stb:
+            TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = _stb['mode']
         _ji = config_override.get('joint_importance')
         if _ji:
             TrainingConfig.JOINT_IMPORTANCE_CONFIG = _ji
