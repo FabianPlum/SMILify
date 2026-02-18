@@ -1307,62 +1307,6 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         # but we make it explicit that this is for caching/reuse
         return self._predict_canonical_joints_3d(body_params)
 
-    def _get_joint_importance_weights(self) -> Optional[torch.Tensor]:
-        """
-        Get per-joint importance weights based on TrainingConfig.
-        
-        Returns a weight tensor of shape (J,) where J = len(CANONICAL_MODEL_JOINTS).
-        Important joints get `weight_multiplier`, all others get 1.0.
-        Returns None if joint importance weighting is disabled.
-        
-        Returns:
-            Weight tensor (J,) or None if disabled
-        """
-        if not TrainingConfig.is_joint_importance_enabled():
-            return None
-        
-        important_names = TrainingConfig.get_important_joint_names()
-        multiplier = TrainingConfig.get_joint_importance_multiplier()
-        
-        if not important_names or multiplier == 1.0:
-            return None
-        
-        n_canonical_joints = len(config.CANONICAL_MODEL_JOINTS)
-        weights = torch.ones(n_canonical_joints, dtype=torch.float32, device=self.device)
-        
-        # Get joint names from the SMAL model or config
-        # config.joint_names is loaded from the SMAL pkl file
-        try:
-            model_joint_names = config.joint_names
-        except AttributeError:
-            print("Warning: config.joint_names not available, joint importance weighting disabled")
-            return None
-        
-        # Map important joint names to canonical joint indices
-        matched_count = 0
-        for joint_name in important_names:
-            # Find this joint name in the model's joint names
-            if joint_name in model_joint_names:
-                model_idx = model_joint_names.index(joint_name)
-                
-                # Find where this model index appears in CANONICAL_MODEL_JOINTS
-                if model_idx in config.CANONICAL_MODEL_JOINTS:
-                    canonical_idx = config.CANONICAL_MODEL_JOINTS.index(model_idx)
-                    weights[canonical_idx] = multiplier
-                    matched_count += 1
-                else:
-                    print(f"Warning: Joint '{joint_name}' (model idx {model_idx}) not in CANONICAL_MODEL_JOINTS")
-            else:
-                print(f"Warning: Joint name '{joint_name}' not found in model. "
-                      f"Available joints: {model_joint_names[:10]}..." if len(model_joint_names) > 10 
-                      else f"Available joints: {model_joint_names}")
-        
-        if matched_count == 0:
-            print("Warning: No important joints matched, joint importance weighting disabled")
-            return None
-        
-        return weights
-
     def _batch_project_joints_to_views(self, 
                                         joints_3d: torch.Tensor,
                                         fov_per_view: List[torch.Tensor],

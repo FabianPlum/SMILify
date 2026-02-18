@@ -1230,6 +1230,11 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                 _smal_file,
                 shape_family=config_override.get('shape_family'),
             )
+        # Re-apply joint importance config in spawned workers (mp.spawn starts
+        # fresh processes where TrainingConfig has its default joint names).
+        _ji = config_override.get('joint_importance')
+        if _ji:
+            TrainingConfig.JOINT_IMPORTANCE_CONFIG = _ji
 
     # Load training configuration
     training_config = TrainingConfig.get_all_config(dataset_name)
@@ -1941,6 +1946,13 @@ if __name__ == "__main__":
 
         # Sync scale_trans_mode to legacy TrainingConfig (still read by some code paths)
         TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = new_config.scale_trans_beta.mode
+
+        # Sync joint_importance to legacy TrainingConfig
+        TrainingConfig.JOINT_IMPORTANCE_CONFIG = {
+            'enabled': new_config.joint_importance.enabled,
+            'important_joint_names': list(new_config.joint_importance.important_joint_names),
+            'weight_multiplier': new_config.joint_importance.weight_multiplier,
+        }
 
         # Convert to legacy dict format for existing main()
         config_override = new_config.to_legacy_dict()
