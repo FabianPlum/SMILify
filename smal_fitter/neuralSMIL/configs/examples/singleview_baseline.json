@@ -40,18 +40,9 @@
       "10": 3e-5,
       "20": 2e-5,
       "60": 1e-5,
-      "100": 1e-5,
+      "100": 5e-6,
       "150": 2e-6,
-      "200": 2e-6,
-      "250": 1e-6,
-      "300": 1e-5,
-      "350": 1e-6,
-      "400": 1e-5,
-      "475": 1e-6,
-      "490": 5e-7,
-      "500": 5e-6,
-      "550": 1e-6,
-      "718": 1e-5
+      "200": 1e-6
     }
   },
 
@@ -79,112 +70,25 @@
         "limb_scale_regularization": 0.1,
         "limb_trans_regularization": 1
       },
-      "10": {
-        "keypoint_2d": 0.1,
-        "joint_angle_regularization": 0.005,
-        "limb_scale_regularization": 0.05,
-        "limb_trans_regularization": 1
-      },
-      "25": {
-        "keypoint_2d": 0.2,
+      "5": {
         "joint_angle_regularization": 0.0025,
-        "limb_scale_regularization": 0.02,
-        "limb_trans_regularization": 1
-      },
-      "35": {
-        "keypoint_3d": 1,
-        "joint_angle_regularization": 0.001,
         "limb_scale_regularization": 0.01,
-        "limb_trans_regularization": 1
+        "limb_trans_regularization": 0.01
       },
-      "45": {
-        "keypoint_3d": 1,
+      "10": {
         "joint_angle_regularization": 0.0001,
-        "limb_scale_regularization": 0.005,
-        "limb_trans_regularization": 1
+        "limb_scale_regularization": 0.001,
+        "limb_trans_regularization": 0.01
+      },
+      "20": {
+        "joint_angle_regularization": 0.00001,
+        "limb_scale_regularization": 0.0001,
+        "limb_trans_regularization": 0.01
       },
       "50": {
-        "keypoint_3d": 2,
-        "joint_angle_regularization": 5e-5,
+        "joint_angle_regularization": 0.00001,
         "limb_scale_regularization": 0.001,
-        "limb_trans_regularization": 0.5
-      },
-      "100": {
-        "keypoint_3d": 2,
-        "keypoint_2d": 0.2,
-        "joint_angle_regularization": 1e-5,
-        "limb_scale_regularization": 1e-7,
-        "limb_trans_regularization": 0.1
-      },
-      "300": {
-        "keypoint_3d": 2,
-        "keypoint_2d": 0.2,
-        "joint_angle_regularization": 1e-5,
-        "limb_scale_regularization": 1e-7,
-        "limb_trans_regularization": 0.1,
-        "fov": 1e-7,
-        "cam_rot": 1e-8,
-        "cam_trans": 1e-8
-      },
-      "400": {
-        "keypoint_3d": 2,
-        "keypoint_2d": 0.4,
-        "joint_angle_regularization": 0.0001,
-        "limb_scale_regularization": 1e-5,
-        "limb_trans_regularization": 0.1,
-        "fov": 1e-7,
-        "cam_rot": 1e-8,
-        "cam_trans": 1e-8
-      },
-      "460": {
-        "keypoint_3d": 2,
-        "keypoint_2d": 0.2,
-        "joint_angle_regularization": 1e-5,
-        "limb_scale_regularization": 0.001,
-        "limb_trans_regularization": 0.1,
-        "fov": 1e-7,
-        "cam_rot": 1e-8,
-        "cam_trans": 1e-8
-      },
-      "490": {
-        "keypoint_3d": 2,
-        "keypoint_2d": 0.2,
-        "joint_angle_regularization": 1e-6,
-        "limb_scale_regularization": 0.0001,
-        "limb_trans_regularization": 0.1,
-        "fov": 1e-7,
-        "cam_rot": 1e-8,
-        "cam_trans": 1e-8
-      },
-      "500": {
-        "keypoint_3d": 20,
-        "keypoint_2d": 0.2,
-        "joint_angle_regularization": 1e-7,
-        "limb_scale_regularization": 1e-5,
-        "limb_trans_regularization": 0.1,
-        "fov": 1e-6,
-        "cam_rot": 1e-7,
-        "cam_trans": 1e-7
-      },
-      "560": {
-        "keypoint_3d": 20,
-        "keypoint_2d": 0.2,
-        "joint_angle_regularization": 1e-7,
-        "limb_scale_regularization": 0.001,
-        "limb_trans_regularization": 1.0,
-        "fov": 1e-6,
-        "cam_rot": 1e-7,
-        "cam_trans": 1e-7
-      },
-      "575": {
-        "keypoint_3d": 20,
-        "keypoint_2d": 0.2,
-        "joint_angle_regularization": 1e-7,
-        "limb_scale_regularization": 0.0025,
-        "limb_trans_regularization": 1.0,
-        "fov": 1e-6,
-        "cam_rot": 1e-7,
-        "cam_trans": 1e-7
+        "limb_trans_regularization": 0.001
       }
     }
   },
@@ -223,13 +127,13 @@
 
   "training": {
     "batch_size": 8,
-    "num_epochs": 600,
+    "num_epochs": 250,
     "seed": 1234,
     "rotation_representation": "6d",
     "num_workers": 8,
     "pin_memory": true,
     "prefetch_factor": 4,
-    "resume_checkpoint": null,
+    "resume_checkpoint": "checkpoints/best_model.pth",
     "use_gt_camera_init": false
   }
 }
