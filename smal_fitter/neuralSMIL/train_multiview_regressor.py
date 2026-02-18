@@ -2851,6 +2851,12 @@ if __name__ == "__main__":
                 'weight_multiplier': new_config.joint_importance.weight_multiplier,
             }
 
+            # Sync ignored_joint_locations to legacy TrainingConfig
+            TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = {
+                'enabled': new_config.ignored_joint_locations.enabled,
+                'ignored_joint_names': list(new_config.ignored_joint_locations.ignored_joint_names),
+            }
+
             # Convert to legacy flat dict for existing main()
             training_config = new_config.to_multiview_legacy_dict()
             training_config['shape_family'] = (

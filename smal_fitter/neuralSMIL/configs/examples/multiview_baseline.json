@@ -210,6 +210,11 @@
     "weight_multiplier": 10.0
   },
 
+  "ignored_joint_locations": {
+    "enabled": true,
+    "ignored_joint_names": []
+  },
+
   "output": {
     "checkpoint_dir": "multiview_checkpoints",
     "plots_dir": "plots",

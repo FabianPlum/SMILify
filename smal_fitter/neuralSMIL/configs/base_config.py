@@ -306,6 +306,17 @@ class MeshScalingConfig:
 
 
 @dataclass
+class IgnoredJointLocationsConfig:
+    """Loss-level joint location exclusion for 2D and 3D keypoint losses.
+
+    Unlike IgnoredJointsConfig (data preprocessing), this operates during loss
+    computation so joints remain in the dataset but are simply not supervised.
+    """
+    enabled: bool = True
+    ignored_joint_names: List[str] = field(default_factory=list)
+
+
+@dataclass
 class JointImportanceConfig:
     """Per-joint importance weighting for keypoint losses."""
     enabled: bool = True
@@ -412,6 +423,7 @@ class BaseTrainingConfig:
     scale_trans_beta: ScaleTransBetaConfig = field(default_factory=ScaleTransBetaConfig)
     mesh_scaling: MeshScalingConfig = field(default_factory=MeshScalingConfig)
     joint_importance: JointImportanceConfig = field(default_factory=JointImportanceConfig)
+    ignored_joint_locations: IgnoredJointLocationsConfig = field(default_factory=IgnoredJointLocationsConfig)
     ignored_joints: IgnoredJointsConfig = field(default_factory=IgnoredJointsConfig)
     multi_dataset: MultiDatasetConfig = field(default_factory=MultiDatasetConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
@@ -534,5 +546,9 @@ class BaseTrainingConfig:
                 'enabled': self.joint_importance.enabled,
                 'important_joint_names': list(self.joint_importance.important_joint_names),
                 'weight_multiplier': self.joint_importance.weight_multiplier,
+            },
+            'ignored_joint_locations': {
+                'enabled': self.ignored_joint_locations.enabled,
+                'ignored_joint_names': list(self.ignored_joint_locations.ignored_joint_names),
             },
         }

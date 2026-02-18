@@ -2,12 +2,12 @@
   "mode": "singleview",
 
   "smal_model": {
-    "smal_file": "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl",
+    "smal_file": "3D_model_prep/SMILy_STICK.pkl",
     "shape_family": -1
   },
 
   "dataset": {
-    "data_path": "RealSMILyMouseFalknerFROM3D_no_crop.h5",
+    "data_path": "bbox_center_PERU_test.h5",
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
@@ -190,7 +190,7 @@
   },
 
   "scale_trans_beta": {
-    "mode": "entangled_with_betas"
+    "mode": "separate"
   },
 
   "mesh_scaling": {
@@ -201,8 +201,13 @@
 
   "joint_importance": {
     "enabled": true,
-    "important_joint_names": ["Nose", "paw_L_tip", "paw_R_tip", "Foot_L_tip", "Foot_R_tip", "Tail_07"],
+    "important_joint_names": ["l_1_pt_l", "l_2_pt_l", "l_3_pt_l", "l_1_pt_r", "l_2_pt_r", "l_3_pt_r"],
     "weight_multiplier": 10.0
+  },
+
+  "ignored_joint_locations": {
+    "enabled": true,
+    "ignored_joint_names": ["b_t","b_a_1","b_a_2","b_a_3","b_a_4","b_a_5"]
   },
 
   "output": {
@@ -211,20 +216,20 @@
     "visualizations_dir": "visualizations",
     "train_visualizations_dir": "visualizations_train",
     "save_checkpoint_every": 10,
-    "generate_visualizations_every": 10,
+    "generate_visualizations_every": 1,
     "plot_history_every": 10,
     "num_visualization_samples": 10
   },
 
   "training": {
     "batch_size": 8,
-    "num_epochs": 1000,
+    "num_epochs": 600,
     "seed": 1234,
     "rotation_representation": "6d",
     "num_workers": 8,
     "pin_memory": true,
     "prefetch_factor": 4,
     "resume_checkpoint": null,
-    "use_gt_camera_init": true
+    "use_gt_camera_init": false
   }
 }

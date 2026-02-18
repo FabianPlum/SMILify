@@ -2761,52 +2761,76 @@ class SMILImageRegressor(SMALFitter):
         return result
 
     def _compute_joint_importance_weights(self) -> Optional[torch.Tensor]:
-        """Compute per-joint importance weights (called once, then cached)."""
-        if not TrainingConfig.is_joint_importance_enabled():
+        """Compute per-joint importance weights (called once, then cached).
+
+        Combines two features into a single (J,) weight tensor:
+        - joint_importance: boosts selected joints (weight > 1.0)
+        - ignored_joint_locations: zeros out selected joints (weight = 0.0)
+
+        Returns None if neither feature is active (no-op for callers).
+        """
+        importance_active = TrainingConfig.is_joint_importance_enabled()
+        ignore_active = TrainingConfig.is_joint_location_ignore_enabled()
+
+        if not importance_active and not ignore_active:
             return None
 
-        important_names = TrainingConfig.get_important_joint_names()
-        multiplier = TrainingConfig.get_joint_importance_multiplier()
-
-        if not important_names or multiplier == 1.0:
+        try:
+            model_joint_names = config.joint_names
+        except AttributeError:
+            print("Warning: config.joint_names not available, joint importance/ignore disabled")
             return None
 
         n_canonical_joints = len(config.CANONICAL_MODEL_JOINTS)
         weights = torch.ones(n_canonical_joints, dtype=torch.float32, device=self.device)
 
-        # Get joint names from the SMAL model or config
-        # config.joint_names is loaded from the SMAL pkl file
-        try:
-            model_joint_names = config.joint_names
-        except AttributeError:
-            print("Warning: config.joint_names not available, joint importance weighting disabled")
-            return None
-
-        # Map important joint names to canonical joint indices
-        matched_count = 0
-        for joint_name in important_names:
-            # Find this joint name in the model's joint names
-            if joint_name in model_joint_names:
-                model_idx = model_joint_names.index(joint_name)
-
-                # Find where this model index appears in CANONICAL_MODEL_JOINTS
-                if model_idx in config.CANONICAL_MODEL_JOINTS:
-                    canonical_idx = config.CANONICAL_MODEL_JOINTS.index(model_idx)
-                    weights[canonical_idx] = multiplier
-                    matched_count += 1
-                else:
-                    print(f"Warning: Joint '{joint_name}' (model idx {model_idx}) not in CANONICAL_MODEL_JOINTS")
-            else:
+        def _name_to_canonical_idx(joint_name):
+            """Return canonical index for a joint name, or None if not found."""
+            if joint_name not in model_joint_names:
                 print(f"Warning: Joint name '{joint_name}' not found in model. "
                       f"Available joints: {model_joint_names[:10]}..." if len(model_joint_names) > 10
                       else f"Available joints: {model_joint_names}")
+                return None
+            model_idx = model_joint_names.index(joint_name)
+            if model_idx not in config.CANONICAL_MODEL_JOINTS:
+                print(f"Warning: Joint '{joint_name}' (model idx {model_idx}) not in CANONICAL_MODEL_JOINTS")
+                return None
+            return config.CANONICAL_MODEL_JOINTS.index(model_idx)
 
-        if matched_count == 0:
-            print("Warning: No important joints matched, joint importance weighting disabled")
+        # Apply joint importance: boost selected joints
+        if importance_active:
+            important_names = TrainingConfig.get_important_joint_names()
+            multiplier = TrainingConfig.get_joint_importance_multiplier()
+            matched = 0
+            for name in important_names:
+                idx = _name_to_canonical_idx(name)
+                if idx is not None:
+                    weights[idx] = multiplier
+                    matched += 1
+            if matched == 0:
+                print("Warning: No important joints matched, joint importance weighting disabled")
+            else:
+                print(f"Joint importance: {matched}/{len(important_names)} joints matched, multiplier={multiplier}")
+
+        # Apply joint location ignore: zero out selected joints (applied after importance
+        # so that ignored joints always end up with weight 0, even if also listed as important)
+        if ignore_active:
+            ignored_names = TrainingConfig.get_ignored_joint_location_names()
+            matched = 0
+            for name in ignored_names:
+                idx = _name_to_canonical_idx(name)
+                if idx is not None:
+                    weights[idx] = 0.0
+                    matched += 1
+            if matched == 0:
+                print("Warning: No ignored joint locations matched")
+            else:
+                print(f"Joint location ignore: {matched}/{len(ignored_names)} joints zeroed out in keypoint loss")
+
+        # If all weights are still 1.0, the tensor has no effect — return None
+        if weights.min() == 1.0 and weights.max() == 1.0:
             return None
 
-        print(f"Joint importance weighting enabled: {matched_count}/{len(important_names)} joints matched, "
-              f"multiplier={multiplier}")
         return weights
 
     def _compute_batch_keypoint_loss(self, rendered_joints: torch.Tensor, keypoint_data_list: list,
