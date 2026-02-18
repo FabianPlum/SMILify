@@ -1451,11 +1451,9 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
                             'Should match training preprocessing. (default: centred)')
     
     # Processing options
-    parser.add_argument('--batch_size', type=int, default=1,
-                       help='Batch size for processing (default: 1, currently only 1 is supported)')
     parser.add_argument('--device', type=str, default='auto',
                        choices=['auto', 'cuda', 'cpu'],
-                       help='Device to use for inference (default: auto)')
+                       help='Device to use for inference (default: auto), using cuda if available')
     
     # Video-specific options
     parser.add_argument('--fps', type=int, default=None,
@@ -1464,8 +1462,8 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
                        help='Save individual frame results when processing video')
     parser.add_argument('--max_frames', type=int, default=-1,
                        help='Maximum number of frames to process from video (default: -1 for all frames)')
-    parser.add_argument('--camera_smoothing', type=int, default=10,
-                       help='Moving average window size for camera parameter smoothing (default: 10, set to 0 to disable)')
+    parser.add_argument('--camera_smoothing', type=int, default=2,
+                       help='Moving average window size for camera parameter smoothing (default: 2, set to 0 to disable)')
     parser.add_argument('--video_export_mode', type=str, default='overlay',
                        choices=['overlay', 'side_by_side'],
                        help='Video export mode: overlay=blend model onto input (default), '
