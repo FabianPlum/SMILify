@@ -819,24 +819,26 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
             
             # Set joint scales and translations if available
             if 'log_beta_scales' in predicted_params and 'betas_trans' in predicted_params:
-                # Transform PCA weights to per-joint values for visualization
-                if model.scale_trans_mode in ['separate', 'ignore']:
-                    # In separate/ignore modes, predicted_params contain PCA weights (5 parameters each)
-                    # Transform them to per-joint values for the SMALFitter
-                    scale_weights = predicted_params['log_beta_scales'][0:1]  # (1, 5)
-                    trans_weights = predicted_params['betas_trans'][0:1]      # (1, 5)
-                    
-                    # Transform to per-joint values using the helper method
-                    log_beta_scales_joint, betas_trans_joint = model._transform_separate_pca_weights_to_joint_values(
-                        scale_weights, trans_weights
-                    )
-                    
+                scale_pred = predicted_params['log_beta_scales'][0:1]
+                trans_pred = predicted_params['betas_trans'][0:1]
+                if model.scale_trans_mode == 'separate':
+                    # Check whether the model outputs PCA weights (2D) or per-joint values (3D)
+                    scale_trans_config = TrainingConfig.get_scale_trans_config()
+                    use_pca = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+                    if use_pca:
+                        # PCA weights — transform to per-joint values for the SMALFitter
+                        log_beta_scales_joint, betas_trans_joint = model._transform_separate_pca_weights_to_joint_values(
+                            scale_pred, trans_pred
+                        )
+                    else:
+                        # Already per-joint values (batch, n_joints, 3)
+                        log_beta_scales_joint, betas_trans_joint = scale_pred, trans_pred
                     temp_fitter.log_beta_scales.data = log_beta_scales_joint
                     temp_fitter.betas_trans.data = betas_trans_joint
                 else:
-                    # In other modes, the values are already per-joint
-                    temp_fitter.log_beta_scales.data = predicted_params['log_beta_scales'][0:1]
-                    temp_fitter.betas_trans.data = predicted_params['betas_trans'][0:1]
+                    # entangled_with_betas / other modes: values already per-joint
+                    temp_fitter.log_beta_scales.data = scale_pred
+                    temp_fitter.betas_trans.data = trans_pred
             
             # Set camera parameters from PREDICTED values (not ground truth!)
             # This ensures visualization matches the loss computation
