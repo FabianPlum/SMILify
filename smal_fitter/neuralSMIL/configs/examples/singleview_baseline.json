@@ -39,10 +39,10 @@
       "0": 5e-5,
       "10": 3e-5,
       "20": 2e-5,
-      "60": 1e-5,
-      "100": 5e-6,
-      "150": 2e-6,
-      "200": 1e-6
+      "40": 1e-5,
+      "60": 5e-6,
+      "100": 2e-6,
+      "150": 1e-6
     }
   },
 
@@ -86,8 +86,8 @@
         "limb_trans_regularization": 0.01
       },
       "50": {
-        "joint_angle_regularization": 0.00001,
-        "limb_scale_regularization": 0.001,
+        "joint_angle_regularization": 0.000001,
+        "limb_scale_regularization": 0.0001,
         "limb_trans_regularization": 0.001
       }
     }
