@@ -36,7 +36,7 @@ from configs import (
 
 EXAMPLES_DIR = os.path.join(_neural_smil, "configs", "examples")
 SINGLEVIEW_JSON = os.path.join(EXAMPLES_DIR, "singleview_baseline.json")
-MULTIVIEW_JSON = os.path.join(EXAMPLES_DIR, "multiview_6cam.json")
+MULTIVIEW_JSON = os.path.join(EXAMPLES_DIR, "multiview_baseline.json")
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +178,7 @@ class TestSmalModelSingleView:
     def test_example_config_smal_file_and_shape_family_in_legacy_dict(self, singleview_config):
         """Values from examples/singleview_baseline.json smal_model appear in to_legacy_dict()."""
         d = singleview_config.to_legacy_dict()
-        assert d["smal_file"] == "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl"
+        assert d["smal_file"] == "3D_model_prep/SMILy_STICK.pkl"
         assert d["shape_family"] == -1
 
     def test_cli_override_smal_model_smal_file_shape_family(self):
@@ -211,9 +211,9 @@ class TestSmalModelMultiView:
     """Multiview smal_model argument passing and legacy dict output."""
 
     def test_example_config_smal_file_shape_family_in_multiview_legacy_dict(self, multiview_config):
-        """Example multiview_6cam.json has null smal_model; legacy dict has None / default shape_family."""
+        """Example multiview_baseline.json smal_model values appear in to_multiview_legacy_dict()."""
         d = multiview_config.to_multiview_legacy_dict()
-        assert d["smal_file"] is None
+        assert d["smal_file"] == "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl"
         assert d["shape_family"] == -1  # multiview uses -1 when smal_model.shape_family is None
 
     def test_cli_override_smal_model_smal_file_shape_family_multiview(self):
