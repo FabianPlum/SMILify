@@ -199,9 +199,11 @@ class ImageExporter():
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0):
+    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, epoch=None):
         """Export visualization image."""
-        imageio.imsave(os.path.join(self.output_dir, f"img_{img_idx:04d}_epoch_{global_id:04d}.png"), collage_np)
+        # Use epoch if provided, otherwise fall back to global_id for backwards compatibility
+        epoch_num = epoch if epoch is not None else global_id
+        imageio.imsave(os.path.join(self.output_dir, f"img_{img_idx:04d}_epoch_{epoch_num:04d}.png"), collage_np)
 
 
 def create_placeholder_data_batch(batch_size=1, image_size=512):
@@ -880,7 +882,7 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                     )
             
             # Generate visualization - match model's UE scaling setting
-            temp_fitter.generate_visualization(image_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=sample_count)
+            temp_fitter.generate_visualization(image_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=sample_count, epoch=epoch)
             
             sample_count += 1
         
