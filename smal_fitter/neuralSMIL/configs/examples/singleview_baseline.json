@@ -87,7 +87,7 @@
       },
       "50": {
         "joint_angle_regularization": 0.000001,
-        "limb_scale_regularization": 0.0001,
+        "limb_scale_regularization": 0.0005,
         "limb_trans_regularization": 0.001
       }
     }
