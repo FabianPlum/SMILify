@@ -303,23 +303,56 @@ python smal_fitter/neuralSMIL/benchmark_model.py \
 | `--device` | auto | Force device, e.g. `cuda:0` or `cpu` |
 | `--orig_width` / `--orig_height` | _(dataset)_ | Override image size used for pixel-space PCK scaling |
 
+## Adding new parametric models
 
-# Code refactor TODOs 
+The [Blender SMIL Addon](3D_model_prep/SMIL_processing_addon.py) lets you turn virtually any rigged mesh into a fully parametric SMIL-compatible model — no fixed skeleton topology required. As long as your mesh has an armature with vertex weights, the addon can extract all the components needed for a differentiable linear blend skinning model: vertex templates, joint regressors, kinematic trees, shape spaces, and symmetry maps.
+
+<img src="docs/SMILify_Blender_Addon_ants.png" width="800">
+
+The addon panel provides a single interface for importing existing SMIL/SMAL `.pkl` models, editing them in Blender, and re-exporting updated models. For building a new parametric model from scratch, the typical workflow is:
+
+1. **Prepare and export a rigged template mesh** — start with any Blender mesh that has an armature and vertex group weights. Clean weight painting is critical; the addon provides options to clean, normalise, and limit vertex weights. Export this template as a `.pkl` file using the addon's "Export SMIL Model" button — this creates the initial model containing the vertex template, joint locations, kinematic tree, skinning weights, joint regressor, and symmetry data.
+
+2. **Register the template to target meshes** — use the [3D mesh registration pipeline](fitter_3d/) to fit the template model to a collection of target `.obj` meshes (e.g. 3D scans of different individuals or species). Registration optimises shape, pose, scale, and per-vertex deformations to align the template topology to each target (see the [fitter_3d README](fitter_3d/README.md) for configuration details). The registration results are saved as `.npz` files containing the registered vertex positions and labels for each target.
+
+   ```bash
+   python fitter_3d/optimise.py --mesh_dir path/to/target_meshes --yaml_src fitter_3d/ants_cfg.yaml
+   ```
+
+   <img src="docs/ant_registered_meshes.gif" width="800">
+
+3. **Load registrations into the addon** — back in Blender, import the template `.pkl` alongside the registration `.npz` via "Direct Import SMIL Model". Alternatively, for more control, use "Load all unposed registered meshes" to bring every registration into the scene as a separate rigged mesh for visual inspection, followed by "Generate SMIL model from unposed meshes" to build the final model.
+
+4. **Build a shape space** — the registrations can be stored either as individual cleaned shape keys, or — more commonly — PCA is applied across all registered meshes to produce a compact set of principal shape components with statistically meaningful ranges. The number of principal components is configurable in the addon panel.
+
+5. **Export the parametric model** — the addon writes a single `.pkl` file containing everything the fitting and neural inference pipelines expect: vertex template (mean shape), `shapedirs`, `J_regressor`, kinematic tree, skinning weights, shape covariance, and optionally `scaledirs`/`transdirs` for disentangled variation.
+
+### Disentangling shape, scale, and translation
+
+When registered meshes span multiple species or size classes, raw shape PCA conflates genuine morphological differences with differences in overall scale and joint-level translations. The addon supports an **entangled PCA** mode that jointly decomposes vertex positions, per-joint scale factors, and per-joint translations into shared principal components. This produces separate `scaledirs` and `transdirs` alongside the standard `shapedirs`, enabling:
+
+- **Cleaner morphometric analyses** — shape variation can be studied independently of size, and vice versa.
+- **Independent control at inference time** — scale and shape parameters can be varied separately, giving downstream pipelines finer-grained control over the generated model.
+
+<img src="docs/Auto-aligned_ant_shape_vs_scale_variation_disentanglement.png" width="800">
+
+The disentangled components are exported as part of the `.pkl` model file and are automatically picked up by the fitting and neural inference pipelines when present.
+
+____________________________________
+## Code refactor TODOs 
 - [X] Move all legcay funcitonality and documentation to it's own sub-directory to clean up the repo and make its purpose more apparent.
 - [ ] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules.
 - [ ] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable.
-- [ ] At the moment, the SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
+- [ ] At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
 - [X] Get rid of the numpy/chumpy dependency mess.
 - [X] Allow importing legacy SMAL models with chumpy variables WITHOUT requiring chumpy to be installed through custom unpickler.
 - [ ] Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.
-- [ ] The code is poorly documented. That needs to be fixed.
 - [X] The code is poorly tested. That needs to be fixed. Write integration tests for main functionality.
-- [ ] Let's see how far we can get with this in our limited time BUT I would love to re-write this whole thing as a Blender addon. But that's for another day (probably more of a "project wish" than related to refactoring).
 
 ## Functionality / broader project TODOs
-- [ ] Allow to add user-defined priors for joint limits in the Blender addon.
+- [ ] Allow to add user-defined joint limits in the Blender addon.
 - [X] Finish cleaning antscan dataset and prepare models for fitting.
-- [ ] Create SMIL model from massive antscan dataset.
+- [ ] Create SMIL model from massive antscan dataset. (future todo for _SMILify Gen2_)
 - [X] Add configurable mouse SMIL model.
 - [X] Re-implement multi-GPU mesh registration cleanly.
 
