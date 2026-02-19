@@ -1908,10 +1908,11 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
             if model.allow_mesh_scaling and 'mesh_scale' in predicted_params:
                 vis_mesh_scale = predicted_params['mesh_scale'][0:1].detach()
             temp_fitter.generate_visualization(
-                image_exporter, 
+                image_exporter,
                 apply_UE_transform=model.use_ue_scaling,  # MUST match model setting!
                 img_idx=view_idx,
-                mesh_scale=vis_mesh_scale
+                mesh_scale=vis_mesh_scale,
+                epoch=epoch
             )
             
             views_rendered += 1
