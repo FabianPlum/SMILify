@@ -1,15 +1,23 @@
 # SMILify
 
 This repository is based on [SMALify](https://github.com/benjiebob/SMALify) with the aim to turn any rigged 3D model into
-a SMAL compatible model. There are Blender files to convert your mesh and lots of code 
+a SMAL compatible model. There are Blender files to convert your mesh and lots of code
 changes to deal with arbitrary armature configurations, rather than assuming a fixed
 quadruped model.
 
 For now, I'll focus on insects, hence **SMIL**.
 
-> [!Important] 
+## Neural Inference Examples
+
+Multi-view 3D reconstruction using neural inference:
+
+<img src="docs/mouse_18_cam_smil_multi.gif" width="350"> <img src="docs/mouse_18_cam_smil.gif" width="350">
+
+<img src="docs/peruphasma_4_cam_smil.gif" width="350">
+
+> [!Important]
 > Produced poses may be unrealistic, as we currently don't have a learned pose prior and are instead working
-> with user-defined joint limits (currently set in smal_fitter/priors/joint_limits_prior.py but soon to be 
+> with user-defined joint limits (currently set in smal_fitter/priors/joint_limits_prior.py but soon to be
 > adjustable interactively in the accompanying blender addon)
 
 ## Installation (mesh registration)
