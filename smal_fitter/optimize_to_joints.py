@@ -40,17 +40,18 @@ class ImageExporter():
 
         return output_dirs
 
-    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0):
-        imageio.imsave(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.png".format(self.stage_id, self.epoch_name)), collage_np)
+    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, epoch=None):
+        epoch_name = epoch if epoch is not None else self.epoch_name
+        imageio.imsave(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.png".format(self.stage_id, epoch_name)), collage_np)
 
         # Export parameters
-        with open(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.pkl".format(self.stage_id, self.epoch_name)), 'wb') as f:
+        with open(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.pkl".format(self.stage_id, epoch_name)), 'wb') as f:
             pkl.dump(img_parameters, f)
 
         # Export mesh
         vertices = vertices[batch_id].cpu().numpy()
         mesh = trimesh.Trimesh(vertices = vertices, faces = faces, process = False)
-        mesh.export(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.ply".format(self.stage_id, self.epoch_name)))
+        mesh.export(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.ply".format(self.stage_id, epoch_name)))
 
 def main():
     
