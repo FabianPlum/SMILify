@@ -20,7 +20,7 @@ Example 18 camera inference results, using a newly developed [parametric mouse m
 Example 4-5 camera inference results with a molde trained on data collected from an Omni-Directional Treadmill (ODT) using a [parametric multi species stick insect model](3D_model_prep/SMILy_STICK.pkl) configured with the [Blender SMIL Addon](3D_model_prep/SMIL_processing_addon.py).
 
 
-## Installation (mesh registration)
+## Installation
 1. Clone the repository **with submodules** and enter directory
    ```
    git clone https://github.com/FabianPlum/SMILify
@@ -63,7 +63,17 @@ Example 4-5 camera inference results with a molde trained on data collected from
    pytest tests/test_pipeline.py -v -s
    ```
 
+## Dataset preprocessing
+_coming soon_
 
+## Training
+_coming soon_
+
+## Inference
+_coming soon_
+
+## Benchmarking
+_coming soon_
 
 
 # Code refactor TODOs 
