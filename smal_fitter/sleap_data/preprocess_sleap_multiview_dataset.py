@@ -49,6 +49,7 @@ except ImportError:
     from smal_fitter.sleap_data.sleap_3d_loader import SLEAP3DDataLoader
 
 import config
+from neuralSMIL.configs.config_utils import apply_smal_file_override
 
 
 class SLEAPMultiViewPreprocessor:
@@ -1171,10 +1172,12 @@ class SLEAPMultiViewPreprocessor:
         return np.nan_to_num(arr, nan=default_value, posinf=default_value, neginf=default_value)
     
     def _encode_image_jpeg(self, image: np.ndarray) -> bytes:
-        """Encode image as JPEG bytes."""
+        """Encode image as JPEG bytes. Input must be RGB float [0, 1]."""
         image_uint8 = (image * 255).astype(np.uint8)
+        # cv2.imencode expects BGR input, so convert from RGB before encoding
+        image_bgr = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2BGR)
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
-        _, jpeg_bytes = cv2.imencode('.jpg', image_uint8, encode_param)
+        _, jpeg_bytes = cv2.imencode('.jpg', image_bgr, encode_param)
         return jpeg_bytes.tobytes()
     
     def process_dataset(self, sessions_dir: str, output_path: str, 
@@ -1539,7 +1542,11 @@ Examples:
     parser.add_argument("--no_undistort", action="store_true",
                        help="Skip undistorting images and 2D keypoints using camera calibration "
                             "(default: undistort if calibration is available)")
-    
+
+    # SMAL model options
+    parser.add_argument("--smal_file", type=str, default=None,
+                       help="Path to SMAL/SMIL model pickle file (overrides config.SMAL_FILE if provided)")
+
     # Other options
     parser.add_argument("--confidence_threshold", type=float, default=0.5,
                        help="Keypoint confidence threshold (default: 0.5)")
@@ -1549,7 +1556,14 @@ Examples:
                        help="Enable debug mode to print detailed information about filtered outlier keypoints")
     
     args = parser.parse_args()
-    
+
+    # Override SMAL model if smal_file is provided
+    if args.smal_file:
+        if not os.path.exists(args.smal_file):
+            print(f"Error: SMAL model file does not exist: {args.smal_file}")
+            sys.exit(1)
+        apply_smal_file_override(args.smal_file)
+
     # Validate input directory
     if not os.path.exists(args.sessions_dir):
         print(f"Error: Sessions directory does not exist: {args.sessions_dir}")
@@ -1572,6 +1586,8 @@ Examples:
         print(f"Target resolution: {args.target_resolution}x{args.target_resolution}")
         print(f"Crop mode: {args.crop_mode}")
         print(f"Undistort images: {not args.no_undistort}")
+        if args.smal_file:
+            print(f"SMAL model: {args.smal_file}")
         print("="*60)
     
     # Start preprocessing
