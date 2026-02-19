@@ -6,17 +6,12 @@ import config
 # Then, read those in here, all stored in the SMPL file and replace the hard-coded nightmare below.
 
 if config.ignore_hardcoded_body:
-    Ranges = {}  # for now all joints get [[-1,1], [-1,1], [-1,1]]
+    Ranges = {}
+    _root_joint = config.dd["J_names"][0]
     for joint in config.dd["J_names"]:
-        # fix root bone when those are not actuated
-        # TODO the abdomen joints, by default clamp to the bottom of the abdomen due to the way the joint regressor
-        # currently estimates their relative position. The joint regressor uses the relative position to the n closest
-        # vertices to reposition the joints. Due to the vertical asymmetry of the abdomen, The lower vertices
-        # disproportionally contribute to the location.
-        if joint == "b_t" or joint == "b_a_3" or joint == "b_a_4" or joint == "b_a_5":
+        if joint == _root_joint:
             Ranges[joint] = [[0, 0], [0, 0], [0, 0]]
         else:
-            # for now, treat all joints as ball joints (see TODO above)
             Ranges[joint] = [[-0.01, 0.01], [-0.01, 0.01], [-0.01, 0.01]]
 else:
     Ranges = {
@@ -59,10 +54,22 @@ else:
 class LimitPrior(object):
     def __init__(self):
         if config.ignore_hardcoded_body:
+            # Build Ranges at init time from the current config.dd, not the
+            # module-level Ranges which may have been built with a different
+            # SMAL model at import time (e.g. before apply_smal_file_override).
+            ranges = {}
+            root_joint = config.dd["J_names"][0]
+            for joint in config.dd["J_names"]:
+                if joint == root_joint:
+                    ranges[joint] = [[0, 0], [0, 0], [0, 0]]
+                else:
+                    ranges[joint] = [[-0.01, 0.01], [-0.01, 0.01], [-0.01, 0.01]]
+
             self.parts = {}
             for j, joint in enumerate(config.dd["J_names"]):
                 self.parts[joint] = j
         else:
+            ranges = Ranges
             self.parts = {
                 'pelvis0': 0,
                 'spine': 1,
@@ -102,12 +109,12 @@ class LimitPrior(object):
         self.prefix = 3
         self.part_ids = np.array(sorted(self.parts.values()))
         self.min_values = np.hstack(
-            [np.array(np.array(Ranges[self.id2name[part_id]])[:, 0]) for part_id in self.part_ids])
+            [np.array(np.array(ranges[self.id2name[part_id]])[:, 0]) for part_id in self.part_ids])
         self.max_values = np.hstack([
-            np.array(np.array(Ranges[self.id2name[part_id]])[:, 1])
+            np.array(np.array(ranges[self.id2name[part_id]])[:, 1])
             for part_id in self.part_ids
         ])
-        self.ranges = Ranges
+        self.ranges = ranges
 
     def __call__(self, x, xp):
         ''' 

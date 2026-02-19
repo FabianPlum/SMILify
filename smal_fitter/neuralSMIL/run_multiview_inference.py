@@ -48,6 +48,7 @@ from multiview_smil_regressor import create_multiview_regressor, MultiViewSMILIm
 from smil_image_regressor import rotation_6d_to_axis_angle
 from smal_fitter import SMALFitter
 from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+from configs import apply_smal_file_override
 import config
 
 
@@ -538,7 +539,7 @@ class _InMemoryImageExporter:
     def __init__(self):
         self.image = None
 
-    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0):
+    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, epoch=None):
         self.image = collage_np
 
 
@@ -623,8 +624,7 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
     resized_image = np.array(pil_img).astype(np.float32) / 255.0
 
     resized_image = np.clip(resized_image, 0.0, 1.0)
-    resized_image_bgr = resized_image[:, :, [2, 1, 0]]
-    rgb = torch.from_numpy(resized_image_bgr).permute(2, 0, 1).unsqueeze(0).float()
+    rgb = torch.from_numpy(resized_image).permute(2, 0, 1).unsqueeze(0).float()
 
     keypoints_2d = y_data.get("keypoints_2d", None)
     visibility = y_data.get("keypoint_visibility", None)
@@ -1102,6 +1102,18 @@ def main_inference(
         else:
             device = "cuda" if torch.cuda.is_available() else "cpu"
     
+    # Apply SMAL model override if provided (similar to training script)
+    # This must be done before loading the dataset/model to ensure config.dd, config.N_POSE, etc. are correct
+    if args.smal_file:
+        if rank == 0:
+            print(f"Applying SMAL file override: {args.smal_file}")
+        shape_family = args.shape_family if args.shape_family is not None else config.SHAPE_FAMILY
+        apply_smal_file_override(args.smal_file, shape_family=shape_family)
+        if rank == 0:
+            print(f"  Shape family: {config.SHAPE_FAMILY}")
+            print(f"  N_POSE: {config.N_POSE}")
+            print(f"  N_BETAS: {config.N_BETAS}")
+    
     # Parse view indices from comma-separated string
     view_indices = [int(x.strip()) for x in args.view_indices.split(",")]
     
@@ -1345,6 +1357,8 @@ def main():
     parser.add_argument("--view_indices", type=str, default="0", help="Comma-separated list of camera view indices to render for singleview output (default: '0'). E.g., '0,4,11' renders views 0, 4, and 11.")
     parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs to use (default: 1, ignored when using torchrun)")
     parser.add_argument("--master-port", type=str, default=None, help="Master port for distributed processing (default: from MASTER_PORT env var or 12355)")
+    parser.add_argument("--smal_file", type=str, default=None, help="Path to SMAL model file to override config.py SMAL_FILE (optional)")
+    parser.add_argument("--shape_family", type=int, default=None, help="Shape family to use with --smal_file (optional, defaults to config.SHAPE_FAMILY)")
     args = parser.parse_args()
     
     # Get master port from args or environment variable

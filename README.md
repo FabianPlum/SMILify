@@ -1,21 +1,29 @@
 # SMILify
 
 This repository is based on [SMALify](https://github.com/benjiebob/SMALify) with the aim to turn any rigged 3D model into
-a SMAL compatible model. There are Blender files to convert your mesh and lots of code 
+a SMAL compatible model. There are Blender files to convert your mesh and lots of code
 changes to deal with arbitrary armature configurations, rather than assuming a fixed
 quadruped model.
 
 For now, I'll focus on insects, hence **SMIL**.
 
-> [!Important] 
-> Produced poses may be unrealistic, as we currently don't have a learned pose prior and are instead working
-> with user-defined joint limits (currently set in smal_fitter/priors/joint_limits_prior.py but soon to be 
-> adjustable interactively in the accompanying blender addon)
+## Neural Inference Examples
 
-## Installation (mesh registration)
+Multi-view 3D reconstruction using neural inference:
+
+<img src="docs/mouse_18_cam_smil_multi.gif" width="800"> <img src="docs/mouse_18_cam_smil.gif" width="800">
+
+Example 18 camera inference results, using a newly developed [parametric mouse model](3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl)
+
+<img src="docs/peruphasma_4_cam_smil.gif" width="800">
+
+Example 4-5 camera inference results with a molde trained on data collected from an Omni-Directional Treadmill (ODT) using a [parametric multi species stick insect model](3D_model_prep/SMILy_STICK.pkl) configured with the [Blender SMIL Addon](3D_model_prep/SMIL_processing_addon.py).
+
+
+## Installation
 1. Clone the repository **with submodules** and enter directory
    ```
-   git clone --recurse-submodules https://github.com/FabianPlum/SMILify
+   git clone https://github.com/FabianPlum/SMILify
    ```
    Note: If you don't clone with submodules you won't get the sample data from BADJA/StanfordExtra/SMALST.
 
@@ -52,163 +60,315 @@ For now, I'll focus on insects, hence **SMIL**.
    
 5. Test your installation
    ```
-   pytest tests/test_pipeline.py -v -s
+   pytest tests/ -v -s
    ```
 
+## Dataset preprocessing
 
-## Installation (all functionality)
-1. Clone the repository **with submodules** and enter directory
+SMILify uses [SLEAP](https://sleap.ai/) for 2D pose estimation and expects data to be preprocessed into an optimised HDF5 format before training.
+Two preprocessing scripts are provided:
+
+- [smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py](smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py) — **multi-view** (recommended)
+- [smal_fitter/sleap_data/preprocess_sleap_dataset.py](smal_fitter/sleap_data/preprocess_sleap_dataset.py) — single-view
+
+### Input directory structure
+
+The script expects a top-level **sessions directory** containing one sub-folder per recording session.
+Each session folder must follow the SLEAP multi-view layout (one sub-folder per camera, each containing the video and `.slp` / `.h5` prediction files, plus a `calibration.toml` and `points3d.h5` for 3D data).
+
+Two optional lookup-table CSV files should be placed directly in the sessions directory:
+
+```
+/path/to/sessions/
+├── joint_lookup.csv               # maps model joints → SLEAP keypoint names
+├── shape_betas.csv                # maps session names → ground-truth shape betas (optional)
+├── session_001/                   # one recording session
+│   ├── calibration.toml           # multi-camera calibration (required for 3D)
+│   ├── points3d.h5                # 3D keypoints from anipose / SLEAP 3D
+│   ├── Camera0/
+│   │   ├── video.mp4
+│   │   └── video.mp4.predictions.slp
+│   ├── Camera1/
+│   │   └── ...
+│   └── ...
+├── session_002/
+│   └── ...
+└── ...
+```
+
+### Lookup tables
+
+**`joint_lookup.csv`** — maps every joint in the SMIL/SMAL model to the corresponding keypoint label used in your SLEAP project.
+Leave the `data` column empty for joints that have no annotated equivalent.
+
+| model | data |
+|---|---|
+| skull | Head |
+| Ear_L_tip | Ear_L |
+| Ear_R_tip | Ear_R |
+| Nose | Nose |
+| humerus_L | Shoulder_L |
+| tibia_L | Knee_L |
+| Tail_01 | TTI |
+| Tail_07 | TailTip |
+| Lumbar-Vertebrae | _(unmapped)_ |
+| … | … |
+
+**`shape_betas.csv`** — optionally provides ground-truth shape principal components for each session.
+The `label` column must match the session sub-folder name exactly.
+
+| label | PC1 | PC2 | PC3 |
+|---|---|---|---|
+| session_001 | 0.95 | 0.51 | 0.85 |
+| session_002 | 0.50 | 0.51 | 0.85 |
+
+### Running the multi-view preprocessor 
+_(Example command, using only the first 500 frames of a multi-view session. Remove the '--max_frames_per_session', if you wish to use the complete dataset)_
+
+```bash
+python smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py \
+    /path/to/sessions \
+    output_dataset.h5 \
+    --joint_lookup_table /path/to/sessions/joint_lookup.csv \
+    --shape_betas_table  /path/to/sessions/shape_betas.csv \
+    --smal_file          3D_model_prep/SMILy_STICK.pkl \
+    --max_frames_per_session 500
+```
+
+**Key arguments:**
+
+| Argument | Default | Description |
+|---|---|---|
+| `sessions_dir` | _(required)_ | Directory containing session sub-folders |
+| `output_path` | _(required)_ | Output `.h5` file path |
+| `--joint_lookup_table` | None | CSV mapping model joints → SLEAP keypoint names |
+| `--shape_betas_table` | None | CSV with per-session ground-truth shape betas |
+| `--smal_file` | _(config)_ | Path to SMIL/SMAL model `.pkl` file |
+| `--max_frames_per_session` | all | Cap frames per session (useful for quick tests) |
+| `--frame_skip` | 1 | Use every Nth synchronised frame |
+| `--min_views` | 2 | Minimum camera views required per sample |
+| `--crop_mode` | `default` | `default` · `centred` · `bbox_crop` |
+| `--target_resolution` | 224 | Output image resolution in pixels |
+| `--no_3d_data` | False | Skip loading 3D keypoints and camera parameters |
+| `--no_undistort` | False | Skip lens-distortion correction |
+| `--confidence_threshold` | 0.5 | Minimum SLEAP keypoint confidence to mark as visible |
+
+For the **single-view** case use `preprocess_sleap_dataset.py` with the same `sessions_dir` / `output_path` positional arguments; it accepts `--num_workers` for parallel processing and `--use_reprojections` to substitute raw SLEAP predictions with reprojected 2D coordinates from a `reprojections.h5` file.
+
+## Training
+
+Training is driven by [smal_fitter/neuralSMIL/train_multiview_regressor.py](smal_fitter/neuralSMIL/train_multiview_regressor.py).
+Everything — model, dataset, optimiser, loss curriculum, output paths — is configured through a single JSON file (see [smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json](smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json) for an annotated example).
+In practice the only CLI argument you usually need is `--num_gpus` to match the hardware available on your system:
+
+```bash
+python smal_fitter/neuralSMIL/train_multiview_regressor.py \
+    --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json \
+    --num_gpus 2
+```
+
+Training resumes automatically from `training.resume_checkpoint` if set in the config. You can also pass it on the CLI:
+
+```bash
+python smal_fitter/neuralSMIL/train_multiview_regressor.py \
+    --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json \
+    --resume_checkpoint multiview_checkpoints/best_model.pth
+```
+
+Alternatively, launch via `torchrun` for cluster use (ignores `--num_gpus`):
+
+```bash
+torchrun --nproc_per_node=4 smal_fitter/neuralSMIL/train_multiview_regressor.py \
+    --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json
+```
+
+### Config file structure
+
+| Section | Key fields | Purpose |
+|---|---|---|
+| `smal_model` | `smal_file` | Path to the SMIL/SMAL `.pkl` model |
+| `dataset` | `data_path`, `train_ratio`, `val_ratio`, `test_ratio` | Dataset file and split ratios |
+| `model` | `backbone_name`, `freeze_backbone`, `head_type`, `hidden_dim` | Network architecture |
+| `optimizer` | `learning_rate`, `weight_decay`, `lr_schedule` | Optimiser and epoch-based LR schedule |
+| `loss_curriculum` | `base_weights`, `curriculum_stages` | Per-loss weights stepped at specified epoch boundaries |
+| `training` | `batch_size`, `num_epochs`, `num_workers`, `resume_checkpoint`, `use_gt_camera_init` | Training loop settings |
+| `output` | `checkpoint_dir`, `visualizations_dir`, `save_checkpoint_every` | Where to write outputs |
+| `joint_importance` | `important_joint_names`, `weight_multiplier` | Boost loss weight for specific joints |
+
+`loss_curriculum` is the most important section to tune: `base_weights` sets initial loss weights and `curriculum_stages` steps them at given epoch boundaries — e.g. 2D keypoint supervision early on, then gradually introducing 3D supervision once a rough pose is established.
+
+## Inference
+
+### Multi-view
+
+Inference runs on a **pre-processed HDF5 dataset** (the same format produced by the preprocessing step above), which makes it significantly faster than reading raw video frames at inference time.
+The script loads the checkpoint automatically from `multiview_checkpoints/best_model.pth` (or `final_model.pth`) unless another path is set in the config.
+
+```bash
+python smal_fitter/neuralSMIL/run_multiview_inference.py \
+    --dataset output_dataset.h5 \
+    --smal_file 3D_model_prep/SMILy_STICK.pkl \
+    --num_gpus 2
+```
+
+The script writes two output videos to the working directory:
+- `<dataset>_multiview_inference.mp4` — side-by-side grid of input frames and predicted mesh overlays for all camera views
+- `<dataset>_singleview_inference.mp4` — full mesh render for the first camera (use `--view_indices` to change or add views)
+
+Key arguments:
+
+| Argument | Default | Description |
+|---|---|---|
+| `--dataset` | _(required)_ | Path to preprocessed `.h5` dataset |
+| `--smal_file` | None | SMIL/SMAL model `.pkl` (overrides config) |
+| `--num_gpus` | 1 | Number of GPUs (ignored when using `torchrun`) |
+| `--view_indices` | `"0"` | Comma-separated view indices for singleview output, e.g. `"0,4,11"` |
+| `--fps` | 60 | Output video frame rate |
+| `--max_frames` | all | Cap total frames processed (useful for quick checks) |
+
+> **Note:** In future this will be extended to accept synchronised raw video streams directly, removing the need for a pre-processed dataset.
+
+### Single-view
+
+The single-view script works directly on a raw video or a folder of images.
+When `--crop_mode bbox_crop` is used, bounding boxes are derived from an existing SLEAP project, tightly cropping each frame around the detected specimen — this is the recommended mode when the model was trained with `bbox_crop`.
+
+```bash
+python smal_fitter/neuralSMIL/run_singleview_inference.py \
+    --checkpoint checkpoints/best_model.pth \
+    --input_video /path/to/video.mp4 \
+    --output_folder /path/to/output \
+    --sleap_project /path/to/sleap/sessions \
+    --crop_mode bbox_crop \
+    --max_frames 1000
+```
+
+Key arguments:
+
+| Argument | Default | Description |
+|---|---|---|
+| `--checkpoint` | _(required)_ | Path to trained `.pth` checkpoint |
+| `--input_video` / `--input_folder` | _(required, one of)_ | Raw video file or folder of images |
+| `--output_folder` | _(required)_ | Directory for results |
+| `--crop_mode` | `centred` | `centred` · `default` · `bbox_crop` — must match training preprocessing |
+| `--sleap_project` | None | SLEAP session directory (required for `bbox_crop`) |
+| `--sleap_camera` | None | Camera name override when using `bbox_crop` with multi-camera data |
+| `--max_frames` | all | Cap frames processed |
+| `--video_export_mode` | `overlay` | `overlay` (mesh blended onto input) or `side_by_side` |
+| `--camera_smoothing` | 0 | Moving-average window for camera parameter smoothing |
+
+> **Note:** For future use cases without SLEAP annotations, a lightweight detector model providing cropped specimen frames would be a natural drop-in replacement for the SLEAP-based bounding box extraction.
+
+## Benchmarking
+
+[smal_fitter/neuralSMIL/benchmark_model.py](smal_fitter/neuralSMIL/benchmark_model.py) evaluates a checkpoint on the held-out test split of a preprocessed HDF5 dataset.
+The model type is **auto-detected** from the checkpoint — no flag needed:
+- checkpoint contains `view_embeddings.weight` → multi-view
+- otherwise → single-view
+
+```bash
+python smal_fitter/neuralSMIL/benchmark_model.py \
+    --checkpoint multiview_checkpoints/best_model.pth \
+    --dataset_path output_dataset.h5 \
+    --smal-file 3D_model_prep/SMILy_STICK.pkl
+```
+
+**Metrics reported:**
+
+| Metric | Single-view | Multi-view |
+|---|---|---|
+| PCK@5px | yes | yes |
+| PCK curve (1–50 px) | yes | yes |
+| MPJPE (mm) | — | yes (when 3D GT available) |
+| MPJPE percentiles (P50–P99) | — | yes |
+
+**Output files** are written to `benchmark_{model_type}_{checkpoint}_{dataset}/`:
+
+| File | Description |
+|---|---|
+| `benchmark_report.txt` | Full text log of all metrics |
+| `pck_curve.png` | PCK vs pixel-threshold plot |
+| `error_histogram.png` | 2D keypoint error distribution |
+| `mpjpe_histogram.png` | 3D joint error distribution (multi-view) |
+| `sample_XX_3d_keypoints_percentiles.png` | GT vs predicted 3D joints coloured by error percentile (multi-view) |
+| `errors_2d_px.npy` / `errors_3d_mm.npy` | Raw error arrays for custom analysis |
+
+**Key arguments:**
+
+| Argument | Default | Description |
+|---|---|---|
+| `--checkpoint` | _(required)_ | Path to `.pth` checkpoint |
+| `--dataset_path` | _(required)_ | Path to preprocessed `.h5` dataset |
+| `--smal-file` | _(checkpoint)_ | SMIL/SMAL model `.pkl` (required if not stored in checkpoint) |
+| `--device` | auto | Force device, e.g. `cuda:0` or `cpu` |
+| `--orig_width` / `--orig_height` | _(dataset)_ | Override image size used for pixel-space PCK scaling |
+
+## Adding new parametric models
+
+The [Blender SMIL Addon](3D_model_prep/SMIL_processing_addon.py) lets you turn virtually any rigged mesh into a fully parametric SMIL-compatible model — no fixed skeleton topology required. As long as your mesh has an armature with vertex weights, the addon can extract all the components needed for a differentiable linear blend skinning model: vertex templates, joint regressors, kinematic trees, shape spaces, and symmetry maps.
+
+<img src="docs/SMILify_Blender_Addon_ants.png" width="800">
+
+The addon panel provides a single interface for importing existing SMIL/SMAL `.pkl` models, editing them in Blender, and re-exporting updated models. For building a new parametric model from scratch, the typical workflow is:
+
+1. **Prepare and export a rigged template mesh** — start with any Blender mesh that has an armature and vertex group weights. Clean weight painting is critical; the addon provides options to clean, normalise, and limit vertex weights. Export this template as a `.pkl` file using the addon's "Export SMIL Model" button — this creates the initial model containing the vertex template, joint locations, kinematic tree, skinning weights, joint regressor, and symmetry data.
+
+2. **Register the template to target meshes** — use the [3D mesh registration pipeline](fitter_3d/) to fit the template model to a collection of target `.obj` meshes (e.g. 3D scans of different individuals or species). Registration optimises shape, pose, scale, and per-vertex deformations to align the template topology to each target (see the [fitter_3d README](fitter_3d/README.md) for configuration details). The registration results are saved as `.npz` files containing the registered vertex positions and labels for each target.
+
+   ```bash
+   python fitter_3d/optimise.py --mesh_dir path/to/target_meshes --yaml_src fitter_3d/ants_cfg.yaml
    ```
-   git clone --recurse-submodules https://github.com/benjiebob/SMALify
-   cd SMALify
-   ```
-   Note: If you don't clone with submodules you won't get the sample data from BADJA/StanfordExtra/SMALST.
-    
-2. Install dependencies, particularly [PyTorch (cuda support recommended)](https://pytorch.org/), [Pytorch3D](https://github.com/facebookresearch/pytorch3d). Check [requirements.txt](https://github.com/benjiebob/SMALify/blob/master/requirements.txt) for full details.
 
-3. Download [BADJA videos](https://drive.google.com/file/d/1ad1BLmzyOp_g3BfpE2yklNI-E1b8y4gy/view?usp=sharing) and unzip to `badja_extra_videos.zip`. 
+   <img src="docs/ant_registered_meshes.gif" width="800">
 
-4. Inspect the directory paths in [config.py](https://github.com/benjiebob/SMALify/blob/master/config.py) and make sure they match your system.
+3. **Load registrations into the addon** — back in Blender, import the template `.pkl` alongside the registration `.npz` via "Direct Import SMIL Model". Alternatively, for more control, use "Load all unposed registered meshes" to bring every registration into the scene as a separate rigged mesh for visual inspection, followed by "Generate SMIL model from unposed meshes" to build the final model.
 
-## QuickStart: Running the Fitter
+4. **Build a shape space** — the registrations can be stored either as individual cleaned shape keys, or — more commonly — PCA is applied across all registered meshes to produce a compact set of principal shape components with statistically meaningful ranges. The number of principal components is configurable in the addon panel.
 
-- Run on a synthetic sample image generated with _[replicAnt](https://github.com/evo-biomech/replicAnt)_.
-      <img src="docs/SMIL-fit-ATTA.gif">
-   - Run the python script
-      ```
-      python smal_fitter/optimize_to_joints.py
-      ```
-   - Inspect the SMALify/checkpoint directory to inspect the progress of the fitter. 
-      - The output files stX_epY means, stage X and iteration Y of the fitter.
-      - The final output is named st10_ep0 by (a slightly lazy) convention. 
-      - The other files have the following meaning
+5. **Export the parametric model** — the addon writes a single `.pkl` file containing everything the fitting and neural inference pipelines expect: vertex template (mean shape), `shapedirs`, `J_regressor`, kinematic tree, skinning weights, shape covariance, and optionally `scaledirs`/`transdirs` for disentangled variation.
 
-         | Extension  | Explanation |
-         | ------------- | ------------- |
-         | .png  | Image Visualization  |
-         | .ply  | Mesh file, can be viewed in e.g. [MeshLab](https://www.meshlab.net/)  |
-         | .pkl  | Pickle file, contains the latest model/camera parameters |
+### Disentangling shape, scale, and translation
 
-   - Create a video with the final fits
-      - The generate_video.py function loads the exported .pkl files generated during the fitting process and exports the data. This is generally usful if your .pkl files are created using alternative methods, e.g. Who Left the Dogs Out? (coming soon!) or your own research. 
-      - Set CHECKPOINT_NAME in [config.py](https://github.com/benjiebob/SMALify/blob/master/config.py) to be the name of the output directory in SMALify/checkpoints.
-      - By default the code will load the final optimized meshes, indicated by EPOCH_NAME = "st10_ep0". If you want to generate a video from intermediate results, set this to some different stage/iteration. 
-      - Run the video generation script, which exports the video to SMALify/exported
-         ```
-         python smal_fitter/generate_video.py
-         ```
-      - Create a video using e.g. [FFMPEG](https://ffmpeg.org/):
-         ```
-         cd exported/CHECKPOINT_NAME/EPOCH_NAME
-         ffmpeg -framerate 2 -pattern_type glob -i '*.png' -pix_fmt yuv420p results.mp4
-         ```
-- Fit to an image from [StanfordExtra](https://github.com/benjiebob/StanfordExtra) dataset.
-   <img src="docs/stanfordextra_opt.gif">
-   - Edit the [config.py](https://github.com/benjiebob/SMALify/blob/master/config.py) file to make load a StanfordExtra image instead of a BADJA video sequence:
-      ```
-      # SEQUENCE_OR_IMAGE_NAME = "badja:rs_dog"
-      SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176.jpg"
-      ```
-   - Run the python script:
-      ```
-      python smal_fitter/optimize_to_joints.py
-      ```
-## Running on alternative data
-### Alternative BADJA/StanfordExtra sequences:
-- Follow the instructions for [BADJA](https://github.com/benjiebob/BADJA) or [StanfordExtra](https://github.com/benjiebob/StanfordExtra).
-- Open the [config.py](https://github.com/benjiebob/SMALify/blob/master/config.py) file and make the following changes
+When registered meshes span multiple species or size classes, raw shape PCA conflates genuine morphological differences with differences in overall scale and joint-level translations. The addon supports an **entangled PCA** mode that jointly decomposes vertex positions, per-joint scale factors, and per-joint translations into shared principal components. This produces separate `scaledirs` and `transdirs` alongside the standard `shapedirs`, enabling:
 
-   | Config Setting  | Explanation | Example |
-   | ------------- | ------------- | ------------- |
-   | SEQUENCE_OR_IMAGE_NAME  | Used to refer to your sequence/image  | badja:rs_dog
-   | SHAPE_FAMILY            | Choose from 0: Cat, 1: Canine (e.g. Dog), 2: Equine (e.g. Horse), 3: Bovine (e.g. Cow), 4: Hippo |  1 |
-   | IMAGE_RANGE  | Number of frames to process from the sequence. Ignored for StanfordExtra.  | [1,2,3] or range(0, 10) |
-   | WINDOW_SIZE  | For video sequences, the number of frames to fit into a batch. Alter depending on GPU capacity. | 10 |
-   
-### Running on your own data
-The first job is to generate keypoint/silhouette data for your input image(s). I recommend using [LabelMe](https://github.com/wkentaro/labelme), which is fantastic software that makes annotating keypoints / silhouettes efficient. 
-   
-- Install the software, and then load the joint annotation execute
-   ```
-   labelme --labels labels.txt --nosortlabels
-   ```
-- Next, generate the silhouette annotations
-   ```
-   # TODO
-   ```
-- TODO: Write script to load labelme files
+- **Cleaner morphometric analyses** — shape variation can be studied independently of size, and vice versa.
+- **Independent control at inference time** — scale and shape parameters can be varied separately, giving downstream pipelines finer-grained control over the generated model.
 
-### Building your own quadruped deformable model
-If you want to represent an animal quadruped category which isn't covered by the SMAL model (e.g. perhaps you want to reconstruct rodents/squirrels), you can use the [fitter_3d](https://github.com/benjiebob/SMALify/tree/master/fitter_3d) tool. The basic idea is to fit the existing SMAL model to a collection of 3D artist meshes (you can download online) and thereby learn a new shape space. More information is given in the [README](https://github.com/benjiebob/SMALify/blob/master/fitter_3d/README.md).
+<img src="docs/Auto-aligned_ant_shape_vs_scale_variation_disentanglement.png" width="800">
 
-## Improving performance and general tips and tricks
-- For some sequences, it may be necessary to fiddle with the weights applied to each part of the loss function. These are defined in [config.py](https://github.com/benjiebob/SMALify/blob/master/config.py) in an OPT_WEIGHTS settings. The values weight the following loss components:
+The disentangled components are exported as part of the `.pkl` model file and are automatically picked up by the fitting and neural inference pipelines when present.
 
-| Loss Component  | Explanation | Tips for Loss Weight
-| ------------- | ------------- | ------------- |
-| 2D Keypoint Reprojection  | Project the SMAL model with latest parameters and compare projected joints to input 2D keypoints | If your model limbs don't match well with the input keypoints after fitting, it may be worth increasing this. |
-| 3D Shape Prior | Used to constrain the 3D shapes to be 'animal-like'. Note that (unlike equivalent human approaches that use mocap etc.) only artist data is used for this. | If your reconstructed animals don't look like animals, try increasing this. |
-| 3D Pose Prior  | Used to contains the 3D poses to be anatomically plausible. | If your reconstructed animals have limb configurations which are very unreasonable, e.g. legs in strange places, try increasing this. |
-| 2D Silhouette  | Project the SMAL model with latest parameters and compare rendered silhouette to input 2D silhouette. | If the shape of your reconstructed animal doesn't match well (e.g. maybe it's too thin?), try increasing this. |
-| Temporal  | Constrain the change in SMAL parameters between frames. (Only for videos) | If your limbs move unnaturally between video frames, try adapting this. |
-
-   Note that to avoid poor local minima, the optimization proceeds over multiple stages and the weights vary at each stage. For example, only once an approximate camera location has been found should there be 2D joint loss, and only once an approximate set of limb positions have been found should there be a 2D silhouette loss.
-
-- To improve efficiency it is very likely that the number of iterations (again a setting in OPT_WEIGHTS) can be reduced for many sequences. I've err'd on the side of caution for this release by running many more iterations than probably needed.
-
+____________________________________
 ## Code refactor TODOs 
+- [X] Move all legcay funcitonality and documentation to it's own sub-directory to clean up the repo and make its purpose more apparent.
 - [ ] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules.
 - [ ] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable.
-- [ ] At the moment, the SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
+- [ ] At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
 - [X] Get rid of the numpy/chumpy dependency mess.
 - [X] Allow importing legacy SMAL models with chumpy variables WITHOUT requiring chumpy to be installed through custom unpickler.
 - [ ] Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.
-- [ ] The code is poorly documented. That needs to be fixed.
 - [X] The code is poorly tested. That needs to be fixed. Write integration tests for main functionality.
-- [ ] Let's see how far we can get with this in our limited time BUT I would love to re-write this whole thing as a Blender addon. But that's for another day (probably more of a "project wish" than related to refactoring).
 
 ## Functionality / broader project TODOs
-- [ ] Allow to add user-defined priors for joint limits in the Blender addon.
-- [ ] Add support for user-defined pose library in the Blender addon.
-- [ ] Correctly handle new pose priors.
+- [ ] Allow to add user-defined joint limits in the Blender addon.
 - [X] Finish cleaning antscan dataset and prepare models for fitting.
-- [ ] Create SMIL model from massive antscan dataset.
-- [ ] Add configurable mouse SMIL model.
-- [ ] Re-implement multi-GPU mesh registration cleanly.
+- [ ] Create SMIL model from massive antscan dataset. (future todo for _SMILify Gen2_)
+- [X] Add configurable mouse SMIL model.
+- [X] Re-implement multi-GPU mesh registration cleanly.
 
 ## Acknowledgements
+- [SMALify](https://github.com/benjiebob/SMALify); Biggs et al, the original repo on which this one is based.
 This repository owes a great deal to the following works and authors:
 - [SMAL](http://smal.is.tue.mpg.de/); Zuffi et al. designed the SMAL deformable quadruped template model and have been wonderful for providing advice throughout my animal reconstruction PhD journey.
 - [SMPLify](http://smplify.is.tue.mpg.de/); Bogo et al. provided the basis for our original ChumPY implementation and inspired the name of this repo.
 - [SMALST](https://github.com/silviazuffi/smalst); Zuffi et al. provided a PyTorch implementations of the SMAL skinning functions which have been used here.
 
-If you find this fitting code and/or BADJA dataset useful for your research, please consider citing the following paper:
-
-```
-@inproceedings{biggs2018creatures,
-  title={{C}reatures great and {SMAL}: {R}ecovering the shape and motion of animals from video},
-  author={Biggs, Benjamin and Roddick, Thomas and Fitzgibbon, Andrew and Cipolla, Roberto},
-  booktitle={ACCV},
-  year={2018}
-}
-```
-
-if you make use of the limb scaling parameters, or Unity shape prior (on by default for the dog shape family) or the [StanfordExtra](https://github.com/benjiebob/StanfordExtra) dataset please cite [Who Left the Dogs Out? 3D Animal Reconstruction with Expectation Maximization in the Loop](https://arxiv.org/abs/2007.11110):
-
-```
-@inproceedings{biggs2020wldo,
-  title={{W}ho left the dogs out?: {3D} animal reconstruction with expectation maximization in the loop},
-  author={Biggs, Benjamin and Boyne, Oliver and Charles, James and Fitzgibbon, Andrew and Cipolla, Roberto},
-  booktitle={ECCV},
-  year={2020}
-}
-```
 
 ## Contribute
 Please create a pull request or submit an issue if you would like to contribute.
 
 ## Licensing
-(c) Fabian Plum, Imperial College London, Department of Bioengineering, and Benjamin Biggs, Oliver Boyne, Andrew Fitzgibbon and Roberto Cipolla. Department of Engineering, University of Cambridge 2020
+(c) Fabian Plum, Imperial College London & Forschungs Zentrum Juelich & scAnt UG
 
 By downloading this codebase and included dataset(s), you agree to the [Creative Commons Attribution-NonCommercial 4.0 International license](https://creativecommons.org/licenses/by-nc-sa/4.0/). This license allows users to use, share and adapt the codebase and dataset(s), so long as credit is given to the authors (e.g. by citation) and the dataset is not used for any commercial purposes.
 

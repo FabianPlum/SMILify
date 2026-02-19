@@ -1,0 +1,139 @@
+{
+  "mode": "singleview",
+
+  "smal_model": {
+    "smal_file": "3D_model_prep/SMILy_STICK.pkl",
+    "shape_family": -1
+  },
+
+  "dataset": {
+    "data_path": "bbox_center_PERU_test.h5",
+    "train_ratio": 0.85,
+    "val_ratio": 0.05,
+    "test_ratio": 0.1,
+    "dataset_fraction": 1.0
+  },
+
+  "model": {
+    "backbone_name": "vit_large_patch16_224",
+    "freeze_backbone": true,
+    "hidden_dim": 1024,
+    "head_type": "transformer_decoder",
+    "use_unity_prior": false,
+    "rgb_only": false,
+    "transformer_depth": 6,
+    "transformer_heads": 8,
+    "transformer_dim_head": 64,
+    "transformer_mlp_dim": 1024,
+    "transformer_dropout": 0.1,
+    "transformer_ief_iters": 3,
+    "transformer_trans_scale_factor": 1
+  },
+
+  "optimizer": {
+    "learning_rate": 5e-5,
+    "weight_decay": 1e-4,
+    "gradient_clip_norm": 1.0,
+    "optimizer_type": "adamw",
+    "lr_schedule": {
+      "0": 5e-5,
+      "10": 3e-5,
+      "20": 2e-5,
+      "40": 1e-5,
+      "60": 5e-6,
+      "100": 2e-6,
+      "150": 1e-6
+    }
+  },
+
+  "loss_curriculum": {
+    "base_weights": {
+      "global_rot": 0.0,
+      "joint_rot": 0.001,
+      "betas": 0.0005,
+      "trans": 0.0005,
+      "fov": 0.001,
+      "cam_rot": 0.01,
+      "cam_trans": 0.01,
+      "log_beta_scales": 0.0005,
+      "betas_trans": 0.0005,
+      "keypoint_2d": 0.1,
+      "keypoint_3d": 0.25,
+      "silhouette": 0.0,
+      "joint_angle_regularization": 0.001,
+      "limb_scale_regularization": 0.01,
+      "limb_trans_regularization": 1
+    },
+    "curriculum_stages": {
+      "1": {
+        "joint_angle_regularization": 0.01,
+        "limb_scale_regularization": 0.1,
+        "limb_trans_regularization": 1
+      },
+      "5": {
+        "joint_angle_regularization": 0.0025,
+        "limb_scale_regularization": 0.01,
+        "limb_trans_regularization": 0.01
+      },
+      "10": {
+        "joint_angle_regularization": 0.0001,
+        "limb_scale_regularization": 0.001,
+        "limb_trans_regularization": 0.01
+      },
+      "20": {
+        "joint_angle_regularization": 0.00001,
+        "limb_scale_regularization": 0.0001,
+        "limb_trans_regularization": 0.01
+      },
+      "50": {
+        "joint_angle_regularization": 0.000001,
+        "limb_scale_regularization": 0.0005,
+        "limb_trans_regularization": 0.001
+      }
+    }
+  },
+
+  "scale_trans_beta": {
+    "mode": "separate"
+  },
+
+  "mesh_scaling": {
+    "allow_mesh_scaling": true,
+    "init_mesh_scale": 1.0,
+    "use_log_scale": true
+  },
+
+  "joint_importance": {
+    "enabled": true,
+    "important_joint_names": ["l_1_pt_l", "l_2_pt_l", "l_3_pt_l", "l_1_pt_r", "l_2_pt_r", "l_3_pt_r"],
+    "weight_multiplier": 10.0
+  },
+
+  "ignored_joint_locations": {
+    "enabled": true,
+    "ignored_joint_names": ["b_t","b_a_1","b_a_2","b_a_3","b_a_4","b_a_5"]
+  },
+
+  "output": {
+    "checkpoint_dir": "checkpoints",
+    "plots_dir": "plots",
+    "visualizations_dir": "visualizations",
+    "train_visualizations_dir": "visualizations_train",
+    "save_checkpoint_every": 10,
+    "generate_visualizations_every": 1,
+    "plot_history_every": 10,
+    "num_visualization_samples": 10
+  },
+
+  "training": {
+    "batch_size": 8,
+    "num_epochs": 250,
+    "seed": 1234,
+    "rotation_representation": "6d",
+    "num_workers": 8,
+    "pin_memory": true,
+    "prefetch_factor": 4,
+    "resume_checkpoint": "checkpoints/best_model.pth",
+    "use_gt_camera_init": false
+  }
+}

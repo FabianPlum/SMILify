@@ -1,8 +1,16 @@
 """
 Training Configuration for SMIL Image Regressor
 
-This file contains all configuration parameters for training the SMILImageRegressor,
-including dataset paths, training splits, loss curriculum, and hyperparameters.
+DEPRECATED: This file is maintained for backward compatibility.
+The canonical configuration system is now in configs/ (see configs/README.md).
+
+Use the new system instead:
+    from configs import SingleViewConfig, MultiViewConfig, load_config
+
+Or load from a JSON config file:
+    python train_smil_regressor.py --config configs/examples/singleview_baseline.json
+
+This file continues to work for existing code that imports TrainingConfig directly.
 """
 
 import os
@@ -229,6 +237,16 @@ class TrainingConfig:
     # Allows certain joints to have higher weight in 2D and 3D keypoint losses.
     # This is crucial when learning joint angles implicitly from keypoint supervision,
     # as it incentivizes the model to prioritize getting specific joints correct.
+    # Joints to exclude from 2D and 3D keypoint losses at the loss level.
+    # Unlike IGNORED_JOINTS_CONFIG (data preprocessing), this operates during
+    # loss computation, so the joints still appear in the dataset but are simply
+    # not supervised. Useful when a joint is present in the data but its ground
+    # truth location is unreliable or systematically misaligned.
+    IGNORED_JOINT_LOCATIONS_CONFIG = {
+        'enabled': True,
+        'ignored_joint_names': [],  # Joint names (from SMAL pkl) to exclude from keypoint losses
+    }
+
     JOINT_IMPORTANCE_CONFIG = {
         'enabled': True,  # Set to True to enable per-joint importance weighting
         
@@ -626,7 +644,18 @@ class TrainingConfig:
     def get_joint_importance_multiplier(cls) -> float:
         """Get the weight multiplier for important joints."""
         return cls.JOINT_IMPORTANCE_CONFIG.get('weight_multiplier', 1.0)
-    
+
+    @classmethod
+    def is_joint_location_ignore_enabled(cls) -> bool:
+        """Check if loss-level joint location ignoring is enabled and has joints configured."""
+        cfg = cls.IGNORED_JOINT_LOCATIONS_CONFIG
+        return cfg.get('enabled', False) and len(cfg.get('ignored_joint_names', [])) > 0
+
+    @classmethod
+    def get_ignored_joint_location_names(cls) -> List[str]:
+        """Get list of joint names whose locations should be excluded from keypoint losses."""
+        return cls.IGNORED_JOINT_LOCATIONS_CONFIG.get('ignored_joint_names', [])
+
     @classmethod
     def get_dataset_fraction(cls) -> float:
         """

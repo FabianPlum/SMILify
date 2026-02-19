@@ -42,6 +42,7 @@ except ImportError:
     from sleap_data_loader import SLEAPDataLoader
 
 import config
+from neuralSMIL.configs.config_utils import apply_smal_file_override
 
 
 class SLEAPDatasetPreprocessor:
@@ -1098,11 +1099,14 @@ class SLEAPDatasetPreprocessor:
         """
         # Convert to uint8
         image_uint8 = (image * 255).astype(np.uint8)
-        
+
+        # cv2.imencode expects BGR input, so convert from RGB before encoding
+        image_bgr = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2BGR)
+
         # Encode as JPEG
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
-        _, jpeg_bytes = cv2.imencode('.jpg', image_uint8, encode_param)
-        
+        _, jpeg_bytes = cv2.imencode('.jpg', image_bgr, encode_param)
+
         return jpeg_bytes.tobytes()
     
     def process_dataset(self, sessions_dir: str, output_path: str, 
@@ -1596,7 +1600,11 @@ Examples:
                        help="Number of parallel processing workers (default: 4)")
     parser.add_argument("--max-frames-per-video", type=int, default=None,
                        help="Maximum number of frames to process per video (default: None for all frames, useful for debugging)")
-    
+
+    # SMAL model options
+    parser.add_argument("--smal_file", type=str, default=None,
+                       help="Path to SMAL/SMIL model pickle file (overrides config.SMAL_FILE if provided)")
+
     # Output options
     parser.add_argument("--quiet", action="store_true",
                        help="Suppress progress output")
@@ -1609,7 +1617,14 @@ Examples:
                             "will be marked as invisible. Default: 0.5")
     
     args = parser.parse_args()
-    
+
+    # Override SMAL model if smal_file is provided
+    if args.smal_file:
+        if not os.path.exists(args.smal_file):
+            print(f"Error: SMAL model file does not exist: {args.smal_file}")
+            sys.exit(1)
+        apply_smal_file_override(args.smal_file)
+
     # Validate arguments
     if args.jpeg_quality < 1 or args.jpeg_quality > 100:
         print("Error: jpeg_quality must be between 1 and 100")
@@ -1658,6 +1673,8 @@ Examples:
         print(f"Max frames per video: {args.max_frames_per_video or 'All frames'}")
         print(f"Use reprojections: {args.use_reprojections}")
         print(f"Confidence threshold: {args.confidence_threshold}")
+        if args.smal_file:
+            print(f"SMAL model: {args.smal_file}")
         print(f"Estimated time: {estimate_processing_time(num_sessions, args.num_workers)}")
         print("="*60)
         
