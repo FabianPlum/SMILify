@@ -39,7 +39,7 @@ pip.main(['install', 'scikit-learn', 'matplotlib' '--target', (sys.exec_prefix) 
 # here, we need to run the following from the command line instead, as blender does not want to pip install things while running
 # so, go to the python executable that was shipped with blender and make sure the --target is correct
 
-./python3.11 -m pip install matplotlib scikit-learn --target /home/USER/Downloads/blender-4.2.0-linux-x64/4.2/python/lib/python3.11/site-packages
+./python3.11 -m pip install matplotlib scikit-learn scipy --target /home/USER/Downloads/blender-4.2.0-linux-x64/4.2/python/lib/python3.11/site-packages
 """
 
 
