@@ -122,5 +122,32 @@ class MultiViewConfig(BaseTrainingConfig):
             'smal_file': self.smal_model.smal_file if self.smal_model is not None else None,
             'loss_weights': self.get_loss_weights_for_epoch(0),
             'use_gt_camera_init': self.training.use_gt_camera_init,
+
+            # Joint importance / ignored joints / loss curriculum — must be carried
+            # through so that DDP worker processes (mp.spawn / torchrun) can re-sync
+            # TrainingConfig after being spawned as fresh Python processes.
+            'joint_importance_config': {
+                'enabled': self.joint_importance.enabled,
+                'important_joint_names': list(self.joint_importance.important_joint_names),
+                'weight_multiplier': self.joint_importance.weight_multiplier,
+            },
+            'ignored_joint_locations_config': {
+                'enabled': self.ignored_joint_locations.enabled,
+                'ignored_joint_names': list(self.ignored_joint_locations.ignored_joint_names),
+            },
+            'loss_curriculum_config': {
+                'base_weights': dict(self.loss_curriculum.base_weights),
+                'curriculum_stages': [
+                    (epoch, dict(updates))
+                    for epoch, updates in sorted(self.loss_curriculum.curriculum_stages.items())
+                ],
+            },
+            'lr_curriculum_config': {
+                'base_learning_rate': self.optimizer.learning_rate,
+                'lr_stages': [
+                    (epoch, lr)
+                    for epoch, lr in sorted(self.optimizer.lr_schedule.items())
+                ],
+            },
         }
         return d

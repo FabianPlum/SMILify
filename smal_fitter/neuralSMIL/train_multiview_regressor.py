@@ -1211,7 +1211,7 @@ class SingleViewImageExporter:
         self.epoch = epoch
         os.makedirs(output_dir, exist_ok=True)
     
-    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0):
+    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, epoch=None):
         """Export visualization image with sample and view info in filename."""
         filename = f"sample_{self.sample_idx:03d}_view_{self.view_idx:02d}_epoch_{self.epoch:03d}.png"
         imageio.imsave(os.path.join(self.output_dir, filename), collage_np)
@@ -1516,12 +1516,8 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 pil_img = pil_img.resize((target_size, target_size), Image.BILINEAR)
                 resized_image = np.array(pil_img).astype(np.float32) / 255.0
             
-            # Prepare RGB tensor for SMALFitter (BGR format for visualization compatibility)
-            # Ensure values are in [0, 1] range
             resized_image = np.clip(resized_image, 0.0, 1.0)
-            # Swap RGB to BGR channels
-            resized_image_bgr = resized_image[:, :, [2, 1, 0]]  # RGB -> BGR
-            rgb = torch.from_numpy(resized_image_bgr).permute(2, 0, 1).unsqueeze(0).float()  # (1, 3, H, W)
+            rgb = torch.from_numpy(resized_image).permute(2, 0, 1).unsqueeze(0).float()  # (1, 3, H, W)
             
             # Verify RGB range (SMALFitter expects [0, 1])
             assert rgb.min() >= 0.0 and rgb.max() <= 1.0, f"RGB values out of range: [{rgb.min():.3f}, {rgb.max():.3f}]"
@@ -2252,6 +2248,19 @@ def main(config: dict):
             shape_family=config.get('shape_family'),
         )
 
+    # Re-sync joint importance / ignored joint locations / loss curriculum to
+    # TrainingConfig in this process.
+    # Same reason as SMAL override above: DDP workers (mp.spawn / torchrun) start as
+    # fresh Python processes and do not inherit TrainingConfig mutations from the parent.
+    if 'joint_importance_config' in config:
+        TrainingConfig.JOINT_IMPORTANCE_CONFIG = config['joint_importance_config']
+    if 'ignored_joint_locations_config' in config:
+        TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = config['ignored_joint_locations_config']
+    if 'loss_curriculum_config' in config:
+        TrainingConfig.LOSS_CURRICULUM = config['loss_curriculum_config']
+    if 'lr_curriculum_config' in config:
+        TrainingConfig.LEARNING_RATE_CURRICULUM = config['lr_curriculum_config']
+
     # Extract distributed training config
     is_distributed = config.get('is_distributed', False)
     rank = config.get('rank', 0)
@@ -2559,7 +2568,9 @@ def main(config: dict):
                 )
                 print(f"  LR (curriculum): {curriculum_lr:.2e}")
                 print(f"  Key loss weights: kp2d={current_loss_weights.get('keypoint_2d', 0):.4f}, "
-                      f"joint_rot={current_loss_weights.get('joint_rot', 0):.4f}")
+                      f"joint_rot={current_loss_weights.get('joint_rot', 0):.4f}, "
+                      f"limb_scale_reg={current_loss_weights.get('limb_scale_regularization', 0):.6f}, "
+                      f"limb_trans_reg={current_loss_weights.get('limb_trans_regularization', 0):.6f}")
             
             # Save best model
             if val_metrics['avg_loss'] < best_val_loss:
@@ -2861,6 +2872,25 @@ if __name__ == "__main__":
             TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = {
                 'enabled': new_config.ignored_joint_locations.enabled,
                 'ignored_joint_names': list(new_config.ignored_joint_locations.ignored_joint_names),
+            }
+
+            # Sync loss curriculum to legacy TrainingConfig
+            # Convert curriculum_stages from Dict[int, Dict] to List[(int, Dict)] format
+            TrainingConfig.LOSS_CURRICULUM = {
+                'base_weights': dict(new_config.loss_curriculum.base_weights),
+                'curriculum_stages': [
+                    (epoch, dict(updates))
+                    for epoch, updates in sorted(new_config.loss_curriculum.curriculum_stages.items())
+                ],
+            }
+
+            # Sync learning rate curriculum to legacy TrainingConfig
+            TrainingConfig.LEARNING_RATE_CURRICULUM = {
+                'base_learning_rate': new_config.optimizer.learning_rate,
+                'lr_stages': [
+                    (epoch, lr)
+                    for epoch, lr in sorted(new_config.optimizer.lr_schedule.items())
+                ],
             }
 
             # Convert to legacy flat dict for existing main()
