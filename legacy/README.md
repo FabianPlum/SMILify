@@ -47,7 +47,7 @@ The section below is here for legacy reasons, when this repo was first adapted f
          cd exported/CHECKPOINT_NAME/EPOCH_NAME
          ffmpeg -framerate 2 -pattern_type glob -i '*.png' -pix_fmt yuv420p results.mp4
          ```
-- Fit to an image from [StanfordExtra](https://github.com/benjiebob/StanfordExtra) dataset.
+- Fit to an image from [StanfordExtra]git (https://github.com/benjiebob/StanfordExtra) dataset.
    <img src="../docs/stanfordextra_opt.gif">
    - Edit the [config.py](https://github.com/benjiebob/SMALify/blob/master/config.py) file to make load a StanfordExtra image instead of a BADJA video sequence:
       ```
