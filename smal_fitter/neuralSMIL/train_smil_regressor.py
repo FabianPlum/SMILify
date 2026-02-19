@@ -37,6 +37,7 @@ from smal_fitter import SMALFitter
 from Unreal2Pytorch3D import return_placeholder_data
 import config
 from training_config import TrainingConfig
+from configs import SingleViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
 from memory_optimization import MemoryOptimizer, recommend_training_config, MixedPrecisionTrainer
 
 # Import SLEAP dataset to enable patching of UnifiedSMILDataset
@@ -198,9 +199,11 @@ class ImageExporter():
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0):
+    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, epoch=None):
         """Export visualization image."""
-        imageio.imsave(os.path.join(self.output_dir, f"img_{img_idx:04d}_epoch_{global_id:04d}.png"), collage_np)
+        # Use epoch if provided, otherwise fall back to global_id for backwards compatibility
+        epoch_num = epoch if epoch is not None else global_id
+        imageio.imsave(os.path.join(self.output_dir, f"img_{img_idx:04d}_epoch_{epoch_num:04d}.png"), collage_np)
 
 
 def create_placeholder_data_batch(batch_size=1, image_size=512):
@@ -695,15 +698,10 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                 # For optimized dataset or SLEAP dataset, use the original image data and correct image size
                 original_image = x_data['input_image_data']  # This is already in RGB format [0,1]
                 
-                # Convert RGB to BGR for visualization compatibility
                 if isinstance(original_image, np.ndarray):
-                    # Swap RGB to BGR channels
-                    original_image_bgr = original_image[:, :, [2, 1, 0]]  # RGB -> BGR
-                    rgb = torch.from_numpy(original_image_bgr).permute(2, 0, 1).unsqueeze(0)
+                    rgb = torch.from_numpy(original_image).permute(2, 0, 1).unsqueeze(0)
                 else:
-                    # Swap RGB to BGR channels for tensor
-                    original_image_bgr = original_image[:, :, [2, 1, 0]]  # RGB -> BGR
-                    rgb = original_image_bgr.permute(2, 0, 1).unsqueeze(0) if len(original_image_bgr.shape) == 3 else original_image_bgr
+                    rgb = original_image.permute(2, 0, 1).unsqueeze(0) if len(original_image.shape) == 3 else original_image
                 
                 # Get the actual image size from the original image
                 image_height, image_width = original_image.shape[:2]
@@ -818,24 +816,26 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
             
             # Set joint scales and translations if available
             if 'log_beta_scales' in predicted_params and 'betas_trans' in predicted_params:
-                # Transform PCA weights to per-joint values for visualization
-                if model.scale_trans_mode in ['separate', 'ignore']:
-                    # In separate/ignore modes, predicted_params contain PCA weights (5 parameters each)
-                    # Transform them to per-joint values for the SMALFitter
-                    scale_weights = predicted_params['log_beta_scales'][0:1]  # (1, 5)
-                    trans_weights = predicted_params['betas_trans'][0:1]      # (1, 5)
-                    
-                    # Transform to per-joint values using the helper method
-                    log_beta_scales_joint, betas_trans_joint = model._transform_separate_pca_weights_to_joint_values(
-                        scale_weights, trans_weights
-                    )
-                    
+                scale_pred = predicted_params['log_beta_scales'][0:1]
+                trans_pred = predicted_params['betas_trans'][0:1]
+                if model.scale_trans_mode == 'separate':
+                    # Check whether the model outputs PCA weights (2D) or per-joint values (3D)
+                    scale_trans_config = TrainingConfig.get_scale_trans_config()
+                    use_pca = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+                    if use_pca:
+                        # PCA weights — transform to per-joint values for the SMALFitter
+                        log_beta_scales_joint, betas_trans_joint = model._transform_separate_pca_weights_to_joint_values(
+                            scale_pred, trans_pred
+                        )
+                    else:
+                        # Already per-joint values (batch, n_joints, 3)
+                        log_beta_scales_joint, betas_trans_joint = scale_pred, trans_pred
                     temp_fitter.log_beta_scales.data = log_beta_scales_joint
                     temp_fitter.betas_trans.data = betas_trans_joint
                 else:
-                    # In other modes, the values are already per-joint
-                    temp_fitter.log_beta_scales.data = predicted_params['log_beta_scales'][0:1]
-                    temp_fitter.betas_trans.data = predicted_params['betas_trans'][0:1]
+                    # entangled_with_betas / other modes: values already per-joint
+                    temp_fitter.log_beta_scales.data = scale_pred
+                    temp_fitter.betas_trans.data = trans_pred
             
             # Set camera parameters from PREDICTED values (not ground truth!)
             # This ensures visualization matches the loss computation
@@ -877,7 +877,7 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                     )
             
             # Generate visualization - match model's UE scaling setting
-            temp_fitter.generate_visualization(image_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=sample_count)
+            temp_fitter.generate_visualization(image_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=sample_count, epoch=epoch)
             
             sample_count += 1
         
@@ -1163,11 +1163,14 @@ def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=Fa
 
 
 def save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_err, val_param_err,
-                   train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss, 
-                   checkpoint_path):
+                   train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
+                   checkpoint_path, checkpoint_config=None):
     """
     Save training checkpoint with complete state.
-    
+
+    When checkpoint_config is provided, it is saved so run_inference can load
+    model config, scale_trans, and shape_family from the checkpoint.
+
     Args:
         epoch: Current epoch number
         model: SMILImageRegressor model
@@ -1182,8 +1185,10 @@ def save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_e
         val_param_errors: Full validation parameter error history
         best_val_loss: Best validation loss so far
         checkpoint_path: Path to save checkpoint
+        checkpoint_config: Optional dict with 'model_config', 'training_params' (at least
+            'rotation_representation'), 'scale_trans_mode', 'scale_trans_config', 'shape_family'.
     """
-    torch.save({
+    state = {
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
@@ -1196,7 +1201,10 @@ def save_checkpoint(epoch, model, optimizer, train_loss, val_loss, train_param_e
         'train_param_errors_history': train_param_errors,
         'val_param_errors_history': val_param_errors,
         'best_val_loss': best_val_loss,
-    }, checkpoint_path)
+    }
+    if checkpoint_config is not None:
+        state['config'] = checkpoint_config
+    torch.save(state, checkpoint_path)
 
 
 def main(dataset_name=None, checkpoint_path=None, config_override=None):
@@ -1208,9 +1216,34 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         checkpoint_path (str): Path to checkpoint file to resume training from (default: None)
         config_override (dict): Dictionary to override specific config values (default: None)
     """
+    # Re-apply SMAL model override in this process.
+    # When using mp.spawn, each worker is a fresh Python process that imports
+    # config.py with its defaults.  The parent process may have already called
+    # apply_smal_file_override(), but that only patched the parent's globals.
+    # We must re-apply here so config.N_POSE, config.N_BETAS, config.dd, etc.
+    # match the checkpoint / JSON config in every worker.
+    if config_override:
+        _smal_file = config_override.get('smal_file')
+        if _smal_file:
+            apply_smal_file_override(
+                _smal_file,
+                shape_family=config_override.get('shape_family'),
+            )
+        # Re-apply TrainingConfig overrides in spawned workers (mp.spawn starts
+        # fresh processes where TrainingConfig has its default values).
+        _stb = config_override.get('scale_trans_beta')
+        if _stb:
+            TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = _stb['mode']
+        _ji = config_override.get('joint_importance')
+        if _ji:
+            TrainingConfig.JOINT_IMPORTANCE_CONFIG = _ji
+        _ijl = config_override.get('ignored_joint_locations')
+        if _ijl:
+            TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = _ijl
+
     # Load training configuration
     training_config = TrainingConfig.get_all_config(dataset_name)
-    
+
     # Extract DDP configuration from config_override
     is_distributed = config_override.get('is_distributed', False) if config_override else False
     rank = config_override.get('rank', 0) if config_override else 0
@@ -1238,6 +1271,18 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     training_params = training_config['training_params']
     model_config = training_config['model_config']
     output_config = training_config['output_config']
+
+    # Build config to save in checkpoints so run_inference can load without training_config
+    checkpoint_config = {
+        'model_config': model_config.copy(),
+        'training_params': {
+            'rotation_representation': training_params.get('rotation_representation', '6d'),
+        },
+        'scale_trans_mode': TrainingConfig.get_scale_trans_mode(),
+        'scale_trans_config': TrainingConfig.get_scale_trans_config(),
+        'shape_family': config.SHAPE_FAMILY,
+        'smal_file': getattr(config, 'SMAL_FILE', None),
+    }
     
     # Use checkpoint from config if not provided as argument
     if checkpoint_path is None:
@@ -1747,7 +1792,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                 model_to_save = model.module if is_distributed else model
                 save_checkpoint(epoch, model_to_save, optimizer, train_loss, val_loss, train_param_err, val_param_err,
                               train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
-                              best_model_path)
+                              best_model_path, checkpoint_config=checkpoint_config)
                 print(f'  New best model saved with validation loss: {val_loss:.6f}')
             elif not is_distributed or rank == 0:
                 print(f'  New best validation loss: {val_loss:.6f} (checkpoint saving disabled in test mode)')
@@ -1760,7 +1805,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                 model_to_save = model.module if is_distributed else model
                 save_checkpoint(epoch, model_to_save, optimizer, train_loss, val_loss, train_param_err, val_param_err,
                               train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss,
-                              checkpoint_path_save)
+                              checkpoint_path_save, checkpoint_config=checkpoint_config)
                 print(f'  Checkpoint saved at epoch {epoch}')
             else:
                 print(f'  Checkpoint saving disabled in test mode (epoch {epoch})')
@@ -1784,7 +1829,12 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                 param_errors_path = os.path.join(output_config['plots_dir'], f'parameter_errors_epoch_{epoch}.png')
                 plot_training_history(train_losses, val_losses, history_path)
                 plot_parameter_errors(train_param_errors, val_param_errors, param_errors_path)
-    
+
+        # Sync all ranks after rank-0-only operations (visualization, plotting, checkpointing)
+        # so non-zero ranks don't race ahead into the next epoch's train_epoch() and deadlock.
+        if is_distributed:
+            dist.barrier()
+
     if not is_distributed or rank == 0:
         print("Training completed!")
     
@@ -1827,53 +1877,152 @@ if __name__ == "__main__":
                        help='Path to checkpoint file to resume training from (overrides config setting, default: None)')
     parser.add_argument('--seed', type=int, default=None,
                        help='Random seed for reproducibility (overrides config default)')
-    parser.add_argument('--rotation-representation', type=str, default=None, 
+    parser.add_argument('--rotation_representation', type=str, default=None,
                        choices=['6d', 'axis_angle'],
                        help='Rotation representation for joint rotations (overrides config default)')
-    parser.add_argument('--batch-size', type=int, default=None,
+    parser.add_argument('--batch_size', type=int, default=None,
                        help='Batch size (overrides config default)')
-    parser.add_argument('--learning-rate', type=float, default=None,
+    parser.add_argument('--learning_rate', type=float, default=None,
                        help='Learning rate (overrides config default)')
-    parser.add_argument('--num-epochs', type=int, default=None,
+    parser.add_argument('--num_epochs', type=int, default=None,
                        help='Number of epochs (overrides config default)')
     parser.add_argument('--backbone', type=str, default=None,
                        choices=['resnet50', 'resnet101', 'resnet152', 'vit_base_patch16_224', 'vit_large_patch16_224'],
                        help='Backbone network to use (overrides config default)')
     parser.add_argument('--data_path', type=str, default=None,
                        help='Path to dataset (overrides config default). Can be a directory or HDF5 file.')
-    parser.add_argument('--num-gpus', type=int, default=1,
+    parser.add_argument('--config', type=str, default=None,
+                       help='Path to JSON config file (must include "mode": "singleview"). '
+                            'See configs/examples/singleview_baseline.json for a template.')
+    parser.add_argument('--num_gpus', type=int, default=1,
                        help='Number of GPUs to use for training (default: 1, ignored when using torchrun)')
-    parser.add_argument('--master-port', type=str, default=None,
+    parser.add_argument('--master_port', type=str, default=None,
                        help='Master port for distributed training (default: from MASTER_PORT env var or 12345)')
-    parser.add_argument('--scale-trans-mode', type=str, default=None,
+    parser.add_argument('--scale_trans_mode', type=str, default=None,
                        choices=['ignore', 'separate', 'entangled_with_betas'],
                        help='Scale/translation beta mode (overrides config default)')
     args = parser.parse_args()
-    
-    # Create config override dictionary for any provided arguments
-    config_override = {}
-    if args.seed is not None or args.rotation_representation is not None or \
-       args.batch_size is not None or args.learning_rate is not None or args.num_epochs is not None or args.backbone is not None or \
-       args.data_path is not None:
-        config_override['training_params'] = {}
-        if args.seed is not None:
-            config_override['training_params']['seed'] = args.seed
-        if args.rotation_representation is not None:
-            config_override['training_params']['rotation_representation'] = args.rotation_representation
-        if args.batch_size is not None:
-            config_override['training_params']['batch_size'] = args.batch_size
-        if args.learning_rate is not None:
-            config_override['training_params']['learning_rate'] = args.learning_rate
-        if args.num_epochs is not None:
-            config_override['training_params']['num_epochs'] = args.num_epochs
-        if args.backbone is not None:
-            config_override['model_config'] = {'backbone_name': args.backbone}
-        if args.data_path is not None:
-            config_override['data_path'] = args.data_path
 
-    # Apply scale_trans_mode override directly to TrainingConfig
-    if args.scale_trans_mode is not None:
-        TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = args.scale_trans_mode
+    # ---------------------------------------------------------------
+    # Configuration loading: new JSON config system or legacy CLI args
+    # ---------------------------------------------------------------
+    config_override = {}
+
+    if args.config is not None:
+        # New config system: load from JSON, apply CLI overrides
+        cli_overrides = {}
+        if args.seed is not None:
+            cli_overrides['training'] = cli_overrides.get('training', {})
+            cli_overrides['training']['seed'] = args.seed
+        if args.rotation_representation is not None:
+            cli_overrides['training'] = cli_overrides.get('training', {})
+            cli_overrides['training']['rotation_representation'] = args.rotation_representation
+        if args.batch_size is not None:
+            cli_overrides['training'] = cli_overrides.get('training', {})
+            cli_overrides['training']['batch_size'] = args.batch_size
+        if args.learning_rate is not None:
+            cli_overrides['optimizer'] = cli_overrides.get('optimizer', {})
+            cli_overrides['optimizer']['learning_rate'] = args.learning_rate
+        if args.num_epochs is not None:
+            cli_overrides['training'] = cli_overrides.get('training', {})
+            cli_overrides['training']['num_epochs'] = args.num_epochs
+        if args.backbone is not None:
+            cli_overrides['model'] = cli_overrides.get('model', {})
+            cli_overrides['model']['backbone_name'] = args.backbone
+        if args.data_path is not None:
+            cli_overrides['dataset'] = cli_overrides.get('dataset', {})
+            cli_overrides['dataset']['data_path'] = args.data_path
+        if args.scale_trans_mode is not None:
+            cli_overrides['scale_trans_beta'] = cli_overrides.get('scale_trans_beta', {})
+            cli_overrides['scale_trans_beta']['mode'] = args.scale_trans_mode
+
+        new_config = load_config(
+            config_file=args.config,
+            cli_overrides=cli_overrides,
+            expected_mode='singleview',
+        )
+
+        # Apply smal_model overrides (SMAL_FILE / SHAPE_FAMILY).
+        # apply_smal_file_override re-reads the pickle and patches config.dd,
+        # config.N_POSE, config.N_BETAS, config.joint_names, etc.
+        if getattr(new_config, "smal_model", None) is not None:
+            if new_config.smal_model.smal_file:
+                apply_smal_file_override(
+                    new_config.smal_model.smal_file,
+                    shape_family=new_config.smal_model.shape_family,
+                )
+            elif new_config.smal_model.shape_family is not None:
+                config.SHAPE_FAMILY = int(new_config.smal_model.shape_family)
+
+        # Sync scale_trans_mode to legacy TrainingConfig (still read by some code paths)
+        TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = new_config.scale_trans_beta.mode
+
+        # Sync joint_importance to legacy TrainingConfig
+        TrainingConfig.JOINT_IMPORTANCE_CONFIG = {
+            'enabled': new_config.joint_importance.enabled,
+            'important_joint_names': list(new_config.joint_importance.important_joint_names),
+            'weight_multiplier': new_config.joint_importance.weight_multiplier,
+        }
+
+        # Sync ignored_joint_locations to legacy TrainingConfig
+        TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = {
+            'enabled': new_config.ignored_joint_locations.enabled,
+            'ignored_joint_names': list(new_config.ignored_joint_locations.ignored_joint_names),
+        }
+
+        # Sync loss curriculum to legacy TrainingConfig
+        # Convert curriculum_stages from Dict[int, Dict] to List[(int, Dict)] format
+        TrainingConfig.LOSS_CURRICULUM = {
+            'base_weights': dict(new_config.loss_curriculum.base_weights),
+            'curriculum_stages': [
+                (epoch, dict(updates))
+                for epoch, updates in sorted(new_config.loss_curriculum.curriculum_stages.items())
+            ],
+        }
+
+        # Sync learning rate curriculum to legacy TrainingConfig
+        TrainingConfig.LEARNING_RATE_CURRICULUM = {
+            'base_learning_rate': new_config.optimizer.learning_rate,
+            'lr_stages': [
+                (epoch, lr)
+                for epoch, lr in sorted(new_config.optimizer.lr_schedule.items())
+            ],
+        }
+
+        # Convert to legacy dict format for existing main()
+        config_override = new_config.to_legacy_dict()
+
+        # Save resolved config for reproducibility
+        os.makedirs(new_config.output.checkpoint_dir, exist_ok=True)
+        save_config_json(new_config, os.path.join(new_config.output.checkpoint_dir, 'config.json'))
+
+        print(f"Loaded config from: {args.config}")
+        print(f"Resolved config saved to: {os.path.join(new_config.output.checkpoint_dir, 'config.json')}")
+
+    else:
+        # Legacy config flow: build config_override from CLI args
+        if args.seed is not None or args.rotation_representation is not None or \
+           args.batch_size is not None or args.learning_rate is not None or args.num_epochs is not None or args.backbone is not None or \
+           args.data_path is not None:
+            config_override['training_params'] = {}
+            if args.seed is not None:
+                config_override['training_params']['seed'] = args.seed
+            if args.rotation_representation is not None:
+                config_override['training_params']['rotation_representation'] = args.rotation_representation
+            if args.batch_size is not None:
+                config_override['training_params']['batch_size'] = args.batch_size
+            if args.learning_rate is not None:
+                config_override['training_params']['learning_rate'] = args.learning_rate
+            if args.num_epochs is not None:
+                config_override['training_params']['num_epochs'] = args.num_epochs
+            if args.backbone is not None:
+                config_override['model_config'] = {'backbone_name': args.backbone}
+            if args.data_path is not None:
+                config_override['data_path'] = args.data_path
+
+        # Apply scale_trans_mode override directly to TrainingConfig
+        if args.scale_trans_mode is not None:
+            TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = args.scale_trans_mode
 
     # Get master port from args or environment variable
     master_port = args.master_port or os.environ.get('MASTER_PORT', '12345')

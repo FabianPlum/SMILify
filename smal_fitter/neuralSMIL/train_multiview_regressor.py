@@ -63,6 +63,7 @@ from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_
 from smal_fitter import SMALFitter
 import config
 from training_config import TrainingConfig
+from configs import MultiViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
 
 
 def set_random_seeds(seed: int = 0):
@@ -1210,7 +1211,7 @@ class SingleViewImageExporter:
         self.epoch = epoch
         os.makedirs(output_dir, exist_ok=True)
     
-    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0):
+    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, epoch=None):
         """Export visualization image with sample and view info in filename."""
         filename = f"sample_{self.sample_idx:03d}_view_{self.view_idx:02d}_epoch_{self.epoch:03d}.png"
         imageio.imsave(os.path.join(self.output_dir, filename), collage_np)
@@ -1515,12 +1516,8 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 pil_img = pil_img.resize((target_size, target_size), Image.BILINEAR)
                 resized_image = np.array(pil_img).astype(np.float32) / 255.0
             
-            # Prepare RGB tensor for SMALFitter (BGR format for visualization compatibility)
-            # Ensure values are in [0, 1] range
             resized_image = np.clip(resized_image, 0.0, 1.0)
-            # Swap RGB to BGR channels
-            resized_image_bgr = resized_image[:, :, [2, 1, 0]]  # RGB -> BGR
-            rgb = torch.from_numpy(resized_image_bgr).permute(2, 0, 1).unsqueeze(0).float()  # (1, 3, H, W)
+            rgb = torch.from_numpy(resized_image).permute(2, 0, 1).unsqueeze(0).float()  # (1, 3, H, W)
             
             # Verify RGB range (SMALFitter expects [0, 1])
             assert rgb.min() >= 0.0 and rgb.max() <= 1.0, f"RGB values out of range: [{rgb.min():.3f}, {rgb.max():.3f}]"
@@ -1907,10 +1904,11 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
             if model.allow_mesh_scaling and 'mesh_scale' in predicted_params:
                 vis_mesh_scale = predicted_params['mesh_scale'][0:1].detach()
             temp_fitter.generate_visualization(
-                image_exporter, 
+                image_exporter,
                 apply_UE_transform=model.use_ue_scaling,  # MUST match model setting!
                 img_idx=view_idx,
-                mesh_scale=vis_mesh_scale
+                mesh_scale=vis_mesh_scale,
+                epoch=epoch
             )
             
             views_rendered += 1
@@ -2237,12 +2235,38 @@ def main(config: dict):
     Args:
         config: Training configuration dictionary (from MultiViewTrainingConfig)
     """
+    # Re-apply SMAL model override in this process.
+    # When using mp.spawn, each worker is a fresh Python process that imports
+    # config.py with its defaults.  The parent process may have already called
+    # apply_smal_file_override(), but that only patched the parent's globals.
+    # We must re-apply here so config.N_POSE, config.N_BETAS, config.dd, etc.
+    # match the checkpoint / JSON config in every worker.
+    _smal_file = config.get('smal_file')
+    if _smal_file:
+        apply_smal_file_override(
+            _smal_file,
+            shape_family=config.get('shape_family'),
+        )
+
+    # Re-sync joint importance / ignored joint locations / loss curriculum to
+    # TrainingConfig in this process.
+    # Same reason as SMAL override above: DDP workers (mp.spawn / torchrun) start as
+    # fresh Python processes and do not inherit TrainingConfig mutations from the parent.
+    if 'joint_importance_config' in config:
+        TrainingConfig.JOINT_IMPORTANCE_CONFIG = config['joint_importance_config']
+    if 'ignored_joint_locations_config' in config:
+        TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = config['ignored_joint_locations_config']
+    if 'loss_curriculum_config' in config:
+        TrainingConfig.LOSS_CURRICULUM = config['loss_curriculum_config']
+    if 'lr_curriculum_config' in config:
+        TrainingConfig.LEARNING_RATE_CURRICULUM = config['lr_curriculum_config']
+
     # Extract distributed training config
     is_distributed = config.get('is_distributed', False)
     rank = config.get('rank', 0)
     world_size = config.get('world_size', 1)
     device_override = config.get('device_override', None)
-    
+
     # Set random seeds
     set_random_seeds(config['seed'])
     
@@ -2544,7 +2568,9 @@ def main(config: dict):
                 )
                 print(f"  LR (curriculum): {curriculum_lr:.2e}")
                 print(f"  Key loss weights: kp2d={current_loss_weights.get('keypoint_2d', 0):.4f}, "
-                      f"joint_rot={current_loss_weights.get('joint_rot', 0):.4f}")
+                      f"joint_rot={current_loss_weights.get('joint_rot', 0):.4f}, "
+                      f"limb_scale_reg={current_loss_weights.get('limb_scale_regularization', 0):.6f}, "
+                      f"limb_trans_reg={current_loss_weights.get('limb_trans_regularization', 0):.6f}")
             
             # Save best model
             if val_metrics['avg_loss'] < best_val_loss:
@@ -2595,7 +2621,12 @@ def main(config: dict):
                 num_samples=config.get('num_visualization_samples', 3),
                 rank=rank
             )
-    
+
+        # Sync all ranks after rank-0-only operations (visualization, checkpointing)
+        # so non-zero ranks don't race ahead into the next epoch and deadlock.
+        if is_distributed:
+            dist.barrier()
+
     # Save final model
     if rank == 0:
         save_checkpoint(
@@ -2660,22 +2691,32 @@ if __name__ == "__main__":
         description="Train Multi-View SMIL Image Regressor",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Basic training
-  python train_multiview_regressor.py --dataset_path multiview_sleap.h5
-  
-  # With custom configuration
-  python train_multiview_regressor.py --dataset_path multiview_sleap.h5 \\
-      --batch_size 16 --num_epochs 200 --learning_rate 5e-5
-  
-  # Distributed training (single node, 4 GPUs)
-  torchrun --nproc_per_node=4 train_multiview_regressor.py --dataset_path multiview_sleap.h5
+            Examples:
+            # Training with JSON config (dataset path in config file)
+            python train_multiview_regressor.py --config configs/examples/multiview_baseline.json
+
+            # Training with explicit dataset path
+            python train_multiview_regressor.py --dataset_path multiview_sleap.h5
+
+            # JSON config with CLI dataset override
+            python train_multiview_regressor.py --config configs/examples/multiview_baseline.json \\
+                --dataset_path /path/to/other_dataset.h5
+
+            # With custom configuration
+            python train_multiview_regressor.py --dataset_path multiview_sleap.h5 \\
+                --batch_size 16 --num_epochs 200 --learning_rate 5e-5
+
+            # Distributed training (single node, 4 GPUs)
+            torchrun --nproc_per_node=4 train_multiview_regressor.py \\
+                --config configs/examples/multiview_baseline.json
         """
     )
     
-    # Required arguments
-    parser.add_argument("--dataset_path", type=str, required=True,
-                       help="Path to multi-view SLEAP HDF5 dataset")
+    # Dataset (optional when using --config with dataset.data_path set)
+    parser.add_argument("--dataset_path", type=str, default=None,
+                       help="Path to multi-view SLEAP HDF5 dataset. "
+                            "Optional when using --config with dataset.data_path set. "
+                            "CLI value overrides config file.")
     
     # Model configuration
     parser.add_argument("--backbone_name", type=str, default='vit_large_patch16_224',
@@ -2746,17 +2787,159 @@ Examples:
                        help="Use GT camera params (when available) as base and predict deltas")
     
     args = parser.parse_args()
-    
-    # Load configuration
+
+    # ---------------------------------------------------------------
+    # Configuration loading: new JSON config system or legacy CLI args
+    # ---------------------------------------------------------------
+    _is_new_config = False
+
     if args.config:
-        training_config = MultiViewTrainingConfig.from_file(args.config)
-        # Override with command line args
-        for key, value in vars(args).items():
-            if value is not None and key != 'config':
-                training_config[key] = value
+        # Detect whether this is a new-style config (has "mode" field) or legacy
+        import json as _json
+        with open(args.config) as _f:
+            _raw = _json.load(_f)
+
+        if 'mode' in _raw:
+            # New config system: load via unified config, apply CLI overrides
+            _is_new_config = True
+            cli_overrides = {}
+            if args.batch_size is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['batch_size'] = args.batch_size
+            if args.num_epochs is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['num_epochs'] = args.num_epochs
+            if args.learning_rate is not None:
+                cli_overrides['optimizer'] = cli_overrides.get('optimizer', {})
+                cli_overrides['optimizer']['learning_rate'] = args.learning_rate
+            if args.weight_decay is not None:
+                cli_overrides['optimizer'] = cli_overrides.get('optimizer', {})
+                cli_overrides['optimizer']['weight_decay'] = args.weight_decay
+            if args.seed is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['seed'] = args.seed
+            if args.dataset_path is not None:
+                cli_overrides['dataset'] = cli_overrides.get('dataset', {})
+                cli_overrides['dataset']['data_path'] = args.dataset_path
+            if args.backbone_name is not None:
+                cli_overrides['model'] = cli_overrides.get('model', {})
+                cli_overrides['model']['backbone_name'] = args.backbone_name
+            if args.num_views_to_use is not None:
+                cli_overrides['num_views_to_use'] = args.num_views_to_use
+            if args.cross_attention_layers is not None:
+                cli_overrides['cross_attention_layers'] = args.cross_attention_layers
+            if args.cross_attention_heads is not None:
+                cli_overrides['cross_attention_heads'] = args.cross_attention_heads
+            if args.checkpoint_dir is not None:
+                cli_overrides['output'] = cli_overrides.get('output', {})
+                cli_overrides['output']['checkpoint_dir'] = args.checkpoint_dir
+            if args.resume_checkpoint is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['resume_checkpoint'] = args.resume_checkpoint
+            if args.use_gt_camera_init is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['use_gt_camera_init'] = args.use_gt_camera_init
+
+            new_config = load_config(
+                config_file=args.config,
+                cli_overrides=cli_overrides,
+                expected_mode='multiview',
+            )
+
+            # Apply smal_model overrides (SMAL_FILE / SHAPE_FAMILY).
+            # apply_smal_file_override re-reads the pickle and patches config.dd,
+            # config.N_POSE, config.N_BETAS, config.joint_names, etc.
+            if getattr(new_config, "smal_model", None) is not None:
+                if new_config.smal_model.smal_file:
+                    apply_smal_file_override(
+                        new_config.smal_model.smal_file,
+                        shape_family=new_config.smal_model.shape_family,
+                    )
+                elif new_config.smal_model.shape_family is not None:
+                    config.SHAPE_FAMILY = int(new_config.smal_model.shape_family)
+
+            # Sync scale_trans_mode to legacy TrainingConfig
+            TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = new_config.scale_trans_beta.mode
+
+            # Sync joint_importance to legacy TrainingConfig
+            TrainingConfig.JOINT_IMPORTANCE_CONFIG = {
+                'enabled': new_config.joint_importance.enabled,
+                'important_joint_names': list(new_config.joint_importance.important_joint_names),
+                'weight_multiplier': new_config.joint_importance.weight_multiplier,
+            }
+
+            # Sync ignored_joint_locations to legacy TrainingConfig
+            TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = {
+                'enabled': new_config.ignored_joint_locations.enabled,
+                'ignored_joint_names': list(new_config.ignored_joint_locations.ignored_joint_names),
+            }
+
+            # Sync loss curriculum to legacy TrainingConfig
+            # Convert curriculum_stages from Dict[int, Dict] to List[(int, Dict)] format
+            TrainingConfig.LOSS_CURRICULUM = {
+                'base_weights': dict(new_config.loss_curriculum.base_weights),
+                'curriculum_stages': [
+                    (epoch, dict(updates))
+                    for epoch, updates in sorted(new_config.loss_curriculum.curriculum_stages.items())
+                ],
+            }
+
+            # Sync learning rate curriculum to legacy TrainingConfig
+            TrainingConfig.LEARNING_RATE_CURRICULUM = {
+                'base_learning_rate': new_config.optimizer.learning_rate,
+                'lr_stages': [
+                    (epoch, lr)
+                    for epoch, lr in sorted(new_config.optimizer.lr_schedule.items())
+                ],
+            }
+
+            # Convert to legacy flat dict for existing main()
+            training_config = new_config.to_multiview_legacy_dict()
+            training_config['shape_family'] = (
+                int(new_config.smal_model.shape_family)
+                if getattr(new_config, "smal_model", None) is not None and new_config.smal_model.shape_family is not None
+                else config.SHAPE_FAMILY
+            )
+            training_config['smal_file'] = (
+                new_config.smal_model.smal_file
+                if getattr(new_config, "smal_model", None) is not None and new_config.smal_model.smal_file
+                else getattr(config, 'SMAL_FILE', None)
+            )
+            training_config['scale_trans_config'] = TrainingConfig.get_scale_trans_config()
+
+            # Save resolved config for reproducibility
+            os.makedirs(new_config.output.checkpoint_dir, exist_ok=True)
+            save_config_json(new_config, os.path.join(new_config.output.checkpoint_dir, 'config.json'))
+
+            print(f"Loaded config from: {args.config}")
+            print(f"Resolved config saved to: {os.path.join(new_config.output.checkpoint_dir, 'config.json')}")
+        else:
+            # Legacy JSON config (no "mode" field)
+            training_config = MultiViewTrainingConfig.from_file(args.config)
+            for key, value in vars(args).items():
+                if value is not None and key != 'config':
+                    training_config[key] = value
     else:
         training_config = MultiViewTrainingConfig.from_args(args)
-    
+
+    # Validate dataset path: must be provided via CLI or config file
+    _dataset_path = training_config.get('dataset_path') if isinstance(training_config, dict) else getattr(training_config, 'dataset_path', None)
+    if not _dataset_path:
+        print("ERROR: No dataset path provided. Specify one via --dataset_path or in your "
+              "config file under dataset.data_path.", file=sys.stderr)
+        sys.exit(1)
+    if not os.path.exists(_dataset_path):
+        print(f"ERROR: Dataset path does not exist: {_dataset_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Ensure checkpoint will contain smal_file, shape_family and scale_trans_config for inference
+    if 'shape_family' not in training_config:
+        training_config['shape_family'] = config.SHAPE_FAMILY
+    if 'smal_file' not in training_config:
+        training_config['smal_file'] = getattr(config, 'SMAL_FILE', None)
+    if 'scale_trans_config' not in training_config:
+        training_config['scale_trans_config'] = TrainingConfig.get_scale_trans_config()
+
     # Get master port from args or environment variable
     master_port = args.master_port or os.environ.get('MASTER_PORT', '12355')
     

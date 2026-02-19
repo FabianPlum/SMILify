@@ -23,6 +23,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from smal_fitter import SMALFitter
 import config
+from training_config import TrainingConfig
 from backbone_factory import BackboneFactory, BackboneInterface
 from transformer_decoder import build_smil_transformer_decoder_head
 
@@ -1343,9 +1344,12 @@ class SMILImageRegressor(SMALFitter):
                              loss_weights['keypoint_2d'] > 0)
         need_silhouette_loss = (auxiliary_data is not None and 'silhouette_data' in auxiliary_data and 
                                loss_weights['silhouette'] > 0)
-        need_keypoint_3d_loss = (auxiliary_data is not None and 'keypoint_data' in auxiliary_data and 
+        need_keypoint_3d_loss = (auxiliary_data is not None and 'keypoint_data' in auxiliary_data and
                                 loss_weights['keypoint_3d'] > 0)
-        
+
+        # Get joint importance weights (computed once, used for both 2D and 3D losses)
+        joint_importance_weights = self._get_joint_importance_weights() if (need_keypoint_loss or need_keypoint_3d_loss) else None
+
         # Single rendering pass for 2D keypoints, silhouette, and 3D keypoints if needed
         rendered_joints = None
         rendered_silhouette = None
@@ -1698,7 +1702,25 @@ class SMILImageRegressor(SMALFitter):
                 total_loss = total_loss + loss_weights['limb_trans_regularization'] * trans_reg
             else:
                 loss_components['limb_trans_regularization'] = torch.tensor(eps, device=self.device, requires_grad=True)
-        
+
+        # Joint angle regularization: penalize deviations from default (0,0,0) angles
+        # This helps prevent extreme joint angles and encourages natural poses
+        if loss_weights.get('joint_angle_regularization', 0) > 0 and 'joint_rot' in predicted_params and num_valid_samples > 0:
+            joint_rot_pred = predicted_params['joint_rot'][sample_validity_mask]  # (valid, N_POSE, 6 or 3)
+
+            if self.rotation_representation == '6d':
+                joint_rot_aa = rotation_6d_to_axis_angle(joint_rot_pred)  # (valid, N_POSE, 3)
+            else:
+                joint_rot_aa = joint_rot_pred  # already axis-angle
+
+            joint_angle_norms = torch.norm(joint_rot_aa, dim=-1)  # (valid, N_POSE)
+            joint_angle_reg = torch.mean(joint_angle_norms ** 2)
+
+            loss_components['joint_angle_regularization'] = joint_angle_reg
+            total_loss = total_loss + loss_weights['joint_angle_regularization'] * joint_angle_reg
+        else:
+            loss_components['joint_angle_regularization'] = torch.tensor(eps, device=self.device, requires_grad=True)
+
         # Batched 2D keypoint loss (only for valid samples with available 2D keypoints)
         if need_keypoint_loss and rendered_joints is not None and auxiliary_data['keypoint_data'] and num_valid_samples > 0:
             # Apply availability mask - only compute loss for samples with real 2D keypoint ground truth
@@ -1715,7 +1737,7 @@ class SMILImageRegressor(SMALFitter):
                         valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
                                              if i < len(combined_mask) and combined_mask[i]]
                         
-                        loss = self._compute_batch_keypoint_loss(valid_rendered_joints, valid_keypoint_data)
+                        loss = self._compute_batch_keypoint_loss(valid_rendered_joints, valid_keypoint_data, joint_importance_weights)
                         if torch.isfinite(loss):
                             loss_components['keypoint_2d'] = loss
                             total_loss = total_loss + loss_weights['keypoint_2d'] * loss
@@ -1736,7 +1758,7 @@ class SMILImageRegressor(SMALFitter):
                     valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
                                          if sample_validity_mask[i]]
                     
-                    loss = self._compute_batch_keypoint_loss(valid_rendered_joints, valid_keypoint_data)
+                    loss = self._compute_batch_keypoint_loss(valid_rendered_joints, valid_keypoint_data, joint_importance_weights)
                     if torch.isfinite(loss):
                         loss_components['keypoint_2d'] = loss
                         total_loss = total_loss + loss_weights['keypoint_2d'] * loss
@@ -1813,7 +1835,7 @@ class SMILImageRegressor(SMALFitter):
                         valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
                                              if i < len(combined_mask) and combined_mask[i]]
                         
-                        loss = self._compute_batch_keypoint_3d_loss(valid_joints_3d, valid_keypoint_data)
+                        loss = self._compute_batch_keypoint_3d_loss(valid_joints_3d, valid_keypoint_data, joint_importance_weights)
                         if torch.isfinite(loss):
                             loss_components['keypoint_3d'] = loss
                             total_loss = total_loss + loss_weights['keypoint_3d'] * loss
@@ -1832,7 +1854,7 @@ class SMILImageRegressor(SMALFitter):
                     valid_keypoint_data = [auxiliary_data['keypoint_data'][i] for i in range(len(auxiliary_data['keypoint_data'])) 
                                          if sample_validity_mask[i]]
                     
-                    loss = self._compute_batch_keypoint_3d_loss(valid_joints_3d, valid_keypoint_data)
+                    loss = self._compute_batch_keypoint_3d_loss(valid_joints_3d, valid_keypoint_data, joint_importance_weights)
                     if torch.isfinite(loss):
                         loss_components['keypoint_3d'] = loss
                         total_loss = total_loss + loss_weights['keypoint_3d'] * loss
@@ -2713,15 +2735,115 @@ class SMILImageRegressor(SMALFitter):
         num_available = combined_mask.sum().item()
         
         return filtered_pred, filtered_target, num_available
-    
-    def _compute_batch_keypoint_loss(self, rendered_joints: torch.Tensor, keypoint_data_list: list) -> torch.Tensor:
+
+    def _get_joint_importance_weights(self) -> Optional[torch.Tensor]:
+        """
+        Get per-joint importance weights based on TrainingConfig.
+
+        Returns a weight tensor of shape (J,) where J = len(CANONICAL_MODEL_JOINTS).
+        Important joints get `weight_multiplier`, all others get 1.0.
+        Returns None if joint importance weighting is disabled.
+
+        The result is computed once and cached for the lifetime of this model.
+
+        Returns:
+            Weight tensor (J,) or None if disabled
+        """
+        # Return cached result if available (use _UNSET sentinel to distinguish
+        # "not yet computed" from "computed and returned None").
+        _UNSET = "_UNSET"
+        cached = getattr(self, '_cached_joint_importance_weights', _UNSET)
+        if cached is not _UNSET:
+            return cached
+
+        result = self._compute_joint_importance_weights()
+        self._cached_joint_importance_weights = result
+        return result
+
+    def _compute_joint_importance_weights(self) -> Optional[torch.Tensor]:
+        """Compute per-joint importance weights (called once, then cached).
+
+        Combines two features into a single (J,) weight tensor:
+        - joint_importance: boosts selected joints (weight > 1.0)
+        - ignored_joint_locations: zeros out selected joints (weight = 0.0)
+
+        Returns None if neither feature is active (no-op for callers).
+        """
+        importance_active = TrainingConfig.is_joint_importance_enabled()
+        ignore_active = TrainingConfig.is_joint_location_ignore_enabled()
+
+        if not importance_active and not ignore_active:
+            return None
+
+        try:
+            model_joint_names = config.joint_names
+        except AttributeError:
+            print("Warning: config.joint_names not available, joint importance/ignore disabled")
+            return None
+
+        n_canonical_joints = len(config.CANONICAL_MODEL_JOINTS)
+        weights = torch.ones(n_canonical_joints, dtype=torch.float32, device=self.device)
+
+        def _name_to_canonical_idx(joint_name):
+            """Return canonical index for a joint name, or None if not found."""
+            if joint_name not in model_joint_names:
+                print(f"Warning: Joint name '{joint_name}' not found in model. "
+                      f"Available joints: {model_joint_names[:10]}..." if len(model_joint_names) > 10
+                      else f"Available joints: {model_joint_names}")
+                return None
+            model_idx = model_joint_names.index(joint_name)
+            if model_idx not in config.CANONICAL_MODEL_JOINTS:
+                print(f"Warning: Joint '{joint_name}' (model idx {model_idx}) not in CANONICAL_MODEL_JOINTS")
+                return None
+            return config.CANONICAL_MODEL_JOINTS.index(model_idx)
+
+        # Apply joint importance: boost selected joints
+        if importance_active:
+            important_names = TrainingConfig.get_important_joint_names()
+            multiplier = TrainingConfig.get_joint_importance_multiplier()
+            matched = 0
+            for name in important_names:
+                idx = _name_to_canonical_idx(name)
+                if idx is not None:
+                    weights[idx] = multiplier
+                    matched += 1
+            if matched == 0:
+                print("Warning: No important joints matched, joint importance weighting disabled")
+            else:
+                print(f"Joint importance: {matched}/{len(important_names)} joints matched, multiplier={multiplier}")
+
+        # Apply joint location ignore: zero out selected joints (applied after importance
+        # so that ignored joints always end up with weight 0, even if also listed as important)
+        if ignore_active:
+            ignored_names = TrainingConfig.get_ignored_joint_location_names()
+            matched = 0
+            for name in ignored_names:
+                idx = _name_to_canonical_idx(name)
+                if idx is not None:
+                    weights[idx] = 0.0
+                    matched += 1
+            if matched == 0:
+                print("Warning: No ignored joint locations matched")
+            else:
+                print(f"Joint location ignore: {matched}/{len(ignored_names)} joints zeroed out in keypoint loss")
+
+        # If all weights are still 1.0, the tensor has no effect — return None
+        if weights.min() == 1.0 and weights.max() == 1.0:
+            return None
+
+        return weights
+
+    def _compute_batch_keypoint_loss(self, rendered_joints: torch.Tensor, keypoint_data_list: list,
+                                      joint_importance_weights: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Compute batched 2D keypoint loss efficiently.
-        
+
         Args:
             rendered_joints: Tensor of shape (batch_size, n_joints, 2)
             keypoint_data_list: List of keypoint data dictionaries for each sample
-            
+            joint_importance_weights: Optional per-joint importance weights (J,).
+                                     Higher values = more importance for that joint.
+
         Returns:
             Average keypoint loss across valid samples in the batch
         """
@@ -2763,15 +2885,24 @@ class SMILImageRegressor(SMALFitter):
             
             if valid_mask.any():
                 # Compute loss for this sample using masking
-                joint_weights = valid_mask.float().unsqueeze(-1)  # Shape: (n_joints, 1)
+                mask_weights = valid_mask.float()  # Shape: (n_joints,)
                 diff_squared = (rendered_joints_sample - target_keypoints) ** 2
-                weighted_diff = diff_squared * joint_weights
-                
-                num_valid = valid_mask.sum().float()
-                if num_valid > 0:
-                    sample_loss = weighted_diff.sum() / (num_valid * 2 + eps)
-                    total_loss += sample_loss
-                    valid_samples += 1
+
+                # Apply joint importance weights if provided
+                if joint_importance_weights is not None:
+                    mask_weights = mask_weights * joint_importance_weights
+
+                weighted_diff = diff_squared * mask_weights.unsqueeze(-1)
+
+                # Normalize by weighted valid count for stable loss magnitude
+                if joint_importance_weights is not None:
+                    weighted_valid_count = (valid_mask.float() * joint_importance_weights).sum() * 2 + eps
+                else:
+                    weighted_valid_count = valid_mask.sum().float() * 2 + eps
+
+                sample_loss = weighted_diff.sum() / weighted_valid_count
+                total_loss += sample_loss
+                valid_samples += 1
             else:
                 print(
                     "[KeypointLoss] (batch) No valid 2D joints remaining for supervision "
@@ -2997,14 +3128,17 @@ class SMILImageRegressor(SMALFitter):
         else:
             return torch.tensor(eps, device=self.device, requires_grad=True)
 
-    def _compute_batch_keypoint_3d_loss(self, joints_3d: torch.Tensor, keypoint_data_list: list) -> torch.Tensor:
+    def _compute_batch_keypoint_3d_loss(self, joints_3d: torch.Tensor, keypoint_data_list: list,
+                                         joint_importance_weights: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Compute batched 3D keypoint loss efficiently with visibility awareness.
-        
+
         Args:
             joints_3d: Predicted 3D joint positions tensor of shape (batch_size, n_joints, 3)
             keypoint_data_list: List of keypoint data dictionaries for each sample
-            
+            joint_importance_weights: Optional per-joint importance weights (J,).
+                                     Higher values = more importance for that joint.
+
         Returns:
             Average 3D keypoint loss across valid samples in the batch
         """
@@ -3012,46 +3146,53 @@ class SMILImageRegressor(SMALFitter):
         total_loss = 0.0
         valid_samples = 0
         eps = 1e-8
-        
+
         for i, keypoint_data in enumerate(keypoint_data_list):
             if keypoint_data is None or i >= batch_size:
                 continue
-            
+
             # Check if 3D keypoints are available in the keypoint data
             # Must check both that the key exists AND that the value is not None
             if 'keypoints_3d' not in keypoint_data or keypoint_data['keypoints_3d'] is None:
                 continue
-                
+
             # Get target 3D keypoints and visibility for this sample
             target_keypoints_3d = safe_to_tensor(keypoint_data['keypoints_3d'], device=self.device)
             visibility = safe_to_tensor(keypoint_data['keypoint_visibility'], device=self.device)
-            
+
             # Ensure proper shapes
             if target_keypoints_3d.dim() == 2:  # Shape (n_joints, 3)
                 target_keypoints_3d = target_keypoints_3d  # Keep as is for this sample
             if visibility.dim() == 1:  # Shape (n_joints,)
                 visibility = visibility  # Keep as is for this sample
-            
+
             # Apply visibility mask - only compute loss for visible joints
             visible_mask = visibility.bool()
             finite_mask = torch.isfinite(joints_3d[i]).all(dim=-1) & torch.isfinite(target_keypoints_3d).all(dim=-1)
             valid_mask = visible_mask & finite_mask
-            
+
             if valid_mask.any():
-                # Compute loss for this sample using masking (same approach as 2D keypoints)
-                joint_weights = valid_mask.float().unsqueeze(-1)  # Shape: (n_joints, 1)
-                
+                mask_weights = valid_mask.float()  # Shape: (n_joints,)
+
                 # Compute 3D distance loss (MSE in 3D space)
                 diff_squared = (joints_3d[i] - target_keypoints_3d) ** 2
-                weighted_diff = diff_squared * joint_weights
-                
-                num_valid = valid_mask.sum().float()
-                if num_valid > 0:
-                    # Average over valid joints and 3D coordinates (x, y, z)
-                    sample_loss = weighted_diff.sum() / (num_valid * 3 + eps)
-                    total_loss += sample_loss
-                    valid_samples += 1
-        
+
+                # Apply joint importance weights if provided
+                if joint_importance_weights is not None:
+                    mask_weights = mask_weights * joint_importance_weights
+
+                weighted_diff = diff_squared * mask_weights.unsqueeze(-1)
+
+                # Normalize by weighted valid count for stable loss magnitude
+                if joint_importance_weights is not None:
+                    weighted_valid_count = (valid_mask.float() * joint_importance_weights).sum() * 3 + eps
+                else:
+                    weighted_valid_count = valid_mask.sum().float() * 3 + eps
+
+                sample_loss = weighted_diff.sum() / weighted_valid_count
+                total_loss += sample_loss
+                valid_samples += 1
+
         if valid_samples > 0:
             return total_loss / valid_samples + eps
         else:

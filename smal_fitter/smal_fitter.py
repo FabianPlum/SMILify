@@ -356,10 +356,10 @@ class SMALFitter(nn.Module):
         self.betas = torch.nn.Parameter(torch.from_numpy(np.mean(beta_list, axis=0)).float().to(self.device))
         self.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.mean(scale_list, axis=0)).float().to(self.device))
 
-    def generate_visualization(self, image_exporter, apply_UE_transform=False, img_idx=0, mesh_scale=None):
+    def generate_visualization(self, image_exporter, apply_UE_transform=False, img_idx=0, mesh_scale=None, epoch=None):
         """
         Generate visualization images with rendered mesh overlay.
-        
+
         Args:
             image_exporter: Image exporter instance for saving outputs
             apply_UE_transform: If True, apply 10x scaling (Unreal Engine convention)
@@ -368,6 +368,7 @@ class SMALFitter(nn.Module):
                        mesh is centered at root joint, scaled, then translated.
                        This should match the scale used in training when
                        allow_mesh_scaling is enabled.
+            epoch: Current epoch number for naming visualization images
         """
         # rotation matrix here only used to produce alternative rotated view
         rot_matrix = torch.from_numpy(R.from_euler('y', 180.0, degrees=True).as_matrix()).float().to(self.device)
@@ -484,5 +485,5 @@ class SMALFitter(nn.Module):
                     image_exporter.export(
                         (collage_np * 255.0).astype(np.uint8),
                         batch_id, global_id, img_parameters,
-                        verts, self.smal_model.faces.data.cpu().numpy(), 
-                        img_idx)
+                        verts, self.smal_model.faces.data.cpu().numpy(),
+                        img_idx, epoch=epoch)
