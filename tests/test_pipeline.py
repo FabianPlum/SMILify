@@ -99,10 +99,10 @@ def test_neural_smil_training_pipeline(capsys):
         
         result = run_script_with_env(script_path, [
             '--dataset', 'test_textured',
-            '--num-epochs', '2',  # Very minimal training for integration test
-            '--batch-size', '4',  # Small batch size for testing
+            '--num_epochs', '2',  # Very minimal training for integration test
+            '--batch_size', '4',  # Small batch size for testing
             '--checkpoint', 'DISABLE_CHECKPOINT_LOADING',  # Disable checkpoint loading for test
-            '--scale-trans-mode', 'ignore'  # Compatible with test_textured dataset
+            '--scale_trans_mode', 'ignore'  # Compatible with test_textured dataset
         ], test_env)
     
     finally:
