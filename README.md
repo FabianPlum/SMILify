@@ -60,7 +60,7 @@ Example 4-5 camera inference results with a molde trained on data collected from
    
 5. Test your installation
    ```
-   pytest tests/test_pipeline.py -v -s
+   pytest tests/ -v -s
    ```
 
 ## Dataset preprocessing
