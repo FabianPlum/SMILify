@@ -13,12 +13,12 @@ Multi-view 3D reconstruction using neural inference:
 
 <img src="docs/mouse_18_cam_smil_multi.gif" width="350"> <img src="docs/mouse_18_cam_smil.gif" width="350">
 
+Example 18 camera inference results, using a newly developed [parametric mouse model](3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl)
+
 <img src="docs/peruphasma_4_cam_smil.gif" width="350">
 
-> [!Important]
-> Produced poses may be unrealistic, as we currently don't have a learned pose prior and are instead working
-> with user-defined joint limits (currently set in smal_fitter/priors/joint_limits_prior.py but soon to be
-> adjustable interactively in the accompanying blender addon)
+Example 4-5 camera inference results with a molde trained on data collected from an Omni-Directional Treadmill (ODT) using a [parametric multi species stick insect model](3D_model_prep/SMILy_STICK.pkl) configured with the [Blender SMIL Addon](3D_model_prep/SMIL_processing_addon.py).
+
 
 ## Installation (mesh registration)
 1. Clone the repository **with submodules** and enter directory
