@@ -320,9 +320,7 @@ class IgnoredJointLocationsConfig:
 class JointImportanceConfig:
     """Per-joint importance weighting for keypoint losses."""
     enabled: bool = True
-    important_joint_names: List[str] = field(default_factory=lambda: [
-        "Nose", "paw_L_tip", "paw_R_tip", "Foot_L_tip", "Foot_R_tip", "Tail_07",
-    ])
+    important_joint_names: List[str] = field(default_factory=lambda: [])
     weight_multiplier: float = 10.0
 
     def is_active(self) -> bool:
