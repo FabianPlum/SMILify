@@ -698,15 +698,10 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                 # For optimized dataset or SLEAP dataset, use the original image data and correct image size
                 original_image = x_data['input_image_data']  # This is already in RGB format [0,1]
                 
-                # Convert RGB to BGR for visualization compatibility
                 if isinstance(original_image, np.ndarray):
-                    # Swap RGB to BGR channels
-                    original_image_bgr = original_image[:, :, [2, 1, 0]]  # RGB -> BGR
-                    rgb = torch.from_numpy(original_image_bgr).permute(2, 0, 1).unsqueeze(0)
+                    rgb = torch.from_numpy(original_image).permute(2, 0, 1).unsqueeze(0)
                 else:
-                    # Swap RGB to BGR channels for tensor
-                    original_image_bgr = original_image[:, :, [2, 1, 0]]  # RGB -> BGR
-                    rgb = original_image_bgr.permute(2, 0, 1).unsqueeze(0) if len(original_image_bgr.shape) == 3 else original_image_bgr
+                    rgb = original_image.permute(2, 0, 1).unsqueeze(0) if len(original_image.shape) == 3 else original_image
                 
                 # Get the actual image size from the original image
                 image_height, image_width = original_image.shape[:2]
@@ -1973,6 +1968,25 @@ if __name__ == "__main__":
         TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = {
             'enabled': new_config.ignored_joint_locations.enabled,
             'ignored_joint_names': list(new_config.ignored_joint_locations.ignored_joint_names),
+        }
+
+        # Sync loss curriculum to legacy TrainingConfig
+        # Convert curriculum_stages from Dict[int, Dict] to List[(int, Dict)] format
+        TrainingConfig.LOSS_CURRICULUM = {
+            'base_weights': dict(new_config.loss_curriculum.base_weights),
+            'curriculum_stages': [
+                (epoch, dict(updates))
+                for epoch, updates in sorted(new_config.loss_curriculum.curriculum_stages.items())
+            ],
+        }
+
+        # Sync learning rate curriculum to legacy TrainingConfig
+        TrainingConfig.LEARNING_RATE_CURRICULUM = {
+            'base_learning_rate': new_config.optimizer.learning_rate,
+            'lr_stages': [
+                (epoch, lr)
+                for epoch, lr in sorted(new_config.optimizer.lr_schedule.items())
+            ],
         }
 
         # Convert to legacy dict format for existing main()
