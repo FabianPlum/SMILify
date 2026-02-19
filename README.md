@@ -121,6 +121,10 @@ Example 4-5 camera inference results with a molde trained on data collected from
       ```
       python smal_fitter/optimize_to_joints.py
       ```
+
+# LEGACY Use case
+The section below is here for legacy reasons, when this repo was first adapted from SMALify. The functionality is still intact for compatibility reasons, however fitting is now done primarily through deep neural networks for single and multi view applications. The section below will be moved to a "legacy" sub-directory soon.
+
 ## Running on alternative data
 ### Alternative BADJA/StanfordExtra sequences:
 - Follow the instructions for [BADJA](https://github.com/benjiebob/BADJA) or [StanfordExtra](https://github.com/benjiebob/StanfordExtra).
@@ -164,7 +168,8 @@ If you want to represent an animal quadruped category which isn't covered by the
 
 - To improve efficiency it is very likely that the number of iterations (again a setting in OPT_WEIGHTS) can be reduced for many sequences. I've err'd on the side of caution for this release by running many more iterations than probably needed.
 
-## Code refactor TODOs 
+# Code refactor TODOs 
+- [ ] Move all legcay funcitonality and documentation to it's own sub-directory to clean up the repo and make its purpose more apparent.
 - [ ] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules.
 - [ ] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable.
 - [ ] At the moment, the SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
@@ -177,46 +182,24 @@ If you want to represent an animal quadruped category which isn't covered by the
 
 ## Functionality / broader project TODOs
 - [ ] Allow to add user-defined priors for joint limits in the Blender addon.
-- [ ] Add support for user-defined pose library in the Blender addon.
-- [ ] Correctly handle new pose priors.
 - [X] Finish cleaning antscan dataset and prepare models for fitting.
 - [ ] Create SMIL model from massive antscan dataset.
-- [ ] Add configurable mouse SMIL model.
-- [ ] Re-implement multi-GPU mesh registration cleanly.
+- [X] Add configurable mouse SMIL model.
+- [X] Re-implement multi-GPU mesh registration cleanly.
 
 ## Acknowledgements
+- [SMALify](https://github.com/benjiebob/SMALify); Biggs et al, the original repo on which this one is based.
 This repository owes a great deal to the following works and authors:
 - [SMAL](http://smal.is.tue.mpg.de/); Zuffi et al. designed the SMAL deformable quadruped template model and have been wonderful for providing advice throughout my animal reconstruction PhD journey.
 - [SMPLify](http://smplify.is.tue.mpg.de/); Bogo et al. provided the basis for our original ChumPY implementation and inspired the name of this repo.
 - [SMALST](https://github.com/silviazuffi/smalst); Zuffi et al. provided a PyTorch implementations of the SMAL skinning functions which have been used here.
 
-If you find this fitting code and/or BADJA dataset useful for your research, please consider citing the following paper:
-
-```
-@inproceedings{biggs2018creatures,
-  title={{C}reatures great and {SMAL}: {R}ecovering the shape and motion of animals from video},
-  author={Biggs, Benjamin and Roddick, Thomas and Fitzgibbon, Andrew and Cipolla, Roberto},
-  booktitle={ACCV},
-  year={2018}
-}
-```
-
-if you make use of the limb scaling parameters, or Unity shape prior (on by default for the dog shape family) or the [StanfordExtra](https://github.com/benjiebob/StanfordExtra) dataset please cite [Who Left the Dogs Out? 3D Animal Reconstruction with Expectation Maximization in the Loop](https://arxiv.org/abs/2007.11110):
-
-```
-@inproceedings{biggs2020wldo,
-  title={{W}ho left the dogs out?: {3D} animal reconstruction with expectation maximization in the loop},
-  author={Biggs, Benjamin and Boyne, Oliver and Charles, James and Fitzgibbon, Andrew and Cipolla, Roberto},
-  booktitle={ECCV},
-  year={2020}
-}
-```
 
 ## Contribute
 Please create a pull request or submit an issue if you would like to contribute.
 
 ## Licensing
-(c) Fabian Plum, Imperial College London, Department of Bioengineering, and Benjamin Biggs, Oliver Boyne, Andrew Fitzgibbon and Roberto Cipolla. Department of Engineering, University of Cambridge 2020
+(C) Fabian Plum, Imperial College London & Forschungs Zentrum Juelich & scAnt UG, Department of Bioengineering, and Benjamin Biggs, Oliver Boyne, Andrew Fitzgibbon and Roberto Cipolla. Department of Engineering, University of Cambridge 2020
 
 By downloading this codebase and included dataset(s), you agree to the [Creative Commons Attribution-NonCommercial 4.0 International license](https://creativecommons.org/licenses/by-nc-sa/4.0/). This license allows users to use, share and adapt the codebase and dataset(s), so long as credit is given to the authors (e.g. by citation) and the dataset is not used for any commercial purposes.
 
