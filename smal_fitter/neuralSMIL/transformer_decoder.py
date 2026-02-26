@@ -135,10 +135,18 @@ class SMILTransformerDecoderHead(nn.Module):
         
         # Calculate output dimensions for SMIL parameters
         self._calculate_output_dims()
-        
-        # Token embedding for parameter tokens
-        self.token_embedding = nn.Linear(1, hidden_dim)  # Start with zero tokens
-        
+
+        # Compute total parameter dimension for IEF feedback token
+        self._param_feedback_dim = (
+            self.global_rot_dim + self.joint_rot_dim +  # pose
+            self.betas_dim + self.trans_dim +            # body
+            self.fov_dim + self.cam_rot_dim + self.cam_trans_dim +  # camera
+            self.scales_dim + self.joint_trans_dim       # optional scales/trans
+        )
+
+        # Token embedding: projects concatenated parameter estimates into hidden_dim
+        self.token_embedding = nn.Linear(self._param_feedback_dim, hidden_dim)
+
         # Positional embedding for tokens
         self.pos_embedding = nn.Parameter(torch.randn(1, 1, hidden_dim))
         
@@ -329,18 +337,16 @@ class SMILTransformerDecoderHead(nn.Module):
         
         # Iterative Error Feedback (IEF)
         for i in range(self.ief_iters):
-            # Create parameter token (concatenate all current predictions)
+            # Concatenate all current parameter estimates as feedback
             param_tokens = [pred_pose, pred_betas, pred_trans, pred_fov, pred_cam_rot, pred_cam_trans]
             if self.scales_dim > 0:
                 param_tokens.append(pred_scales)
             if self.joint_trans_dim > 0:
                 param_tokens.append(pred_joint_trans)
-            
-            # Use a single token representing the current state
-            token = torch.zeros(batch_size, 1, 1).to(device)
-            
-            # Embed token
-            token = self.token_embedding(token)
+            param_state = torch.cat(param_tokens, dim=-1)  # (batch_size, _param_feedback_dim)
+
+            # Project current parameter state into a single decoder token
+            token = self.token_embedding(param_state).unsqueeze(1)  # (batch_size, 1, hidden_dim)
             token = token + self.pos_embedding
             
             # Pass through transformer decoder layers
