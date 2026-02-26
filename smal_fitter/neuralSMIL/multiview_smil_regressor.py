@@ -462,22 +462,24 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         
         # Apply cross-view attention for feature fusion
         fused_features = self.view_fusion(stacked_features, view_mask)  # (batch_size, num_views, feature_dim)
-        
-        # Aggregate features for body parameter prediction
-        # Use mean pooling over valid views
-        if view_mask is not None:
-            # Mask invalid views before pooling
-            mask_expanded = view_mask.unsqueeze(-1).float()  # (batch_size, num_views, 1)
-            masked_features = fused_features * mask_expanded
-            aggregated_features = masked_features.sum(dim=1) / (mask_expanded.sum(dim=1) + 1e-8)
-        else:
-            aggregated_features = fused_features.mean(dim=1)  # (batch_size, feature_dim)
-        
-        # Apply body aggregator
-        body_features = self.body_aggregator(aggregated_features)
-        
+
         # Predict shared body parameters using parent's head
-        body_params = self._predict_body_params(body_features, batch_size)
+        # For transformer_decoder: cross-attend directly to per-view fused features
+        # For mlp: mean-pool first since the MLP needs a flat vector
+        if self.head_type == 'transformer_decoder':
+            body_params = self._predict_body_params(
+                fused_features, batch_size, view_mask=view_mask
+            )
+        else:
+            # MLP path: pool to (B, feature_dim) then pass through aggregator
+            if view_mask is not None:
+                mask_expanded = view_mask.unsqueeze(-1).float()  # (batch_size, num_views, 1)
+                masked_features = fused_features * mask_expanded
+                aggregated_features = masked_features.sum(dim=1) / (mask_expanded.sum(dim=1) + 1e-8)
+            else:
+                aggregated_features = fused_features.mean(dim=1)  # (batch_size, feature_dim)
+            body_features = self.body_aggregator(aggregated_features)
+            body_params = self._predict_body_params(body_features, batch_size)
         
         # Predict per-view camera parameters
         per_view_cam_params = self._predict_camera_params_per_view(
@@ -497,11 +499,22 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         
         return output
     
-    def _predict_body_params(self, features: torch.Tensor, batch_size: int) -> Dict[str, torch.Tensor]:
+    def _predict_body_params(self, features: torch.Tensor, batch_size: int,
+                             view_mask: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """
-        Predict shared body parameters from aggregated features.
-        
-        Uses the parent class's regression head for body parameters only.
+        Predict shared body parameters from features.
+
+        For the MLP head, ``features`` is a pooled vector ``(B, feature_dim)``.
+        For the transformer_decoder head, ``features`` can be per-view fused
+        features ``(B, V, feature_dim)`` which are used as cross-attention
+        context, letting the decoder attend over views.
+
+        Args:
+            features: Either ``(B, feature_dim)`` (MLP) or ``(B, V, feature_dim)``
+                      (transformer_decoder with multiview context).
+            batch_size: Batch size.
+            view_mask: Optional ``(B, V)`` boolean mask for valid views.  Only
+                       used when features is 3-D (transformer_decoder path).
         """
         if self.head_type == 'mlp':
             # Pass through regression head
@@ -585,14 +598,27 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             return params
             
         elif self.head_type == 'transformer_decoder':
-            # Use transformer decoder for body params
-            # IMPORTANT: Pass features as spatial_features so the decoder can cross-attend to them.
-            # The transformer decoder uses spatial_features for cross-attention in its layers.
-            # Without this, the decoder would output the same result regardless of input!
-            # Shape: features is (batch_size, feature_dim), reshape to (batch_size, 1, feature_dim)
-            # to serve as a single-token sequence for cross-attention.
-            spatial_feats = features.unsqueeze(1)  # (batch_size, 1, feature_dim)
-            params = self.transformer_head(features, spatial_feats)
+            # Use transformer decoder for body params.
+            # When features is 3-D (B, V, D) — multiview path — the per-view
+            # fused features serve as the cross-attention context so the decoder
+            # can attend over views (analogous to attending over spatial patch
+            # tokens in the single-view path).
+            if features.dim() == 3:
+                # Multiview: features is (B, V, D)
+                spatial_feats = features  # (B, V, D) — one token per view
+
+                # Pool for the global feature vector the decoder also receives
+                if view_mask is not None:
+                    mask_exp = view_mask.unsqueeze(-1).float()  # (B, V, 1)
+                    global_feats = (features * mask_exp).sum(dim=1) / (mask_exp.sum(dim=1) + 1e-8)
+                else:
+                    global_feats = features.mean(dim=1)  # (B, D)
+            else:
+                # Single-view / already-pooled fallback: (B, D)
+                spatial_feats = features.unsqueeze(1)  # (B, 1, D)
+                global_feats = features
+
+            params = self.transformer_head(global_feats, spatial_feats)
             
             # Handle scale/trans mode
             if self.scale_trans_mode == 'entangled_with_betas':
