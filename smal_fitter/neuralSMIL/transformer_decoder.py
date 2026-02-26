@@ -363,43 +363,54 @@ class SMILTransformerDecoderHead(nn.Module):
             pred_fov = pred_fov + self.fov_head(token_out)
             pred_cam_rot = pred_cam_rot + self.cam_rot_head(token_out)
             pred_cam_trans = pred_cam_trans + self.cam_trans_head(token_out)
-            
-            # Check for NaN values after each iteration
-            if not torch.isfinite(pred_pose).all():
-                print(f"Warning: Non-finite values in pred_pose at iteration {i}: {pred_pose}")
-                pred_pose = torch.zeros_like(pred_pose)
-            if not torch.isfinite(pred_betas).all():
-                print(f"Warning: Non-finite values in pred_betas at iteration {i}: {pred_betas}")
-                pred_betas = torch.zeros_like(pred_betas)
-            if not torch.isfinite(pred_trans).all():
-                print(f"Warning: Non-finite values in pred_trans at iteration {i}: {pred_trans}")
-                pred_trans = torch.zeros_like(pred_trans)
-            if not torch.isfinite(pred_fov).all():
-                print(f"Warning: Non-finite values in pred_fov at iteration {i}: {pred_fov}")
-                pred_fov = torch.tensor([[0.9]], device=pred_fov.device, dtype=pred_fov.dtype).expand_as(pred_fov)
-            if not torch.isfinite(pred_cam_rot).all():
-                print(f"Warning: Non-finite values in pred_cam_rot at iteration {i}: {pred_cam_rot}")
-                pred_cam_rot = torch.eye(3, device=pred_cam_rot.device, dtype=pred_cam_rot.dtype).flatten().unsqueeze(0).expand_as(pred_cam_rot)
-            if not torch.isfinite(pred_cam_trans).all():
-                print(f"Warning: Non-finite values in pred_cam_trans at iteration {i}: {pred_cam_trans}")
-                pred_cam_trans = torch.zeros_like(pred_cam_trans)
-            
+
             if self.scales_dim > 0:
                 pred_scales = pred_scales + self.scales_head(token_out) * self.scales_scale_factor
-                if not torch.isfinite(pred_scales).all():
-                    print(f"Warning: Non-finite values in pred_scales at iteration {i}: {pred_scales}")
-                    pred_scales = torch.zeros_like(pred_scales)
             if self.joint_trans_dim > 0:
                 pred_joint_trans = pred_joint_trans + self.joint_trans_head(token_out) * self.trans_scale_factor
-                if not torch.isfinite(pred_joint_trans).all():
-                    print(f"Warning: Non-finite values in pred_joint_trans at iteration {i}: {pred_joint_trans}")
-                    pred_joint_trans = torch.zeros_like(pred_joint_trans)
             if self.allow_mesh_scaling:
-                # Predict in log space for numerical stability (small updates)
                 pred_mesh_scale = pred_mesh_scale + self.mesh_scale_head(token_out) * 0.1
-                if not torch.isfinite(pred_mesh_scale).all():
-                    print(f"Warning: Non-finite values in pred_mesh_scale at iteration {i}: {pred_mesh_scale}")
-                    pred_mesh_scale = torch.zeros_like(pred_mesh_scale)
+
+            # Sanitise non-finite values with nan_to_num (preserves autograd
+            # graph for finite elements, unlike replacing with new tensors).
+            all_preds = [pred_pose, pred_betas, pred_trans, pred_fov,
+                         pred_cam_rot, pred_cam_trans]
+            if self.scales_dim > 0:
+                all_preds.append(pred_scales)
+            if self.joint_trans_dim > 0:
+                all_preds.append(pred_joint_trans)
+            if self.allow_mesh_scaling:
+                all_preds.append(pred_mesh_scale)
+
+            has_nonfinite = any(not torch.isfinite(t).all() for t in all_preds)
+            if has_nonfinite:
+                if not hasattr(self, '_nan_warn_count'):
+                    self._nan_warn_count = 0
+                self._nan_warn_count += 1
+                if self._nan_warn_count <= 5:
+                    names = ['pose', 'betas', 'trans', 'fov', 'cam_rot', 'cam_trans']
+                    if self.scales_dim > 0:
+                        names.append('scales')
+                    if self.joint_trans_dim > 0:
+                        names.append('joint_trans')
+                    if self.allow_mesh_scaling:
+                        names.append('mesh_scale')
+                    bad = [n for n, t in zip(names, all_preds) if not torch.isfinite(t).all()]
+                    print(f"Warning: non-finite values in IEF iter {i}: {bad} "
+                          f"(occurrence {self._nan_warn_count})")
+
+                pred_pose = torch.nan_to_num(pred_pose)
+                pred_betas = torch.nan_to_num(pred_betas)
+                pred_trans = torch.nan_to_num(pred_trans)
+                pred_fov = torch.nan_to_num(pred_fov)
+                pred_cam_rot = torch.nan_to_num(pred_cam_rot)
+                pred_cam_trans = torch.nan_to_num(pred_cam_trans)
+                if self.scales_dim > 0:
+                    pred_scales = torch.nan_to_num(pred_scales)
+                if self.joint_trans_dim > 0:
+                    pred_joint_trans = torch.nan_to_num(pred_joint_trans)
+                if self.allow_mesh_scaling:
+                    pred_mesh_scale = torch.nan_to_num(pred_mesh_scale)
             
             # Store predictions for this iteration
             pred_pose_list.append(pred_pose.clone())
