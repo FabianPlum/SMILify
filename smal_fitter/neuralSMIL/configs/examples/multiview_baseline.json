@@ -76,7 +76,8 @@
       "silhouette": 0.0,
       "joint_angle_regularization": 0.001,
       "limb_scale_regularization": 0.01,
-      "limb_trans_regularization": 1
+      "limb_trans_regularization": 1,
+      "triangulation_consistency": 0.0
     },
     "curriculum_stages": {
       "1": {
