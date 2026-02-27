@@ -379,6 +379,7 @@ class MultiViewTrainingConfig:
         merged['seed'] = training_params['seed']
         merged['rotation_representation'] = training_params['rotation_representation']
         merged['resume_checkpoint'] = training_params.get('resume_checkpoint')
+        merged['reset_ief_token_embedding'] = training_params.get('reset_ief_token_embedding', False)
         merged['num_workers'] = training_params.get('num_workers', 4)
         merged['pin_memory'] = training_params.get('pin_memory', True)
         
@@ -598,7 +599,19 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                     )
                 
                 optimizer.step()
-            
+
+            # IEF refinement monitoring: track per-iteration pose delta norms.
+            # ief_pose_delta_N = avg L2 distance between iter N and iter N-1 predictions.
+            # Healthy IEF shows delta_1 > delta_2 (coarse correction then fine-tuning).
+            # Flat or growing deltas indicate the IEF is not learning to refine.
+            with torch.no_grad():
+                hist = predicted_params.get('iteration_history', {}) if predicted_params else {}
+                pose_hist = hist.get('pose', [])
+                for i in range(1, len(pose_hist)):
+                    delta = (pose_hist[i].detach() - pose_hist[i - 1].detach()).norm(dim=-1).mean().item()
+                    key = f'ief_pose_delta_{i}'
+                    loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
+
             # Accumulate metrics
             total_loss += loss.item()
             num_batches += 1
@@ -688,12 +701,20 @@ def validate(model: MultiViewSMILImageRegressor,
                 
                 total_loss += loss.item()
                 num_batches += 1
-                
+
                 for key, value in loss_components.items():
                     if key not in loss_components_sum:
                         loss_components_sum[key] = 0.0
                     loss_components_sum[key] += value.item() if torch.is_tensor(value) else value
-                    
+
+                # IEF refinement monitoring (already in no_grad context)
+                hist = predicted_params.get('iteration_history', {}) if predicted_params else {}
+                pose_hist = hist.get('pose', [])
+                for i in range(1, len(pose_hist)):
+                    delta = (pose_hist[i] - pose_hist[i - 1]).norm(dim=-1).mean().item()
+                    key = f'ief_pose_delta_{i}'
+                    loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
+
             except Exception as e:
                 print(f"Validation error: {e}")
                 continue
@@ -2528,6 +2549,26 @@ def main(config: dict):
             best_val_loss = metrics.get('best_val_loss', float('inf'))
             if rank == 0:
                 print(f"Resuming training from epoch {start_epoch} (checkpoint was at epoch {loaded_epoch})")
+
+            # Surgical IEF reset: reinitialise only the token_embedding layer and
+            # clear its Adam momentum so stale oscillatory gradients don't carry over.
+            # Set "reset_ief_token_embedding": true in the training config to activate;
+            # remove or set to false after the first resumed run.
+            if config.get('reset_ief_token_embedding', False):
+                base_model = model.module if hasattr(model, 'module') else model
+                if hasattr(base_model, 'transformer_head'):
+                    te = base_model.transformer_head.token_embedding
+                    nn.init.xavier_uniform_(te.weight, gain=0.01)
+                    nn.init.constant_(te.bias, 0)
+                    # Clear Adam state for token_embedding params only; all other
+                    # parameter momentum/variance buffers are preserved.
+                    te_param_ids = {id(p) for p in te.parameters()}
+                    for p, state in list(optimizer.state.items()):
+                        if id(p) in te_param_ids:
+                            optimizer.state[p] = {}
+                    if rank == 0:
+                        print("reset_ief_token_embedding: token_embedding weights and "
+                              "optimizer state reset. Set flag to false for subsequent runs.")
     
     # Training loop
     if rank == 0:
@@ -2793,6 +2834,10 @@ if __name__ == "__main__":
     # Resume training
     parser.add_argument("--resume_checkpoint", type=str, default=None,
                        help="Path to checkpoint to resume from")
+    parser.add_argument("--reset_ief_token_embedding", action="store_true", default=None,
+                       help="Reinitialise token_embedding weights and clear its Adam state after "
+                            "loading a checkpoint. Use once to break an IEF oscillatory attractor, "
+                            "then remove the flag for subsequent runs.")
     
     # Configuration file
     parser.add_argument("--config", type=str, default=None,
@@ -2863,6 +2908,9 @@ if __name__ == "__main__":
             if args.use_gt_camera_init is not None:
                 cli_overrides['training'] = cli_overrides.get('training', {})
                 cli_overrides['training']['use_gt_camera_init'] = args.use_gt_camera_init
+            if args.reset_ief_token_embedding:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['reset_ief_token_embedding'] = True
 
             new_config = load_config(
                 config_file=args.config,
