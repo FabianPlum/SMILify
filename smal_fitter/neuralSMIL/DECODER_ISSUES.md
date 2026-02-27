@@ -102,17 +102,27 @@ warm restarts interleaved with curriculum weight jumps (e.g., `keypoint_3d`
 jumps 10x at epoch 500). Fragile and hard to maintain. Consider cosine
 annealing or a simpler stage-based schedule.
 
-### 7. Batch Size 3 — Very Noisy Gradients
+### 7. Batch Size 3 — Very Noisy Gradients — RESOLVED
 
 Each sample has up to 6 views, so memory pressure is real, but batch size 3
 yields noisy gradient estimates. Gradient accumulation over multiple steps
 could help without increasing memory.
 
-### 8. `global_rot` Loss Weight is 0.0
+**Resolution:** Fixing the IEF structure (issue #1) significantly reduced
+memory requirements by eliminating redundant forward passes. Batch sizes of
+8–16 now fit comfortably on an RTX 4090 even with large parametric models.
+
+### 8. `global_rot` Loss Weight is 0.0 — BY DESIGN
 
 Never overridden in any curriculum stage. Global orientation is only supervised
 indirectly through keypoint losses, which can lead to rotation/translation
 ambiguity.
+
+**Clarification:** Leaving this weight at 0.0 is intentional. The training
+paradigm assumes fixed, known cameras with moving specimens; global rotation
+is therefore observable only through 2D and 3D keypoint reprojection losses.
+Adding a direct regulariser on `global_rot` would impose an orientation prior
+that conflicts with arbitrary specimen poses and fixed-camera geometry.
 
 ---
 
