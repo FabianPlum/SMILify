@@ -2206,21 +2206,45 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cud
     the state dict and optimizer/scheduler states.
     """
     checkpoint = torch.load(filepath, map_location=device)
-    
-    # Load model state dict with strict=False to allow some flexibility
-    # (e.g., if some parameters were added/removed, but architecture matches)
-    if hasattr(model, 'module'):
-        model.module.load_state_dict(checkpoint['model_state_dict'], strict=False)
-    else:
-        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+
+    # Load model state dict, skipping keys whose shapes changed between
+    # architecture versions (e.g. token_embedding after IEF feedback fix).
+    saved_state = checkpoint['model_state_dict']
+    current_model = model.module if hasattr(model, 'module') else model
+    current_state = current_model.state_dict()
+
+    filtered_state = {}
+    skipped = []
+    for key, param in saved_state.items():
+        if key in current_state and param.shape != current_state[key].shape:
+            skipped.append(f"  {key}: checkpoint {param.shape} vs model {current_state[key].shape}")
+        else:
+            filtered_state[key] = param
+
+    if skipped:
+        print(f"Skipped {len(skipped)} mismatched keys (will use fresh init):")
+        for s in skipped:
+            print(s)
+
+    current_model.load_state_dict(filtered_state, strict=False)
     
     if optimizer and 'optimizer_state_dict' in checkpoint:
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if skipped:
+            print("Optimizer state NOT loaded (architecture changed — momentum buffers have stale shapes).")
+            print("Optimizer will start fresh with current LR schedule.")
+        else:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     
     if scheduler and checkpoint.get('scheduler_state_dict'):
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-    
-    return checkpoint.get('epoch', 0), checkpoint.get('metrics', {})
+        if skipped:
+            print("Scheduler state NOT loaded (architecture changed — restarting LR schedule from scratch).")
+        else:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+    epoch = 0 if skipped else checkpoint.get('epoch', 0)
+    if skipped:
+        print(f"Epoch counter reset to 0 (was {checkpoint.get('epoch', 0)}) so LR warmup applies to new layers.")
+    return epoch, checkpoint.get('metrics', {})
 
 
 def main(config: dict):
@@ -2734,18 +2758,18 @@ if __name__ == "__main__":
                        help="Number of cross-attention heads")
     
     # Training configuration
-    parser.add_argument("--batch_size", type=int, default=3,
-                       help="Batch size")
-    parser.add_argument("--num_epochs", type=int, default=600,
-                       help="Number of training epochs")
-    parser.add_argument("--learning_rate", type=float, default=1e-4,
-                       help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=1e-4,
-                       help="Weight decay")
-    parser.add_argument("--gradient_clip_norm", type=float, default=1.0,
-                       help="Gradient clipping norm")
-    parser.add_argument("--seed", type=int, default=42,
-                       help="Random seed")
+    parser.add_argument("--batch_size", type=int, default=None,
+                       help="Batch size (default: from config)")
+    parser.add_argument("--num_epochs", type=int, default=None,
+                       help="Number of training epochs (default: from config)")
+    parser.add_argument("--learning_rate", type=float, default=None,
+                       help="Learning rate (default: from config)")
+    parser.add_argument("--weight_decay", type=float, default=None,
+                       help="Weight decay (default: from config)")
+    parser.add_argument("--gradient_clip_norm", type=float, default=None,
+                       help="Gradient clipping norm (default: from config)")
+    parser.add_argument("--seed", type=int, default=None,
+                       help="Random seed (default: from config)")
     parser.add_argument("--dataset_fraction", type=float, default=None,
                        help="Fraction of training data to use per epoch (0-1, default: from config). "
                             "Useful for large datasets - samples different subset each epoch.")
