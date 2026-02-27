@@ -68,7 +68,8 @@
       "silhouette": 0.0,
       "joint_angle_regularization": 0.001,
       "limb_scale_regularization": 0.01,
-      "limb_trans_regularization": 1
+      "limb_trans_regularization": 1,
+      "triangulation_consistency": 0.0
     },
     "curriculum_stages": {
       "1": {
@@ -80,55 +81,71 @@
         "keypoint_2d": 0.1,
         "joint_angle_regularization": 0.005,
         "limb_scale_regularization": 0.05,
-        "limb_trans_regularization": 1
+        "limb_trans_regularization": 1,
+        "triangulation_consistency": 0.1
       },
       "25": {
         "keypoint_2d": 0.2,
         "joint_angle_regularization": 0.0025,
         "limb_scale_regularization": 0.002,
-        "limb_trans_regularization": 1
+        "limb_trans_regularization": 1,
+        "triangulation_consistency": 1
       },
-      "35": {
+      "30": {
         "keypoint_3d": 1,
         "joint_angle_regularization": 0.001,
         "limb_scale_regularization": 0.001,
-        "limb_trans_regularization": 1
+        "limb_trans_regularization": 1,
+        "triangulation_consistency": 0.001
+        
       },
       "45": {
         "keypoint_3d": 1,
         "joint_angle_regularization": 0.0001,
         "limb_scale_regularization": 0.0005,
-        "limb_trans_regularization": 1
+        "limb_trans_regularization": 1,
+        "triangulation_consistency": 0.005
       },
       "50": {
         "keypoint_3d": 2,
         "joint_angle_regularization": 5e-5,
         "limb_scale_regularization": 0.0001,
-        "limb_trans_regularization": 0.5
+        "limb_trans_regularization": 0.5,
+        "triangulation_consistency": 0.01
+      },
+      "60": {
+        "keypoint_3d": 2,
+        "joint_angle_regularization": 1e-5,
+        "limb_scale_regularization": 0.0001,
+        "limb_trans_regularization": 0.5,
+        "triangulation_consistency": 0.05
       },
       "100": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-5,
+        "joint_angle_regularization": 1e-6,
         "limb_scale_regularization": 0.00005,
-        "limb_trans_regularization": 0.1
+        "limb_trans_regularization": 0.1,
+        "triangulation_consistency": 0.1
       },
       "150": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-5,
+        "joint_angle_regularization": 5e-7,
         "limb_scale_regularization": 0.00001,
         "limb_trans_regularization": 0.1,
         "fov": 1e-7,
         "cam_rot": 1e-8,
-        "cam_trans": 1e-8
+        "cam_trans": 1e-8,
+        "triangulation_consistency": 0.2
       },
       "200": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-5,
-        "limb_scale_regularization": 0.001,
+        "joint_angle_regularization": 1e-7,
+        "limb_scale_regularization": 0.000001,
         "limb_trans_regularization": 0.1,
         "fov": 1e-7,
         "cam_rot": 1e-8,
-        "cam_trans": 1e-8
+        "cam_trans": 1e-8,
+        "triangulation_consistency": 0.5
       }
     }
   },
@@ -165,7 +182,7 @@
   },
 
   "training": {
-    "batch_size": 3,
+    "batch_size": 16,
     "num_epochs": 300,
     "seed": 42,
     "rotation_representation": "6d",
