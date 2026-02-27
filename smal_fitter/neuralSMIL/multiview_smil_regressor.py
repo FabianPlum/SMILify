@@ -967,9 +967,11 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
 
         # =================== TRIANGULATION CONSISTENCY LOSS ===================
-        # Triangulate GT 2D keypoints using predicted cameras and compare to
-        # predicted 3D joints.  This directly enforces multi-view geometric
-        # consistency of the camera heads.
+        # Triangulate GT 2D keypoints using predicted cameras, compare to
+        # predicted 3D joints (detached).  Gradients flow through the
+        # differentiable triangulation into the camera heads, enforcing
+        # multi-view geometric consistency.  The body model's 3D predictions
+        # serve as the stable target (already supervised by keypoint_3d).
         if loss_weights.get('triangulation_consistency', 0) > 0:
             if all_kp_data is not None and joints_3d is not None:
                 try:
@@ -985,8 +987,14 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         view_mask=view_mask,
                     )  # (B, J, 3), (B, J)
 
+                    with torch.no_grad():
+                        # Reject outlier triangulations (behind camera or extremely far)
+                        tri_norm = triangulated.norm(dim=-1)  # (B, J)
+                        sane = tri_norm < 50.0  # generous bound
+                        tri_valid = tri_valid & sane
+
                     if tri_valid.any():
-                        diff_sq = (triangulated - joints_3d) ** 2  # (B, J, 3)
+                        diff_sq = (triangulated - joints_3d.detach()) ** 2  # (B, J, 3)
 
                         # Mask to valid joints and apply importance weights
                         mask_weights = tri_valid.float()  # (B, J)
@@ -1531,12 +1539,11 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         kp_screen = keypoints_2d * img_size             # (B, V, J, 2)  in (y, x)
         kp_screen = kp_screen[..., [1, 0]]              # (B, V, J, 2)  in (x, y)
 
-        # transform_points_screen maps world to screen via:
-        #   ndc = P @ [X,Y,Z,1]  (perspective divide included)
-        #   screen_x = (ndc_x + 1) / 2 * W
-        #   screen_y = (ndc_y + 1) / 2 * H   (pytorch3d: H = W = img_size)
-        # Invert screen -> NDC:
-        ndc_xy = kp_screen / (img_size / 2.0) - 1.0     # (B, V, J, 2)
+        # PyTorch3D's ndc_to_screen_points_naive uses:
+        #   screen = (W - 1) / 2 * (1 - ndc)
+        # Approximating (W-1) ≈ W for large image sizes, the inverse is:
+        #   ndc = 1 - screen / (W / 2)
+        ndc_xy = 1.0 - kp_screen / (img_size / 2.0)     # (B, V, J, 2)
 
         # --- Build DLT system and solve per joint ---
         # Combined visibility: view must be valid AND joint visible
@@ -1544,45 +1551,51 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         if view_mask is not None:
             joint_vis = joint_vis & view_mask.unsqueeze(-1)  # (B, V, J)
 
-        # For each view, the constraint is:
-        #   u * P[2,:] - P[0,:]  = 0   (u = ndc_x)
-        #   v * P[2,:] - P[1,:]  = 0   (v = ndc_y)
-        # giving 2 rows of A per view.  A is (2V, 4), we solve for X via SVD.
-
-        # Expand P for joints: (B, V, 1, 4, 4) -> (B, V, J, 4, 4) not needed,
-        # we index rows of P.  P rows: P[:, v, r, :] with r in {0,1,2}.
-        P0 = P[:, :, 0, :]  # (B, V, 4)
-        P1 = P[:, :, 1, :]  # (B, V, 4)
-        P2 = P[:, :, 2, :]  # (B, V, 4)
+        # PyTorch3D uses row-vector convention: ndc_homo = world_homo @ P
+        # so columns of P map to output dimensions:
+        #   col 0 -> u*w,  col 1 -> v*w,  col 2 -> z*w,  col 3 -> w
+        P_col0 = P[:, :, :, 0]  # (B, V, 4) — x output
+        P_col1 = P[:, :, :, 1]  # (B, V, 4) — y output
+        P_col3 = P[:, :, :, 3]  # (B, V, 4) — w output
 
         u = ndc_xy[..., 0]  # (B, V, J)
         v = ndc_xy[..., 1]  # (B, V, J)
 
-        # row1 = u * P2 - P0   shape (B, V, J, 4)
-        row1 = u.unsqueeze(-1) * P2.unsqueeze(2) - P0.unsqueeze(2)
-        # row2 = v * P2 - P1   shape (B, V, J, 4)
-        row2 = v.unsqueeze(-1) * P2.unsqueeze(2) - P1.unsqueeze(2)
+        # DLT constraints: u * w_col - x_col = 0,  v * w_col - y_col = 0
+        # With w=1 normalization: A_xyz @ [X,Y,Z]^T = -a_w
+        # row1 = u * P_col3 - P_col0   shape (B, V, J, 4)
+        row1 = u.unsqueeze(-1) * P_col3.unsqueeze(2) - P_col0.unsqueeze(2)
+        # row2 = v * P_col3 - P_col1   shape (B, V, J, 4)
+        row2 = v.unsqueeze(-1) * P_col3.unsqueeze(2) - P_col1.unsqueeze(2)
 
         # Zero out rows from invisible views
         vis_mask = joint_vis.unsqueeze(-1).float()  # (B, V, J, 1)
         row1 = row1 * vis_mask
         row2 = row2 * vis_mask
 
-        # Stack rows: (B, V, J, 4) x2 -> interleave to (B, 2V, J, 4)
-        # then transpose to (B, J, 2V, 4) for per-joint SVD
+        # Stack rows: (B, V, J, 2, 4) -> (B, J, 2V, 4)
         A = torch.stack([row1, row2], dim=3)  # (B, V, J, 2, 4)
-        A = A.view(B, V * 2, J, 4)            # (B, 2V, J, 4)
-        A = A.permute(0, 2, 1, 3)             # (B, J, 2V, 4)
+        A = A.permute(0, 2, 1, 3, 4)         # (B, J, V, 2, 4)
+        A = A.reshape(B, J, V * 2, 4)        # (B, J, 2V, 4)
 
-        # Solve via SVD: for each (B, J) system of shape (2V, 4)
-        # The solution is the last row of V^T (right singular vector for
-        # smallest singular value).
-        _, _, Vh = torch.linalg.svd(A)       # Vh: (B, J, 4, 4)
-        X_homo = Vh[:, :, -1, :]              # (B, J, 4)
+        # Solve via normal equations with w=1 normalization.
+        # The homogeneous system A @ [X,Y,Z,1]^T = 0 becomes:
+        #   A_xyz @ p = -a_w   =>   (A_xyz^T A_xyz + λI) @ p = -A_xyz^T a_w
+        # The damping λI ensures the system is always full-rank (Tikhonov
+        # regularisation), avoiding LAPACK failures on zero-padded rows from
+        # invisible joints, and the gradient through torch.linalg.solve is
+        # stable (implicit-function theorem, no singular-value gaps).
+        A_xyz = A[:, :, :, :3]                # (B, J, 2V, 3)
+        a_w = A[:, :, :, 3]                   # (B, J, 2V)
 
-        # Convert from homogeneous: divide by w
-        w = X_homo[:, :, 3:4]                 # (B, J, 1)
-        triangulated = X_homo[:, :, :3] / (w + 1e-8)  # (B, J, 3)
+        AtA = torch.einsum('bkni,bknj->bkij', A_xyz, A_xyz)  # (B, J, 3, 3)
+        Atb = torch.einsum('bkni,bkn->bki', A_xyz, -a_w)     # (B, J, 3)
+
+        # Damping for numerical stability
+        damping = 1e-6 * torch.eye(3, device=device, dtype=AtA.dtype)
+        AtA = AtA + damping
+
+        triangulated = torch.linalg.solve(AtA, Atb)  # (B, J, 3)
 
         # Valid mask: joint must be visible in >= 2 views
         view_count = joint_vis.float().sum(dim=1)  # (B, J)
