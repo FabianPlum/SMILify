@@ -121,6 +121,7 @@ class MultiViewConfig(BaseTrainingConfig):
             ),  # May be overridden by training script at runtime
             'smal_file': self.smal_model.smal_file if self.smal_model is not None else None,
             'loss_weights': self.get_loss_weights_for_epoch(0),
+            'reset_ief_token_embedding': self.training.reset_ief_token_embedding,
             'use_gt_camera_init': self.training.use_gt_camera_init,
 
             # Joint importance / ignored joints / loss curriculum — must be carried
