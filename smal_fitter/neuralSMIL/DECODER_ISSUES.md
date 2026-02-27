@@ -62,36 +62,34 @@ attention mechanism handles aggregation.
 
 ## P2 — Medium
 
-### 4. NaN Clamping Breaks Gradient Flow
+### 4. NaN Clamping Breaks Gradient Flow — FIXED
 
 **Files:** `transformer_decoder.py:362-396`
 
-When a prediction becomes non-finite mid-IEF, the code replaces it with
-`torch.zeros_like(...)` (or identity for rotations). This:
+When a prediction becomes non-finite mid-IEF, the code replaced it with
+`torch.zeros_like(...)` (or identity for rotations). This detached the
+computational graph at the NaN point, zeroing gradients for the parameters
+that produced the failure.
 
-- Silently masks numerical instability instead of surfacing it.
-- Detaches the computational graph at the NaN point, zeroing gradients for
-  the parameters that produced the failure.
-- Corrupts the baseline for subsequent IEF iterations.
+**Resolution:** Replaced graph-breaking `torch.zeros_like` clamping with
+gradient-preserving `torch.nan_to_num`. NaN values are replaced with 0 and
+inf values are clamped, but the operation preserves the computational graph
+so gradients still flow through non-NaN elements.
 
-**Fix:** Address the root cause (likely unbounded outputs or loss spikes).
-If a safety net is needed, use `torch.nan_to_num` with gradient-preserving
-clamping or raise/log loudly so instability is caught during development.
+### 5. No Multi-View Geometric Consistency for Camera Heads — FIXED
 
-### 5. No Multi-View Geometric Consistency for Camera Heads
+**Files:** `multiview_smil_regressor.py` (`_triangulate_joints_dlt`,
+`_compute_multiview_losses`)
 
-**Files:** `multiview_smil_regressor.py:608-682`
+**Resolution:** Implemented a differentiable **triangulation consistency loss**
+that triangulates GT 2D keypoints using predicted cameras (via DLT with normal
+equations and Tikhonov damping) and compares the result against detached body
+model 3D predictions. Gradients flow through the differentiable triangulation
+into the camera heads. The loss ramps up via curriculum as direct camera
+supervision is phased out.
 
-Each `CameraHead` predicts independently from per-view fused features. There
-is no explicit geometric consistency constraint (epipolar loss, triangulation
-consistency, cross-view reprojection). The only coupling is indirect, through
-the shared 3D keypoint loss.
-
-Camera parameter convergence (especially translation and rotation) is likely
-slow and may remain inconsistent across views.
-
-**Fix (future):** Consider adding a triangulation consistency loss or
-cross-view reprojection loss to directly enforce multi-view geometry.
+See [docs/triangulation_consistency_loss.md](docs/triangulation_consistency_loss.md)
+for full details. Validated with 12 synthetic tests in `tests/test_triangulation_consistency.py`.
 
 ---
 
@@ -118,10 +116,37 @@ ambiguity.
 
 ---
 
+### 9. `init_pose = zeros` Invalid for 6D Rotation Representation — FIXED
+
+**Files:** `transformer_decoder.py` (`_initialize_prediction_buffers`)
+
+`init_pose` was set to all-zeros regardless of rotation representation.
+For axis-angle this is correct (zero vector = identity), but for 6D the
+identity rotation is `[1,0,0,1,0,0]` (first two columns of I₃). All-zeros
+in 6D is a degenerate, invalid rotation with three consequences:
+
+- Gram-Schmidt in `rotation_6d_to_matrix` on a near-zero input produces
+  undefined/huge gradients through `joint_angle_regularization`, silently
+  masked by the `nan_to_num` fix — explaining why large angles were hard to
+  reach after that fix landed together with increased batch size.
+- IEF feedback at iteration 2 encodes a near-zero 6D vector the network
+  cannot interpret as "I predict zero rotation".
+- The network must learn a constant `[1,0,0,1,0,0]` offset per joint just to
+  represent the identity pose, adding an implicit bias against any rotation.
+
+**Resolution:** When `rotation_representation == '6d'`, `init_pose` is now
+initialised to `identity_6d.repeat(1 + N_POSE)`.  Axis-angle path unchanged.
+
+---
+
 ## Fix Order
 
 1. **#1 (IEF feedback)** and **#2 (single-token cross-attention)** — fix
    together since both concern the transformer decoder's input conditioning.
 2. **#3 (mean-pool bottleneck)** — naturally resolves once #2 is addressed.
-3. **#4 (NaN clamping)** — clean up after decoder changes stabilise training.
-4. **#5–#8** — address incrementally as training matures.
+3. ~~**#4 (NaN clamping)**~~ — **DONE.** Replaced with `torch.nan_to_num`.
+4. ~~**#5 (geometric consistency)**~~ — **DONE.** Triangulation consistency
+   loss implemented, tested, and integrated into the training curriculum.
+5. ~~**#9 (6D init_pose)**~~ — **DONE.** `init_pose` now initialised to 6D
+   identity `[1,0,0,1,0,0]` repeated per joint.
+6. **#6–#8** — address incrementally as training matures.
