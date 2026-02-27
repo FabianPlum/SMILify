@@ -1158,6 +1158,43 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         # No valid joints in batch
                         loss_components['keypoint_3d'] = torch.tensor(0.0, device=self.device, requires_grad=True)
         
+        # IEF intermediate supervision
+        # Applies parameter losses to each non-final IEF iteration with a linearly
+        # increasing weight, so the network receives gradient signal at every step
+        # rather than only on the final prediction. Controlled by 'ief_intermediate'
+        # loss weight (0.0 = disabled, the default).
+        ief_w = loss_weights.get('ief_intermediate', 0.0)
+        if ief_w > 0 and 'iteration_history' in predicted_params:
+            hist = predicted_params['iteration_history']
+            n_iters = len(hist.get('pose', []))
+            global_rot_dim = 6 if self.rotation_representation == '6d' else 3
+            for i in range(n_iters - 1):  # skip final iter — already supervised above
+                w = ief_w * (i + 1) / n_iters  # linear ramp: earlier iters get lower weight
+                iter_pose  = hist['pose'][i]   # (B, total_pose_dim)
+                iter_betas = hist['betas'][i]  # (B, N_BETAS)
+                iter_trans = hist['trans'][i]  # (B, 3)
+                iter_joint_rot = iter_pose[:, global_rot_dim:].view(batch_size, config.N_POSE, -1)
+
+                if body_targets.get('joint_rot') is not None and loss_weights.get('joint_rot', 0) > 0:
+                    ief_loss = self._compute_rotation_loss(
+                        iter_joint_rot.reshape(batch_size, -1),
+                        body_targets['joint_rot'].reshape(batch_size, -1),
+                        body_targets.get('joint_rot_mask')
+                    )
+                    total_loss = total_loss + w * loss_weights['joint_rot'] * ief_loss
+
+                if body_targets.get('betas') is not None and loss_weights.get('betas', 0) > 0:
+                    mask = body_targets.get('betas_mask')
+                    if mask is not None and mask.any():
+                        ief_loss = F.mse_loss(iter_betas[mask], body_targets['betas'][mask])
+                        total_loss = total_loss + w * loss_weights['betas'] * ief_loss
+
+                if body_targets.get('trans') is not None and loss_weights.get('trans', 0) > 0:
+                    mask = body_targets.get('trans_mask')
+                    if mask is not None and mask.any():
+                        ief_loss = F.mse_loss(iter_trans[mask], body_targets['trans'][mask])
+                        total_loss = total_loss + w * loss_weights['trans'] * ief_loss
+
         if return_components:
             return total_loss, loss_components
         return total_loss
