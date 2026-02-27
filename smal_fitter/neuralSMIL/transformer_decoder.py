@@ -89,14 +89,15 @@ class TransformerDecoderLayer(nn.Module):
         super().__init__()
         
         self.norm1 = nn.LayerNorm(dim)
+        self.norm_context = nn.LayerNorm(context_dim if context_dim else dim)
         self.cross_attn = CrossAttention(dim, context_dim, heads, dim_head, dropout)
-        
+
         self.norm2 = nn.LayerNorm(dim)
         self.ff = FeedForward(dim, mlp_dim, dropout)
-    
+
     def forward(self, x: torch.Tensor, context: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # Cross-attention
-        x = x + self.cross_attn(self.norm1(x), context)
+        # Cross-attention (normalize both query and context for stability)
+        x = x + self.cross_attn(self.norm1(x), self.norm_context(context) if context is not None else None)
         
         # Feed-forward
         x = x + self.ff(self.norm2(x))
@@ -241,8 +242,12 @@ class SMILTransformerDecoderHead(nn.Module):
     
     def _initialize_parameters(self):
         """Initialize transformer decoder parameters."""
-        # Initialize token embedding
-        nn.init.xavier_uniform_(self.token_embedding.weight)
+        # Initialize token embedding with very small weights so that when
+        # resuming from a pre-IEF checkpoint, the initial param_state (zeros)
+        # produces near-zero embeddings — matching what the old architecture did.
+        # This prevents NaN explosions from random embeddings hitting pre-trained
+        # decoder layers.
+        nn.init.xavier_uniform_(self.token_embedding.weight, gain=0.01)
         nn.init.constant_(self.token_embedding.bias, 0)
         
         # Initialize positional embedding
@@ -268,10 +273,20 @@ class SMILTransformerDecoderHead(nn.Module):
     
     def _initialize_prediction_buffers(self):
         """Initialize prediction buffers for IEF."""
-        # Initialize with zeros for IEF
         # Note: pose includes both global and joint rotations
         total_pose_dim = self.global_rot_dim + self.joint_rot_dim
-        self.register_buffer('init_pose', torch.zeros(1, total_pose_dim))
+
+        if self.rotation_representation == '6d':
+            # For 6D representation, identity rotation = [1,0,0,1,0,0] (first two columns of I3).
+            # Initialising to zeros would give an invalid/degenerate rotation, making the
+            # regularisation gradient numerically unstable and forcing the network to learn a
+            # constant [1,0,0,1,0,0] offset per joint just to represent "no rotation".
+            identity_6d = torch.tensor([1., 0., 0., 1., 0., 0.])
+            n_rotations = total_pose_dim // 6  # global (1) + joints (N_POSE)
+            self.register_buffer('init_pose', identity_6d.repeat(n_rotations).unsqueeze(0))
+        else:
+            # For axis-angle, zeros = identity (zero rotation vector).
+            self.register_buffer('init_pose', torch.zeros(1, total_pose_dim))
         self.register_buffer('init_betas', torch.zeros(1, self.betas_dim))
         self.register_buffer('init_trans', torch.zeros(1, self.trans_dim))
         # Initialize FOV with reasonable value based on ground truth (typically around 8 degrees)
