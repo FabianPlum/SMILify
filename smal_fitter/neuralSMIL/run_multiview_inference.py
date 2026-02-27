@@ -40,6 +40,7 @@ from datetime import timedelta
 import numpy as np
 import cv2
 import torch
+from tqdm import tqdm
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
@@ -56,6 +57,122 @@ DEFAULT_CHECKPOINTS = [
     "multiview_checkpoints/best_model.pth",
     "multiview_checkpoints/final_model.pth",
 ]
+
+
+class PredictionSmoother:
+    """Temporal smoother that applies moving average over predicted parameters.
+
+    Maintains a ring buffer of the last ``window_size`` predictions and returns
+    their element-wise mean.  Metadata keys (non-tensor values and lists whose
+    length varies across frames) are passed through from the latest frame.
+    """
+
+    _PER_VIEW_KEYS = {"fov_per_view", "cam_rot_per_view", "cam_trans_per_view"}
+    _METADATA_KEYS = {"num_views", "view_mask", "camera_indices"}
+
+    def __init__(self, window_size: int):
+        self.window_size = window_size
+        self._buffer: List[Dict[str, Any]] = []
+
+    def __call__(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Add *params* to the buffer and return the smoothed result."""
+        if self.window_size <= 0:
+            return params
+
+        self._buffer.append(params)
+        if len(self._buffer) > self.window_size:
+            self._buffer.pop(0)
+
+        if len(self._buffer) == 1:
+            return params
+
+        smoothed: Dict[str, Any] = {}
+        for key in params:
+            if key in self._METADATA_KEYS:
+                smoothed[key] = params[key]
+            elif key in self._PER_VIEW_KEYS:
+                num_views = len(params[key])
+                smoothed_list = []
+                for v in range(num_views):
+                    tensors = [
+                        buf[key][v]
+                        for buf in self._buffer
+                        if key in buf and v < len(buf[key])
+                    ]
+                    if tensors:
+                        smoothed_list.append(torch.stack(tensors).mean(dim=0))
+                    else:
+                        smoothed_list.append(params[key][v])
+                smoothed[key] = smoothed_list
+            elif isinstance(params[key], torch.Tensor):
+                tensors = [buf[key] for buf in self._buffer if key in buf]
+                smoothed[key] = torch.stack(tensors).mean(dim=0)
+            else:
+                smoothed[key] = params[key]
+
+        return smoothed
+
+
+def _params_to_cpu(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Detach and move all tensors in a predicted_params dict to CPU."""
+    out: Dict[str, Any] = {}
+    for key, val in params.items():
+        if isinstance(val, torch.Tensor):
+            out[key] = val.detach().cpu()
+        elif isinstance(val, list) and val and isinstance(val[0], torch.Tensor):
+            out[key] = [t.detach().cpu() for t in val]
+        else:
+            out[key] = val
+    return out
+
+
+def _params_to_device(params: Dict[str, Any], device: str) -> Dict[str, Any]:
+    """Move all tensors in a predicted_params dict to *device*."""
+    out: Dict[str, Any] = {}
+    for key, val in params.items():
+        if isinstance(val, torch.Tensor):
+            out[key] = val.to(device)
+        elif isinstance(val, list) and val and isinstance(val[0], torch.Tensor):
+            out[key] = [t.to(device) for t in val]
+        else:
+            out[key] = val
+    return out
+
+
+def run_forward_multiview(model: MultiViewSMILImageRegressor,
+                          x_data: dict,
+                          y_data: dict,
+                          device: str) -> Optional[dict]:
+    """Run a single forward pass and return predicted_params (or None if no views)."""
+    images = x_data.get("images", [])
+    num_views = len(images)
+    if num_views == 0:
+        return None
+
+    cam_indices = x_data.get("camera_indices", list(range(num_views)))
+    if isinstance(cam_indices, np.ndarray):
+        cam_indices = cam_indices.tolist()
+    if len(cam_indices) != num_views:
+        if len(cam_indices) > num_views:
+            cam_indices = cam_indices[:num_views]
+        else:
+            cam_indices = list(cam_indices) + list(range(len(cam_indices), num_views))
+
+    images_per_view = []
+    for img in images:
+        img_tensor = model.preprocess_image(img).to(device)
+        images_per_view.append(img_tensor.squeeze(0))
+
+    images_tensors = [img.unsqueeze(0) for img in images_per_view]
+    camera_indices_tensor = torch.tensor([cam_indices], device=device)
+    view_mask = torch.ones(1, num_views, dtype=torch.bool, device=device)
+
+    with torch.no_grad():
+        predicted_params = model.forward_multiview(
+            images_tensors, camera_indices_tensor, view_mask, target_data=[y_data]
+        )
+
+    return predicted_params
 
 
 def is_torchrun_launched():
@@ -308,18 +425,14 @@ def create_multiview_visualization(model: MultiViewSMILImageRegressor,
                                    y_data: dict,
                                    device: str,
                                    disable_scaling: bool = False,
-                                   disable_translation: bool = False) -> Optional[np.ndarray]:
+                                   disable_translation: bool = False,
+                                   predicted_params: Optional[dict] = None) -> Optional[np.ndarray]:
     """
     Create multi-view grid visualization matching training visualization exactly.
-    
+
     CRITICAL: This function must match the training visualization in train_multiview_regressor.py
     exactly, especially for PCA transformation and parameter application order.
-    
-    This function handles variable numbers of views per sample (same as training):
-    - Grid dimensions are calculated dynamically based on actual num_views
-    - view_mask is created with shape (1, num_views) where num_views is the actual number of views
-    - The model's forward_multiview adapts to the actual number of views in the sample
-    
+
     Args:
         model: MultiViewSMILImageRegressor model
         x_data: Input data dictionary
@@ -327,43 +440,18 @@ def create_multiview_visualization(model: MultiViewSMILImageRegressor,
         device: PyTorch device
         disable_scaling: If True, zero out log_beta_scales for visualization (testing/debugging)
         disable_translation: If True, zero out betas_trans for visualization (testing/debugging)
+        predicted_params: Pre-computed predicted parameters. If None, runs forward pass internally.
     """
     images = x_data.get("images", [])
     num_views = len(images)
     if num_views == 0:
         return None
 
-    # Get camera indices - may have fewer entries than max_views
-    cam_indices = x_data.get("camera_indices", list(range(num_views)))
-    if isinstance(cam_indices, np.ndarray):
-        cam_indices = cam_indices.tolist()
-    
-    # Ensure cam_indices matches num_views (handle cases where dataset has fewer views)
-    if len(cam_indices) != num_views:
-        if len(cam_indices) > num_views:
-            cam_indices = cam_indices[:num_views]
-        else:
-            # Pad with sequential indices if needed
-            cam_indices = list(cam_indices) + list(range(len(cam_indices), num_views))
-
-    images_per_view = []
-    for img in images:
-        img_tensor = model.preprocess_image(img).to(device)  # (1, 3, H, W)
-        images_per_view.append(img_tensor.squeeze(0))  # (3, H, W)
-
-    images_tensors = [img.unsqueeze(0) for img in images_per_view]
-    camera_indices_tensor = torch.tensor([cam_indices], device=device)
-    # Create view_mask with shape (1, num_views) where num_views is the actual number of views
-    # The model adapts to this number - it doesn't require max_views views
-    view_mask = torch.ones(1, num_views, dtype=torch.bool, device=device)
-
-    # Pass y_data as target_data for GT camera initialization (if model trained with use_gt_camera_init=True)
-    # This ensures the model uses GT camera params as base values when predicting camera deltas
-    with torch.no_grad():
-        predicted_params = model.forward_multiview(images_tensors, camera_indices_tensor, view_mask, target_data=[y_data])
-    
-    # NOTE: We do NOT modify predicted_params here. Instead, pass disable flags to
-    # create_rendered_view_with_keypoints() which will handle them by creating a local copy.
+    # Run forward pass if predicted_params not provided
+    if predicted_params is None:
+        predicted_params = run_forward_multiview(model, x_data, y_data, device)
+        if predicted_params is None:
+            return None
 
     # Calculate grid dimensions dynamically based on actual num_views (same as training)
     # This allows samples with fewer views than max_views to be visualized correctly
@@ -549,25 +637,14 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
                               device: str,
                               view_idx: int = 0,
                               disable_scaling: bool = False,
-                              disable_translation: bool = False) -> Optional[np.ndarray]:
+                              disable_translation: bool = False,
+                              predicted_params: Optional[dict] = None) -> Optional[np.ndarray]:
     """
     Render single-view mesh visualization matching training visualization exactly.
-    
+
     CRITICAL: This function must match the training visualization in train_multiview_regressor.py
     exactly, especially for PCA transformation and parameter application order.
-    
-    This function handles variable numbers of views per sample (same as training):
-    - Works correctly even if the sample has fewer views than max_views used during training
-    - view_mask is created with shape (1, num_views) where num_views is the actual number of views
-    
-    Operation order (must match training):
-    1. Create SMALFitter
-    2. Set propagate_scaling to match model
-    3. Set body parameters (global_rot, joint_rot, betas, trans, fov)
-    4. Set scales/trans (with PCA transformation if in separate mode with PCA)
-    5. Set camera parameters (R, T, fov, aspect_ratio)
-    6. Generate visualization
-    
+
     Args:
         model: MultiViewSMILImageRegressor model
         x_data: Input data dictionary
@@ -576,40 +653,18 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
         view_idx: Which view to render (must be < num_views for this sample)
         disable_scaling: If True, skip applying log_beta_scales (testing/debugging)
         disable_translation: If True, skip applying betas_trans (testing/debugging)
+        predicted_params: Pre-computed predicted parameters. If None, runs forward pass internally.
     """
     images = x_data.get("images", [])
     num_views = len(images)
     if num_views == 0 or view_idx >= num_views:
         return None
 
-    # Get camera indices - may have fewer entries than max_views
-    cam_indices = x_data.get("camera_indices", list(range(num_views)))
-    if isinstance(cam_indices, np.ndarray):
-        cam_indices = cam_indices.tolist()
-    
-    # Ensure cam_indices matches num_views (handle cases where dataset has fewer views)
-    if len(cam_indices) != num_views:
-        if len(cam_indices) > num_views:
-            cam_indices = cam_indices[:num_views]
-        else:
-            # Pad with sequential indices if needed
-            cam_indices = list(cam_indices) + list(range(len(cam_indices), num_views))
-
-    images_per_view = []
-    for img in images:
-        img_tensor = model.preprocess_image(img).to(device)
-        images_per_view.append(img_tensor.squeeze(0))
-
-    images_tensors = [img.unsqueeze(0) for img in images_per_view]
-    camera_indices_tensor = torch.tensor([cam_indices], device=device)
-    # Create view_mask with shape (1, num_views) where num_views is the actual number of views
-    # The model adapts to this number - it doesn't require max_views views
-    view_mask = torch.ones(1, num_views, dtype=torch.bool, device=device)
-
-    # Pass y_data as target_data for GT camera initialization (if model trained with use_gt_camera_init=True)
-    # This ensures the model uses GT camera params as base values when predicting camera deltas
-    with torch.no_grad():
-        predicted_params = model.forward_multiview(images_tensors, camera_indices_tensor, view_mask, target_data=[y_data])
+    # Run forward pass if predicted_params not provided
+    if predicted_params is None:
+        predicted_params = run_forward_multiview(model, x_data, y_data, device)
+        if predicted_params is None:
+            return None
 
     fov_per_view = predicted_params.get("fov_per_view", None)
     cam_rot_per_view = predicted_params.get("cam_rot_per_view", None)
@@ -791,137 +846,165 @@ def _pad_or_resize(frame: np.ndarray, target_size: Tuple[int, int]) -> np.ndarra
     return padded
 
 
-def process_dataset_portion(
+def _compute_rank_indices(
     dataset: SLEAPMultiViewDataset,
-    model: MultiViewSMILImageRegressor,
-    device: str,
     rank: int,
     world_size: int,
     sampler: Optional[DistributedSampler],
-    grid_width: int,
-    grid_height: int,
-    singleview_size: Tuple[int, int],
     max_frames: Optional[int] = None,
-    disable_scaling: bool = False,
-    disable_translation: bool = False,
-    view_indices: List[int] = None,
-) -> Tuple[List[np.ndarray], Dict[int, List[np.ndarray]], List[int], Dict[int, List[int]]]:
-    """
-    Process a portion of the dataset on a single GPU.
-    
-    Args:
-        dataset: The multi-view dataset
-        model: The trained model
-        device: Device string
-        rank: Process rank
-        world_size: Total number of processes
-        sampler: Optional distributed sampler
-        grid_width: Width of multiview grid
-        grid_height: Height of multiview grid
-        singleview_size: Size of singleview frames
-        max_frames: Maximum total frames to process across all ranks (None = all)
-        disable_scaling: If True, skip applying part scaling for comparison/debugging
-        disable_translation: If True, skip applying part translation for comparison/debugging
-        view_indices: List of camera view indices to render for singleview output (default: [0])
-    
-    Returns:
-        Tuple of (multiview_frames, singleview_frames_per_view, mv_frame_indices, sv_frame_indices_per_view)
-        - multiview_frames: List of multiview grid frames
-        - singleview_frames_per_view: Dict mapping view_idx -> list of frames
-        - mv_frame_indices: List of dataset indices for multiview frames
-        - sv_frame_indices_per_view: Dict mapping view_idx -> list of dataset indices
-    """
-    if view_indices is None:
-        view_indices = [0]
-    
-    multiview_frames = []
-    mv_frame_indices = []
-    
-    # Initialize per-view storage
-    singleview_frames_per_view: Dict[int, List[np.ndarray]] = {v: [] for v in view_indices}
-    sv_frame_indices_per_view: Dict[int, List[int]] = {v: [] for v in view_indices}
-    
-    # Set sampler epoch for distributed processing
+) -> List[int]:
+    """Return the global dataset indices assigned to *rank*."""
     if sampler is not None:
         sampler.set_epoch(0)
-    
-    # Get indices for this rank
-    # DistributedSampler divides the dataset into chunks based on rank
-    if sampler is not None:
-        # Compute which indices belong to this rank
-        # DistributedSampler logic: each rank gets dataset[rank::world_size]
         indices = list(range(rank, len(dataset), world_size))
     else:
-        # Single GPU: process all samples
         indices = list(range(len(dataset)))
-    
-    # Apply max_frames limit (distributed across ranks)
+
     if max_frames is not None:
-        # Each rank processes max_frames / world_size frames
         frames_per_rank = max(1, max_frames // world_size)
         indices = indices[:frames_per_rank]
         if rank == 0:
             print(f"Limiting to {max_frames} total frames ({frames_per_rank} per rank)")
-    
+
+    return indices
+
+
+def run_inference_phase(
+    dataset: SLEAPMultiViewDataset,
+    model: MultiViewSMILImageRegressor,
+    device: str,
+    indices: List[int],
+    rank: int,
+) -> List[Tuple[int, dict]]:
+    """Run forward passes on the assigned indices and return raw predictions on CPU.
+
+    Returns:
+        List of ``(global_idx, predicted_params_cpu)`` tuples.
+    """
     model.eval()
-    
-    for local_idx, global_idx in enumerate(indices):
+    raw_predictions: List[Tuple[int, dict]] = []
+
+    iterator = tqdm(indices, desc="Running inference", disable=(rank != 0))
+    for global_idx in iterator:
+        try:
+            x_data, y_data = dataset[global_idx]
+            if len(x_data.get("images", [])) == 0:
+                continue
+            predicted_params = run_forward_multiview(model, x_data, y_data, device)
+            if predicted_params is None:
+                continue
+            raw_predictions.append((global_idx, _params_to_cpu(predicted_params)))
+        except Exception as e:
+            print(f"[Rank {rank}] Error in inference for sample {global_idx}: {e}")
+            continue
+
+    print(f"[Rank {rank}] Inference complete: {len(raw_predictions)} predictions")
+    return raw_predictions
+
+
+def run_render_phase(
+    dataset: SLEAPMultiViewDataset,
+    model: MultiViewSMILImageRegressor,
+    device: str,
+    smoothed_params: Dict[int, dict],
+    indices: List[int],
+    rank: int,
+    grid_width: int,
+    grid_height: int,
+    singleview_size: Tuple[int, int],
+    disable_scaling: bool = False,
+    disable_translation: bool = False,
+    view_indices: Optional[List[int]] = None,
+) -> Tuple[List[np.ndarray], Dict[int, List[np.ndarray]], List[int], Dict[int, List[int]]]:
+    """Render visualizations for the assigned indices using pre-computed smoothed params.
+
+    Returns the same tuple as the old ``process_dataset_portion``.
+    """
+    if view_indices is None:
+        view_indices = [0]
+
+    multiview_frames: List[np.ndarray] = []
+    mv_frame_indices: List[int] = []
+    singleview_frames_per_view: Dict[int, List[np.ndarray]] = {v: [] for v in view_indices}
+    sv_frame_indices_per_view: Dict[int, List[int]] = {v: [] for v in view_indices}
+
+    iterator = tqdm(indices, desc="Rendering visualizations", disable=(rank != 0))
+    for global_idx in iterator:
+        if global_idx not in smoothed_params:
+            continue
         try:
             x_data, y_data = dataset[global_idx]
             num_available_views = len(x_data.get("images", []))
-            
-            # Skip samples with no views
             if num_available_views == 0:
-                if rank == 0 and local_idx == 0:
-                    print(f"Warning: Sample {global_idx} has no views, skipping")
                 continue
-            
-            # Process multiview visualization
-            # The visualization function handles variable numbers of views correctly:
-            # - Grid dimensions are calculated based on actual num_views
-            # - view_mask is created with shape (1, num_views) where num_views is actual
-            # - Model adapts to the actual number of views
+
+            params = _params_to_device(smoothed_params[global_idx], device)
+
             mv_frame = create_multiview_visualization(
                 model, x_data, y_data, device,
                 disable_scaling=disable_scaling,
-                disable_translation=disable_translation
+                disable_translation=disable_translation,
+                predicted_params=params,
             )
             if mv_frame is not None:
-                # Pad or resize to consistent size for video output
-                # Samples with fewer views will be padded to max_views grid size
                 mv_frame = _pad_or_resize(mv_frame, (grid_width, grid_height))
-                mv_bgr = cv2.cvtColor(mv_frame, cv2.COLOR_RGB2BGR)
-                multiview_frames.append(mv_bgr)
+                multiview_frames.append(cv2.cvtColor(mv_frame, cv2.COLOR_RGB2BGR))
                 mv_frame_indices.append(global_idx)
-            
-            # Process singleview visualization for each requested view
+
             for view_idx in view_indices:
                 if view_idx >= num_available_views:
-                    # Skip if this view doesn't exist in the sample
-                    # This handles cases where samples have fewer views than requested
                     continue
                 sv_frame = render_singleview_collage(
                     model, x_data, y_data, device,
                     view_idx=view_idx,
                     disable_scaling=disable_scaling,
-                    disable_translation=disable_translation
+                    disable_translation=disable_translation,
+                    predicted_params=params,
                 )
                 if sv_frame is not None:
                     sv_frame = _pad_or_resize(sv_frame, singleview_size)
-                    sv_bgr = cv2.cvtColor(sv_frame, cv2.COLOR_RGB2BGR)
-                    singleview_frames_per_view[view_idx].append(sv_bgr)
+                    singleview_frames_per_view[view_idx].append(
+                        cv2.cvtColor(sv_frame, cv2.COLOR_RGB2BGR)
+                    )
                     sv_frame_indices_per_view[view_idx].append(global_idx)
-            
-            if (local_idx + 1) % 100 == 0:
-                print(f"[Rank {rank}] Processed {local_idx + 1}/{len(indices)} samples")
-                
+
         except Exception as e:
-            print(f"[Rank {rank}] Error processing sample {global_idx}: {e}")
+            print(f"[Rank {rank}] Error rendering sample {global_idx}: {e}")
             continue
-    
-    total_sv_frames = sum(len(frames) for frames in singleview_frames_per_view.values())
-    print(f"[Rank {rank}] Completed processing {len(multiview_frames)} multiview frames, {total_sv_frames} singleview frames across {len(view_indices)} views")
+
+    total_sv = sum(len(f) for f in singleview_frames_per_view.values())
+    print(f"[Rank {rank}] Rendering complete: {len(multiview_frames)} multiview, {total_sv} singleview frames")
     return multiview_frames, singleview_frames_per_view, mv_frame_indices, sv_frame_indices_per_view
+
+
+def write_predictions_to_temp(
+    raw_predictions: List[Tuple[int, dict]],
+    temp_dir: Path,
+    rank: int,
+) -> None:
+    """Pickle raw predictions for this rank to shared temp storage."""
+    rank_dir = temp_dir / f"rank_{rank}"
+    rank_dir.mkdir(parents=True, exist_ok=True)
+    pred_path = rank_dir / "predictions.pkl"
+    with open(pred_path, "wb") as f:
+        pickle.dump(raw_predictions, f)
+    print(f"[Rank {rank}] Wrote {len(raw_predictions)} predictions to {pred_path}")
+
+
+def load_all_predictions_from_temp(
+    temp_dir: Path,
+    world_size: int,
+) -> List[Tuple[int, dict]]:
+    """Load and merge prediction pickles from all ranks, sorted by global index."""
+    all_predictions: List[Tuple[int, dict]] = []
+    for rank_idx in range(world_size):
+        pred_path = temp_dir / f"rank_{rank_idx}" / "predictions.pkl"
+        if pred_path.exists():
+            with open(pred_path, "rb") as f:
+                all_predictions.extend(pickle.load(f))
+    all_predictions.sort(key=lambda x: x[0])
+    print(f"Loaded {len(all_predictions)} total predictions from {world_size} ranks")
+    return all_predictions
 
 
 def write_frames_to_temp_storage(
@@ -1131,6 +1214,8 @@ def main_inference(
         if args.disable_translation:
             print(f"Part translation: DISABLED (comparison mode)")
         print(f"View indices for singleview: {view_indices}")
+        if args.smoothing_window > 0:
+            print(f"Temporal smoothing: {args.smoothing_window} frames")
         print(f"{'='*60}\n")
     
     checkpoint_path = _find_default_checkpoint()
@@ -1182,17 +1267,13 @@ def main_inference(
     sampler = None
     if world_size > 1:
         sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=False)
-    
+
     # Calculate frame dimensions
-    # Note: Each sample may have fewer views than model_max_views. The visualization
-    # functions calculate grid dimensions dynamically based on actual num_views per sample.
-    # We use model_max_views here as the maximum grid size for consistent video output.
-    # Samples with fewer views will be padded to this size by _pad_or_resize().
     img_size = 224
     margin = 5
     grid_width = model_max_views * img_size + (model_max_views + 1) * margin
     grid_height = 2 * img_size + 3 * margin
-    
+
     # Determine singleview frame size (use first sample to get actual size)
     singleview_size = (224, 224)  # Default
     if len(dataset) > 0:
@@ -1204,45 +1285,104 @@ def main_inference(
                 singleview_size = (test_frame.shape[1], test_frame.shape[0])
         except Exception:
             pass  # Use default
-    
-    # Process dataset portion on this rank
-    multiview_frames, singleview_frames_per_view, mv_frame_indices, sv_frame_indices_per_view = process_dataset_portion(
+
+    # Compute which dataset indices this rank is responsible for
+    assigned_indices = _compute_rank_indices(
+        dataset, rank, world_size, sampler, max_frames=args.max_frames
+    )
+
+    # ── Phase 1: Inference (all ranks in parallel) ──────────────────────
+    if rank == 0:
+        print("\n── Phase 1: Running inference ──")
+    raw_predictions = run_inference_phase(dataset, model, device, assigned_indices, rank)
+
+    # Free GPU memory after inference — rendering will reload params to device as needed
+    torch.cuda.empty_cache()
+
+    # ── Phase 2: Gather + smooth predictions ────────────────────────────
+    smoothing_window = args.smoothing_window
+    dataset_name = dataset_path.stem
+    temp_base = Path.cwd() / f".inference_temp_{dataset_name}"
+
+    if world_size > 1 and smoothing_window > 0:
+        # Multi-GPU with smoothing: gather all predictions so every rank
+        # can build the full temporally-ordered sequence for correct smoothing.
+        if rank == 0:
+            print(f"\n── Phase 2: Gathering predictions across {world_size} ranks for smoothing (window={smoothing_window}) ──")
+            if temp_base.exists():
+                shutil.rmtree(temp_base)
+            temp_base.mkdir(parents=True, exist_ok=True)
+        dist.barrier()
+
+        write_predictions_to_temp(raw_predictions, temp_base, rank)
+        dist.barrier()
+
+        all_predictions = load_all_predictions_from_temp(temp_base, world_size)
+
+        # Apply smoothing over the full sorted sequence
+        smoother = PredictionSmoother(smoothing_window)
+        smoothed_params: Dict[int, dict] = {}
+        iterator = tqdm(all_predictions, desc="Applying temporal smoothing", disable=(rank != 0))
+        for global_idx, params in iterator:
+            smoothed_params[global_idx] = smoother(params)
+
+        # Clean up prediction temp files (keep temp_base for frame storage later)
+        for rank_idx in range(world_size):
+            pred_path = temp_base / f"rank_{rank_idx}" / "predictions.pkl"
+            if pred_path.exists():
+                pred_path.unlink()
+
+        del raw_predictions, all_predictions
+
+    elif smoothing_window > 0:
+        # Single GPU with smoothing
+        if rank == 0:
+            print(f"\n── Phase 2: Applying temporal smoothing (window={smoothing_window}) ──")
+        raw_predictions.sort(key=lambda x: x[0])
+        smoother = PredictionSmoother(smoothing_window)
+        smoothed_params = {}
+        for global_idx, params in tqdm(raw_predictions, desc="Applying temporal smoothing", disable=(rank != 0)):
+            smoothed_params[global_idx] = smoother(params)
+        del raw_predictions
+
+    else:
+        # No smoothing: use raw predictions directly
+        if rank == 0:
+            print("\n── Phase 2: No smoothing (window=0) ──")
+        smoothed_params = {idx: params for idx, params in raw_predictions}
+        del raw_predictions
+
+    # ── Phase 3: Render visualizations (all ranks in parallel) ──────────
+    if rank == 0:
+        print("\n── Phase 3: Rendering visualizations ──")
+    multiview_frames, singleview_frames_per_view, mv_frame_indices, sv_frame_indices_per_view = run_render_phase(
         dataset=dataset,
         model=model,
         device=device,
+        smoothed_params=smoothed_params,
+        indices=assigned_indices,
         rank=rank,
-        world_size=world_size,
-        sampler=sampler,
         grid_width=grid_width,
         grid_height=grid_height,
         singleview_size=singleview_size,
-        max_frames=args.max_frames,
         disable_scaling=args.disable_scaling,
         disable_translation=args.disable_translation,
         view_indices=view_indices,
     )
-    
-    # Output paths
-    dataset_name = dataset_path.stem
+    del smoothed_params
+
+    # ── Phase 4: Write output videos ────────────────────────────────────
+    if rank == 0:
+        print("\n── Phase 4: Writing output videos ──")
     multiview_out = Path(f"{dataset_name}_multiview_inference.mp4")
     singleview_out_base = Path(f"{dataset_name}_singleview_inference.mp4")
-    
-    # Use file-based gathering to avoid OOM with all_gather_object on large frame lists
+
     if world_size > 1:
-        # Create a shared temporary directory for frame storage
-        # Use cwd or dataset parent dir which should be on shared filesystem
-        temp_base = Path.cwd() / f".inference_temp_{dataset_name}"
-        
-        # Only rank 0 creates the directory
         if rank == 0:
-            if temp_base.exists():
-                shutil.rmtree(temp_base)
-            temp_base.mkdir(parents=True, exist_ok=True)
-        
-        # Synchronize to ensure temp directory exists before other ranks write
+            if not temp_base.exists():
+                temp_base.mkdir(parents=True, exist_ok=True)
         dist.barrier()
-        
-        # Each rank writes its frames to temporary storage
+
         write_frames_to_temp_storage(
             multiview_frames=multiview_frames,
             singleview_frames_per_view=singleview_frames_per_view,
@@ -1251,15 +1391,11 @@ def main_inference(
             temp_dir=temp_base,
             rank=rank,
         )
-        
-        # Free memory immediately after writing to disk
         del multiview_frames, singleview_frames_per_view, mv_frame_indices, sv_frame_indices_per_view
         torch.cuda.empty_cache()
-        
-        # Wait for all ranks to finish writing
+
         dist.barrier()
-        
-        # Only rank 0 merges and writes the final videos
+
         if rank == 0:
             merge_frames_and_write_videos(
                 temp_dir=temp_base,
@@ -1272,15 +1408,12 @@ def main_inference(
                 singleview_size=singleview_size,
                 view_indices=view_indices,
             )
-            
-            # Clean up temporary files
             print(f"Cleaning up temporary directory: {temp_base}")
             shutil.rmtree(temp_base)
-        
-        # Final barrier to ensure cleanup is done before exit
+
         dist.barrier()
     else:
-        # Single GPU: write directly (no temp storage needed)
+        # Single GPU: write directly
         if len(multiview_frames) > 0:
             multiview_writer = cv2.VideoWriter(
                 str(multiview_out),
@@ -1292,18 +1425,16 @@ def main_inference(
                 multiview_writer.write(frame)
             multiview_writer.release()
             print(f"Wrote {multiview_out}")
-        
-        # Write singleview videos for each requested view
+
         for view_idx in view_indices:
             frames = singleview_frames_per_view.get(view_idx, [])
             if len(frames) > 0:
-                # Create output path with view index
                 if len(view_indices) == 1:
                     singleview_out = singleview_out_base
                 else:
                     stem = singleview_out_base.stem
                     singleview_out = singleview_out_base.parent / f"{stem}_view{view_idx}.mp4"
-                
+
                 singleview_writer = cv2.VideoWriter(
                     str(singleview_out),
                     cv2.VideoWriter_fourcc(*"mp4v"),
@@ -1355,6 +1486,7 @@ def main():
     parser.add_argument("--disable_scaling", action="store_true", help="Disable part scaling (log_beta_scales) for comparison/debugging")
     parser.add_argument("--disable_translation", action="store_true", default=True, help="Disable part translation (betas_trans) for comparison/debugging")
     parser.add_argument("--view_indices", type=str, default="0", help="Comma-separated list of camera view indices to render for singleview output (default: '0'). E.g., '0,4,11' renders views 0, 4, and 11.")
+    parser.add_argument("--smoothing_window", type=int, default=0, help="Number of frames to average predictions over for temporal smoothing (default: 0, disabled)")
     parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs to use (default: 1, ignored when using torchrun)")
     parser.add_argument("--master-port", type=str, default=None, help="Master port for distributed processing (default: from MASTER_PORT env var or 12355)")
     parser.add_argument("--smal_file", type=str, default=None, help="Path to SMAL model file to override config.py SMAL_FILE (optional)")
