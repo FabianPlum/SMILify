@@ -95,12 +95,20 @@ for full details. Validated with 12 synthetic tests in `tests/test_triangulation
 
 ## P3 — Low / Observations
 
-### 6. Overly Complex Curriculum & LR Schedule
+### 6. Overly Complex Curriculum & LR Schedule — RESOLVED
 
-15 curriculum stages and 14 LR steps over 600 epochs with non-monotonic LR
+14 curriculum stages and 15 LR steps over 600 epochs with non-monotonic LR
 warm restarts interleaved with curriculum weight jumps (e.g., `keypoint_3d`
-jumps 10x at epoch 500). Fragile and hard to maintain. Consider cosine
-annealing or a simpler stage-based schedule.
+jumps 10x at epoch 500). Fragile and hard to maintain.
+
+**Resolution:** Simplified to 5 curriculum stages and 5 monotonically
+decreasing LR steps over 300 epochs in `multiview_baseline.json`. Stages at
+400–575 were dead code for a 300-epoch run and have been removed. The key
+training phases are preserved: regularization warmup (base), 2D keypoint
+ramp (epoch 20), 3D keypoint introduction (epoch 50), stable main training
+(epoch 100), camera regularization onset (epoch 200), and final fine-tuning
+push (epoch 250). LR warm restarts have been removed in favour of a clean
+monotonic decay.
 
 ### 7. Batch Size 3 — Very Noisy Gradients — RESOLVED
 
@@ -159,4 +167,6 @@ initialised to `identity_6d.repeat(1 + N_POSE)`.  Axis-angle path unchanged.
    loss implemented, tested, and integrated into the training curriculum.
 5. ~~**#9 (6D init_pose)**~~ — **DONE.** `init_pose` now initialised to 6D
    identity `[1,0,0,1,0,0]` repeated per joint.
-6. **#6–#8** — address incrementally as training matures.
+6. ~~**#6 (curriculum complexity)**~~ — **DONE.** Simplified to 5 stages / 5 LR steps.
+7. **#7** — RESOLVED (larger batch sizes now feasible after IEF fix).
+8. **#8** — BY DESIGN (no direct `global_rot` supervision intended).
