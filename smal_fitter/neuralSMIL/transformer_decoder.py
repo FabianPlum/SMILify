@@ -247,7 +247,7 @@ class SMILTransformerDecoderHead(nn.Module):
         # produces near-zero embeddings — matching what the old architecture did.
         # This prevents NaN explosions from random embeddings hitting pre-trained
         # decoder layers.
-        nn.init.xavier_uniform_(self.token_embedding.weight, gain=0.01)
+        nn.init.xavier_uniform_(self.token_embedding.weight, gain=0.1)
         nn.init.constant_(self.token_embedding.bias, 0)
         
         # Initialize positional embedding
