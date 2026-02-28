@@ -920,7 +920,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         joint_importance_weights = self._get_joint_importance_weights()
         
         # Pre-compute shared data needed by multiple loss terms
-        need_kp = loss_weights.get('keypoint_2d', 0) > 0 or loss_weights.get('triangulation_consistency', 0) > 0
+        need_kp = (loss_weights.get('keypoint_2d', 0) > 0
+                   or loss_weights.get('triangulation_consistency', 0) > 0
+                   or loss_weights.get('ief_intermediate', 0) > 0)
         all_kp_data = None
         joints_3d = None
         aspect_ratio_list = None
@@ -1101,9 +1103,11 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     total_loss = total_loss + loss_weights['cam_trans'] * t_loss
 
         # =================== SHARED 3D KEYPOINT LOSS ===================
-        # If GT 3D keypoints exist, supervise predicted canonical joints in 3D.
+        # Collect GT 3D keypoints (also used by IEF intermediate supervision below)
+        gt_3d = self._collect_keypoints_3d_batch(target_data) if (
+            loss_weights.get('keypoint_3d', 0) > 0 or loss_weights.get('ief_intermediate', 0) > 0
+        ) else None
         if loss_weights.get('keypoint_3d', 0) > 0:
-            gt_3d = self._collect_keypoints_3d_batch(target_data)
             if gt_3d is not None and gt_3d.get('keypoints_3d') is not None:
                 pred_joints_3d = self._predict_canonical_joints_3d(predicted_params)  # (B, J, 3)
                 target_joints_3d = gt_3d['keypoints_3d']  # (B, J, 3)
@@ -1158,22 +1162,107 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         # No valid joints in batch
                         loss_components['keypoint_3d'] = torch.tensor(0.0, device=self.device, requires_grad=True)
         
-        # IEF intermediate supervision
-        # Applies parameter losses to each non-final IEF iteration with a linearly
-        # increasing weight, so the network receives gradient signal at every step
-        # rather than only on the final prediction. Controlled by 'ief_intermediate'
-        # loss weight (0.0 = disabled, the default).
+        # IEF intermediate keypoint supervision
+        # Runs each non-final IEF prediction through the body model to get 3D
+        # joints, then computes the same 2D/3D keypoint losses that supervise the
+        # final output.  This gives intermediate steps meaningful gradient signal
+        # (the dominant keypoint losses) rather than only parameter-level losses
+        # which may have tiny weights or missing GT (e.g. no GT joint angles in
+        # SLEAP data).  Controlled by 'ief_intermediate' loss weight.
         ief_w = loss_weights.get('ief_intermediate', 0.0)
         if ief_w > 0 and 'iteration_history' in predicted_params:
             hist = predicted_params['iteration_history']
             n_iters = len(hist.get('pose', []))
             global_rot_dim = 6 if self.rotation_representation == '6d' else 3
+            rot_per_joint = 6 if self.rotation_representation == '6d' else 3
+
             for i in range(n_iters - 1):  # skip final iter — already supervised above
                 w = ief_w * (i + 1) / n_iters  # linear ramp: earlier iters get lower weight
-                iter_pose  = hist['pose'][i]   # (B, total_pose_dim)
-                iter_betas = hist['betas'][i]  # (B, N_BETAS)
-                iter_trans = hist['trans'][i]  # (B, 3)
-                iter_joint_rot = iter_pose[:, global_rot_dim:].view(batch_size, config.N_POSE, -1)
+
+                # Reconstruct body_params dict from iteration history
+                iter_pose = hist['pose'][i]  # (B, total_pose_dim)
+                iter_body_params = {
+                    'global_rot': iter_pose[:, :global_rot_dim],
+                    'joint_rot': iter_pose[:, global_rot_dim:].view(batch_size, config.N_POSE, rot_per_joint),
+                    'betas': hist['betas'][i],
+                    'trans': hist['trans'][i],
+                }
+                if 'scales' in hist:
+                    # Iteration history stores flat (B, scales_dim); reshape to
+                    # match _predict_canonical_joints_3d: per-joint (B, n_joints, 3)
+                    # for non-PCA separate mode, or (B, N_BETAS) for PCA mode.
+                    raw_scales = hist['scales'][i]
+                    if raw_scales.shape[-1] != config.N_BETAS:
+                        iter_body_params['log_beta_scales'] = raw_scales.view(batch_size, -1, 3)
+                    else:
+                        iter_body_params['log_beta_scales'] = raw_scales
+                if 'joint_trans' in hist:
+                    raw_jtrans = hist['joint_trans'][i]
+                    if raw_jtrans.shape[-1] != config.N_BETAS:
+                        iter_body_params['betas_trans'] = raw_jtrans.view(batch_size, -1, 3)
+                    else:
+                        iter_body_params['betas_trans'] = raw_jtrans
+                if 'mesh_scale' in hist:
+                    iter_body_params['mesh_scale'] = hist['mesh_scale'][i]
+
+                # Forward through body model to get intermediate 3D joints
+                try:
+                    iter_joints_3d = self._predict_canonical_joints_3d(iter_body_params)  # (B, J, 3)
+                except Exception as e:
+                    print(f"Warning: IEF intermediate body model forward failed at iter {i}: {e}")
+                    continue
+
+                # 3D keypoint loss on intermediate predictions
+                if gt_3d is not None and gt_3d.get('keypoints_3d') is not None and loss_weights.get('keypoint_3d', 0) > 0:
+                    target_joints_3d = gt_3d['keypoints_3d']
+                    sample_mask_3d = gt_3d.get('mask', None)
+                    if (iter_joints_3d.shape == target_joints_3d.shape
+                            and sample_mask_3d is not None and sample_mask_3d.any()):
+                        joint_norms = torch.norm(target_joints_3d, dim=-1)
+                        finite_mask = torch.isfinite(target_joints_3d).all(dim=-1)
+                        valid_joint_mask = (joint_norms > 1e-6) & finite_mask
+                        combined_mask = sample_mask_3d.unsqueeze(1) & valid_joint_mask
+                        if combined_mask.any():
+                            diff = iter_joints_3d - target_joints_3d
+                            mask_weights_3d = combined_mask.float()
+                            if joint_importance_weights is not None:
+                                mask_weights_3d = mask_weights_3d * joint_importance_weights.unsqueeze(0)
+                            masked_loss = (diff ** 2) * mask_weights_3d.unsqueeze(-1)
+                            if joint_importance_weights is not None:
+                                wvc = (combined_mask.float() * joint_importance_weights.unsqueeze(0)).sum() * 3 + 1e-8
+                            else:
+                                wvc = combined_mask.sum().float() * 3 + 1e-8
+                            ief_kp3d = masked_loss.sum() / wvc
+                            if torch.isfinite(ief_kp3d):
+                                total_loss = total_loss + w * loss_weights['keypoint_3d'] * ief_kp3d
+
+                # 2D keypoint loss on intermediate predictions (project using final cameras)
+                if all_kp_data is not None and loss_weights.get('keypoint_2d', 0) > 0:
+                    try:
+                        iter_rendered = self._batch_project_joints_to_views(
+                            iter_joints_3d,
+                            predicted_params['fov_per_view'],
+                            predicted_params['cam_rot_per_view'],
+                            predicted_params['cam_trans_per_view'],
+                            aspect_ratio_per_view=aspect_ratio_list,
+                            view_mask=view_mask
+                        )
+                        ief_kp2d = self._compute_batched_keypoint_loss(
+                            iter_rendered,
+                            all_kp_data['keypoints_2d'],
+                            all_kp_data['visibility'],
+                            view_mask,
+                            joint_weights=joint_importance_weights
+                        )
+                        if torch.isfinite(ief_kp2d):
+                            total_loss = total_loss + w * loss_weights['keypoint_2d'] * ief_kp2d
+                    except Exception as e:
+                        pass  # projection can fail for degenerate intermediate cameras
+
+                # Retain parameter-level losses when GT is available (cheap, extra signal)
+                iter_joint_rot = iter_body_params['joint_rot']
+                iter_betas = iter_body_params['betas']
+                iter_trans = iter_body_params['trans']
 
                 if body_targets.get('joint_rot') is not None and loss_weights.get('joint_rot', 0) > 0:
                     ief_loss = self._compute_rotation_loss(
