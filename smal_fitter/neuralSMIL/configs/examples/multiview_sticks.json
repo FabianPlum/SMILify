@@ -17,7 +17,7 @@
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
-    "dataset_fraction": 0.1
+    "dataset_fraction": 0.2
   },
 
   "model": {
@@ -27,8 +27,8 @@
     "head_type": "transformer_decoder",
     "use_unity_prior": false,
     "rgb_only": false,
-    "transformer_depth": 6,
-    "transformer_heads": 8,
+    "transformer_depth": 2,
+    "transformer_heads": 4,
     "transformer_dim_head": 64,
     "transformer_mlp_dim": 1024,
     "transformer_dropout": 0.1,
@@ -46,8 +46,7 @@
       "10": 3e-5,
       "20": 2e-5,
       "60": 1e-5,
-      "100": 1e-5,
-      "150": 2e-6,
+      "100": 2e-6,
       "200": 1e-6
     }
   },
@@ -68,7 +67,9 @@
       "silhouette": 0.0,
       "joint_angle_regularization": 0.001,
       "limb_scale_regularization": 0.01,
-      "limb_trans_regularization": 1
+      "limb_trans_regularization": 1,
+      "triangulation_consistency": 0.0,
+      "ief_intermediate": 0.1
     },
     "curriculum_stages": {
       "1": {
@@ -78,43 +79,31 @@
       },
       "10": {
         "keypoint_2d": 0.1,
-        "joint_angle_regularization": 0.005,
+        "joint_angle_regularization": 1e-4,
         "limb_scale_regularization": 0.05,
         "limb_trans_regularization": 1
       },
-      "25": {
-        "keypoint_2d": 0.2,
-        "joint_angle_regularization": 0.0025,
-        "limb_scale_regularization": 0.002,
-        "limb_trans_regularization": 1
-      },
-      "35": {
-        "keypoint_3d": 1,
-        "joint_angle_regularization": 0.001,
-        "limb_scale_regularization": 0.001,
-        "limb_trans_regularization": 1
-      },
-      "45": {
-        "keypoint_3d": 1,
-        "joint_angle_regularization": 0.0001,
-        "limb_scale_regularization": 0.0005,
-        "limb_trans_regularization": 1
+      "20": {
+        "keypoint_3d": 2,
+        "joint_angle_regularization": 1e-5,
+        "limb_scale_regularization": 0.0001,
+        "limb_trans_regularization": 0.5
       },
       "50": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 5e-5,
-        "limb_scale_regularization": 0.0001,
+        "joint_angle_regularization": 1e-6,
+        "limb_scale_regularization": 1e-5,
         "limb_trans_regularization": 0.5
       },
       "100": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-5,
-        "limb_scale_regularization": 0.00005,
+        "joint_angle_regularization": 1e-6,
+        "limb_scale_regularization": 0.00001,
         "limb_trans_regularization": 0.1
       },
       "150": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-5,
+        "joint_angle_regularization": 1e-7,
         "limb_scale_regularization": 0.00001,
         "limb_trans_regularization": 0.1,
         "fov": 1e-7,
@@ -123,8 +112,8 @@
       },
       "200": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-5,
-        "limb_scale_regularization": 0.001,
+        "joint_angle_regularization": 1e-7,
+        "limb_scale_regularization": 0.000001,
         "limb_trans_regularization": 0.1,
         "fov": 1e-7,
         "cam_rot": 1e-8,
@@ -160,19 +149,20 @@
     "visualizations_dir": "multiview_visualizations",
     "singleview_visualizations_dir": "multiview_singleview_renders",
     "save_checkpoint_every": 10,
-    "generate_visualizations_every": 10,
+    "generate_visualizations_every": 1,
     "num_visualization_samples": 3
   },
 
   "training": {
-    "batch_size": 3,
+    "batch_size": 8,
     "num_epochs": 300,
     "seed": 42,
     "rotation_representation": "6d",
-    "num_workers": 8,
+    "num_workers": 16,
     "pin_memory": true,
-    "prefetch_factor": 4,
+    "prefetch_factor": 8,
     "resume_checkpoint": null,
+    "reset_ief_token_embedding": false,
     "use_gt_camera_init": true
   }
 }

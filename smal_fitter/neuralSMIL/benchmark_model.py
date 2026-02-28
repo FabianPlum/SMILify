@@ -684,8 +684,9 @@ def _save_error_histogram(errors_px: np.ndarray, output_dir: str):
     plt.figure(figsize=(8, 5))
     if errors_px.size > 0:
         max_err = max(50.0, float(np.max(errors_px)))
-        bins = np.arange(0, max_err + 1, 1.0)
+        bins = np.logspace(np.log10(max(0.1, float(errors_px[errors_px > 0].min()))), np.log10(max_err), 50)
         plt.hist(errors_px, bins=bins, color="#4C72B0", alpha=0.8)
+    plt.xscale("log")
     plt.title("2D Keypoint Error Histogram (px)")
     plt.xlabel("Error (px)")
     plt.ylabel("Count")
@@ -1074,8 +1075,9 @@ def _run_multiview_benchmark(
     plt.figure(figsize=(8, 5))
     if errors_mm.size > 0:
         max_err_mm = max(200.0, float(np.max(errors_mm)))
-        bins_mm = np.arange(0, max_err_mm + 1, 1.0)
+        bins_mm = np.logspace(np.log10(max(0.1, float(errors_mm[errors_mm > 0].min()))), np.log10(max_err_mm), 50)
         plt.hist(errors_mm, bins=bins_mm, color="#55A868", alpha=0.8)
+    plt.xscale("log")
     plt.title("3D Joint Error Histogram (mm)")
     plt.xlabel("Error (mm)")
     plt.ylabel("Count")

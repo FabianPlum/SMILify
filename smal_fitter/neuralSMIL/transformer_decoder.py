@@ -89,14 +89,15 @@ class TransformerDecoderLayer(nn.Module):
         super().__init__()
         
         self.norm1 = nn.LayerNorm(dim)
+        self.norm_context = nn.LayerNorm(context_dim if context_dim else dim)
         self.cross_attn = CrossAttention(dim, context_dim, heads, dim_head, dropout)
-        
+
         self.norm2 = nn.LayerNorm(dim)
         self.ff = FeedForward(dim, mlp_dim, dropout)
-    
+
     def forward(self, x: torch.Tensor, context: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # Cross-attention
-        x = x + self.cross_attn(self.norm1(x), context)
+        # Cross-attention (normalize both query and context for stability)
+        x = x + self.cross_attn(self.norm1(x), self.norm_context(context) if context is not None else None)
         
         # Feed-forward
         x = x + self.ff(self.norm2(x))
@@ -135,10 +136,18 @@ class SMILTransformerDecoderHead(nn.Module):
         
         # Calculate output dimensions for SMIL parameters
         self._calculate_output_dims()
-        
-        # Token embedding for parameter tokens
-        self.token_embedding = nn.Linear(1, hidden_dim)  # Start with zero tokens
-        
+
+        # Compute total parameter dimension for IEF feedback token
+        self._param_feedback_dim = (
+            self.global_rot_dim + self.joint_rot_dim +  # pose
+            self.betas_dim + self.trans_dim +            # body
+            self.fov_dim + self.cam_rot_dim + self.cam_trans_dim +  # camera
+            self.scales_dim + self.joint_trans_dim       # optional scales/trans
+        )
+
+        # Token embedding: projects concatenated parameter estimates into hidden_dim
+        self.token_embedding = nn.Linear(self._param_feedback_dim, hidden_dim)
+
         # Positional embedding for tokens
         self.pos_embedding = nn.Parameter(torch.randn(1, 1, hidden_dim))
         
@@ -233,8 +242,12 @@ class SMILTransformerDecoderHead(nn.Module):
     
     def _initialize_parameters(self):
         """Initialize transformer decoder parameters."""
-        # Initialize token embedding
-        nn.init.xavier_uniform_(self.token_embedding.weight)
+        # Initialize token embedding with very small weights so that when
+        # resuming from a pre-IEF checkpoint, the initial param_state (zeros)
+        # produces near-zero embeddings — matching what the old architecture did.
+        # This prevents NaN explosions from random embeddings hitting pre-trained
+        # decoder layers.
+        nn.init.xavier_uniform_(self.token_embedding.weight, gain=0.1)
         nn.init.constant_(self.token_embedding.bias, 0)
         
         # Initialize positional embedding
@@ -260,10 +273,20 @@ class SMILTransformerDecoderHead(nn.Module):
     
     def _initialize_prediction_buffers(self):
         """Initialize prediction buffers for IEF."""
-        # Initialize with zeros for IEF
         # Note: pose includes both global and joint rotations
         total_pose_dim = self.global_rot_dim + self.joint_rot_dim
-        self.register_buffer('init_pose', torch.zeros(1, total_pose_dim))
+
+        if self.rotation_representation == '6d':
+            # For 6D representation, identity rotation = [1,0,0,1,0,0] (first two columns of I3).
+            # Initialising to zeros would give an invalid/degenerate rotation, making the
+            # regularisation gradient numerically unstable and forcing the network to learn a
+            # constant [1,0,0,1,0,0] offset per joint just to represent "no rotation".
+            identity_6d = torch.tensor([1., 0., 0., 1., 0., 0.])
+            n_rotations = total_pose_dim // 6  # global (1) + joints (N_POSE)
+            self.register_buffer('init_pose', identity_6d.repeat(n_rotations).unsqueeze(0))
+        else:
+            # For axis-angle, zeros = identity (zero rotation vector).
+            self.register_buffer('init_pose', torch.zeros(1, total_pose_dim))
         self.register_buffer('init_betas', torch.zeros(1, self.betas_dim))
         self.register_buffer('init_trans', torch.zeros(1, self.trans_dim))
         # Initialize FOV with reasonable value based on ground truth (typically around 8 degrees)
@@ -329,18 +352,16 @@ class SMILTransformerDecoderHead(nn.Module):
         
         # Iterative Error Feedback (IEF)
         for i in range(self.ief_iters):
-            # Create parameter token (concatenate all current predictions)
+            # Concatenate all current parameter estimates as feedback
             param_tokens = [pred_pose, pred_betas, pred_trans, pred_fov, pred_cam_rot, pred_cam_trans]
             if self.scales_dim > 0:
                 param_tokens.append(pred_scales)
             if self.joint_trans_dim > 0:
                 param_tokens.append(pred_joint_trans)
-            
-            # Use a single token representing the current state
-            token = torch.zeros(batch_size, 1, 1).to(device)
-            
-            # Embed token
-            token = self.token_embedding(token)
+            param_state = torch.cat(param_tokens, dim=-1)  # (batch_size, _param_feedback_dim)
+
+            # Project current parameter state into a single decoder token
+            token = self.token_embedding(param_state).unsqueeze(1)  # (batch_size, 1, hidden_dim)
             token = token + self.pos_embedding
             
             # Pass through transformer decoder layers
@@ -357,43 +378,54 @@ class SMILTransformerDecoderHead(nn.Module):
             pred_fov = pred_fov + self.fov_head(token_out)
             pred_cam_rot = pred_cam_rot + self.cam_rot_head(token_out)
             pred_cam_trans = pred_cam_trans + self.cam_trans_head(token_out)
-            
-            # Check for NaN values after each iteration
-            if not torch.isfinite(pred_pose).all():
-                print(f"Warning: Non-finite values in pred_pose at iteration {i}: {pred_pose}")
-                pred_pose = torch.zeros_like(pred_pose)
-            if not torch.isfinite(pred_betas).all():
-                print(f"Warning: Non-finite values in pred_betas at iteration {i}: {pred_betas}")
-                pred_betas = torch.zeros_like(pred_betas)
-            if not torch.isfinite(pred_trans).all():
-                print(f"Warning: Non-finite values in pred_trans at iteration {i}: {pred_trans}")
-                pred_trans = torch.zeros_like(pred_trans)
-            if not torch.isfinite(pred_fov).all():
-                print(f"Warning: Non-finite values in pred_fov at iteration {i}: {pred_fov}")
-                pred_fov = torch.tensor([[0.9]], device=pred_fov.device, dtype=pred_fov.dtype).expand_as(pred_fov)
-            if not torch.isfinite(pred_cam_rot).all():
-                print(f"Warning: Non-finite values in pred_cam_rot at iteration {i}: {pred_cam_rot}")
-                pred_cam_rot = torch.eye(3, device=pred_cam_rot.device, dtype=pred_cam_rot.dtype).flatten().unsqueeze(0).expand_as(pred_cam_rot)
-            if not torch.isfinite(pred_cam_trans).all():
-                print(f"Warning: Non-finite values in pred_cam_trans at iteration {i}: {pred_cam_trans}")
-                pred_cam_trans = torch.zeros_like(pred_cam_trans)
-            
+
             if self.scales_dim > 0:
                 pred_scales = pred_scales + self.scales_head(token_out) * self.scales_scale_factor
-                if not torch.isfinite(pred_scales).all():
-                    print(f"Warning: Non-finite values in pred_scales at iteration {i}: {pred_scales}")
-                    pred_scales = torch.zeros_like(pred_scales)
             if self.joint_trans_dim > 0:
                 pred_joint_trans = pred_joint_trans + self.joint_trans_head(token_out) * self.trans_scale_factor
-                if not torch.isfinite(pred_joint_trans).all():
-                    print(f"Warning: Non-finite values in pred_joint_trans at iteration {i}: {pred_joint_trans}")
-                    pred_joint_trans = torch.zeros_like(pred_joint_trans)
             if self.allow_mesh_scaling:
-                # Predict in log space for numerical stability (small updates)
                 pred_mesh_scale = pred_mesh_scale + self.mesh_scale_head(token_out) * 0.1
-                if not torch.isfinite(pred_mesh_scale).all():
-                    print(f"Warning: Non-finite values in pred_mesh_scale at iteration {i}: {pred_mesh_scale}")
-                    pred_mesh_scale = torch.zeros_like(pred_mesh_scale)
+
+            # Sanitise non-finite values with nan_to_num (preserves autograd
+            # graph for finite elements, unlike replacing with new tensors).
+            all_preds = [pred_pose, pred_betas, pred_trans, pred_fov,
+                         pred_cam_rot, pred_cam_trans]
+            if self.scales_dim > 0:
+                all_preds.append(pred_scales)
+            if self.joint_trans_dim > 0:
+                all_preds.append(pred_joint_trans)
+            if self.allow_mesh_scaling:
+                all_preds.append(pred_mesh_scale)
+
+            has_nonfinite = any(not torch.isfinite(t).all() for t in all_preds)
+            if has_nonfinite:
+                if not hasattr(self, '_nan_warn_count'):
+                    self._nan_warn_count = 0
+                self._nan_warn_count += 1
+                if self._nan_warn_count <= 5:
+                    names = ['pose', 'betas', 'trans', 'fov', 'cam_rot', 'cam_trans']
+                    if self.scales_dim > 0:
+                        names.append('scales')
+                    if self.joint_trans_dim > 0:
+                        names.append('joint_trans')
+                    if self.allow_mesh_scaling:
+                        names.append('mesh_scale')
+                    bad = [n for n, t in zip(names, all_preds) if not torch.isfinite(t).all()]
+                    print(f"Warning: non-finite values in IEF iter {i}: {bad} "
+                          f"(occurrence {self._nan_warn_count})")
+
+                pred_pose = torch.nan_to_num(pred_pose)
+                pred_betas = torch.nan_to_num(pred_betas)
+                pred_trans = torch.nan_to_num(pred_trans)
+                pred_fov = torch.nan_to_num(pred_fov)
+                pred_cam_rot = torch.nan_to_num(pred_cam_rot)
+                pred_cam_trans = torch.nan_to_num(pred_cam_trans)
+                if self.scales_dim > 0:
+                    pred_scales = torch.nan_to_num(pred_scales)
+                if self.joint_trans_dim > 0:
+                    pred_joint_trans = torch.nan_to_num(pred_joint_trans)
+                if self.allow_mesh_scaling:
+                    pred_mesh_scale = torch.nan_to_num(pred_mesh_scale)
             
             # Store predictions for this iteration
             pred_pose_list.append(pred_pose.clone())

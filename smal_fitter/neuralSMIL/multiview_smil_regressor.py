@@ -462,22 +462,24 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         
         # Apply cross-view attention for feature fusion
         fused_features = self.view_fusion(stacked_features, view_mask)  # (batch_size, num_views, feature_dim)
-        
-        # Aggregate features for body parameter prediction
-        # Use mean pooling over valid views
-        if view_mask is not None:
-            # Mask invalid views before pooling
-            mask_expanded = view_mask.unsqueeze(-1).float()  # (batch_size, num_views, 1)
-            masked_features = fused_features * mask_expanded
-            aggregated_features = masked_features.sum(dim=1) / (mask_expanded.sum(dim=1) + 1e-8)
-        else:
-            aggregated_features = fused_features.mean(dim=1)  # (batch_size, feature_dim)
-        
-        # Apply body aggregator
-        body_features = self.body_aggregator(aggregated_features)
-        
+
         # Predict shared body parameters using parent's head
-        body_params = self._predict_body_params(body_features, batch_size)
+        # For transformer_decoder: cross-attend directly to per-view fused features
+        # For mlp: mean-pool first since the MLP needs a flat vector
+        if self.head_type == 'transformer_decoder':
+            body_params = self._predict_body_params(
+                fused_features, batch_size, view_mask=view_mask
+            )
+        else:
+            # MLP path: pool to (B, feature_dim) then pass through aggregator
+            if view_mask is not None:
+                mask_expanded = view_mask.unsqueeze(-1).float()  # (batch_size, num_views, 1)
+                masked_features = fused_features * mask_expanded
+                aggregated_features = masked_features.sum(dim=1) / (mask_expanded.sum(dim=1) + 1e-8)
+            else:
+                aggregated_features = fused_features.mean(dim=1)  # (batch_size, feature_dim)
+            body_features = self.body_aggregator(aggregated_features)
+            body_params = self._predict_body_params(body_features, batch_size)
         
         # Predict per-view camera parameters
         per_view_cam_params = self._predict_camera_params_per_view(
@@ -497,11 +499,22 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         
         return output
     
-    def _predict_body_params(self, features: torch.Tensor, batch_size: int) -> Dict[str, torch.Tensor]:
+    def _predict_body_params(self, features: torch.Tensor, batch_size: int,
+                             view_mask: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """
-        Predict shared body parameters from aggregated features.
-        
-        Uses the parent class's regression head for body parameters only.
+        Predict shared body parameters from features.
+
+        For the MLP head, ``features`` is a pooled vector ``(B, feature_dim)``.
+        For the transformer_decoder head, ``features`` can be per-view fused
+        features ``(B, V, feature_dim)`` which are used as cross-attention
+        context, letting the decoder attend over views.
+
+        Args:
+            features: Either ``(B, feature_dim)`` (MLP) or ``(B, V, feature_dim)``
+                      (transformer_decoder with multiview context).
+            batch_size: Batch size.
+            view_mask: Optional ``(B, V)`` boolean mask for valid views.  Only
+                       used when features is 3-D (transformer_decoder path).
         """
         if self.head_type == 'mlp':
             # Pass through regression head
@@ -585,14 +598,27 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             return params
             
         elif self.head_type == 'transformer_decoder':
-            # Use transformer decoder for body params
-            # IMPORTANT: Pass features as spatial_features so the decoder can cross-attend to them.
-            # The transformer decoder uses spatial_features for cross-attention in its layers.
-            # Without this, the decoder would output the same result regardless of input!
-            # Shape: features is (batch_size, feature_dim), reshape to (batch_size, 1, feature_dim)
-            # to serve as a single-token sequence for cross-attention.
-            spatial_feats = features.unsqueeze(1)  # (batch_size, 1, feature_dim)
-            params = self.transformer_head(features, spatial_feats)
+            # Use transformer decoder for body params.
+            # When features is 3-D (B, V, D) — multiview path — the per-view
+            # fused features serve as the cross-attention context so the decoder
+            # can attend over views (analogous to attending over spatial patch
+            # tokens in the single-view path).
+            if features.dim() == 3:
+                # Multiview: features is (B, V, D)
+                spatial_feats = features  # (B, V, D) — one token per view
+
+                # Pool for the global feature vector the decoder also receives
+                if view_mask is not None:
+                    mask_exp = view_mask.unsqueeze(-1).float()  # (B, V, 1)
+                    global_feats = (features * mask_exp).sum(dim=1) / (mask_exp.sum(dim=1) + 1e-8)
+                else:
+                    global_feats = features.mean(dim=1)  # (B, D)
+            else:
+                # Single-view / already-pooled fallback: (B, D)
+                spatial_feats = features.unsqueeze(1)  # (B, 1, D)
+                global_feats = features
+
+            params = self.transformer_head(global_feats, spatial_feats)
             
             # Handle scale/trans mode
             if self.scale_trans_mode == 'entangled_with_betas':
@@ -716,6 +742,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 'joint_angle_regularization': 0.0001,  # Penalty for large joint angles
                 'limb_scale_regularization': 0.01,      # Penalty for deviations from scale=1 (log_beta_scales)
                 'limb_trans_regularization': 0.1,       # Heavy penalty for translation changes (betas_trans)
+                'triangulation_consistency': 0.0,       # Triangulate GT 2D keypoints with predicted cameras, compare to predicted 3D
             }
         
         batch_size = predicted_params['global_rot'].shape[0]
@@ -892,21 +919,24 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         # Get joint importance weights (computed once, used for both 2D and 3D losses)
         joint_importance_weights = self._get_joint_importance_weights()
         
-        if loss_weights.get('keypoint_2d', 0) > 0:
-            # Collect all GT keypoints at once (batched)
+        # Pre-compute shared data needed by multiple loss terms
+        need_kp = (loss_weights.get('keypoint_2d', 0) > 0
+                   or loss_weights.get('triangulation_consistency', 0) > 0
+                   or loss_weights.get('ief_intermediate', 0) > 0)
+        all_kp_data = None
+        joints_3d = None
+        aspect_ratio_list = None
+
+        if need_kp:
             all_kp_data = self._collect_all_view_keypoint_data(target_data, num_views)
-            
             if all_kp_data is not None:
-                # Compute 3D joints ONCE (avoids N SMAL forward passes)
                 joints_3d = self._compute_world_space_joints(predicted_params)  # (B, J, 3)
-                
-                # Get GT-derived aspect ratios for all views (when available)
                 gt_cam_all = self._collect_all_view_camera_data(target_data, num_views)
-                aspect_ratio_list = None
                 if gt_cam_all is not None and gt_cam_all.get('aspect_ratio') is not None:
-                    # Convert (B, V) to list of (B,) tensors to match expected format
                     aspect_ratio_list = [gt_cam_all['aspect_ratio'][:, v] for v in range(num_views)]
-                
+
+        if loss_weights.get('keypoint_2d', 0) > 0:
+            if all_kp_data is not None and joints_3d is not None:
                 # Batch project to all views at once
                 try:
                     rendered_joints_all = self._batch_project_joints_to_views(
@@ -917,27 +947,81 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         aspect_ratio_per_view=aspect_ratio_list,
                         view_mask=view_mask
                     )  # (B, V, J, 2)
-                    
-                    # Compute batched visibility-weighted loss with joint importance weighting
+
                     target_kps = all_kp_data['keypoints_2d']  # (B, V, J, 2)
                     visibility = all_kp_data['visibility']    # (B, V, J)
-                    
+
                     keypoint_loss = self._compute_batched_keypoint_loss(
                         rendered_joints_all, target_kps, visibility, view_mask,
                         joint_weights=joint_importance_weights
                     )
-                    
+
                     if torch.isfinite(keypoint_loss):
                         loss_components['keypoint_2d'] = keypoint_loss
                         total_loss = total_loss + loss_weights['keypoint_2d'] * keypoint_loss
                     else:
                         loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
-                        
+
                 except Exception as e:
                     print(f"Warning: Batched keypoint projection failed: {e}")
                     loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
             else:
                 loss_components['keypoint_2d'] = torch.tensor(eps, device=self.device, requires_grad=True)
+
+        # =================== TRIANGULATION CONSISTENCY LOSS ===================
+        # Triangulate GT 2D keypoints using predicted cameras, compare to
+        # predicted 3D joints (detached).  Gradients flow through the
+        # differentiable triangulation into the camera heads, enforcing
+        # multi-view geometric consistency.  The body model's 3D predictions
+        # serve as the stable target (already supervised by keypoint_3d).
+        if loss_weights.get('triangulation_consistency', 0) > 0:
+            if all_kp_data is not None and joints_3d is not None:
+                try:
+                    target_kps = all_kp_data['keypoints_2d']  # (B, V, J, 2)
+                    visibility = all_kp_data['visibility']    # (B, V, J)
+
+                    triangulated, tri_valid = self._triangulate_joints_dlt(
+                        target_kps, visibility,
+                        predicted_params['fov_per_view'],
+                        predicted_params['cam_rot_per_view'],
+                        predicted_params['cam_trans_per_view'],
+                        aspect_ratio_per_view=aspect_ratio_list,
+                        view_mask=view_mask,
+                    )  # (B, J, 3), (B, J)
+
+                    with torch.no_grad():
+                        # Reject outlier triangulations (behind camera or extremely far)
+                        tri_norm = triangulated.norm(dim=-1)  # (B, J)
+                        sane = tri_norm < 50.0  # generous bound
+                        tri_valid = tri_valid & sane
+
+                    if tri_valid.any():
+                        diff_sq = (triangulated - joints_3d.detach()) ** 2  # (B, J, 3)
+
+                        # Mask to valid joints and apply importance weights
+                        mask_weights = tri_valid.float()  # (B, J)
+                        if joint_importance_weights is not None:
+                            mask_weights = mask_weights * joint_importance_weights.unsqueeze(0)
+
+                        masked_loss = diff_sq * mask_weights.unsqueeze(-1)  # (B, J, 3)
+
+                        if joint_importance_weights is not None:
+                            denom = (tri_valid.float() * joint_importance_weights.unsqueeze(0)).sum() * 3 + eps
+                        else:
+                            denom = tri_valid.sum().float() * 3 + eps
+
+                        tri_loss = masked_loss.sum() / denom
+
+                        if torch.isfinite(tri_loss):
+                            loss_components['triangulation_consistency'] = tri_loss
+                            total_loss = total_loss + loss_weights['triangulation_consistency'] * tri_loss
+                        else:
+                            loss_components['triangulation_consistency'] = torch.tensor(eps, device=self.device, requires_grad=True)
+                    else:
+                        loss_components['triangulation_consistency'] = torch.tensor(eps, device=self.device, requires_grad=True)
+                except Exception as e:
+                    print(f"Warning: Triangulation consistency loss failed: {e}")
+                    loss_components['triangulation_consistency'] = torch.tensor(eps, device=self.device, requires_grad=True)
 
         # =================== PER-VIEW CAMERA SUPERVISION LOSSES ===================
         # If GT camera parameters are available (e.g., from SLEAP 3D calibration), we can supervise
@@ -1019,9 +1103,11 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     total_loss = total_loss + loss_weights['cam_trans'] * t_loss
 
         # =================== SHARED 3D KEYPOINT LOSS ===================
-        # If GT 3D keypoints exist, supervise predicted canonical joints in 3D.
+        # Collect GT 3D keypoints (also used by IEF intermediate supervision below)
+        gt_3d = self._collect_keypoints_3d_batch(target_data) if (
+            loss_weights.get('keypoint_3d', 0) > 0 or loss_weights.get('ief_intermediate', 0) > 0
+        ) else None
         if loss_weights.get('keypoint_3d', 0) > 0:
-            gt_3d = self._collect_keypoints_3d_batch(target_data)
             if gt_3d is not None and gt_3d.get('keypoints_3d') is not None:
                 pred_joints_3d = self._predict_canonical_joints_3d(predicted_params)  # (B, J, 3)
                 target_joints_3d = gt_3d['keypoints_3d']  # (B, J, 3)
@@ -1076,6 +1162,128 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         # No valid joints in batch
                         loss_components['keypoint_3d'] = torch.tensor(0.0, device=self.device, requires_grad=True)
         
+        # IEF intermediate keypoint supervision
+        # Runs each non-final IEF prediction through the body model to get 3D
+        # joints, then computes the same 2D/3D keypoint losses that supervise the
+        # final output.  This gives intermediate steps meaningful gradient signal
+        # (the dominant keypoint losses) rather than only parameter-level losses
+        # which may have tiny weights or missing GT (e.g. no GT joint angles in
+        # SLEAP data).  Controlled by 'ief_intermediate' loss weight.
+        ief_w = loss_weights.get('ief_intermediate', 0.0)
+        if ief_w > 0 and 'iteration_history' in predicted_params:
+            hist = predicted_params['iteration_history']
+            n_iters = len(hist.get('pose', []))
+            global_rot_dim = 6 if self.rotation_representation == '6d' else 3
+            rot_per_joint = 6 if self.rotation_representation == '6d' else 3
+
+            for i in range(n_iters - 1):  # skip final iter — already supervised above
+                w = ief_w * (i + 1) / n_iters  # linear ramp: earlier iters get lower weight
+
+                # Reconstruct body_params dict from iteration history
+                iter_pose = hist['pose'][i]  # (B, total_pose_dim)
+                iter_body_params = {
+                    'global_rot': iter_pose[:, :global_rot_dim],
+                    'joint_rot': iter_pose[:, global_rot_dim:].view(batch_size, config.N_POSE, rot_per_joint),
+                    'betas': hist['betas'][i],
+                    'trans': hist['trans'][i],
+                }
+                if 'scales' in hist:
+                    # Iteration history stores flat (B, scales_dim); reshape to
+                    # match _predict_canonical_joints_3d: per-joint (B, n_joints, 3)
+                    # for non-PCA separate mode, or (B, N_BETAS) for PCA mode.
+                    raw_scales = hist['scales'][i]
+                    if raw_scales.shape[-1] != config.N_BETAS:
+                        iter_body_params['log_beta_scales'] = raw_scales.view(batch_size, -1, 3)
+                    else:
+                        iter_body_params['log_beta_scales'] = raw_scales
+                if 'joint_trans' in hist:
+                    raw_jtrans = hist['joint_trans'][i]
+                    if raw_jtrans.shape[-1] != config.N_BETAS:
+                        iter_body_params['betas_trans'] = raw_jtrans.view(batch_size, -1, 3)
+                    else:
+                        iter_body_params['betas_trans'] = raw_jtrans
+                if 'mesh_scale' in hist:
+                    iter_body_params['mesh_scale'] = hist['mesh_scale'][i]
+
+                # Forward through body model to get intermediate 3D joints
+                try:
+                    iter_joints_3d = self._predict_canonical_joints_3d(iter_body_params)  # (B, J, 3)
+                except Exception as e:
+                    print(f"Warning: IEF intermediate body model forward failed at iter {i}: {e}")
+                    continue
+
+                # 3D keypoint loss on intermediate predictions
+                if gt_3d is not None and gt_3d.get('keypoints_3d') is not None and loss_weights.get('keypoint_3d', 0) > 0:
+                    target_joints_3d = gt_3d['keypoints_3d']
+                    sample_mask_3d = gt_3d.get('mask', None)
+                    if (iter_joints_3d.shape == target_joints_3d.shape
+                            and sample_mask_3d is not None and sample_mask_3d.any()):
+                        joint_norms = torch.norm(target_joints_3d, dim=-1)
+                        finite_mask = torch.isfinite(target_joints_3d).all(dim=-1)
+                        valid_joint_mask = (joint_norms > 1e-6) & finite_mask
+                        combined_mask = sample_mask_3d.unsqueeze(1) & valid_joint_mask
+                        if combined_mask.any():
+                            diff = iter_joints_3d - target_joints_3d
+                            mask_weights_3d = combined_mask.float()
+                            if joint_importance_weights is not None:
+                                mask_weights_3d = mask_weights_3d * joint_importance_weights.unsqueeze(0)
+                            masked_loss = (diff ** 2) * mask_weights_3d.unsqueeze(-1)
+                            if joint_importance_weights is not None:
+                                wvc = (combined_mask.float() * joint_importance_weights.unsqueeze(0)).sum() * 3 + 1e-8
+                            else:
+                                wvc = combined_mask.sum().float() * 3 + 1e-8
+                            ief_kp3d = masked_loss.sum() / wvc
+                            if torch.isfinite(ief_kp3d):
+                                total_loss = total_loss + w * loss_weights['keypoint_3d'] * ief_kp3d
+
+                # 2D keypoint loss on intermediate predictions (project using final cameras)
+                if all_kp_data is not None and loss_weights.get('keypoint_2d', 0) > 0:
+                    try:
+                        iter_rendered = self._batch_project_joints_to_views(
+                            iter_joints_3d,
+                            predicted_params['fov_per_view'],
+                            predicted_params['cam_rot_per_view'],
+                            predicted_params['cam_trans_per_view'],
+                            aspect_ratio_per_view=aspect_ratio_list,
+                            view_mask=view_mask
+                        )
+                        ief_kp2d = self._compute_batched_keypoint_loss(
+                            iter_rendered,
+                            all_kp_data['keypoints_2d'],
+                            all_kp_data['visibility'],
+                            view_mask,
+                            joint_weights=joint_importance_weights
+                        )
+                        if torch.isfinite(ief_kp2d):
+                            total_loss = total_loss + w * loss_weights['keypoint_2d'] * ief_kp2d
+                    except Exception as e:
+                        pass  # projection can fail for degenerate intermediate cameras
+
+                # Retain parameter-level losses when GT is available (cheap, extra signal)
+                iter_joint_rot = iter_body_params['joint_rot']
+                iter_betas = iter_body_params['betas']
+                iter_trans = iter_body_params['trans']
+
+                if body_targets.get('joint_rot') is not None and loss_weights.get('joint_rot', 0) > 0:
+                    ief_loss = self._compute_rotation_loss(
+                        iter_joint_rot.reshape(batch_size, -1),
+                        body_targets['joint_rot'].reshape(batch_size, -1),
+                        body_targets.get('joint_rot_mask')
+                    )
+                    total_loss = total_loss + w * loss_weights['joint_rot'] * ief_loss
+
+                if body_targets.get('betas') is not None and loss_weights.get('betas', 0) > 0:
+                    mask = body_targets.get('betas_mask')
+                    if mask is not None and mask.any():
+                        ief_loss = F.mse_loss(iter_betas[mask], body_targets['betas'][mask])
+                        total_loss = total_loss + w * loss_weights['betas'] * ief_loss
+
+                if body_targets.get('trans') is not None and loss_weights.get('trans', 0) > 0:
+                    mask = body_targets.get('trans_mask')
+                    if mask is not None and mask.any():
+                        ief_loss = F.mse_loss(iter_trans[mask], body_targets['trans'][mask])
+                        total_loss = total_loss + w * loss_weights['trans'] * ief_loss
+
         if return_components:
             return total_loss, loss_components
         return total_loss
@@ -1383,10 +1591,145 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         
         # Reshape back to (B, V, J, 2)
         proj_points_batched = proj_points_normalized.view(batch_size, num_views, num_joints, 2)
-        
+
         return proj_points_batched
 
-    def _collect_all_view_keypoint_data(self, target_data: List[Dict[str, Any]], 
+    def _triangulate_joints_dlt(
+        self,
+        keypoints_2d: torch.Tensor,
+        visibility: torch.Tensor,
+        fov_per_view: List[torch.Tensor],
+        cam_rot_per_view: List[torch.Tensor],
+        cam_trans_per_view: List[torch.Tensor],
+        aspect_ratio_per_view: Optional[List[torch.Tensor]] = None,
+        view_mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Triangulate 3D joint positions from multi-view 2D keypoints using DLT.
+
+        Uses the predicted camera parameters to build projection matrices, then
+        solves the linear triangulation system per joint via SVD.
+
+        Args:
+            keypoints_2d: GT 2D keypoints ``(B, V, J, 2)`` normalised to [0, 1].
+            visibility: Per-joint visibility ``(B, V, J)``.
+            fov_per_view: Predicted FOV per view, list of ``(B, 1)``.
+            cam_rot_per_view: Predicted rotation per view, list of ``(B, 3, 3)``.
+            cam_trans_per_view: Predicted translation per view, list of ``(B, 3)``.
+            aspect_ratio_per_view: Optional aspect ratios, list of ``(B,)``.
+            view_mask: Optional ``(B, V)`` mask for valid views.
+
+        Returns:
+            Tuple of:
+            - triangulated_joints ``(B, J, 3)`` in world space.
+            - valid_mask ``(B, J)`` boolean — True where >= 2 views contributed.
+        """
+        B, V, J, _ = keypoints_2d.shape
+        device = keypoints_2d.device
+        img_size = float(self.renderer.image_size)
+
+        # --- Build (B*V, 4, 4) projection matrices from predicted cameras ---
+        fov_stacked = torch.stack(
+            [f.squeeze(-1) if f.dim() > 1 else f for f in fov_per_view], dim=1
+        )  # (B, V)
+        cam_rot_stacked = torch.stack(cam_rot_per_view, dim=1)  # (B, V, 3, 3)
+        cam_trans_stacked = torch.stack(cam_trans_per_view, dim=1)  # (B, V, 3)
+
+        if aspect_ratio_per_view is not None and len(aspect_ratio_per_view) > 0:
+            aspect_stacked = torch.stack(
+                [a.squeeze(-1) if a.dim() > 1 else a for a in aspect_ratio_per_view],
+                dim=1,
+            )  # (B, V)
+        else:
+            aspect_stacked = torch.ones(B, V, device=device)
+
+        cameras = FoVPerspectiveCameras(
+            device=device,
+            R=cam_rot_stacked.reshape(B * V, 3, 3).float(),
+            T=cam_trans_stacked.reshape(B * V, 3).float(),
+            fov=fov_stacked.reshape(B * V).float(),
+            aspect_ratio=aspect_stacked.reshape(B * V).float(),
+            znear=self.renderer.DEFAULT_ZNEAR if hasattr(self.renderer, 'DEFAULT_ZNEAR') else 0.001,
+            zfar=self.renderer.DEFAULT_ZFAR if hasattr(self.renderer, 'DEFAULT_ZFAR') else 1000.0,
+        )
+
+        # Full projection: world -> NDC (4x4 matrices, row-vector convention)
+        P = cameras.get_full_projection_transform().get_matrix()  # (B*V, 4, 4)
+        P = P.view(B, V, 4, 4)
+
+        # --- Convert normalised [0,1] keypoints to NDC coordinates ---
+        # _batch_project_joints_to_views does:
+        #   screen = transform_points_screen(...)[:, :, [1, 0]]  (swap x,y)
+        #   norm   = screen / img_size
+        # So to invert: un-normalise then un-swap.
+        kp_screen = keypoints_2d * img_size             # (B, V, J, 2)  in (y, x)
+        kp_screen = kp_screen[..., [1, 0]]              # (B, V, J, 2)  in (x, y)
+
+        # PyTorch3D's ndc_to_screen_points_naive uses:
+        #   screen = (W - 1) / 2 * (1 - ndc)
+        # Approximating (W-1) ≈ W for large image sizes, the inverse is:
+        #   ndc = 1 - screen / (W / 2)
+        ndc_xy = 1.0 - kp_screen / (img_size / 2.0)     # (B, V, J, 2)
+
+        # --- Build DLT system and solve per joint ---
+        # Combined visibility: view must be valid AND joint visible
+        joint_vis = visibility.bool()  # (B, V, J)
+        if view_mask is not None:
+            joint_vis = joint_vis & view_mask.unsqueeze(-1)  # (B, V, J)
+
+        # PyTorch3D uses row-vector convention: ndc_homo = world_homo @ P
+        # so columns of P map to output dimensions:
+        #   col 0 -> u*w,  col 1 -> v*w,  col 2 -> z*w,  col 3 -> w
+        P_col0 = P[:, :, :, 0]  # (B, V, 4) — x output
+        P_col1 = P[:, :, :, 1]  # (B, V, 4) — y output
+        P_col3 = P[:, :, :, 3]  # (B, V, 4) — w output
+
+        u = ndc_xy[..., 0]  # (B, V, J)
+        v = ndc_xy[..., 1]  # (B, V, J)
+
+        # DLT constraints: u * w_col - x_col = 0,  v * w_col - y_col = 0
+        # With w=1 normalization: A_xyz @ [X,Y,Z]^T = -a_w
+        # row1 = u * P_col3 - P_col0   shape (B, V, J, 4)
+        row1 = u.unsqueeze(-1) * P_col3.unsqueeze(2) - P_col0.unsqueeze(2)
+        # row2 = v * P_col3 - P_col1   shape (B, V, J, 4)
+        row2 = v.unsqueeze(-1) * P_col3.unsqueeze(2) - P_col1.unsqueeze(2)
+
+        # Zero out rows from invisible views
+        vis_mask = joint_vis.unsqueeze(-1).float()  # (B, V, J, 1)
+        row1 = row1 * vis_mask
+        row2 = row2 * vis_mask
+
+        # Stack rows: (B, V, J, 2, 4) -> (B, J, 2V, 4)
+        A = torch.stack([row1, row2], dim=3)  # (B, V, J, 2, 4)
+        A = A.permute(0, 2, 1, 3, 4)         # (B, J, V, 2, 4)
+        A = A.reshape(B, J, V * 2, 4)        # (B, J, 2V, 4)
+
+        # Solve via normal equations with w=1 normalization.
+        # The homogeneous system A @ [X,Y,Z,1]^T = 0 becomes:
+        #   A_xyz @ p = -a_w   =>   (A_xyz^T A_xyz + λI) @ p = -A_xyz^T a_w
+        # The damping λI ensures the system is always full-rank (Tikhonov
+        # regularisation), avoiding LAPACK failures on zero-padded rows from
+        # invisible joints, and the gradient through torch.linalg.solve is
+        # stable (implicit-function theorem, no singular-value gaps).
+        A_xyz = A[:, :, :, :3]                # (B, J, 2V, 3)
+        a_w = A[:, :, :, 3]                   # (B, J, 2V)
+
+        AtA = torch.einsum('bkni,bknj->bkij', A_xyz, A_xyz)  # (B, J, 3, 3)
+        Atb = torch.einsum('bkni,bkn->bki', A_xyz, -a_w)     # (B, J, 3)
+
+        # Damping for numerical stability
+        damping = 1e-6 * torch.eye(3, device=device, dtype=AtA.dtype)
+        AtA = AtA + damping
+
+        triangulated = torch.linalg.solve(AtA, Atb)  # (B, J, 3)
+
+        # Valid mask: joint must be visible in >= 2 views
+        view_count = joint_vis.float().sum(dim=1)  # (B, J)
+        valid_mask = view_count >= 2.0
+
+        return triangulated, valid_mask
+
+    def _collect_all_view_keypoint_data(self, target_data: List[Dict[str, Any]],
                                          num_views: int) -> Optional[Dict[str, torch.Tensor]]:
         """
         Collect keypoint data for ALL views at once (batched).
