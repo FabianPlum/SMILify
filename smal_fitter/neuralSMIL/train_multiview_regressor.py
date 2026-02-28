@@ -2497,7 +2497,8 @@ def main(config: dict):
         input_resolution=input_resolution,
         allow_mesh_scaling=allow_mesh_scaling,
         mesh_scale_init=mesh_scale_init,
-        use_gt_camera_init=config.get('use_gt_camera_init', False)
+        use_gt_camera_init=config.get('use_gt_camera_init', False),
+        transformer_config=config.get('transformer_config', {})
     )
     
     model = model.to(device)
