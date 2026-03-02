@@ -1519,7 +1519,10 @@ Examples:
     parser.add_argument("--target_resolution", type=int, default=224,
                        help="Target image resolution (default: 224)")
     parser.add_argument("--backbone", dest="backbone_name", default='vit_large_patch16_224',
-                       help="Backbone network name (default: vit_large_patch16_224)")
+                       help="Backbone network name (default: vit_large_patch16_224). "
+                            "Supported: vit_base_patch16_224, vit_large_patch16_224, "
+                            "resnet50/101/152, unet_efficientnet_b0/b3, unet_resnet34, "
+                            "unet_mobilenet_v3")
     parser.add_argument("--jpeg_quality", type=int, default=95,
                        help="JPEG compression quality 1-100 (default: 95)")
     parser.add_argument("--crop_mode", type=str, default='default',
