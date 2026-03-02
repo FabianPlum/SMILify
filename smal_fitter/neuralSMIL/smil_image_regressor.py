@@ -280,12 +280,16 @@ class SMILImageRegressor(SMALFitter):
         # Merge with user-provided config
         config = {**default_config, **self.transformer_config}
         
-        # For ViT backbones, we can use spatial features
-        if self.backbone_name.startswith('vit'):
-            context_dim = self.feature_dim  # Same as feature dim for ViT
-        else:
-            # For ResNet, we don't have spatial features, so use global features as context
-            context_dim = self.feature_dim
+        # context_dim = dimension of spatial tokens passed to cross-attention.
+        # For ViT: patch tokens share the same dim as the CLS token (feature_dim).
+        # For UNet: spatial decoder channels differ from bottleneck feature_dim;
+        #   get_spatial_dim() returns the correct value.
+        # For ResNet: no spatial features, context_dim is unused but set consistently.
+        context_dim = (
+            self.backbone.get_spatial_dim()
+            if hasattr(self.backbone, 'get_spatial_dim')
+            else self.feature_dim
+        )
         
         # Create transformer decoder head
         self.transformer_head = build_smil_transformer_decoder_head(
@@ -359,13 +363,8 @@ class SMILImageRegressor(SMALFitter):
             # Assume values are in [0, 255] range
             image_data = image_data.astype(np.float32) / 255.0
         
-        # Resize to appropriate resolution based on backbone type
-        if self.backbone_name.startswith('vit'):
-            # Vision Transformers expect 224x224 input
-            target_size = (224, 224)
-        else:
-            # ResNet can handle higher resolutions
-            target_size = (self.input_resolution, self.input_resolution)
+        # Resize to the model's configured input resolution
+        target_size = (self.input_resolution, self.input_resolution)
         if len(image_data.shape) == 4:
             # Batch of images
             batch_size = image_data.shape[0]
@@ -401,12 +400,7 @@ class SMILImageRegressor(SMALFitter):
             Scaled keypoint coordinates in normalized [0,1] format
         """
         if target_size is None:
-            if self.backbone_name.startswith('vit'):
-                # Vision Transformers expect 224x224 input
-                target_size = (224, 224)
-            else:
-                # ResNet can handle higher resolutions
-                target_size = (self.input_resolution, self.input_resolution)
+            target_size = (self.input_resolution, self.input_resolution)
         
         # Handle different input formats
         if isinstance(original_size, (int, float)):
@@ -483,12 +477,7 @@ class SMILImageRegressor(SMALFitter):
                 image_data = image_data.astype(np.float32) / 255.0
             
             # Resize to appropriate resolution based on backbone type
-            if self.backbone_name.startswith('vit'):
-                # Vision Transformers expect 224x224 input
-                target_size = (224, 224)
-            else:
-                # ResNet can handle higher resolutions
-                target_size = (self.input_resolution, self.input_resolution)
+            target_size = (self.input_resolution, self.input_resolution)
             if image_data.shape[:2] != target_size:
                 image_data = cv2.resize(image_data, target_size)
             
@@ -631,12 +620,13 @@ class SMILImageRegressor(SMALFitter):
     
     def _forward_transformer_decoder(self, images: torch.Tensor, batch_size: int) -> Dict[str, torch.Tensor]:
         """Forward pass for transformer decoder regression head."""
-        # Extract features using backbone
-        if self.backbone_name.startswith('vit'):
-            # For ViT, get both global and spatial features
+        # Extract features using backbone.
+        # Any backbone that implements forward_with_spatial() provides rich spatial
+        # context for the decoder's cross-attention (ViT patch tokens, UNet decoder
+        # feature maps, …).  Fall back to global-only for ResNet.
+        if hasattr(self.backbone, 'forward_with_spatial'):
             global_features, spatial_features = self.backbone.forward_with_spatial(images)
         else:
-            # For ResNet, only global features available
             global_features = self.backbone(images)
             spatial_features = None
         
