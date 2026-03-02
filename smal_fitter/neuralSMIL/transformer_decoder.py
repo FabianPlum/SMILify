@@ -145,8 +145,19 @@ class SMILTransformerDecoderHead(nn.Module):
             self.scales_dim + self.joint_trans_dim       # optional scales/trans
         )
 
+        # LayerNorm on concatenated parameter feedback — adaptive normalisation
+        # that learns the right scale per component from data, replacing the
+        # hardcoded per-group divisors that became stale as predictions diverged
+        # from init values.
+        self.param_norm = nn.LayerNorm(self._param_feedback_dim)
+
         # Token embedding: projects concatenated parameter estimates into hidden_dim
         self.token_embedding = nn.Linear(self._param_feedback_dim, hidden_dim)
+
+        # Global feature projection: injects pooled image features into the
+        # decoder token so the decoder has direct access to visual information,
+        # not only through cross-attention to the (potentially few) spatial tokens.
+        self.global_feat_proj = nn.Linear(feature_dim, hidden_dim)
 
         # Positional embedding for tokens
         self.pos_embedding = nn.Parameter(torch.randn(1, 1, hidden_dim))
@@ -249,7 +260,12 @@ class SMILTransformerDecoderHead(nn.Module):
         # decoder layers.
         nn.init.xavier_uniform_(self.token_embedding.weight, gain=0.1)
         nn.init.constant_(self.token_embedding.bias, 0)
-        
+
+        # Global feature projection — small gain so it starts near-zero and
+        # doesn't disrupt a pretrained decoder when first introduced.
+        nn.init.xavier_uniform_(self.global_feat_proj.weight, gain=0.1)
+        nn.init.constant_(self.global_feat_proj.bias, 0)
+
         # Initialize positional embedding
         nn.init.normal_(self.pos_embedding, std=0.02)
         
@@ -305,7 +321,7 @@ class SMILTransformerDecoderHead(nn.Module):
         if self.allow_mesh_scaling:
             init_log_scale = np.log(self.mesh_scale_init) if self.mesh_scale_init > 0 else 0.0
             self.register_buffer('init_mesh_scale', torch.tensor([[init_log_scale]]))
-    
+
     def forward(self, features: torch.Tensor, spatial_features: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """
         Forward pass through transformer decoder head.
@@ -350,6 +366,9 @@ class SMILTransformerDecoderHead(nn.Module):
         if self.allow_mesh_scaling:
             pred_mesh_scale_list = []
         
+        # Project global image features once (constant across IEF iterations)
+        img_token = self.global_feat_proj(features).unsqueeze(1)  # (batch_size, 1, hidden_dim)
+
         # Iterative Error Feedback (IEF)
         for i in range(self.ief_iters):
             # Concatenate all current parameter estimates as feedback
@@ -360,8 +379,15 @@ class SMILTransformerDecoderHead(nn.Module):
                 param_tokens.append(pred_joint_trans)
             param_state = torch.cat(param_tokens, dim=-1)  # (batch_size, _param_feedback_dim)
 
-            # Project current parameter state into a single decoder token
-            token = self.token_embedding(param_state).unsqueeze(1)  # (batch_size, 1, hidden_dim)
+            # Adaptive normalisation — LayerNorm learns per-component scale
+            # from training data, handling the 3-order-of-magnitude spread
+            # (pose ~1, cam_trans ~100) without hardcoded assumptions.
+            param_state = self.param_norm(param_state)
+
+            # Project current parameter state into a single decoder token and
+            # add global image features so the decoder has direct access to
+            # the pooled visual representation.
+            token = self.token_embedding(param_state).unsqueeze(1) + img_token  # (batch_size, 1, hidden_dim)
             token = token + self.pos_embedding
             
             # Pass through transformer decoder layers
@@ -551,7 +577,7 @@ def build_smil_transformer_decoder_head(feature_dim: int, context_dim: int,
                                        mesh_scale_init: float = 1.0) -> SMILTransformerDecoderHead:
     """
     Build a SMIL transformer decoder head.
-    
+
     Args:
         feature_dim: Dimension of global features from backbone
         context_dim: Dimension of spatial features from backbone
@@ -568,7 +594,7 @@ def build_smil_transformer_decoder_head(feature_dim: int, context_dim: int,
         scale_trans_mode: Mode for handling scale and translation betas ('ignore', 'separate', 'entangled_with_betas')
         allow_mesh_scaling: If True, predict a global mesh scale factor
         mesh_scale_init: Initial value for mesh scale (default: 1.0 = no scaling)
-        
+
     Returns:
         SMILTransformerDecoderHead instance
     """
