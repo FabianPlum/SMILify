@@ -69,10 +69,8 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
         self.original_resolution = self._detect_input_resolution()
         
         # Determine target resolution based on backbone
-        if backbone_name.startswith('vit'):
-            self.target_resolution = 224  # ViT expects 224x224
-        else:
-            self.target_resolution = self.original_resolution  # ResNet can handle original resolution
+        from backbone_factory import BackboneFactory
+        self.target_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
     def _detect_input_resolution(self):
         """Detect the input resolution from the batch data file."""
