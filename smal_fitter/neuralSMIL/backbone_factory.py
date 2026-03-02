@@ -22,63 +22,47 @@ except ImportError:
     timm = None
 
 
-class BackboneInterface(ABC):
-    """Abstract interface for backbone networks."""
-    
+class BackboneInterface(nn.Module, ABC):
+    """Abstract interface for backbone networks.
+
+    Inherits from nn.Module so that backbone parameters are properly
+    registered when assigned as attributes of parent modules (e.g.
+    SMILImageRegressor.backbone), making them visible to
+    model.parameters(), optimizers, and checkpoint saving.
+    """
+
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the backbone.
-        
+
         Args:
             x: Input tensor of shape (batch_size, 3, height, width)
-            
+
         Returns:
             Feature tensor of shape (batch_size, feature_dim)
         """
         pass
-    
+
     @abstractmethod
     def get_feature_dim(self) -> int:
         """Get the output feature dimension."""
         pass
-    
+
     @abstractmethod
     def freeze_weights(self) -> None:
         """Freeze all backbone parameters."""
         pass
-    
+
     @abstractmethod
     def unfreeze_weights(self) -> None:
         """Unfreeze all backbone parameters."""
         pass
-    
+
     @abstractmethod
     def get_trainable_parameters(self) -> list:
         """Get list of trainable parameter groups."""
         pass
-    
-    def to(self, device):
-        """Move backbone to device."""
-        self.backbone = self.backbone.to(device)
-        return self
-    
-    def parameters(self):
-        """Get backbone parameters."""
-        return self.backbone.parameters()
-    
-    def eval(self):
-        """Set backbone to evaluation mode."""
-        self.backbone.eval()
-        return self
-    
-    def train(self, mode=True):
-        """Set backbone to training mode."""
-        self.backbone.train(mode)
-        return self
-    
-    def __call__(self, x):
-        """Make backbone callable."""
-        return self.forward(x)
+
 
 
 class ResNetBackbone(BackboneInterface):
