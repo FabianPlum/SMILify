@@ -969,8 +969,9 @@ def create_multiview_visualization(model: MultiViewSMILImageRegressor,
             import traceback
             traceback.print_exc()
     
-    # Visualization parameters
-    img_size = 224  # Standard visualization size
+    # Visualization parameters — derive from model's actual renderer resolution
+    # so that visualization is correct for any backbone (ViT=224, ResNet/UNet=512, etc.)
+    img_size = int(model.renderer.image_size)
     margin = 5
     
     # Create visualization grid
@@ -2462,13 +2463,14 @@ def main(config: dict):
     # Determine input resolution based on backbone
     # This ensures the renderer is initialized with the correct size
     backbone_name = config['backbone_name']
-    if backbone_name.startswith('vit'):
-        input_resolution = 224  # ViT uses 224x224
-    else:
-        input_resolution = 512  # ResNet typically uses 512x512
-    
+    from backbone_factory import BackboneFactory
+    input_resolution = config.get(
+        'input_resolution',
+        BackboneFactory.get_default_input_resolution(backbone_name)
+    )
+
     if rank == 0:
-        print(f"Using input resolution: {input_resolution}x{input_resolution} (based on backbone: {backbone_name})")
+        print(f"Using input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
     
     # Get mesh scaling config
     allow_mesh_scaling = config.get('allow_mesh_scaling', False)
