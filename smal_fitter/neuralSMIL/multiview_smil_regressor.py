@@ -654,7 +654,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     view_emb = self.patch_view_embed(camera_indices)  # (B, V, D)
                     spatial_feats = patch_tokens + view_emb.unsqueeze(2)  # (B, V, P, D)
                     Bp, Vp, P, D = spatial_feats.shape
-                    spatial_feats = spatial_feats.view(Bp, Vp * P, D)  # (B, V*P, D)
+                    spatial_feats = spatial_feats.reshape(Bp, Vp * P, D)  # (B, V*P, D)
                 else:
                     spatial_feats = features  # (B, V, D) — one token per view
             else:
