@@ -384,6 +384,7 @@ class TrainingHyperparameters:
     pin_memory: bool = True
     prefetch_factor: int = 4
     resume_checkpoint: Optional[str] = None
+    reset_ief_token_embedding: bool = False
     use_gt_camera_init: bool = True
 
 
