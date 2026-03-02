@@ -2786,20 +2786,20 @@ if __name__ == "__main__":
                             "Optional when using --config with dataset.data_path set. "
                             "CLI value overrides config file.")
     
-    # Model configuration
-    parser.add_argument("--backbone_name", type=str, default='vit_large_patch16_224',
-                       help="Backbone network name")
+    # Model configuration (defaults are None so JSON config values are not overridden)
+    parser.add_argument("--backbone_name", type=str, default=None,
+                       help="Backbone network name (default: from config or vit_large_patch16_224)")
     parser.add_argument("--freeze_backbone", action="store_true",
                        help="Freeze backbone weights")
-    parser.add_argument("--head_type", type=str, default='transformer_decoder',
+    parser.add_argument("--head_type", type=str, default=None,
                        choices=['mlp', 'transformer_decoder'],
-                       help="Type of regression head")
-    parser.add_argument("--hidden_dim", type=int, default=512,
-                       help="Hidden dimension for MLP head")
-    parser.add_argument("--cross_attention_layers", type=int, default=2,
-                       help="Number of cross-attention layers")
-    parser.add_argument("--cross_attention_heads", type=int, default=8,
-                       help="Number of cross-attention heads")
+                       help="Type of regression head (default: from config)")
+    parser.add_argument("--hidden_dim", type=int, default=None,
+                       help="Hidden dimension for MLP head (default: from config)")
+    parser.add_argument("--cross_attention_layers", type=int, default=None,
+                       help="Number of cross-attention layers (default: from config)")
+    parser.add_argument("--cross_attention_heads", type=int, default=None,
+                       help="Number of cross-attention heads (default: from config)")
     
     # Training configuration
     parser.add_argument("--batch_size", type=int, default=None,
@@ -2823,16 +2823,16 @@ if __name__ == "__main__":
                        help="Max views to use per sample (None = all)")
     
     # Output configuration
-    parser.add_argument("--checkpoint_dir", type=str, default='multiview_checkpoints',
-                       help="Checkpoint directory")
-    parser.add_argument("--visualizations_dir", type=str, default='multiview_visualizations',
-                       help="Visualizations directory")
-    parser.add_argument("--save_every_n_epochs", type=int, default=5,
-                       help="Save checkpoint every N epochs")
-    parser.add_argument("--visualize_every_n_epochs", type=int, default=1,
-                       help="Generate visualizations every N epochs (0 to disable)")
-    parser.add_argument("--num_visualization_samples", type=int, default=3,
-                       help="Number of samples to visualize each time")
+    parser.add_argument("--checkpoint_dir", type=str, default=None,
+                       help="Checkpoint directory (default: from config)")
+    parser.add_argument("--visualizations_dir", type=str, default=None,
+                       help="Visualizations directory (default: from config)")
+    parser.add_argument("--save_every_n_epochs", type=int, default=None,
+                       help="Save checkpoint every N epochs (default: from config)")
+    parser.add_argument("--visualize_every_n_epochs", type=int, default=None,
+                       help="Generate visualizations every N epochs, 0 to disable (default: from config)")
+    parser.add_argument("--num_visualization_samples", type=int, default=None,
+                       help="Number of samples to visualize each time (default: from config)")
     
     # Resume training
     parser.add_argument("--resume_checkpoint", type=str, default=None,
