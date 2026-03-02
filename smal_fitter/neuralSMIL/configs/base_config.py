@@ -14,7 +14,10 @@ Configuration Precedence (highest to lowest):
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass  # reserved for future type-only imports
 
 
 @dataclass
@@ -49,6 +52,9 @@ class ModelConfig:
     use_unity_prior: bool = False
     rgb_only: bool = False
 
+    # Input resolution (None = auto-detect from backbone via BackboneFactory)
+    input_resolution: Optional[int] = None
+
     # Transformer decoder configuration
     transformer_depth: int = 6
     transformer_heads: int = 8
@@ -58,12 +64,26 @@ class ModelConfig:
     transformer_ief_iters: int = 3
     transformer_trans_scale_factor: int = 1  # Scale factor for betas_trans
 
+    def get_input_resolution(self) -> int:
+        """Return input resolution, auto-detecting from backbone if not set."""
+        if self.input_resolution is not None:
+            return self.input_resolution
+        from backbone_factory import BackboneFactory
+        return BackboneFactory.get_default_input_resolution(self.backbone_name)
+
     def validate(self):
         if self.head_type not in ('mlp', 'transformer_decoder'):
             raise ValueError(f"Invalid head_type '{self.head_type}', must be 'mlp' or 'transformer_decoder'")
 
     def get_adjusted_hidden_dim(self) -> int:
-        """Return hidden_dim adjusted for backbone architecture."""
+        """Return hidden_dim adjusted for backbone architecture.
+
+        For ViT/ResNet the decoder hidden_dim is matched to the backbone
+        feature_dim to avoid an unnecessary projection.  For UNet backbones the
+        decoder hidden_dim is independent of both the encoder bottleneck and the
+        decoder spatial channels, so a fixed 512 is a reasonable default that
+        keeps the transformer decoder lightweight while still being expressive.
+        """
         if self.backbone_name.startswith('vit'):
             if 'base' in self.backbone_name:
                 return 768
@@ -71,6 +91,14 @@ class ModelConfig:
                 return 1024
         elif self.backbone_name.startswith('resnet'):
             return 2048
+        elif self.backbone_name.startswith('unet_'):
+            _unet_hidden: dict = {
+                'unet_efficientnet_b0': 512,
+                'unet_efficientnet_b3': 512,
+                'unet_resnet34':        512,
+                'unet_mobilenet_v3':    256,
+            }
+            return _unet_hidden.get(self.backbone_name, 512)
         return self.hidden_dim
 
 
@@ -499,6 +527,7 @@ class BaseTrainingConfig:
                 'backbone_name': self.model.backbone_name,
                 'freeze_backbone': self.model.freeze_backbone,
                 'hidden_dim': hidden_dim,
+                'input_resolution': self.model.get_input_resolution(),
                 'rgb_only': self.model.rgb_only,
                 'use_unity_prior': self.model.use_unity_prior,
                 'head_type': self.model.head_type,
