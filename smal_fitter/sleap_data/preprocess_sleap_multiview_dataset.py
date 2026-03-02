@@ -1516,8 +1516,12 @@ Examples:
                        help="Path to CSV lookup table for ground truth shape betas")
     
     # Processing options
-    parser.add_argument("--target_resolution", type=int, default=224,
-                       help="Target image resolution (default: 224)")
+    parser.add_argument("--resolution", type=int, default=None,
+                       help="Target image resolution. Overrides backbone default. "
+                            "If not specified, derived from --backbone "
+                            "(224 for ViT, 512 for ResNet/UNet)")
+    parser.add_argument("--target_resolution", type=int, default=None,
+                       help="(Deprecated, use --resolution) Target image resolution")
     parser.add_argument("--backbone", dest="backbone_name", default='vit_large_patch16_224',
                        help="Backbone network name (default: vit_large_patch16_224). "
                             "Supported: vit_base_patch16_224, vit_large_patch16_224, "
@@ -1560,6 +1564,17 @@ Examples:
     
     args = parser.parse_args()
 
+    # Resolve target resolution: --resolution > --target_resolution > backbone default
+    if args.resolution is not None:
+        target_resolution = args.resolution
+    elif args.target_resolution is not None:
+        target_resolution = args.target_resolution
+    else:
+        # Derive from backbone using BackboneFactory as single source of truth
+        from neuralSMIL.backbone_factory import BackboneFactory
+        target_resolution = BackboneFactory.get_default_input_resolution(args.backbone_name)
+    args.target_resolution = target_resolution
+
     # Override SMAL model if smal_file is provided
     if args.smal_file:
         if not os.path.exists(args.smal_file):
@@ -1586,7 +1601,12 @@ Examples:
         print(f"Output file: {args.output_path}")
         print(f"Minimum views per sample: {args.min_views}")
         print(f"Frame skip: {args.frame_skip} (process every {args.frame_skip} frame(s))")
-        print(f"Target resolution: {args.target_resolution}x{args.target_resolution}")
+        if args.resolution is not None:
+            res_source = "from --resolution"
+        else:
+            res_source = f"default for {args.backbone_name}"
+        print(f"Target resolution: {args.target_resolution}x{args.target_resolution} ({res_source})")
+        print(f"Backbone: {args.backbone_name}")
         print(f"Crop mode: {args.crop_mode}")
         print(f"Undistort images: {not args.no_undistort}")
         if args.smal_file:
