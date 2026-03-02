@@ -29,6 +29,7 @@ socket.getaddrinfo = _getaddrinfo_ipv4_only
 
 import argparse
 import os
+import sys
 import re
 import tempfile
 import pickle
@@ -36,6 +37,10 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import timedelta
+
+# Ensure project root and neuralSMIL dir are on sys.path (needed for mp.spawn)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import numpy as np
 import cv2
@@ -377,7 +382,8 @@ def load_multiview_model_from_checkpoint(checkpoint_path: Path,
     print(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
     print(f"Note: Model can handle samples with fewer views than max_views via view_mask")
 
-    input_resolution = 224 if backbone_name.startswith("vit") else 512
+    from backbone_factory import BackboneFactory
+    input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
     model = create_multiview_regressor(
         device=device,
@@ -455,7 +461,9 @@ def create_multiview_visualization(model: MultiViewSMILImageRegressor,
 
     # Calculate grid dimensions dynamically based on actual num_views (same as training)
     # This allows samples with fewer views than max_views to be visualized correctly
-    img_size = 224
+    # Derive img_size from the model's renderer resolution so visualization is correct
+    # for any backbone (ViT=224, ResNet/UNet=512, etc.)
+    img_size = int(model.renderer.image_size)
     margin = 5
     grid_width = num_views * img_size + (num_views + 1) * margin
     grid_height = 2 * img_size + 3 * margin
@@ -1268,14 +1276,14 @@ def main_inference(
     if world_size > 1:
         sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=False)
 
-    # Calculate frame dimensions
-    img_size = 224
+    # Calculate frame dimensions — derive from the model's renderer resolution
+    img_size = int(model.renderer.image_size)
     margin = 5
     grid_width = model_max_views * img_size + (model_max_views + 1) * margin
     grid_height = 2 * img_size + 3 * margin
 
     # Determine singleview frame size (use first sample to get actual size)
-    singleview_size = (224, 224)  # Default
+    singleview_size = (img_size, img_size)  # Default, overridden below by test render
     if len(dataset) > 0:
         try:
             test_frame = render_singleview_collage(
