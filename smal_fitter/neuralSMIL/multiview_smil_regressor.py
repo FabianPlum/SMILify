@@ -421,8 +421,16 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
 
         # Per-view positional embedding for patch tokens so the decoder's
         # cross-attention knows which view each spatial patch came from.
-        if self.head_type == 'transformer_decoder' and self.backbone_name.startswith('vit'):
-            self.patch_view_embed = nn.Embedding(self.num_canonical_cameras, self.feature_dim).to(device)
+        # Dimension must match the spatial feature channels, which equals
+        # feature_dim for ViT (patch dim == CLS dim) but may differ for
+        # UNet (decoder channels != bottleneck channels).
+        if self.head_type == 'transformer_decoder' and hasattr(self.backbone, 'forward_with_spatial'):
+            _patch_embed_dim = (
+                self.backbone.get_spatial_dim()
+                if hasattr(self.backbone, 'get_spatial_dim')
+                else self.feature_dim
+            )
+            self.patch_view_embed = nn.Embedding(self.num_canonical_cameras, _patch_embed_dim).to(device)
             nn.init.normal_(self.patch_view_embed.weight, mean=0.0, std=0.02)
     
     def forward_multiview(self, images_per_view: List[torch.Tensor], 
@@ -455,14 +463,20 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         B, V, C, H, W = all_images.shape
         all_images_flat = all_images.view(B * V, C, H, W)  # (B*V, C, H, W)
         
-        # Single backbone forward pass for all views at once
-        # For ViT + transformer_decoder: also extract per-view patch tokens
-        # (B*V, 196, D) for rich spatial cross-attention context.
+        # Single backbone forward pass for all views at once.
+        # For transformer_decoder + any backbone with forward_with_spatial():
+        # also extract per-view spatial tokens for rich cross-attention context.
+        # ViT: (B*V, 196, D) patch tokens.  UNet: (B*V, H*W, C) decoder feature map.
         patch_tokens = None
-        if self.head_type == 'transformer_decoder' and self.backbone_name.startswith('vit'):
+        if self.head_type == 'transformer_decoder' and hasattr(self.backbone, 'forward_with_spatial'):
             all_features, all_patches = self.backbone.forward_with_spatial(all_images_flat)
-            # all_features: (B*V, D) CLS tokens, all_patches: (B*V, 196, D)
-            patch_tokens = all_patches.view(B, V, -1, self.feature_dim)  # (B, V, 196, D)
+            # all_features: (B*V, feature_dim), all_patches: (B*V, P, spatial_dim)
+            _spatial_dim = (
+                self.backbone.get_spatial_dim()
+                if hasattr(self.backbone, 'get_spatial_dim')
+                else self.feature_dim
+            )
+            patch_tokens = all_patches.view(B, V, -1, _spatial_dim)  # (B, V, P, spatial_dim)
         else:
             all_features = self.backbone(all_images_flat)  # (B*V, feature_dim)
 
@@ -2417,9 +2431,11 @@ def create_multiview_regressor(device, batch_size, shape_family, use_unity_prior
         MultiViewSMILImageRegressor instance
     """
     # Create placeholder data batch
-    # Use input_resolution if provided, otherwise default to 224
+    # Derive input_resolution from backbone if not explicitly provided
     # This ensures the renderer is initialized with the correct size
-    input_resolution = kwargs.get('input_resolution', 224)
+    from backbone_factory import BackboneFactory
+    _backbone_name = kwargs.get('backbone_name', 'resnet152')
+    input_resolution = kwargs.get('input_resolution', BackboneFactory.get_default_input_resolution(_backbone_name))
     data_batch = torch.zeros(batch_size, 3, input_resolution, input_resolution, dtype=torch.float32, device=device)
     
     return MultiViewSMILImageRegressor(
