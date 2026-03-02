@@ -387,7 +387,8 @@ def _create_singleview_model(
     apply_smal_file_override(smal_file, shape_family=shape_family)
 
     backbone_name = model_config["backbone_name"]
-    input_resolution = 224 if backbone_name.startswith("vit") else 512
+    from backbone_factory import BackboneFactory
+    input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
     log_fn(f"Singleview model config:")
     log_fn(f"  backbone: {backbone_name}")
@@ -906,10 +907,8 @@ def _run_multiview_benchmark(
 
     # Create model (mirror training script)
     backbone_name = config_from_ckpt["backbone_name"]
-    if backbone_name.startswith("vit"):
-        input_resolution = 224
-    else:
-        input_resolution = 512
+    from backbone_factory import BackboneFactory
+    input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
     log_fn(f"\nUsing input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
 
     allow_mesh_scaling = config_from_ckpt.get("allow_mesh_scaling", False)
