@@ -418,6 +418,12 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         # This helps during inference when camera assignment might be ambiguous
         self.view_embeddings = nn.Embedding(self.num_canonical_cameras, self.feature_dim).to(device)
         nn.init.normal_(self.view_embeddings.weight, mean=0.0, std=0.02)
+
+        # Per-view positional embedding for patch tokens so the decoder's
+        # cross-attention knows which view each spatial patch came from.
+        if self.head_type == 'transformer_decoder' and self.backbone_name.startswith('vit'):
+            self.patch_view_embed = nn.Embedding(self.num_canonical_cameras, self.feature_dim).to(device)
+            nn.init.normal_(self.patch_view_embed.weight, mean=0.0, std=0.02)
     
     def forward_multiview(self, images_per_view: List[torch.Tensor], 
                           camera_indices: torch.Tensor,
@@ -450,8 +456,16 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         all_images_flat = all_images.view(B * V, C, H, W)  # (B*V, C, H, W)
         
         # Single backbone forward pass for all views at once
-        all_features = self.backbone(all_images_flat)  # (B*V, feature_dim)
-        
+        # For ViT + transformer_decoder: also extract per-view patch tokens
+        # (B*V, 196, D) for rich spatial cross-attention context.
+        patch_tokens = None
+        if self.head_type == 'transformer_decoder' and self.backbone_name.startswith('vit'):
+            all_features, all_patches = self.backbone.forward_with_spatial(all_images_flat)
+            # all_features: (B*V, D) CLS tokens, all_patches: (B*V, 196, D)
+            patch_tokens = all_patches.view(B, V, -1, self.feature_dim)  # (B, V, 196, D)
+        else:
+            all_features = self.backbone(all_images_flat)  # (B*V, feature_dim)
+
         # Reshape back to (B, V, feature_dim)
         stacked_features = all_features.view(B, V, -1)
         
@@ -468,7 +482,8 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         # For mlp: mean-pool first since the MLP needs a flat vector
         if self.head_type == 'transformer_decoder':
             body_params = self._predict_body_params(
-                fused_features, batch_size, view_mask=view_mask
+                fused_features, batch_size, view_mask=view_mask,
+                patch_tokens=patch_tokens, camera_indices=camera_indices
             )
         else:
             # MLP path: pool to (B, feature_dim) then pass through aggregator
@@ -500,7 +515,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         return output
     
     def _predict_body_params(self, features: torch.Tensor, batch_size: int,
-                             view_mask: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+                             view_mask: Optional[torch.Tensor] = None,
+                             patch_tokens: Optional[torch.Tensor] = None,
+                             camera_indices: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """
         Predict shared body parameters from features.
 
@@ -515,6 +532,11 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             batch_size: Batch size.
             view_mask: Optional ``(B, V)`` boolean mask for valid views.  Only
                        used when features is 3-D (transformer_decoder path).
+            patch_tokens: Optional ``(B, V, P, D)`` per-view ViT patch tokens.
+                          When provided, used as spatial cross-attention context
+                          instead of the V fused CLS tokens.
+            camera_indices: Optional ``(B, V)`` camera indices for patch view
+                            embeddings.  Required when patch_tokens is provided.
         """
         if self.head_type == 'mlp':
             # Pass through regression head
@@ -599,20 +621,28 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             
         elif self.head_type == 'transformer_decoder':
             # Use transformer decoder for body params.
-            # When features is 3-D (B, V, D) — multiview path — the per-view
-            # fused features serve as the cross-attention context so the decoder
-            # can attend over views (analogous to attending over spatial patch
-            # tokens in the single-view path).
             if features.dim() == 3:
-                # Multiview: features is (B, V, D)
-                spatial_feats = features  # (B, V, D) — one token per view
+                # Multiview: features is (B, V, D) — fused CLS tokens
 
-                # Pool for the global feature vector the decoder also receives
+                # Pool fused CLS tokens for the global feature vector
                 if view_mask is not None:
                     mask_exp = view_mask.unsqueeze(-1).float()  # (B, V, 1)
                     global_feats = (features * mask_exp).sum(dim=1) / (mask_exp.sum(dim=1) + 1e-8)
                 else:
                     global_feats = features.mean(dim=1)  # (B, D)
+
+                # Cross-attention context: use per-view patch tokens when
+                # available (rich spatial detail), else fall back to V fused
+                # CLS tokens.
+                if patch_tokens is not None and camera_indices is not None:
+                    # Add view identity so the decoder knows which view each
+                    # spatial patch came from: (B, V, D) → broadcast over P
+                    view_emb = self.patch_view_embed(camera_indices)  # (B, V, D)
+                    spatial_feats = patch_tokens + view_emb.unsqueeze(2)  # (B, V, P, D)
+                    Bp, Vp, P, D = spatial_feats.shape
+                    spatial_feats = spatial_feats.view(Bp, Vp * P, D)  # (B, V*P, D)
+                else:
+                    spatial_feats = features  # (B, V, D) — one token per view
             else:
                 # Single-view / already-pooled fallback: (B, D)
                 spatial_feats = features.unsqueeze(1)  # (B, 1, D)
