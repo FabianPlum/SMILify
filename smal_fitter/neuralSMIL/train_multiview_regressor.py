@@ -379,6 +379,7 @@ class MultiViewTrainingConfig:
         merged['seed'] = training_params['seed']
         merged['rotation_representation'] = training_params['rotation_representation']
         merged['resume_checkpoint'] = training_params.get('resume_checkpoint')
+        merged['reset_ief_token_embedding'] = training_params.get('reset_ief_token_embedding', False)
         merged['num_workers'] = training_params.get('num_workers', 4)
         merged['pin_memory'] = training_params.get('pin_memory', True)
         
@@ -598,7 +599,19 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                     )
                 
                 optimizer.step()
-            
+
+            # IEF refinement monitoring: track per-iteration pose delta norms.
+            # ief_pose_delta_N = avg L2 distance between iter N and iter N-1 predictions.
+            # Healthy IEF shows delta_1 > delta_2 (coarse correction then fine-tuning).
+            # Flat or growing deltas indicate the IEF is not learning to refine.
+            with torch.no_grad():
+                hist = predicted_params.get('iteration_history', {}) if predicted_params else {}
+                pose_hist = hist.get('pose', [])
+                for i in range(1, len(pose_hist)):
+                    delta = (pose_hist[i].detach() - pose_hist[i - 1].detach()).norm(dim=-1).mean().item()
+                    key = f'ief_pose_delta_{i}'
+                    loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
+
             # Accumulate metrics
             total_loss += loss.item()
             num_batches += 1
@@ -688,12 +701,20 @@ def validate(model: MultiViewSMILImageRegressor,
                 
                 total_loss += loss.item()
                 num_batches += 1
-                
+
                 for key, value in loss_components.items():
                     if key not in loss_components_sum:
                         loss_components_sum[key] = 0.0
                     loss_components_sum[key] += value.item() if torch.is_tensor(value) else value
-                    
+
+                # IEF refinement monitoring (already in no_grad context)
+                hist = predicted_params.get('iteration_history', {}) if predicted_params else {}
+                pose_hist = hist.get('pose', [])
+                for i in range(1, len(pose_hist)):
+                    delta = (pose_hist[i] - pose_hist[i - 1]).norm(dim=-1).mean().item()
+                    key = f'ief_pose_delta_{i}'
+                    loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
+
             except Exception as e:
                 print(f"Validation error: {e}")
                 continue
@@ -2206,21 +2227,45 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cud
     the state dict and optimizer/scheduler states.
     """
     checkpoint = torch.load(filepath, map_location=device)
-    
-    # Load model state dict with strict=False to allow some flexibility
-    # (e.g., if some parameters were added/removed, but architecture matches)
-    if hasattr(model, 'module'):
-        model.module.load_state_dict(checkpoint['model_state_dict'], strict=False)
-    else:
-        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+
+    # Load model state dict, skipping keys whose shapes changed between
+    # architecture versions (e.g. token_embedding after IEF feedback fix).
+    saved_state = checkpoint['model_state_dict']
+    current_model = model.module if hasattr(model, 'module') else model
+    current_state = current_model.state_dict()
+
+    filtered_state = {}
+    skipped = []
+    for key, param in saved_state.items():
+        if key in current_state and param.shape != current_state[key].shape:
+            skipped.append(f"  {key}: checkpoint {param.shape} vs model {current_state[key].shape}")
+        else:
+            filtered_state[key] = param
+
+    if skipped:
+        print(f"Skipped {len(skipped)} mismatched keys (will use fresh init):")
+        for s in skipped:
+            print(s)
+
+    current_model.load_state_dict(filtered_state, strict=False)
     
     if optimizer and 'optimizer_state_dict' in checkpoint:
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if skipped:
+            print("Optimizer state NOT loaded (architecture changed — momentum buffers have stale shapes).")
+            print("Optimizer will start fresh with current LR schedule.")
+        else:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     
     if scheduler and checkpoint.get('scheduler_state_dict'):
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-    
-    return checkpoint.get('epoch', 0), checkpoint.get('metrics', {})
+        if skipped:
+            print("Scheduler state NOT loaded (architecture changed — restarting LR schedule from scratch).")
+        else:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+    epoch = 0 if skipped else checkpoint.get('epoch', 0)
+    if skipped:
+        print(f"Epoch counter reset to 0 (was {checkpoint.get('epoch', 0)}) so LR warmup applies to new layers.")
+    return epoch, checkpoint.get('metrics', {})
 
 
 def main(config: dict):
@@ -2452,7 +2497,8 @@ def main(config: dict):
         input_resolution=input_resolution,
         allow_mesh_scaling=allow_mesh_scaling,
         mesh_scale_init=mesh_scale_init,
-        use_gt_camera_init=config.get('use_gt_camera_init', False)
+        use_gt_camera_init=config.get('use_gt_camera_init', False),
+        transformer_config=config.get('transformer_config', {})
     )
     
     model = model.to(device)
@@ -2504,6 +2550,26 @@ def main(config: dict):
             best_val_loss = metrics.get('best_val_loss', float('inf'))
             if rank == 0:
                 print(f"Resuming training from epoch {start_epoch} (checkpoint was at epoch {loaded_epoch})")
+
+            # Surgical IEF reset: reinitialise only the token_embedding layer and
+            # clear its Adam momentum so stale oscillatory gradients don't carry over.
+            # Set "reset_ief_token_embedding": true in the training config to activate;
+            # remove or set to false after the first resumed run.
+            if config.get('reset_ief_token_embedding', False):
+                base_model = model.module if hasattr(model, 'module') else model
+                if hasattr(base_model, 'transformer_head'):
+                    te = base_model.transformer_head.token_embedding
+                    nn.init.xavier_uniform_(te.weight, gain=0.01)
+                    nn.init.constant_(te.bias, 0)
+                    # Clear Adam state for token_embedding params only; all other
+                    # parameter momentum/variance buffers are preserved.
+                    te_param_ids = {id(p) for p in te.parameters()}
+                    for p, state in list(optimizer.state.items()):
+                        if id(p) in te_param_ids:
+                            optimizer.state[p] = {}
+                    if rank == 0:
+                        print("reset_ief_token_embedding: token_embedding weights and "
+                              "optimizer state reset. Set flag to false for subsequent runs.")
     
     # Training loop
     if rank == 0:
@@ -2734,18 +2800,18 @@ if __name__ == "__main__":
                        help="Number of cross-attention heads")
     
     # Training configuration
-    parser.add_argument("--batch_size", type=int, default=3,
-                       help="Batch size")
-    parser.add_argument("--num_epochs", type=int, default=600,
-                       help="Number of training epochs")
-    parser.add_argument("--learning_rate", type=float, default=1e-4,
-                       help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=1e-4,
-                       help="Weight decay")
-    parser.add_argument("--gradient_clip_norm", type=float, default=1.0,
-                       help="Gradient clipping norm")
-    parser.add_argument("--seed", type=int, default=42,
-                       help="Random seed")
+    parser.add_argument("--batch_size", type=int, default=None,
+                       help="Batch size (default: from config)")
+    parser.add_argument("--num_epochs", type=int, default=None,
+                       help="Number of training epochs (default: from config)")
+    parser.add_argument("--learning_rate", type=float, default=None,
+                       help="Learning rate (default: from config)")
+    parser.add_argument("--weight_decay", type=float, default=None,
+                       help="Weight decay (default: from config)")
+    parser.add_argument("--gradient_clip_norm", type=float, default=None,
+                       help="Gradient clipping norm (default: from config)")
+    parser.add_argument("--seed", type=int, default=None,
+                       help="Random seed (default: from config)")
     parser.add_argument("--dataset_fraction", type=float, default=None,
                        help="Fraction of training data to use per epoch (0-1, default: from config). "
                             "Useful for large datasets - samples different subset each epoch.")
@@ -2769,6 +2835,10 @@ if __name__ == "__main__":
     # Resume training
     parser.add_argument("--resume_checkpoint", type=str, default=None,
                        help="Path to checkpoint to resume from")
+    parser.add_argument("--reset_ief_token_embedding", action="store_true", default=None,
+                       help="Reinitialise token_embedding weights and clear its Adam state after "
+                            "loading a checkpoint. Use once to break an IEF oscillatory attractor, "
+                            "then remove the flag for subsequent runs.")
     
     # Configuration file
     parser.add_argument("--config", type=str, default=None,
@@ -2839,6 +2909,9 @@ if __name__ == "__main__":
             if args.use_gt_camera_init is not None:
                 cli_overrides['training'] = cli_overrides.get('training', {})
                 cli_overrides['training']['use_gt_camera_init'] = args.use_gt_camera_init
+            if args.reset_ief_token_embedding:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['reset_ief_token_embedding'] = True
 
             new_config = load_config(
                 config_file=args.config,
