@@ -632,6 +632,13 @@ def train_epoch(model: MultiViewSMILImageRegressor,
             print(f"Error in batch {batch_idx}: {e}")
             import traceback
             traceback.print_exc()
+            # Clean up GPU memory after OOM to prevent cascading failures.
+            # Without this, the failed forward pass's GPU tensors stay alive
+            # and every subsequent batch also OOMs.
+            if isinstance(e, torch.cuda.OutOfMemoryError):
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
             continue
     
     # Compute averages
@@ -2689,6 +2696,11 @@ def main(config: dict):
                 num_samples=config.get('num_visualization_samples', 3),
                 rank=rank
             )
+
+            # Free GPU memory fragmented by visualization (SMALFitter instances, renderers, etc.)
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
 
         # Sync all ranks after rank-0-only operations (visualization, checkpointing)
         # so non-zero ranks don't race ahead into the next epoch and deadlock.
