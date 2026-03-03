@@ -2380,7 +2380,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     sample_view_mask.append(True)
                 else:
                     # Pad with zeros
-                    dummy_img = torch.zeros(3, 224, 224, dtype=torch.float32, device=self.device)
+                    dummy_img = torch.zeros(3, self.input_resolution, self.input_resolution, dtype=torch.float32, device=self.device)
                     all_images_per_view[v].append(dummy_img)
                     sample_cam_indices.append(0)
                     sample_view_mask.append(False)
