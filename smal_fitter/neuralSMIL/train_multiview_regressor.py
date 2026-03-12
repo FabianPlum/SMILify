@@ -117,14 +117,32 @@ def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int =
         print(f"WARNING: MASTER_ADDR '{master_addr}' is not an IPv4 address!")
         print(f"  Attempting to resolve to IPv4...")
         try:
-            # Force IPv4 resolution
             import socket
-            result = socket.getaddrinfo(master_addr, master_port, socket.AF_INET, socket.SOCK_STREAM)
-            if result:
-                master_addr = result[0][4][0]
-                print(f"  Resolved to: {master_addr}")
+            resolved = False
+            # On HPC systems, inter-node communication uses InfiniBand.
+            # Try the InfiniBand hostname first (append 'i' before first dot or at end).
+            dot_idx = master_addr.find('.')
+            if dot_idx > 0:
+                ib_hostname = master_addr[:dot_idx] + 'i' + master_addr[dot_idx:]
             else:
-                print(f"  ERROR: Could not resolve {master_addr} to IPv4!")
+                ib_hostname = master_addr + 'i'
+            try:
+                result = socket.getaddrinfo(ib_hostname, master_port, socket.AF_INET, socket.SOCK_STREAM)
+                if result:
+                    master_addr = result[0][4][0]
+                    print(f"  Resolved InfiniBand hostname '{ib_hostname}' to: {master_addr}")
+                    resolved = True
+            except socket.gaierror:
+                pass  # InfiniBand hostname doesn't exist, fall back to original
+
+            if not resolved:
+                # Fall back to resolving the original hostname
+                result = socket.getaddrinfo(master_addr, master_port, socket.AF_INET, socket.SOCK_STREAM)
+                if result:
+                    master_addr = result[0][4][0]
+                    print(f"  Resolved to: {master_addr}")
+                else:
+                    print(f"  ERROR: Could not resolve {master_addr} to IPv4!")
         except Exception as e:
             print(f"  ERROR resolving hostname: {e}")
     
