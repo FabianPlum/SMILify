@@ -1215,6 +1215,7 @@ def main_inference(
         print(f"Device: {device}")
         print(f"World size: {world_size}")
         print(f"Dataset: {dataset_path}")
+        print(f"Checkpoint: {args.checkpoint if args.checkpoint else '(auto-detect)'}")
         if args.max_frames is not None:
             print(f"Max frames: {args.max_frames} (testing mode)")
         if args.disable_scaling:
@@ -1226,7 +1227,7 @@ def main_inference(
             print(f"Temporal smoothing: {args.smoothing_window} frames")
         print(f"{'='*60}\n")
     
-    checkpoint_path = _find_default_checkpoint()
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else _find_default_checkpoint()
     
     # Load dataset
     # Use num_views_to_use=None to use all available views per sample (same as training)
@@ -1499,6 +1500,7 @@ def main():
     parser.add_argument("--master-port", type=str, default=None, help="Master port for distributed processing (default: from MASTER_PORT env var or 12355)")
     parser.add_argument("--smal_file", type=str, default=None, help="Path to SMAL model file to override config.py SMAL_FILE (optional)")
     parser.add_argument("--shape_family", type=int, default=None, help="Shape family to use with --smal_file (optional, defaults to config.SHAPE_FAMILY)")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint (.pth) to use for inference (default: auto-detected from multiview_checkpoints/)")
     args = parser.parse_args()
     
     # Get master port from args or environment variable
