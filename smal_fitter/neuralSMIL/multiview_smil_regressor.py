@@ -2158,7 +2158,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         canonical_joints = canonical_joints.float()
         faces_batch = faces_batch.long()
 
-        _, rendered_joints_raw = self.renderer(verts, canonical_joints, faces_batch)
+        _, rendered_joints_raw = self.renderer(verts, canonical_joints, faces_batch, joints_only=True)
         
         # Normalize rendered joints using the actual renderer image size
         # This ensures consistency between training loss and visualization
