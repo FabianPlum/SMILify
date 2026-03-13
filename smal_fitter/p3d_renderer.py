@@ -124,22 +124,26 @@ class Renderer(torch.nn.Module):
         if hasattr(self.color_renderer.shader, 'cameras'):
             self.color_renderer.shader.cameras = self.cameras
 
-    def forward(self, vertices, points, faces, render_texture=False):
+    def forward(self, vertices, points, faces, render_texture=False, joints_only=False):
         # PyTorch3D expects float32 inputs; upstream code can accidentally produce float64
         # (e.g., from SMAL model buffers / numpy defaults). Force here to avoid dtype mismatch.
         vertices = vertices.float()
         points = points.float()
         faces = faces.long()
 
+        screen_size = torch.ones(vertices.shape[0], 2, dtype=torch.float32, device=vertices.device) * self.image_size
+        # fix discussed here: https://github.com/benjiebob/SMALify/issues/30
+        # answer by mshooter
+        proj_points = self.cameras.transform_points_screen(points, image_size=screen_size)[:, :, [1, 0]]
+
+        if joints_only:
+            return None, proj_points
+
         tex = torch.ones_like(vertices) * self.mesh_color  # (1, V, 3)
         textures = Textures(verts_rgb=tex)
 
         mesh = Meshes(verts=vertices, faces=faces, textures=textures)
         sil_images = self.silhouette_renderer(mesh)[..., -1].unsqueeze(1)
-        screen_size = torch.ones(vertices.shape[0], 2, dtype=torch.float32, device=vertices.device) * self.image_size
-        # fix discussed here: https://github.com/benjiebob/SMALify/issues/30
-        # answer by mshooter
-        proj_points = self.cameras.transform_points_screen(points, image_size=screen_size)[:, :, [1, 0]]
 
         if render_texture:
             color_image = self.color_renderer(mesh).permute(0, 3, 1, 2)[:, :3, :, :]
