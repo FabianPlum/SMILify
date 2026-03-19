@@ -161,7 +161,8 @@ class SLEAPMultiViewPreprocessor:
             'views_excluded_processing_error': 0,
             'total_views_attempted': 0,  # Views in available_cameras that we tried to process
             'total_views_included': 0,  # Views successfully included
-            'views_undistorted': 0  # Views that were undistorted
+            'views_undistorted': 0,  # Views that were undistorted
+            'views_reprojected': 0  # Views using reprojected 2D keypoints
         }
         
         # Canonical camera ordering (will be determined from first session)
@@ -244,21 +245,27 @@ class SLEAPMultiViewPreprocessor:
         print(f"Established canonical camera order: {canonical_order}")
         return canonical_order
     
-    def _discover_multiview_frames(self, loader: SLEAPDataLoader, 
-                                   session_path: str) -> List[Dict[str, Any]]:
+    def _discover_multiview_frames(self, loader: SLEAPDataLoader,
+                                   session_path: str,
+                                   reproj_file: Optional[h5py.File] = None) -> List[Dict[str, Any]]:
         """
         Discover all frames that have multi-view data.
-        
+
         Args:
             loader: SLEAPDataLoader instance
             session_path: Path to session
-            
+            reproj_file: Optional open reprojections.h5 handle. When provided and
+                         use_reprojections=True, camera/frame availability is derived
+                         from reprojection validity in addition to SLEAP annotation
+                         coverage. Cameras absent from reprojections.h5 (excluded from
+                         triangulation) are removed from the candidate set.
+
         Returns:
             List of frame info dicts with keys: frame_idx, available_cameras
         """
-        # Collect all annotated frame indices per camera
+        # Collect all annotated frame indices per camera (from SLEAP)
         camera_frames: Dict[str, Set[int]] = {}
-        
+
         for camera_name in loader.camera_views:
             try:
                 camera_data = loader.load_camera_data(camera_name)
@@ -267,7 +274,35 @@ class SLEAPMultiViewPreprocessor:
             except Exception as e:
                 print(f"Warning: Failed to get frames for camera {camera_name}: {e}")
                 camera_frames[camera_name] = set()
-        
+
+        # When using reprojections: adjust camera_frames based on reprojection validity.
+        # - Cameras absent from reprojections.h5 were excluded from triangulation (bad
+        #   calibration) and must be removed so they don't contribute raw SLEAP keypoints.
+        # - Cameras present in reprojections.h5 gain any frames where triangulation
+        #   succeeded even if SLEAP missed a detection (e.g. Camera3 with only 14k frames).
+        if self.use_reprojections and reproj_file is not None:
+            cameras_to_remove = []
+            for camera_name in list(camera_frames.keys()):
+                ds = self._resolve_reprojection_dataset(reproj_file, camera_name, warn=False)
+                if ds is None:
+                    cameras_to_remove.append(camera_name)
+                else:
+                    # Fast scan: read first keypoint's x-coordinate per frame (~576 KB).
+                    # A non-NaN value means triangulation succeeded for at least that joint.
+                    try:
+                        first_kp_x = np.array(ds[:, 0, 0, 0])  # (n_frames,)
+                        reproj_valid = set(np.where(~np.isnan(first_kp_x))[0].tolist())
+                        camera_frames[camera_name] = camera_frames[camera_name] | reproj_valid
+                    except Exception as e:
+                        print(f"Warning: Failed to scan reprojection frames for {camera_name}: {e}")
+
+            for camera_name in cameras_to_remove:
+                del camera_frames[camera_name]
+
+            if cameras_to_remove:
+                print(f"  Excluded {len(cameras_to_remove)} camera(s) not in reprojections.h5 "
+                      f"(not triangulated): {cameras_to_remove}")
+
         # Find frames that appear in multiple cameras
         all_frames: Set[int] = set()
         for frames in camera_frames.values():
@@ -354,12 +389,28 @@ class SLEAPMultiViewPreprocessor:
                     loader_3d = None
                     has_3d_data = False
             
+            # Open reprojections file if use_reprojections is enabled
+            reproj_file = None
+            if self.use_reprojections:
+                session_path_obj = Path(session_path)
+                reproj_candidates = list(session_path_obj.glob('reprojections*.h5'))
+                if reproj_candidates:
+                    reproj_path = reproj_candidates[0]
+                    try:
+                        reproj_file = h5py.File(str(reproj_path), 'r')
+                        print(f"Info: Using reprojections file: {reproj_path}")
+                    except Exception as e:
+                        print(f"Warning: Failed to open reprojections file {reproj_path}: {e}")
+                        reproj_file = None
+                else:
+                    print(f"Warning: --use_reprojections enabled but no reprojections*.h5 found in {session_path}")
+
             # Track total cameras for this session
             num_cameras = len(loader.camera_views)
             self.stats['total_cameras'] = max(self.stats['total_cameras'], num_cameras)
             
             # Discover multi-view frames
-            multiview_frames = self._discover_multiview_frames(loader, session_path)
+            multiview_frames = self._discover_multiview_frames(loader, session_path, reproj_file=reproj_file)
             
             if len(multiview_frames) == 0:
                 print(f"No multi-view frames found in {session_path}")
@@ -420,7 +471,8 @@ class SLEAPMultiViewPreprocessor:
                         video_frame_positions=video_frame_positions,
                         ground_truth_betas=ground_truth_betas,
                         loader_3d=loader_3d,
-                        has_3d_data=has_3d_data
+                        has_3d_data=has_3d_data,
+                        reproj_handle=reproj_file
                     )
                     if sample is not None:
                         samples.append(sample)
@@ -434,6 +486,10 @@ class SLEAPMultiViewPreprocessor:
             # Close video captures
             for cap in video_cap_cache.values():
                 cap.release()
+
+            # Close reprojections file handle
+            if reproj_file is not None:
+                reproj_file.close()
             
             self.stats['sessions_processed'] += 1
             self.stats['processed_samples'] += len(samples)
@@ -452,7 +508,8 @@ class SLEAPMultiViewPreprocessor:
                                   video_frame_positions: Dict[str, int],
                                   ground_truth_betas: Optional[np.ndarray],
                                   loader_3d: Optional['SLEAP3DDataLoader'] = None,
-                                  has_3d_data: bool = False) -> Optional[Dict[str, Any]]:
+                                  has_3d_data: bool = False,
+                                  reproj_handle: Optional[h5py.File] = None) -> Optional[Dict[str, Any]]:
         """
         Process a single multi-view frame (all cameras for one time instant).
         
@@ -606,26 +663,63 @@ class SLEAPMultiViewPreprocessor:
                 
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
-                # Extract keypoints
-                keypoints_2d, visibility = loader.extract_2d_keypoints(camera_data, frame_idx)
+                # Extract 2D keypoints: try reprojections first, fall back to SLEAP
+                used_reproj = False
+                if self.use_reprojections and reproj_handle is not None:
+                    ds = self._resolve_reprojection_dataset(reproj_handle, camera_name)
+                    if ds is not None:
+                        try:
+                            kp = np.asarray(ds[frame_idx, 0, :, :])  # (n_keypoints, 2)
+                            vis = (~np.isnan(kp).any(axis=1)).astype(np.float32)
+                            vis *= np.all(kp > 0, axis=1).astype(np.float32)
+                            if vis.sum() == 0:
+                                # All reprojected keypoints are NaN/zero for this frame:
+                                # triangulation failed. Exclude rather than fall back to
+                                # raw SLEAP (which would break 3D-2D consistency).
+                                self.stats['views_excluded_no_keypoints'] += 1
+                                continue
+                            keypoints_2d = kp
+                            visibility = vis
+                            used_reproj = True
+                            self.stats['views_reprojected'] += 1
+                        except Exception as e:
+                            if self.debug:
+                                print(f"    Warning: Failed to read reprojection for {camera_name} frame {frame_idx}: {e}")
+                    else:
+                        # Camera absent from reprojections.h5 (excluded from triangulation).
+                        # Do not fall back to raw SLEAP when --use_reprojections is set,
+                        # as that would mix inconsistent 2D supervision with 3D targets.
+                        self.stats['views_excluded_no_keypoints'] += 1
+                        continue
+
+                if not used_reproj:
+                    keypoints_2d, visibility = loader.extract_2d_keypoints(camera_data, frame_idx)
+
                 if len(keypoints_2d) == 0:
                     self.stats['views_excluded_no_keypoints'] += 1
                     continue
-                
+
                 # Get image size for mapping
                 image_size = loader.get_camera_image_size(camera_name)
-                
-                # Undistort image and keypoints if enabled and camera calibration is available
+
+                # Undistort image (and keypoints if they came from SLEAP, not reprojections)
+                # Reprojected keypoints are already in undistorted/ideal pinhole space
                 if self.undistort_images and has_3d_data and loader_3d is not None:
                     try:
                         cam_params = loader_3d.get_camera_parameters(camera_name)
                         K = cam_params['intrinsic']['K']
                         distortion_coeffs = cam_params['intrinsic'].get('distortion', None)
-                        
+
                         if distortion_coeffs is not None and len(distortion_coeffs) > 0:
-                            frame_rgb, keypoints_2d = self._undistort_image_and_keypoints(
-                                frame_rgb, keypoints_2d, K, distortion_coeffs
-                            )
+                            if used_reproj:
+                                # Only undistort the image; reprojected keypoints are already ideal pinhole
+                                frame_rgb = cv2.undistort(frame_rgb, K.astype(np.float64),
+                                                         np.array(distortion_coeffs).flatten().astype(np.float64),
+                                                         newCameraMatrix=K.astype(np.float64))
+                            else:
+                                frame_rgb, keypoints_2d = self._undistort_image_and_keypoints(
+                                    frame_rgb, keypoints_2d, K, distortion_coeffs
+                                )
                             self.stats['views_undistorted'] += 1
                     except Exception as e:
                         if self.debug:
@@ -672,15 +766,23 @@ class SLEAPMultiViewPreprocessor:
                     try:
                         # Get camera parameters from 3D loader
                         cam_params = loader_3d.get_camera_parameters(camera_name)
-                        K = cam_params['intrinsic']['K']
+                        K = cam_params['intrinsic']['K'].copy().astype(np.float32)
                         R = cam_params['extrinsic']['R']
                         t = cam_params['extrinsic']['t']
-                        img_size = cam_params['image_size']
-                        
-                        view_camera_intrinsics.append(K.astype(np.float32))
+
+                        # Adjust intrinsic matrix for the crop/resize applied to
+                        # the image so that 3D→2D projection during training lands
+                        # in the same coordinate system as the preprocessed 2D
+                        # keypoint targets.
+                        K = self._adjust_intrinsics_for_transform(K, transform_info)
+
+                        view_camera_intrinsics.append(K)
                         view_camera_extrinsics_R.append(R.astype(np.float32))
                         view_camera_extrinsics_t.append(t.astype(np.float32))
-                        view_image_sizes.append(np.array([img_size['width'], img_size['height']], dtype=np.int32))
+                        # Store preprocessed image dimensions (always square after
+                        # crop + resize) instead of original calibration dimensions.
+                        view_image_sizes.append(np.array(
+                            [self.target_resolution, self.target_resolution], dtype=np.int32))
                     except Exception as e:
                         print(f"Warning: Failed to extract camera parameters for {camera_name}: {e}")
                         # Add placeholder camera parameters
@@ -911,7 +1013,31 @@ class SLEAPMultiViewPreprocessor:
             undistorted_keypoints = keypoints_2d
         
         return undistorted_image, undistorted_keypoints
-    
+
+    def _resolve_reprojection_dataset(self, reproj_handle: h5py.File, camera_name: str,
+                                      warn: bool = True) -> Optional[h5py.Dataset]:
+        """
+        Map a camera_name to a dataset in reprojections.h5.
+        Tries exact match first, then case-insensitive exact match, then
+        single-character camera ID (e.g. 'camA' -> 'A').
+        """
+        try:
+            if camera_name in reproj_handle:
+                return reproj_handle[camera_name]
+            # Case-insensitive exact match
+            keys_lower = {k.lower(): k for k in reproj_handle.keys()}
+            if camera_name.lower() in keys_lower:
+                return reproj_handle[keys_lower[camera_name.lower()]]
+            # Single-character camera ID (e.g. 'camA' -> 'A')
+            if len(camera_name) > 0 and camera_name[-1].upper() in reproj_handle:
+                return reproj_handle[camera_name[-1].upper()]
+        except Exception:
+            pass
+        if warn:
+            print(f"Warning: Could not resolve reprojection dataset for camera '{camera_name}' "
+                  f"(available: {list(reproj_handle.keys())})")
+        return None
+
     def _find_video_file(self, loader: SLEAPDataLoader, camera_name: str) -> Optional[Path]:
         """Find video file for a camera."""
         if loader.data_structure_type == 'camera_dirs':
@@ -1165,6 +1291,57 @@ class SLEAPMultiViewPreprocessor:
         
         return adjusted_keypoints
     
+    def _adjust_intrinsics_for_transform(self, K: np.ndarray,
+                                          transform_info: Dict[str, Any]) -> np.ndarray:
+        """
+        Adjust camera intrinsic matrix K for the image crop/resize applied
+        during preprocessing.
+
+        When an image is cropped and resized, the mapping from 3-D camera
+        coordinates to 2-D pixel coordinates changes.  The intrinsic matrix
+        must be updated so that projections during training land in the same
+        coordinate system as the preprocessed 2-D keypoint targets.
+
+        Supports all three crop modes:
+        - 'centred': square center-crop then uniform resize
+        - 'bbox_crop': bounding-box crop then uniform resize
+        - 'default': direct (potentially non-uniform) resize
+
+        Args:
+            K: Original 3×3 intrinsic matrix (will not be mutated).
+            transform_info: Dictionary returned by ``_preprocess_image``.
+
+        Returns:
+            Adjusted 3×3 intrinsic matrix matching the preprocessed image.
+        """
+        K_adj = K.copy()
+        mode = transform_info['mode']
+
+        if mode in ('centred', 'bbox_crop'):
+            y_offset, x_offset = transform_info['crop_offset']
+            scale_factor = transform_info['scale_factor']
+
+            # 1. Shift principal point for crop offset
+            K_adj[0, 2] -= x_offset   # cx
+            K_adj[1, 2] -= y_offset   # cy
+
+            # 2. Scale focal lengths and principal point for resize
+            if isinstance(scale_factor, tuple):
+                # Fallback path inside bbox_crop when no valid keypoints
+                scale_y, scale_x = scale_factor
+                K_adj[0, 0] *= scale_x;  K_adj[0, 2] *= scale_x
+                K_adj[1, 1] *= scale_y;  K_adj[1, 2] *= scale_y
+            else:
+                K_adj[0, 0] *= scale_factor;  K_adj[0, 2] *= scale_factor
+                K_adj[1, 1] *= scale_factor;  K_adj[1, 2] *= scale_factor
+        else:
+            # 'default' mode — non-uniform scale
+            scale_y, scale_x = transform_info['scale_factor']
+            K_adj[0, 0] *= scale_x;  K_adj[0, 2] *= scale_x
+            K_adj[1, 1] *= scale_y;  K_adj[1, 2] *= scale_y
+
+        return K_adj
+
     def _sanitize_array(self, arr: np.ndarray, default_value: float = 0.0) -> np.ndarray:
         """Replace NaN/inf values with default."""
         if arr is None:
@@ -1443,6 +1620,7 @@ class SLEAPMultiViewPreprocessor:
             metadata_group.attrs['has_3d_keypoints'] = any(has_3d_data_list)
             metadata_group.attrs['load_3d_data'] = self.load_3d_data
             metadata_group.attrs['undistort_images'] = self.undistort_images
+            metadata_group.attrs['used_reprojections'] = self.use_reprojections
             # Store mapping info for downstream consumers/debugging
             try:
                 metadata_group.attrs['keypoints_3d_joint_order'] = 'smal'
@@ -1482,6 +1660,7 @@ class SLEAPMultiViewPreprocessor:
             metadata_group.attrs['views_excluded_no_keypoints'] = self.stats['views_excluded_no_keypoints']
             metadata_group.attrs['views_excluded_processing_error'] = self.stats['views_excluded_processing_error']
             metadata_group.attrs['views_undistorted'] = self.stats['views_undistorted']
+            metadata_group.attrs['views_reprojected'] = self.stats['views_reprojected']
 
 
 def main():
@@ -1529,7 +1708,7 @@ Examples:
                             "unet_mobilenet_v3")
     parser.add_argument("--jpeg_quality", type=int, default=95,
                        help="JPEG compression quality 1-100 (default: 95)")
-    parser.add_argument("--crop_mode", type=str, default='default',
+    parser.add_argument("--crop_mode", type=str, default='centred',
                        choices=['default', 'centred', 'bbox_crop'],
                        help="Image cropping mode (default: default)")
     
@@ -1549,6 +1728,10 @@ Examples:
     parser.add_argument("--no_undistort", action="store_true",
                        help="Skip undistorting images and 2D keypoints using camera calibration "
                             "(default: undistort if calibration is available)")
+
+    # Reprojection options
+    parser.add_argument("--use_reprojections", action="store_true",
+                       help="Use per-session reprojections.h5 for 2D keypoints instead of raw SLEAP predictions")
 
     # SMAL model options
     parser.add_argument("--smal_file", type=str, default=None,
@@ -1609,6 +1792,7 @@ Examples:
         print(f"Backbone: {args.backbone_name}")
         print(f"Crop mode: {args.crop_mode}")
         print(f"Undistort images: {not args.no_undistort}")
+        print(f"Use reprojections: {args.use_reprojections}")
         if args.smal_file:
             print(f"SMAL model: {args.smal_file}")
         print("="*60)
@@ -1635,7 +1819,8 @@ Examples:
             load_3d_data=load_3d,
             frame_skip=args.frame_skip,
             debug=args.debug,
-            undistort_images=undistort
+            undistort_images=undistort,
+            use_reprojections=args.use_reprojections
         )
         
         stats = preprocessor.process_dataset(
@@ -1697,6 +1882,14 @@ Examples:
                 inclusion_rate = 100.0 * total_included / total_potential
                 print(f"  Overall view inclusion rate: {inclusion_rate:.1f}%")
             
+            # Reprojection statistics
+            views_reprojected = stats.get('views_reprojected', 0)
+            if views_reprojected > 0:
+                print(f"  Views using reprojected keypoints: {views_reprojected}")
+                if total_included > 0:
+                    reproj_rate = 100.0 * views_reprojected / total_included
+                    print(f"  Reprojection rate: {reproj_rate:.1f}%")
+
             # Undistortion statistics
             views_undistorted = stats.get('views_undistorted', 0)
             if views_undistorted > 0:
