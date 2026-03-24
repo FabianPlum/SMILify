@@ -21,6 +21,7 @@ from torch.utils.data.distributed import DistributedSampler
 import numpy as np
 import os
 import sys
+import gc
 import random
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation
@@ -466,6 +467,10 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
             print(f"Error processing batch {batch_idx}: {e}")
             import traceback
             traceback.print_exc()
+            # Clean up GPU memory after OOM to prevent cascading failures.
+            if isinstance(e, torch.cuda.OutOfMemoryError):
+                gc.collect()
+                torch.cuda.empty_cache()
             continue
     
     # Average parameter errors over all batches
