@@ -460,11 +460,9 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
         # Create placeholder data for model initialization
         placeholder_data = torch.zeros((batch_size, 3, 512, 512))
         
-        # Determine input resolution based on backbone
-        if model_config['backbone_name'].startswith('vit'):
-            input_resolution = 224
-        else:
-            input_resolution = 512
+        # Determine input resolution from the centralized backbone factory
+        from backbone_factory import BackboneFactory
+        input_resolution = BackboneFactory.get_default_input_resolution(model_config['backbone_name'])
         
         print(f"Creating model with input resolution: {input_resolution}")
         
@@ -648,7 +646,7 @@ def load_and_preprocess_image(image_path: str, model: SMILImageRegressor, crop_m
         # Preprocess with proper cropping
         target_resolution = model.input_resolution
         preprocessed_image, transform_info = preprocess_frame(
-            image_data, target_resolution, crop_mode, keypoints_2d=keypoints_2d
+            image_data, target_resolution, crop_mode
         )
         
         # Convert to tensor (C, H, W) format
@@ -843,10 +841,7 @@ def render_prediction_on_frame(model: SMILImageRegressor, predicted_params: Dict
         frame_h, frame_w = original_frame.shape[:2]
         
         # Resize to model's expected input size for rendering
-        if model.backbone_name.startswith('vit'):
-            render_size = 224
-        else:
-            render_size = 512
+        render_size = model.input_resolution
         
         # Prepare image for rendering
         if original_frame.max() > 1.0:
@@ -1007,10 +1002,7 @@ def generate_visualization(model: SMILImageRegressor, predicted_params: Dict[str
             rgb_image = original_image.astype(np.float32)
         
         # Resize to model's expected input size
-        if model.backbone_name.startswith('vit'):
-            target_size = (224, 224)
-        else:
-            target_size = (512, 512)
+        target_size = (model.input_resolution, model.input_resolution)
         
         if rgb_image.shape[:2] != target_size:
             rgb_image = cv2.resize(rgb_image, target_size)
@@ -1260,11 +1252,8 @@ def process_video(model: SMILImageRegressor, video_path: str, output_folder: str
     
     # Determine output video dimensions based on export mode
     if video_export_mode == 'side_by_side':
-        # Determine render size based on model backbone
-        if model.backbone_name.startswith('vit'):
-            render_size = 224
-        else:
-            render_size = 512
+        # Determine render size based on model's input resolution
+        render_size = model.input_resolution
         
         # For side-by-side: input video will be rescaled to match render_size height
         # Output width will be 2 * render_size

@@ -79,10 +79,12 @@ class DatasetPreprocessor:
         self.verbose = verbose
         
         # Determine target resolution based on backbone
-        if backbone_name.startswith('vit'):
-            self.target_resolution = 224
-        else:
+        from backbone_factory import BackboneFactory
+        if target_resolution is not None and target_resolution != 224:
+            # Explicit override takes priority
             self.target_resolution = target_resolution
+        else:
+            self.target_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
         
         # Statistics tracking
         self.stats = {

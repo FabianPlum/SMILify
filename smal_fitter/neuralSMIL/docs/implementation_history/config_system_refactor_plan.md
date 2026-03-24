@@ -1,3 +1,5 @@
+<!-- Created: 2026-02-17 | Last modified: 2026-03-24 -->
+
 # SMILify Configuration System Refactor Plan
 
 ## Executive Summary
@@ -1325,3 +1327,50 @@ python test_smil_regressor_ground_truth.py \
 **Change**: `config.py` default SMAL_FILE changed from `SMILy_STICK.pkl` to `SMIL_OmniAnt.pkl` (the latest textured ant model).
 
 **Rationale**: OmniAnt is the maintained, feature-complete model for ant experiments. STICK remains available as a commented-out option for historical use.
+
+---
+
+## Implementation Status (as of 2026-03-24)
+
+### Phase Completion
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: Create New Config System | **Complete** | All dataclasses, JSON loading, validation, and examples implemented. |
+| Phase 2: Update Training Scripts | **Complete** | Both `train_smil_regressor.py` and `train_multiview_regressor.py` use `load_config()`. Config exported at training start. |
+| Phase 3: Integration Testing | **Mostly complete** | `test_config_system.py` (445 lines) and `test_curriculum_sync.py` (82 lines) cover precedence, merging, and curriculum. Manual multi-view training validated. |
+| Phase 4: Deprecation & Cleanup | **Not started** | `training_config.py` still exists without deprecation warning. Inline `MultiViewTrainingConfig` class not yet removed from `train_multiview_regressor.py`. |
+
+### Additions Beyond Original Plan
+
+The following were not in the original plan but emerged from practical training needs:
+
+1. **UNet backbone family** — `backbone_factory.py` now supports `unet_efficientnet_b0`, `unet_efficientnet_b3`, `unet_resnet34`, `unet_mobilenet_v3` with encoder-decoder architecture, skip connections, and spatial feature extraction via `forward_with_spatial()`.
+
+2. **Memory optimization fields** — `TrainingHyperparameters` gained:
+   - `use_mixed_precision` (FP16 forward pass, FP32 weight updates)
+   - `backbone_chunk_size` (process backbone images in smaller batches to reduce peak VRAM)
+   - `gradient_accumulation_steps` (simulate larger effective batch sizes)
+
+3. **Three-tier joint control**:
+   - `joint_importance` — per-joint loss upweighting for important joints
+   - `ignored_joint_locations` — loss-level exclusion (joints stay in data but are not supervised)
+   - `ignored_joints` — data-preprocessing-level exclusion (joints removed entirely)
+
+4. **`mesh_scaling` section** — `allow_mesh_scaling`, `init_mesh_scale`, `use_log_scale` for global mesh scale prediction.
+
+5. **`multi_dataset` section** — Multi-dataset training with per-dataset weighting, label availability, and split strategy.
+
+6. **6 example configs** (plan had 2): `singleview_baseline.json`, `multiview_baseline.json`, `multiview_sticks.json`, `multiview_sticks_UNET.json`, `multiview_sticks_UNET_continue.json`, `multiview_mouse_UNET_long.json`.
+
+7. **`input_resolution` auto-detection** — `ModelConfig.get_input_resolution()` and `BackboneFactory.get_default_input_resolution()` centralize resolution lookup (224 for ViT, 512 for CNN/UNet).
+
+8. **`hidden_dim` auto-adjustment** — `ModelConfig.get_adjusted_hidden_dim()` picks a sensible decoder dimension per backbone family when not explicitly set.
+
+### Deviations from Plan
+
+1. **`smal_model` vs `legacy`** — The plan used `legacy` as the config section name for SMAL model overrides; implementation uses `smal_model` with automatic aliasing for clarity.
+
+2. **`to_multiview_legacy_dict()` bridge** — Rather than fully removing the flat-dict config pattern from `train_multiview_regressor.py`, a bridge method converts the dataclass config to the legacy dict format. This keeps the training loop code simpler at the cost of an extra conversion step.
+
+3. **Phase 4 deferred** — `training_config.py` deprecation was deprioritized in favour of backbone factory work and training stability fixes.

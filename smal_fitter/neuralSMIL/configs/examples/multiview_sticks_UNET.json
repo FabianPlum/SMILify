@@ -17,7 +17,7 @@
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
-    "dataset_fraction": 0.1
+    "dataset_fraction": 1.0
   },
 
   "model": {
@@ -144,12 +144,12 @@
   },
 
   "output": {
-    "checkpoint_dir": "multiview_checkpoints_STICKS_full_512_3D",
+    "checkpoint_dir": "multiview_checkpoints",
     "plots_dir": "plots",
-    "visualizations_dir": "multiview_visualizations_STICKS_full_512_3D",
-    "singleview_visualizations_dir": "multiview_singleview_renders_STICKS_full_512_3D",
+    "visualizations_dir": "multiview_visualizations",
+    "singleview_visualizations_dir": "multiview_singleview_renders",
     "save_checkpoint_every": 10,
-    "generate_visualizations_every": 5,
+    "generate_visualizations_every": 10,
     "num_visualization_samples": 5
   },
 

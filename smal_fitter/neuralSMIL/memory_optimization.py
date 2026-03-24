@@ -109,7 +109,19 @@ class GradientCheckpointing:
         elif backbone_name.startswith('resnet'):
             # ResNet doesn't typically need gradient checkpointing
             print(f"Gradient checkpointing not needed for {backbone_name}")
-    
+        elif backbone_name.startswith('unet_'):
+            # UNet encoder is a timm model; checkpointing the encoder blocks
+            # can help when the encoder is unfrozen at higher resolutions.
+            if hasattr(model.backbone, 'backbone') and hasattr(model.backbone.backbone, 'encoder'):
+                encoder = model.backbone.backbone.encoder
+                if hasattr(encoder, 'set_grad_checkpointing'):
+                    encoder.set_grad_checkpointing(True)
+                    print(f"Enabled gradient checkpointing for UNet encoder ({backbone_name})")
+                else:
+                    print(f"Gradient checkpointing not supported for UNet encoder ({backbone_name})")
+            else:
+                print(f"Gradient checkpointing not applicable for {backbone_name}")
+
     @staticmethod
     def disable_checkpointing(model: nn.Module, backbone_name: str):
         """Disable gradient checkpointing for the model."""
@@ -118,6 +130,12 @@ class GradientCheckpointing:
                 for block in model.backbone.backbone.blocks:
                     if hasattr(block, 'gradient_checkpointing_disable'):
                         block.gradient_checkpointing_disable()
+            print(f"Disabled gradient checkpointing for {backbone_name}")
+        elif backbone_name.startswith('unet_'):
+            if hasattr(model.backbone, 'backbone') and hasattr(model.backbone.backbone, 'encoder'):
+                encoder = model.backbone.backbone.encoder
+                if hasattr(encoder, 'set_grad_checkpointing'):
+                    encoder.set_grad_checkpointing(False)
             print(f"Disabled gradient checkpointing for {backbone_name}")
 
 
@@ -295,6 +313,14 @@ def recommend_training_config(backbone_name: str, gpu_memory_gb: float = 24.0) -
             config['hidden_dim'] = 768
         elif 'large' in backbone_name:
             config['hidden_dim'] = 1024
+    elif backbone_name.startswith('unet_'):
+        _unet_hidden = {
+            'unet_efficientnet_b0': 512,
+            'unet_efficientnet_b3': 512,
+            'unet_resnet34': 512,
+            'unet_mobilenet_v3': 256,
+        }
+        config['hidden_dim'] = _unet_hidden.get(backbone_name, 512)
     else:
         config['hidden_dim'] = 2048
     
