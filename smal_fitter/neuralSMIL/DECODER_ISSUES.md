@@ -71,20 +71,42 @@ produced the failure.
 and inf values are clamped, but the computational graph is preserved so gradients
 still flow through non-NaN elements.
 
-### 5. No Multi-View Geometric Consistency for Camera Heads — FIXED
+### 5. No Multi-View Geometric Consistency for Camera Heads — IMPLEMENTED, DISABLED
 
 **Files:** `multiview_smil_regressor.py` (`_triangulate_joints_dlt`,
 `_compute_multiview_losses`)
 
-**Resolution:** Implemented a differentiable **triangulation consistency loss**
-that triangulates GT 2D keypoints using predicted cameras (via DLT with normal
-equations and Tikhonov damping) and compares the result against detached body
-model 3D predictions. Gradients flow through the differentiable triangulation
-into the camera heads. The loss ramps up via curriculum as direct camera
-supervision is phased out.
+**Implementation:** A differentiable **triangulation consistency loss** was
+implemented. It triangulates GT 2D keypoints using predicted cameras (via DLT
+with normal equations and Tikhonov damping) and compares the result against
+detached body model 3D predictions. Gradients flow through the differentiable
+triangulation into the camera heads.
 
 See [docs/triangulation_consistency_loss.md](docs/triangulation_consistency_loss.md)
-for full details. Validated with 12 synthetic tests in `tests/test_triangulation_consistency.py`.
+for full details. Validated with 12 synthetic tests in
+`tests/test_triangulation_consistency.py`.
+
+**Status: Disabled (`triangulation_consistency: 0.0` in all configs).**
+
+In practice the loss is **redundant with `keypoint_2d`**: both encode the same
+geometric constraint (GT 2D ↔ predicted cameras ↔ predicted 3D) — they differ
+only in functional form (DLT pseudo-inverse vs. forward projection). When one
+is satisfied, the other is too.
+
+It becomes **actively harmful when GT 2D labels are noisy** (e.g. from a 2D
+pose estimator). 3D GT is typically cleaner because multi-view triangulation
+averages out per-view noise. The `keypoint_3d` loss anchors the body model to
+that cleaner signal, but `triangulation_consistency` re-triangulates the noisy
+2D with still-learning cameras — injecting 2D noise directly into camera
+supervision.
+
+When **GT camera calibration is available** (`use_gt_camera_init: true`) with
+direct camera supervision (`cam_rot`, `cam_trans`, `fov` losses), the system is
+already geometrically consistent by construction. Any consistency loss is a
+no-op at best.
+
+**Leave at 0.0** unless all of: (1) clean 2D keypoints, (2) no GT camera
+calibration, and (3) no 3D keypoints. Even then, its value is marginal.
 
 ---
 
@@ -212,7 +234,7 @@ single-iteration baseline. The decoder fixes (#10 global feature injection,
 2. ~~**#2 (single-token cross-attention)**~~ — FIXED (V-token context).
 3. ~~**#3 (mean-pool bottleneck)**~~ — FIXED (resolved by #2).
 4. ~~**#4 (NaN clamping)**~~ — FIXED. `torch.nan_to_num`.
-5. ~~**#5 (geometric consistency)**~~ — FIXED. Triangulation consistency loss.
+5. ~~**#5 (geometric consistency)**~~ — IMPLEMENTED, DISABLED (redundant with `keypoint_2d`).
 6. ~~**#6 (curriculum complexity)**~~ — FIXED. Simplified schedule.
 7. ~~**#7 (batch size)**~~ — FIXED. Larger batches now feasible.
 8. **#8 (`global_rot` weight)** — BY DESIGN.

@@ -13,7 +13,7 @@
   },
 
   "dataset": {
-    "data_path": "Peru_res_512_3D.h5",
+    "data_path": "STICKS_full_512_3D.h5",
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
@@ -154,7 +154,7 @@
   },
 
   "training": {
-    "batch_size": 4,
+    "batch_size": 3,
     "num_epochs": 300,
     "seed": 42,
     "rotation_representation": "6d",
@@ -163,6 +163,8 @@
     "prefetch_factor": 8,
     "resume_checkpoint": null,
     "reset_ief_token_embedding": false,
-    "use_gt_camera_init": true
+    "use_gt_camera_init": true,
+    "use_mixed_precision": false,
+    "backbone_chunk_size": 6
   }
 }

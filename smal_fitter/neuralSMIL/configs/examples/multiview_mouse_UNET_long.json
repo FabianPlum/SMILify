@@ -3,17 +3,17 @@
 
   "num_views_to_use": null,
   "min_views_per_sample": 2,
-  "cross_attention_layers": 2,
+  "cross_attention_layers": 4,
   "cross_attention_heads": 8,
   "cross_attention_dropout": 0.1,
 
   "smal_model": {
-    "smal_file": "3D_model_prep/SMILy_STICK.pkl",
+    "smal_file": "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl",
     "shape_family": null
   },
 
   "dataset": {
-    "data_path": "STICKS_full_512_3D.h5",
+    "data_path": "FALKNER_MOUSE_18_centred_reprojected.h5",
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
@@ -32,7 +32,7 @@
     "transformer_dim_head": 64,
     "transformer_mlp_dim": 1024,
     "transformer_dropout": 0.1,
-    "transformer_ief_iters": 1,
+    "transformer_ief_iters": 3,
     "transformer_trans_scale_factor": 1
   },
 
@@ -43,11 +43,11 @@
     "optimizer_type": "adamw",
     "lr_schedule": {
       "0": 5e-5,
-      "10": 3e-5,
-      "20": 2e-5,
-      "60": 1e-5,
-      "100": 2e-6,
-      "200": 1e-6
+      "50": 3e-5,
+      "100": 2e-5,
+      "300": 1e-5,
+      "350": 5e-6,
+      "400": 1e-6
     }
   },
 
@@ -69,52 +69,61 @@
       "limb_scale_regularization": 0.01,
       "limb_trans_regularization": 1,
       "triangulation_consistency": 0.0,
-      "ief_intermediate": 0.0
+      "ief_intermediate": 0.1
     },
     "curriculum_stages": {
-      "1": {
-        "joint_angle_regularization": 0.01,
-        "limb_scale_regularization": 0.1,
-        "limb_trans_regularization": 1
-      },
-      "10": {
-        "keypoint_2d": 0.1,
-        "joint_angle_regularization": 1e-5,
-        "limb_scale_regularization": 0.01,
-        "limb_trans_regularization": 1
-      },
       "20": {
+        "keypoint_3d": 0.5,
+        "joint_angle_regularization": 0.0001
+      },
+      "50": {
+        "keypoint_3d": 1,
+        "joint_angle_regularization": 1e-5
+      },
+      "60": {
         "keypoint_3d": 2,
         "joint_angle_regularization": 1e-6,
         "limb_scale_regularization": 0.001,
         "limb_trans_regularization": 0.5
       },
-      "50": {
+      "250": {
         "keypoint_3d": 2,
         "joint_angle_regularization": 1e-6,
-        "limb_scale_regularization": 1e-5,
+        "limb_scale_regularization": 0.001,
         "limb_trans_regularization": 0.5
       },
-      "100": {
+      "300": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-7,
-        "limb_scale_regularization": 5e-6,
-        "limb_trans_regularization": 0.0001
-      },
-      "150": {
-        "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-7,
-        "limb_scale_regularization": 1e-6,
-        "limb_trans_regularization": 0.0001,
+        "joint_angle_regularization": 5e-7,
+        "limb_scale_regularization": 0.0005,
+        "limb_trans_regularization": 0.5,
         "fov": 1e-7,
         "cam_rot": 1e-8,
         "cam_trans": 1e-8
       },
-      "200": {
+      "350": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-7,
-        "limb_scale_regularization": 1e-6,
-        "limb_trans_regularization": 0.00001,
+        "joint_angle_regularization": 1e-6,
+        "limb_scale_regularization": 0.0001,
+        "limb_trans_regularization": 0.5,
+        "fov": 1e-7,
+        "cam_rot": 1e-8,
+        "cam_trans": 1e-8
+      },
+      "400": {
+        "keypoint_3d": 2,
+        "joint_angle_regularization": 4e-7,
+        "limb_scale_regularization": 0.00005,
+        "limb_trans_regularization": 0.5,
+        "fov": 1e-7,
+        "cam_rot": 1e-8,
+        "cam_trans": 1e-8
+      },
+      "500": {
+        "keypoint_3d": 2,
+        "joint_angle_regularization": 2e-7,
+        "limb_scale_regularization": 0.00001,
+        "limb_trans_regularization": 0.5,
         "fov": 1e-7,
         "cam_rot": 1e-8,
         "cam_trans": 1e-8
@@ -134,7 +143,7 @@
 
   "joint_importance": {
     "enabled": true,
-    "important_joint_names": ["l_1_pt_l", "l_2_pt_l", "l_3_pt_l", "l_1_pt_r", "l_2_pt_r", "l_3_pt_r"],
+    "important_joint_names": ["Nose", "paw_L_tip", "paw_R_tip", "Foot_L_tip", "Foot_R_tip", "Tail_07"],
     "weight_multiplier": 10.0
   },
 
@@ -144,27 +153,28 @@
   },
 
   "output": {
-    "checkpoint_dir": "multiview_checkpoints_STICKS_full_512_3D",
+    "checkpoint_dir": "multiview_checkpoints_MOUSE_Unet_512_EffB3_ief3",
     "plots_dir": "plots",
-    "visualizations_dir": "multiview_visualizations_STICKS_full_512_3D",
-    "singleview_visualizations_dir": "multiview_singleview_renders_STICKS_full_512_3D",
-    "save_checkpoint_every": 10,
+    "visualizations_dir": "multiview_visualizations_MOUSE_Unet_512_EffB3_ief3",
+    "singleview_visualizations_dir": "multiview_singleview_renders_MOUSE_Unet_512_EffB3_ief3",
+    "save_checkpoint_every": 5,
     "generate_visualizations_every": 5,
     "num_visualization_samples": 5
   },
 
   "training": {
-    "batch_size": 3,
-    "num_epochs": 300,
+    "batch_size": 1,
+    "num_epochs": 600,
     "seed": 42,
     "rotation_representation": "6d",
     "num_workers": 16,
     "pin_memory": true,
-    "prefetch_factor": 8,
-    "resume_checkpoint": null,
+    "prefetch_factor": 16,
+    "resume_checkpoint": "multiview_checkpoints_MOUSE_Unet_512_EffB3_ief3/checkpoint_epoch_0019.pth",
     "reset_ief_token_embedding": false,
     "use_gt_camera_init": true,
     "use_mixed_precision": false,
-    "backbone_chunk_size": 6
+    "backbone_chunk_size": 16,
+    "gradient_accumulation_steps": 8
   }
 }

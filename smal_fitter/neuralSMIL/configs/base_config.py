@@ -414,6 +414,9 @@ class TrainingHyperparameters:
     resume_checkpoint: Optional[str] = None
     reset_ief_token_embedding: bool = False
     use_gt_camera_init: bool = True
+    use_mixed_precision: bool = False
+    backbone_chunk_size: Optional[int] = None  # Max images through backbone at once (None = all)
+    gradient_accumulation_steps: int = 1  # Accumulate gradients over N mini-batches before stepping
 
 
 @dataclass
