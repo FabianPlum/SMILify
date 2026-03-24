@@ -47,7 +47,9 @@ class ModelConfig:
     """Neural network model architecture."""
     backbone_name: str = 'vit_large_patch16_224'
     freeze_backbone: bool = True
-    backbone_unfreeze_epoch: Optional[int] = None  # Epoch to unfreeze backbone (None = no staged freezing)
+    backbone_unfreeze_epoch: Optional[int] = None  # When set, backbone is frozen at init and unfrozen at this epoch.
+    # Overrides freeze_backbone (backbone is always frozen when this is set).
+    # Set to null/None to use freeze_backbone as-is.
     backbone_lr_multiplier: float = 0.1  # Backbone LR = curriculum_lr * this multiplier after unfreeze
     hidden_dim: int = 1024  # Auto-adjusted based on backbone in validate()
     head_type: str = 'transformer_decoder'  # 'mlp' or 'transformer_decoder'
@@ -76,6 +78,14 @@ class ModelConfig:
     def validate(self):
         if self.head_type not in ('mlp', 'transformer_decoder'):
             raise ValueError(f"Invalid head_type '{self.head_type}', must be 'mlp' or 'transformer_decoder'")
+        if self.backbone_unfreeze_epoch is not None and not self.freeze_backbone:
+            import warnings
+            warnings.warn(
+                f"backbone_unfreeze_epoch={self.backbone_unfreeze_epoch} is set but "
+                f"freeze_backbone=False. The backbone will be frozen at init and "
+                f"unfrozen at epoch {self.backbone_unfreeze_epoch} regardless of "
+                f"freeze_backbone. Set freeze_backbone=True to silence this warning."
+            )
 
     def get_adjusted_hidden_dim(self) -> int:
         """Return hidden_dim adjusted for backbone architecture.
