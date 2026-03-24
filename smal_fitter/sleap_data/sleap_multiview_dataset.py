@@ -36,14 +36,16 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
     - Backward compatibility mode for single-view training
     """
     
-    def __init__(self, 
-                 hdf5_path: str, 
+    def __init__(self,
+                 hdf5_path: str,
                  rotation_representation: str = '6d',
                  num_views_to_use: Optional[int] = None,
                  return_single_view: bool = False,
                  preferred_view: int = 0,
                  random_view_sampling: bool = True,
                  backbone_name: str = None,
+                 augment: bool = False,
+                 augmentation_config: Optional[Dict[str, Any]] = None,
                  **kwargs):
         """
         Initialize the multi-view SLEAP dataset.
@@ -66,6 +68,20 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         self.return_single_view = return_single_view
         self.preferred_view = preferred_view
         self.random_view_sampling = random_view_sampling
+        self.augment = augment
+
+        # Augmentation defaults (overridden by augmentation_config)
+        aug = augmentation_config or {}
+        self.aug_color_jitter_brightness = aug.get('color_jitter_brightness', 0.2)
+        self.aug_color_jitter_contrast = aug.get('color_jitter_contrast', 0.2)
+        self.aug_color_jitter_saturation = aug.get('color_jitter_saturation', 0.15)
+        self.aug_gaussian_noise_std = aug.get('gaussian_noise_std', 0.015)
+        self.aug_gaussian_blur_prob = aug.get('gaussian_blur_prob', 0.3)
+        self.aug_gaussian_blur_kernel_range = tuple(aug.get('gaussian_blur_kernel_range', (3, 7)))
+        self.aug_random_erasing_prob = aug.get('random_erasing_prob', 0.2)
+        self.aug_random_erasing_scale_range = tuple(aug.get('random_erasing_scale_range', (0.02, 0.1)))
+        self.aug_crop_jitter_fraction = aug.get('crop_jitter_fraction', 0.05)
+        self.aug_scale_jitter_range = tuple(aug.get('scale_jitter_range', (0.9, 1.1)))
         
         # Load dataset metadata
         self._load_metadata()
@@ -376,7 +392,45 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         except Exception:
             # Keep None defaults if optional datasets are missing or malformed.
             pass
-        
+
+        # ── Augmentation (training only) ────────────────────────────────
+        if self.augment:
+            images = x_data['images']
+            kp2d = y_data['keypoints_2d']       # (num_views, n_joints, 2)
+            vis = y_data['keypoint_visibility']  # (num_views, n_joints)
+            K_aug = y_data.get('camera_intrinsics')  # (num_views, 3, 3) or None
+
+            for vi in range(len(images)):
+                # Geometric augmentation (per-view, updates K and 2D keypoints)
+                if K_aug is not None:
+                    images[vi], K_aug[vi], kp2d[vi], vis[vi] = (
+                        self._apply_geometric_augmentation(
+                            images[vi], K_aug[vi], kp2d[vi], vis[vi]
+                        )
+                    )
+                # Photometric augmentation (per-view, independent randomness)
+                images[vi] = self._apply_photometric_augmentation(images[vi])
+
+            x_data['images'] = images
+            y_data['keypoints_2d'] = kp2d
+            y_data['keypoint_visibility'] = vis
+
+            # Recompute PyTorch3D camera params from updated intrinsics
+            if K_aug is not None:
+                y_data['camera_intrinsics'] = K_aug
+                sz = y_data['image_sizes']  # (num_views, 2) as (W, H)
+                for vi in range(len(images)):
+                    R_p3d, T_p3d, fov_y, aspect = self._sleap_to_pytorch3d_camera(
+                        R_cv=y_data['camera_extrinsics_R'][vi],
+                        t_cv=y_data['camera_extrinsics_t'][vi],
+                        K=K_aug[vi],
+                        image_size_wh=sz[vi].astype(np.float32),
+                    )
+                    y_data['cam_fov_per_view'][vi, 0] = fov_y
+                    y_data['cam_rot_per_view'][vi] = R_p3d
+                    y_data['cam_trans_per_view'][vi] = T_p3d
+                    y_data['cam_aspect_per_view'][vi, 0] = float(aspect)
+
         return x_data, y_data
     
     def _get_single_view_sample(self, idx: int) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -502,9 +556,159 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = image.astype(np.float32) / 255.0
-        
+
         return image
-    
+
+    # ── Augmentation ─────────────────────────────────────────────────────
+
+    def _apply_photometric_augmentation(self, image: np.ndarray) -> np.ndarray:
+        """Apply photometric augmentation to a single image.
+
+        Args:
+            image: (H, W, 3) float32 RGB in [0, 1].
+
+        Returns:
+            Augmented image, same shape and dtype, clipped to [0, 1].
+        """
+        # Brightness: additive shift
+        if self.aug_color_jitter_brightness > 0:
+            delta = np.random.uniform(-self.aug_color_jitter_brightness,
+                                       self.aug_color_jitter_brightness)
+            image = image + delta
+
+        # Contrast: scale around mean
+        if self.aug_color_jitter_contrast > 0:
+            factor = np.random.uniform(max(0, 1 - self.aug_color_jitter_contrast),
+                                       1 + self.aug_color_jitter_contrast)
+            mean = image.mean()
+            image = (image - mean) * factor + mean
+
+        # Saturation: blend with grayscale
+        if self.aug_color_jitter_saturation > 0:
+            factor = np.random.uniform(max(0, 1 - self.aug_color_jitter_saturation),
+                                       1 + self.aug_color_jitter_saturation)
+            gray = image.mean(axis=2, keepdims=True)
+            image = gray + (image - gray) * factor
+
+        # Gaussian noise
+        if self.aug_gaussian_noise_std > 0:
+            noise = np.random.normal(0, self.aug_gaussian_noise_std,
+                                     image.shape).astype(np.float32)
+            image = image + noise
+
+        # Gaussian blur
+        if self.aug_gaussian_blur_prob > 0 and np.random.random() < self.aug_gaussian_blur_prob:
+            lo, hi = self.aug_gaussian_blur_kernel_range
+            # Kernel size must be odd
+            k = np.random.choice(range(lo, hi + 1, 2))
+            image = cv2.GaussianBlur(image, (k, k), 0)
+
+        # Random erasing (rectangular cutout filled with mean)
+        if self.aug_random_erasing_prob > 0 and np.random.random() < self.aug_random_erasing_prob:
+            h, w = image.shape[:2]
+            lo_s, hi_s = self.aug_random_erasing_scale_range
+            area_frac = np.random.uniform(lo_s, hi_s)
+            erase_area = int(h * w * area_frac)
+            aspect = np.random.uniform(0.3, 1.0 / 0.3)
+            eh = int(np.sqrt(erase_area * aspect))
+            ew = int(np.sqrt(erase_area / aspect))
+            eh, ew = min(eh, h), min(ew, w)
+            y0 = np.random.randint(0, h - eh + 1)
+            x0 = np.random.randint(0, w - ew + 1)
+            image[y0:y0 + eh, x0:x0 + ew] = image.mean()
+
+        return np.clip(image, 0.0, 1.0)
+
+    def _apply_geometric_augmentation(
+        self,
+        image: np.ndarray,
+        K: np.ndarray,
+        keypoints_2d: np.ndarray,
+        visibility: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Apply crop/scale jitter, updating K and 2D keypoints consistently.
+
+        The projection relationship ``2D = K @ [R|t] @ X_3d`` is preserved by
+        adjusting the intrinsics matrix K to match the new image crop/resize.
+        Extrinsics R, t are never modified.
+
+        Args:
+            image: (H, W, 3) float32 RGB in [0, 1].
+            K: (3, 3) camera intrinsics for this view.
+            keypoints_2d: (n_joints, 2) **normalized [0,1] in [y, x] order**
+                as stored in the HDF5 dataset.
+            visibility: (n_joints,) boolean visibility mask.
+
+        Returns:
+            (image, K, keypoints_2d, visibility) — all updated in-place-safe copies.
+        """
+        h, w = image.shape[:2]
+        K = K.copy()
+        keypoints_2d = keypoints_2d.copy()
+        visibility = visibility.copy()
+
+        # 1. Random scale factor
+        lo, hi = self.aug_scale_jitter_range
+        scale = np.random.uniform(lo, hi)
+
+        # 2. Random crop offset (fraction of image size)
+        max_off = self.aug_crop_jitter_fraction
+        off_x = np.random.uniform(-max_off, max_off) * w
+        off_y = np.random.uniform(-max_off, max_off) * h
+
+        # 3. Compute source crop region in original image coords.
+        #    We want the final image to be the same (h, w) resolution.
+        #    A scale > 1 means zoom in (smaller source crop), < 1 means zoom out.
+        src_h = h / scale
+        src_w = w / scale
+        # Centre the crop, then apply offset
+        cx = w / 2.0 + off_x
+        cy = h / 2.0 + off_y
+        x1 = cx - src_w / 2.0
+        y1 = cy - src_h / 2.0
+
+        # 4. Build the affine mapping: source (x1, y1, src_w, src_h) -> dest (0, 0, w, h)
+        #    dest_x = (src_x - x1) * (w / src_w) = (src_x - x1) * scale
+        sx = w / src_w  # == scale
+        sy = h / src_h  # == scale
+
+        M = np.array([
+            [sx, 0, -x1 * sx],
+            [0, sy, -y1 * sy],
+        ], dtype=np.float32)
+        image = cv2.warpAffine(image, M, (w, h),
+                               flags=cv2.INTER_LINEAR,
+                               borderMode=cv2.BORDER_REFLECT_101)
+
+        # 5. Update intrinsics: K_new maps from the same world ray to the new pixel coords.
+        #    new_pixel = M @ old_pixel  =>  K_new = [[sx, 0, -x1*sx], [0, sy, -y1*sy], [0,0,1]] @ K
+        T = np.eye(3, dtype=np.float64)
+        T[0, 0] = sx
+        T[1, 1] = sy
+        T[0, 2] = -x1 * sx
+        T[1, 2] = -y1 * sy
+        K = (T @ K.astype(np.float64)).astype(np.float32)
+
+        # 6. Update 2D keypoints: convert from normalized [y,x] to pixel [x,y],
+        #    apply the affine transform, then convert back to normalized [y,x].
+        pixel_x = keypoints_2d[:, 1] * w   # col 1 = normalized x
+        pixel_y = keypoints_2d[:, 0] * h   # col 0 = normalized y
+
+        new_pixel_x = (pixel_x - x1) * sx
+        new_pixel_y = (pixel_y - y1) * sy
+
+        keypoints_2d[:, 1] = new_pixel_x / w  # back to normalized x
+        keypoints_2d[:, 0] = new_pixel_y / h  # back to normalized y
+
+        # 7. Mark keypoints outside the [0, 1] normalized range as invisible
+        out_of_bounds = (
+            (keypoints_2d[:, 0] < 0) | (keypoints_2d[:, 0] > 1.0) |
+            (keypoints_2d[:, 1] < 0) | (keypoints_2d[:, 1] > 1.0)
+        )
+        visibility[out_of_bounds] = False
+
+        return image, K, keypoints_2d, visibility
+
     def get_max_views_in_dataset(self) -> int:
         """Return the maximum number of views across all samples."""
         return self.max_views
