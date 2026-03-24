@@ -1152,12 +1152,20 @@ class SLEAPDataLoader:
     def _extract_keypoint_names_from_slp(self, slp_file: Path) -> List[str]:
         """
         Extract keypoint names from a .slp file's metadata.
-        
+
+        SLEAP .slp files store two node lists:
+        - Top-level ``metadata['nodes']``: ordered by node **ID**, each entry has a ``name``.
+        - ``metadata['skeletons'][0]['nodes']``: ordered by skeleton **position**,
+          each entry has an ``id`` that references the top-level list.
+
+        ``pred_points`` in the .slp file are stored in skeleton position order,
+        so this method must return names in that same order.
+
         Args:
             slp_file: Path to the .slp file
-            
+
         Returns:
-            List of keypoint names, or empty list if extraction fails
+            List of keypoint names in skeleton position order, or empty list if extraction fails
         """
         with h5py.File(slp_file, 'r') as f:
             if 'metadata' in f:
@@ -1167,15 +1175,35 @@ class SLEAPDataLoader:
                     if isinstance(metadata_json, bytes):
                         metadata_json = metadata_json.decode('utf-8')
                     metadata = json.loads(metadata_json)
-                    
-                    # Extract node names from skeleton definition
-                    if 'nodes' in metadata:
-                        node_names = [node.get('name', f'node_{i}') 
-                                     for i, node in enumerate(metadata['nodes'])]
-                        print(f"Loaded {len(node_names)} keypoint names from .slp metadata")
+
+                    top_nodes = metadata.get('nodes', [])
+                    skeletons = metadata.get('skeletons', [])
+
+                    # Build an id→name lookup from the top-level nodes list
+                    id_to_name = {}
+                    for i, node in enumerate(top_nodes):
+                        name = node.get('name', f'node_{i}')
+                        id_to_name[i] = name
+
+                    # Resolve skeleton position order → name via node IDs
+                    if skeletons and 'nodes' in skeletons[0] and id_to_name:
+                        skel_nodes = skeletons[0]['nodes']
+                        node_names = []
+                        for skel_node in skel_nodes:
+                            nid = skel_node.get('id', None) if isinstance(skel_node, dict) else None
+                            if nid is not None and nid in id_to_name:
+                                node_names.append(id_to_name[nid])
+                            else:
+                                node_names.append(f'node_{len(node_names)}')
+                        print(f"Loaded {len(node_names)} keypoint names from .slp metadata (skeleton position order)")
                         return node_names
-        
-        return []
+
+                    # Fallback: no skeleton info, use top-level nodes in ID order
+                    if top_nodes:
+                        node_names = [node.get('name', f'node_{i}')
+                                     for i, node in enumerate(top_nodes)]
+                        print(f"Loaded {len(node_names)} keypoint names from .slp metadata (ID order, no skeleton)")
+                        return node_names
             
     def get_skeleton_structure(self) -> Tuple[List[Tuple[int, int]], List[Tuple[str, str]]]:
         """
