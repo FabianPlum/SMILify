@@ -47,6 +47,8 @@ class ModelConfig:
     """Neural network model architecture."""
     backbone_name: str = 'vit_large_patch16_224'
     freeze_backbone: bool = True
+    backbone_unfreeze_epoch: Optional[int] = None  # Epoch to unfreeze backbone (None = no staged freezing)
+    backbone_lr_multiplier: float = 0.1  # Backbone LR = curriculum_lr * this multiplier after unfreeze
     hidden_dim: int = 1024  # Auto-adjusted based on backbone in validate()
     head_type: str = 'transformer_decoder'  # 'mlp' or 'transformer_decoder'
     use_unity_prior: bool = False
@@ -334,6 +336,31 @@ class MeshScalingConfig:
 
 
 @dataclass
+class AugmentationConfig:
+    """Image augmentation for training data.
+
+    Only photometric augmentations are safe by default (no camera param changes).
+    Geometric augmentations (crop/scale jitter) update the camera intrinsics K
+    to maintain the projection relationship: 2D = K @ [R|t] @ X_3d.
+    """
+    enabled: bool = False
+
+    # Photometric (per-view, no camera changes)
+    color_jitter_brightness: float = 0.2
+    color_jitter_contrast: float = 0.2
+    color_jitter_saturation: float = 0.15
+    gaussian_noise_std: float = 0.015
+    gaussian_blur_prob: float = 0.3
+    gaussian_blur_kernel_range: Tuple[int, int] = (3, 7)
+    random_erasing_prob: float = 0.2
+    random_erasing_scale_range: Tuple[float, float] = (0.02, 0.1)
+
+    # Geometric (per-view, requires K update)
+    crop_jitter_fraction: float = 0.05  # Max crop offset as fraction of image size
+    scale_jitter_range: Tuple[float, float] = (0.9, 1.1)
+
+
+@dataclass
 class IgnoredJointLocationsConfig:
     """Loss-level joint location exclusion for 2D and 3D keypoint losses.
 
@@ -452,6 +479,7 @@ class BaseTrainingConfig:
     loss_curriculum: LossCurriculumConfig = field(default_factory=LossCurriculumConfig)
     scale_trans_beta: ScaleTransBetaConfig = field(default_factory=ScaleTransBetaConfig)
     mesh_scaling: MeshScalingConfig = field(default_factory=MeshScalingConfig)
+    augmentation: AugmentationConfig = field(default_factory=AugmentationConfig)
     joint_importance: JointImportanceConfig = field(default_factory=JointImportanceConfig)
     ignored_joint_locations: IgnoredJointLocationsConfig = field(default_factory=IgnoredJointLocationsConfig)
     ignored_joints: IgnoredJointsConfig = field(default_factory=IgnoredJointsConfig)
@@ -529,6 +557,8 @@ class BaseTrainingConfig:
             'model_config': {
                 'backbone_name': self.model.backbone_name,
                 'freeze_backbone': self.model.freeze_backbone,
+                'backbone_unfreeze_epoch': self.model.backbone_unfreeze_epoch,
+                'backbone_lr_multiplier': self.model.backbone_lr_multiplier,
                 'hidden_dim': hidden_dim,
                 'input_resolution': self.model.get_input_resolution(),
                 'rgb_only': self.model.rgb_only,
@@ -584,5 +614,18 @@ class BaseTrainingConfig:
             'ignored_joint_locations': {
                 'enabled': self.ignored_joint_locations.enabled,
                 'ignored_joint_names': list(self.ignored_joint_locations.ignored_joint_names),
+            },
+            'augmentation': {
+                'enabled': self.augmentation.enabled,
+                'color_jitter_brightness': self.augmentation.color_jitter_brightness,
+                'color_jitter_contrast': self.augmentation.color_jitter_contrast,
+                'color_jitter_saturation': self.augmentation.color_jitter_saturation,
+                'gaussian_noise_std': self.augmentation.gaussian_noise_std,
+                'gaussian_blur_prob': self.augmentation.gaussian_blur_prob,
+                'gaussian_blur_kernel_range': list(self.augmentation.gaussian_blur_kernel_range),
+                'random_erasing_prob': self.augmentation.random_erasing_prob,
+                'random_erasing_scale_range': list(self.augmentation.random_erasing_scale_range),
+                'crop_jitter_fraction': self.augmentation.crop_jitter_fraction,
+                'scale_jitter_range': list(self.augmentation.scale_jitter_range),
             },
         }
