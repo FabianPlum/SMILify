@@ -1,3 +1,5 @@
+<!-- Created: 2026-01-05 | Last modified: 2026-01-14 -->
+
 # Multi-View SLEAP Dataset Implementation Plan
 
 ## Executive Summary

@@ -1,3 +1,5 @@
+<!-- Created: 2026-02-17 | Last modified: 2026-03-24 -->
+
 # SMILify Configuration System Refactor Plan
 
 ## Executive Summary
