@@ -626,11 +626,23 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         keypoints_2d: np.ndarray,
         visibility: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Apply crop/scale jitter, updating K and 2D keypoints consistently.
+        """Apply scale jitter, updating K and 2D keypoints consistently.
 
         The projection relationship ``2D = K @ [R|t] @ X_3d`` is preserved by
         adjusting the intrinsics matrix K to match the new image crop/resize.
         Extrinsics R, t are never modified.
+
+        **Important:** Only *centered* scale jitter is applied (no crop offset).
+        The training pipeline uses ``FoVPerspectiveCameras`` which parametrises
+        projection via fov + aspect_ratio and assumes the principal point is at
+        the image centre.  A crop offset would shift cx/cy in K, but that shift
+        is lost when converting to FoV parameters — creating a systematic
+        mismatch between the projected keypoints and the augmented targets.
+        Centered scale jitter is safe because it only changes fx/fy
+        (captured by fov/aspect) while keeping cx = w/2, cy = h/2.
+
+        To support crop jitter in the future, the camera pipeline would need to
+        switch to ``PerspectiveCameras`` which accepts a full intrinsics matrix.
 
         Args:
             image: (H, W, 3) float32 RGB in [0, 1].
@@ -647,27 +659,18 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         keypoints_2d = keypoints_2d.copy()
         visibility = visibility.copy()
 
-        # 1. Random scale factor
+        # 1. Random scale factor (centered zoom in/out)
         lo, hi = self.aug_scale_jitter_range
         scale = np.random.uniform(lo, hi)
 
-        # 2. Random crop offset (fraction of image size)
-        max_off = self.aug_crop_jitter_fraction
-        off_x = np.random.uniform(-max_off, max_off) * w
-        off_y = np.random.uniform(-max_off, max_off) * h
-
-        # 3. Compute source crop region in original image coords.
-        #    We want the final image to be the same (h, w) resolution.
-        #    A scale > 1 means zoom in (smaller source crop), < 1 means zoom out.
+        # 2. Compute source crop region — always centred (no offset).
+        #    scale > 1 means zoom in (smaller source crop), < 1 means zoom out.
         src_h = h / scale
         src_w = w / scale
-        # Centre the crop, then apply offset
-        cx = w / 2.0 + off_x
-        cy = h / 2.0 + off_y
-        x1 = cx - src_w / 2.0
-        y1 = cy - src_h / 2.0
+        x1 = (w - src_w) / 2.0
+        y1 = (h - src_h) / 2.0
 
-        # 4. Build the affine mapping: source (x1, y1, src_w, src_h) -> dest (0, 0, w, h)
+        # 3. Build the affine mapping: source (x1, y1, src_w, src_h) -> dest (0, 0, w, h)
         #    dest_x = (src_x - x1) * (w / src_w) = (src_x - x1) * scale
         sx = w / src_w  # == scale
         sy = h / src_h  # == scale
@@ -680,8 +683,9 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                                flags=cv2.INTER_LINEAR,
                                borderMode=cv2.BORDER_REFLECT_101)
 
-        # 5. Update intrinsics: K_new maps from the same world ray to the new pixel coords.
-        #    new_pixel = M @ old_pixel  =>  K_new = [[sx, 0, -x1*sx], [0, sy, -y1*sy], [0,0,1]] @ K
+        # 4. Update intrinsics: K_new maps from the same world ray to the new pixel coords.
+        #    For centred scale, this simplifies to scaling fx, fy, cx, cy by the scale factor,
+        #    which preserves cx = w/2, cy = h/2 (required by FoVPerspectiveCameras).
         T = np.eye(3, dtype=np.float64)
         T[0, 0] = sx
         T[1, 1] = sy
@@ -689,7 +693,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         T[1, 2] = -y1 * sy
         K = (T @ K.astype(np.float64)).astype(np.float32)
 
-        # 6. Update 2D keypoints: convert from normalized [y,x] to pixel [x,y],
+        # 5. Update 2D keypoints: convert from normalized [y,x] to pixel [x,y],
         #    apply the affine transform, then convert back to normalized [y,x].
         pixel_x = keypoints_2d[:, 1] * w   # col 1 = normalized x
         pixel_y = keypoints_2d[:, 0] * h   # col 0 = normalized y
@@ -700,7 +704,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         keypoints_2d[:, 1] = new_pixel_x / w  # back to normalized x
         keypoints_2d[:, 0] = new_pixel_y / h  # back to normalized y
 
-        # 7. Mark keypoints outside the [0, 1] normalized range as invisible
+        # 6. Mark keypoints outside the [0, 1] normalized range as invisible
         out_of_bounds = (
             (keypoints_2d[:, 0] < 0) | (keypoints_2d[:, 0] > 1.0) |
             (keypoints_2d[:, 1] < 0) | (keypoints_2d[:, 1] > 1.0)
