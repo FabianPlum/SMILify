@@ -17,6 +17,8 @@
   "model": {
     "backbone_name": "vit_large_patch16_224",
     "freeze_backbone": true,
+    "backbone_unfreeze_epoch": null,
+    "backbone_lr_multiplier": 0.1,
     "hidden_dim": 1024,
     "head_type": "transformer_decoder",
     "use_unity_prior": false,
@@ -103,6 +105,20 @@
     "use_log_scale": true
   },
 
+  "augmentation": {
+    "enabled": false,
+    "color_jitter_brightness": 0.2,
+    "color_jitter_contrast": 0.2,
+    "color_jitter_saturation": 0.15,
+    "gaussian_noise_std": 0.015,
+    "gaussian_blur_prob": 0.3,
+    "gaussian_blur_kernel_range": [3, 7],
+    "random_erasing_prob": 0.2,
+    "random_erasing_scale_range": [0.02, 0.1],
+    "crop_jitter_fraction": 0.05,
+    "scale_jitter_range": [0.9, 1.1]
+  },
+
   "joint_importance": {
     "enabled": true,
     "important_joint_names": ["l_1_pt_l", "l_2_pt_l", "l_3_pt_l", "l_1_pt_r", "l_2_pt_r", "l_3_pt_r"],
@@ -135,6 +151,7 @@
     "prefetch_factor": 4,
     "resume_checkpoint": "checkpoints/best_model.pth",
     "use_gt_camera_init": false,
-    "use_mixed_precision": true
+    "use_mixed_precision": true,
+    "gradient_accumulation_steps": 1
   }
 }

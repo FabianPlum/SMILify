@@ -13,7 +13,7 @@
   },
 
   "dataset": {
-    "data_path": "STICKS_full_512_3D.h5",
+    "data_path": "SMILySTICKS_centred_reprojected.h5",
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
@@ -23,6 +23,8 @@
   "model": {
     "backbone_name": "unet_efficientnet_b3",
     "freeze_backbone": false,
+    "backbone_unfreeze_epoch": 100,
+    "backbone_lr_multiplier": 0.1,
     "hidden_dim": 1024,
     "head_type": "transformer_decoder",
     "use_unity_prior": false,
@@ -32,7 +34,7 @@
     "transformer_dim_head": 64,
     "transformer_mlp_dim": 1024,
     "transformer_dropout": 0.1,
-    "transformer_ief_iters": 1,
+    "transformer_ief_iters": 3,
     "transformer_trans_scale_factor": 1
   },
 
@@ -69,7 +71,7 @@
       "limb_scale_regularization": 0.01,
       "limb_trans_regularization": 1,
       "triangulation_consistency": 0.0,
-      "ief_intermediate": 0.0
+      "ief_intermediate": 0.05
     },
     "curriculum_stages": {
       "1": {
@@ -123,13 +125,27 @@
   },
 
   "scale_trans_beta": {
-    "mode": "separate"
+    "mode": "entangled_with_betas"
   },
 
   "mesh_scaling": {
     "allow_mesh_scaling": true,
     "init_mesh_scale": 1.0,
     "use_log_scale": true
+  },
+
+  "augmentation": {
+    "enabled": true,
+    "color_jitter_brightness": 0.2,
+    "color_jitter_contrast": 0.2,
+    "color_jitter_saturation": 0.15,
+    "gaussian_noise_std": 0.015,
+    "gaussian_blur_prob": 0.3,
+    "gaussian_blur_kernel_range": [3, 7],
+    "random_erasing_prob": 0.2,
+    "random_erasing_scale_range": [0.02, 0.1],
+    "crop_jitter_fraction": 0.05,
+    "scale_jitter_range": [0.9, 1.1]
   },
 
   "joint_importance": {
@@ -144,17 +160,17 @@
   },
 
   "output": {
-    "checkpoint_dir": "multiview_checkpoints",
+    "checkpoint_dir": "multiview_checkpoints_sticky_test",
     "plots_dir": "plots",
-    "visualizations_dir": "multiview_visualizations",
-    "singleview_visualizations_dir": "multiview_singleview_renders",
+    "visualizations_dir": "multiview_visualizations_sticky_test",
+    "singleview_visualizations_dir": "multiview_singleview_renders_sticky_test",
     "save_checkpoint_every": 10,
-    "generate_visualizations_every": 10,
+    "generate_visualizations_every": 5,
     "num_visualization_samples": 5
   },
 
   "training": {
-    "batch_size": 3,
+    "batch_size": 2,
     "num_epochs": 300,
     "seed": 42,
     "rotation_representation": "6d",
@@ -165,6 +181,7 @@
     "reset_ief_token_embedding": false,
     "use_gt_camera_init": true,
     "use_mixed_precision": false,
-    "backbone_chunk_size": 6
+    "backbone_chunk_size": 6,
+    "gradient_accumulation_steps": 4
   }
 }
