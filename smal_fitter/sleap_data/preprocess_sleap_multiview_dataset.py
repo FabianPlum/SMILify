@@ -1710,7 +1710,7 @@ Examples:
                        help="JPEG compression quality 1-100 (default: 95)")
     parser.add_argument("--crop_mode", type=str, default='centred',
                        choices=['default', 'centred', 'bbox_crop'],
-                       help="Image cropping mode (default: default)")
+                       help="Image cropping mode (default: centred)")
     
     # Multi-view specific options
     parser.add_argument("--min_views", type=int, default=2,
