@@ -333,9 +333,21 @@ class SMILTransformerDecoderHead(nn.Module):
         Returns:
             Dictionary containing predicted SMIL parameters
         """
+        # Force FP32 for the decoder.  The backbone benefits from FP16, but
+        # the IEF loop accumulates residual updates through LayerNorm, attention,
+        # and parameter heads where FP16 precision causes NaN cascades.  The
+        # decoder is small so FP32 has negligible memory impact.
+        with torch.cuda.amp.autocast(enabled=False):
+            features = features.float()
+            if spatial_features is not None:
+                spatial_features = spatial_features.float()
+            return self._forward_impl(features, spatial_features)
+
+    def _forward_impl(self, features: torch.Tensor, spatial_features: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        """Inner forward running in FP32 (called from forward with autocast disabled)."""
         batch_size = features.shape[0]
         device = features.device
-        
+
         # Initialize predictions
         pred_pose = self.init_pose.expand(batch_size, -1).to(device)
         pred_betas = self.init_betas.expand(batch_size, -1).to(device)

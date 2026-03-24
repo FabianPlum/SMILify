@@ -368,10 +368,11 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                  cross_attention_heads: int = 8,
                  cross_attention_dropout: float = 0.1,
                  use_gt_camera_init: bool = False,
+                 backbone_chunk_size: Optional[int] = None,
                  **kwargs):
         """
         Initialize the multi-view SMIL regressor.
-        
+
         Args:
             device: PyTorch device
             data_batch: Batch data for initialization
@@ -383,6 +384,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             cross_attention_layers: Number of cross-attention layers for feature fusion
             cross_attention_heads: Number of attention heads
             cross_attention_dropout: Dropout for attention layers
+            backbone_chunk_size: Max images to process through backbone at once.
+                None = all at once (default). Set to e.g. 6 to reduce peak VRAM
+                when using many views and/or large input resolutions.
             **kwargs: Additional arguments passed to parent SMILImageRegressor
         """
         # Initialize parent single-view regressor
@@ -392,6 +396,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         self.canonical_camera_order = canonical_camera_order or []
         self.num_canonical_cameras = len(self.canonical_camera_order) if self.canonical_camera_order else max_views
         self.use_gt_camera_init = use_gt_camera_init
+        self.backbone_chunk_size = backbone_chunk_size
         
         # Cross-attention feature fusion
         self.view_fusion = MultiViewFeatureFusion(
@@ -456,21 +461,44 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         batch_size = images_per_view[0].size(0)
         num_views = len(images_per_view)
         
-        # =================== OPTIMIZED: Single backbone pass for all views ===================
+        # =================== Backbone pass for all views ===================
         # Stack all views: List of (B, C, H, W) -> (B, V, C, H, W) -> (B*V, C, H, W)
-        # This gives 5-8x speedup vs sequential backbone calls
         all_images = torch.stack(images_per_view, dim=1)  # (B, V, C, H, W)
         B, V, C, H, W = all_images.shape
         all_images_flat = all_images.view(B * V, C, H, W)  # (B*V, C, H, W)
-        
-        # Single backbone forward pass for all views at once.
-        # For transformer_decoder + any backbone with forward_with_spatial():
-        # also extract per-view spatial tokens for rich cross-attention context.
-        # ViT: (B*V, 196, D) patch tokens.  UNet: (B*V, H*W, C) decoder feature map.
+
+        # Backbone forward pass — optionally chunked to reduce peak VRAM.
+        # When backbone_chunk_size is set, we process images in smaller batches
+        # through the backbone and concatenate results. This is mathematically
+        # equivalent to processing all at once since the backbone is per-image.
+        use_spatial = (self.head_type == 'transformer_decoder'
+                       and hasattr(self.backbone, 'forward_with_spatial'))
+        chunk = self.backbone_chunk_size
+
         patch_tokens = None
-        if self.head_type == 'transformer_decoder' and hasattr(self.backbone, 'forward_with_spatial'):
+        if chunk is not None and chunk < B * V:
+            # Chunked backbone forward to reduce peak VRAM
+            feat_chunks = []
+            patch_chunks = [] if use_spatial else None
+            for i in range(0, B * V, chunk):
+                imgs_chunk = all_images_flat[i:i + chunk]
+                if use_spatial:
+                    f, p = self.backbone.forward_with_spatial(imgs_chunk)
+                    feat_chunks.append(f)
+                    patch_chunks.append(p)
+                else:
+                    feat_chunks.append(self.backbone(imgs_chunk))
+            all_features = torch.cat(feat_chunks, dim=0)
+            if use_spatial:
+                all_patches = torch.cat(patch_chunks, dim=0)
+                _spatial_dim = (
+                    self.backbone.get_spatial_dim()
+                    if hasattr(self.backbone, 'get_spatial_dim')
+                    else self.feature_dim
+                )
+                patch_tokens = all_patches.view(B, V, -1, _spatial_dim)
+        elif use_spatial:
             all_features, all_patches = self.backbone.forward_with_spatial(all_images_flat)
-            # all_features: (B*V, feature_dim), all_patches: (B*V, P, spatial_dim)
             _spatial_dim = (
                 self.backbone.get_spatial_dim()
                 if hasattr(self.backbone, 'get_spatial_dim')
