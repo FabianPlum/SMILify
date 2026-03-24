@@ -280,7 +280,10 @@ class UNetBackbone(BackboneInterface):
     _ENCODER_MAP: Dict[str, str] = {
         'unet_efficientnet_b0': 'efficientnet_b0',
         'unet_efficientnet_b3': 'efficientnet_b3',
+        'unet_efficientnet_b5': 'efficientnet_b5',
         'unet_resnet34': 'resnet34',
+        'unet_resnet50': 'resnet50',
+        'unet_convnext_base': 'convnext_base',
         'unet_mobilenet_v3': 'mobilenetv3_large_100',
     }
 
@@ -438,11 +441,14 @@ class BackboneFactory:
         'resnet152': ResNetBackbone,
         'vit_base_patch16_224': ViTBackbone,
         'vit_large_patch16_224': ViTBackbone,
-        # UNet variants: lightweight pretrained encoder + skip-connection decoder
-        'unet_efficientnet_b0': UNetBackbone,   # ~8M enc params, spatial_dim=64
-        'unet_efficientnet_b3': UNetBackbone,   # ~15M enc params, spatial_dim=128
-        'unet_resnet34': UNetBackbone,           # ~25M enc params, spatial_dim=128
-        'unet_mobilenet_v3': UNetBackbone,       # ~6M enc params, spatial_dim=64
+        # UNet variants: pretrained encoder + skip-connection decoder
+        'unet_efficientnet_b0': UNetBackbone,   # ~8M enc params
+        'unet_efficientnet_b3': UNetBackbone,   # ~15M enc params
+        'unet_efficientnet_b5': UNetBackbone,   # ~30M enc params
+        'unet_resnet34': UNetBackbone,           # ~25M enc params
+        'unet_resnet50': UNetBackbone,           # ~25M enc params (deeper)
+        'unet_convnext_base': UNetBackbone,      # ~89M enc params
+        'unet_mobilenet_v3': UNetBackbone,       # ~6M enc params
     }
     
     @classmethod
@@ -478,7 +484,10 @@ class BackboneFactory:
             _unet_decoder_defaults: Dict[str, Any] = {
                 'unet_efficientnet_b0': {'decoder_channels': (128, 64, 32)},
                 'unet_efficientnet_b3': {'decoder_channels': (256, 128, 64)},
+                'unet_efficientnet_b5': {'decoder_channels': (256, 128, 64)},
                 'unet_resnet34':        {'decoder_channels': (256, 128, 64)},
+                'unet_resnet50':        {'decoder_channels': (256, 128, 64)},
+                'unet_convnext_base':   {'decoder_channels': (512, 256, 128)},
                 'unet_mobilenet_v3':    {'decoder_channels': (128, 64, 32)},
             }
             for k, v in _unet_decoder_defaults.get(backbone_name, {}).items():
@@ -550,7 +559,10 @@ class BackboneFactory:
             _unet_info: Dict[str, Any] = {
                 'unet_efficientnet_b0': {'feature_dim': 320, 'spatial_dim': 64,  'memory_usage': 'Low'},
                 'unet_efficientnet_b3': {'feature_dim': 384, 'spatial_dim': 128, 'memory_usage': 'Low'},
+                'unet_efficientnet_b5': {'feature_dim': 512, 'spatial_dim': 128, 'memory_usage': 'Medium'},
                 'unet_resnet34':        {'feature_dim': 512, 'spatial_dim': 128, 'memory_usage': 'Low'},
+                'unet_resnet50':        {'feature_dim': 2048,'spatial_dim': 128, 'memory_usage': 'Medium'},
+                'unet_convnext_base':   {'feature_dim': 1024,'spatial_dim': 256, 'memory_usage': 'High'},
                 'unet_mobilenet_v3':    {'feature_dim': 960, 'spatial_dim': 64,  'memory_usage': 'Low'},
             }
             info.update({
