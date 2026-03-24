@@ -561,12 +561,19 @@ def train_epoch(model: MultiViewSMILImageRegressor,
 
     accum_steps = training_config.get('gradient_accumulation_steps', 1)
 
+    # Track how many mini-batches in the current accumulation window actually
+    # produced a valid backward pass.  When a batch is skipped (None prediction
+    # or exception), the window has fewer contributors.  We only step the
+    # optimizer if at least one backward occurred.
+    valid_steps_in_window = 0
+
     progress_bar = tqdm(train_loader, desc=f"Epoch {epoch}", disable=(rank != 0))
 
     for batch_idx, (x_data_batch, y_data_batch) in enumerate(progress_bar):
         # Zero gradients only at the start of each accumulation window
         if batch_idx % accum_steps == 0:
             optimizer.zero_grad()
+            valid_steps_in_window = 0
 
         # Whether this is the last mini-batch in the current accumulation window
         is_step_batch = ((batch_idx + 1) % accum_steps == 0
@@ -588,6 +595,9 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                         )
 
                         if predicted_params is None:
+                            if is_step_batch and valid_steps_in_window > 0:
+                                scaler.step(optimizer)
+                                scaler.update()
                             continue
 
                         loss, loss_components = base_model.compute_multiview_batch_loss(
@@ -601,6 +611,7 @@ def train_epoch(model: MultiViewSMILImageRegressor,
 
                     # Backward with scaling (gradients accumulate across mini-batches)
                     scaler.scale(loss).backward()
+                    valid_steps_in_window += 1
 
                     # Only step optimizer at the end of each accumulation window
                     if is_step_batch:
@@ -619,6 +630,8 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                     )
 
                     if predicted_params is None:
+                        if is_step_batch and valid_steps_in_window > 0:
+                            optimizer.step()
                         continue
 
                     loss, loss_components = base_model.compute_multiview_batch_loss(
@@ -629,6 +642,7 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                     loss = loss / accum_steps
 
                     loss.backward()
+                    valid_steps_in_window += 1
 
                     if is_step_batch:
                         if training_config.get('gradient_clip_norm', 0) > 0:
@@ -665,7 +679,7 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                     'loss': f'{loss.item() * accum_steps:.4f}',
                     'kp2d': f'{loss_components.get("keypoint_2d", torch.tensor(0.0)).item():.4f}'
                 })
-            
+
         except Exception as e:
             print(f"Error in batch {batch_idx}: {e}")
             import traceback
@@ -676,6 +690,17 @@ def train_epoch(model: MultiViewSMILImageRegressor,
             if isinstance(e, torch.cuda.OutOfMemoryError):
                 gc.collect()
                 torch.cuda.empty_cache()
+            # If this was the step batch and we had valid backwards in this
+            # window, step the optimizer so accumulated gradients aren't lost.
+            if is_step_batch and valid_steps_in_window > 0:
+                try:
+                    if scaler is not None:
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        optimizer.step()
+                except Exception:
+                    pass
             continue
     
     # Compute averages
