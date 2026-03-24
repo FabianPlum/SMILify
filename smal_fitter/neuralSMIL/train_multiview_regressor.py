@@ -2362,7 +2362,13 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cud
             print("Optimizer state NOT loaded (architecture changed — momentum buffers have stale shapes).")
             print("Optimizer will start fresh with current LR schedule.")
         else:
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            saved_opt = checkpoint['optimizer_state_dict']
+            if len(saved_opt.get('param_groups', [])) != len(optimizer.param_groups):
+                print(f"Optimizer param group count changed "
+                      f"({len(saved_opt.get('param_groups', []))} -> {len(optimizer.param_groups)}). "
+                      f"Optimizer state NOT loaded — starting fresh.")
+            else:
+                optimizer.load_state_dict(saved_opt)
     
     if scheduler and checkpoint.get('scheduler_state_dict'):
         if skipped:
@@ -2450,11 +2456,15 @@ def main(config: dict):
     if rank == 0:
         print("Loading multi-view dataset...")
     
+    aug_config = config.get('augmentation', {})
+    aug_enabled = aug_config.get('enabled', False)
     dataset = SLEAPMultiViewDataset(
         hdf5_path=config['dataset_path'],
         rotation_representation=config['rotation_representation'],
         num_views_to_use=config.get('num_views_to_use'),
-        random_view_sampling=True
+        random_view_sampling=True,
+        augment=False,  # Toggled on/off around train vs val; see training loop
+        augmentation_config=aug_config if aug_enabled else None,
     )
     
     if rank == 0:
@@ -2543,7 +2553,11 @@ def main(config: dict):
             print(f"\n  Dataset fraction: {dataset_fraction:.1%}")
             print(f"  Samples per epoch: {samples_per_epoch} (of {len(train_set)} total)")
             print(f"  Note: Different random subset sampled each epoch for diversity")
-    
+        if aug_enabled:
+            print(f"  Augmentation: enabled (photometric + geometric)")
+        else:
+            print(f"  Augmentation: disabled")
+
     # Create validation data loader (always uses full validation set)
     if is_distributed:
         val_sampler = DistributedSampler(val_set, shuffle=False)
@@ -2597,7 +2611,7 @@ def main(config: dict):
         cross_attention_heads=config['cross_attention_heads'],
         cross_attention_dropout=config['cross_attention_dropout'],
         backbone_name=backbone_name,
-        freeze_backbone=config['freeze_backbone'],
+        freeze_backbone=config['freeze_backbone'] or config.get('backbone_unfreeze_epoch') is not None,
         head_type=config['head_type'],
         hidden_dim=config['hidden_dim'],
         rotation_representation=config['rotation_representation'],
@@ -2633,13 +2647,22 @@ def main(config: dict):
         accum = config.get('gradient_accumulation_steps', 1)
         if accum > 1:
             print(f"Gradient accumulation: {accum} steps (effective batch size: {config['batch_size'] * accum})")
-    
-    # Create optimizer
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr=config['learning_rate'],
-        weight_decay=config['weight_decay']
-    )
+        if config.get('backbone_unfreeze_epoch') is not None:
+            print(f"Staged backbone freezing: frozen until epoch {config['backbone_unfreeze_epoch']}, "
+                  f"then LR multiplier {config.get('backbone_lr_multiplier', 0.1)}")
+
+    # Create optimizer with separate param groups for backbone vs head.
+    # This enables discriminative learning rates after backbone unfreeze.
+    base_model = model.module if hasattr(model, 'module') else model
+    backbone_param_ids = {id(p) for p in base_model.backbone.parameters()}
+    head_params = [p for p in model.parameters() if id(p) not in backbone_param_ids]
+    backbone_params = list(base_model.backbone.parameters())
+
+    backbone_lr_multiplier = config.get('backbone_lr_multiplier', 0.1)
+    optimizer = optim.AdamW([
+        {'params': head_params, 'lr': config['learning_rate']},
+        {'params': backbone_params, 'lr': config['learning_rate'] * backbone_lr_multiplier},
+    ], weight_decay=config['weight_decay'])
     
     # Create scheduler
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
@@ -2714,22 +2737,35 @@ def main(config: dict):
             collate_fn=multiview_collate_fn
         )
         
+        # Staged backbone unfreeze
+        unfreeze_epoch = config.get('backbone_unfreeze_epoch')
+        if unfreeze_epoch is not None and epoch == unfreeze_epoch:
+            _backbone = model.module.backbone if hasattr(model, 'module') else model.backbone
+            for param in _backbone.parameters():
+                param.requires_grad = True
+            if rank == 0:
+                trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                print(f"\nEpoch {epoch}: Unfroze backbone (LR multiplier: {backbone_lr_multiplier}). "
+                      f"Trainable params: {trainable:,}")
+
         # Update learning rate based on curriculum from TrainingConfig
         curriculum_lr = MultiViewTrainingConfig.get_learning_rate_for_epoch(epoch)
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = curriculum_lr
+        optimizer.param_groups[0]['lr'] = curriculum_lr  # head
+        optimizer.param_groups[1]['lr'] = curriculum_lr * backbone_lr_multiplier  # backbone
         
-        # Train
+        # Train (with augmentation enabled)
+        dataset.augment = aug_enabled
         train_metrics = train_epoch(
             model, train_loader, optimizer, device, epoch, config,
             scaler=scaler, is_distributed=is_distributed, rank=rank
         )
-        
+        dataset.augment = False
+
         training_history['train_loss'].append(train_metrics['avg_loss'])
         training_history['loss_components'].append(train_metrics['loss_components'])
         training_history['learning_rates'].append(curriculum_lr)
-        
-        # Validate
+
+        # Validate (augmentation disabled)
         if epoch % config['validate_every_n_epochs'] == 0:
             val_metrics = validate(model, val_loader, device, config, epoch=epoch, rank=rank)
             training_history['val_loss'].append(val_metrics['avg_loss'])
