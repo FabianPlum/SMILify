@@ -144,7 +144,7 @@
     "gaussian_blur_kernel_range": [3, 7],
     "random_erasing_prob": 0.2,
     "random_erasing_scale_range": [0.02, 0.1],
-    "crop_jitter_fraction": 0.05,
+    "crop_jitter_fraction": 0.0,
     "scale_jitter_range": [0.9, 1.1]
   },
 
