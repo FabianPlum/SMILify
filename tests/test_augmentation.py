@@ -312,7 +312,7 @@ class TestGeometricAugmentation:
         from sleap_multiview_dataset import SLEAPMultiViewDataset
         self.ds = object.__new__(SLEAPMultiViewDataset)
         self.ds.augment = True
-        self.ds.aug_crop_jitter_fraction = 0.05
+        self.ds.aug_crop_jitter_fraction = 0.0
         self.ds.aug_scale_jitter_range = (0.9, 1.1)
 
     def test_geometric_reprojection_consistency(self):
@@ -400,7 +400,7 @@ class TestGeometricAugmentation:
         np.testing.assert_array_equal(t, t_orig)
 
     def test_out_of_bounds_keypoints_masked(self):
-        """Keypoints pushed outside the image by crop jitter should be masked."""
+        """Keypoints pushed outside the image by scale jitter should be masked."""
         _ensure_viz_dir()
         image_size = 256
         img, K, R, t, pts3d, kp2d, vis = _make_synthetic_sample(image_size=image_size)
@@ -412,9 +412,9 @@ class TestGeometricAugmentation:
         kp2d_edge[2] = [0.008, 0.5]   # near top edge (y ~ 2px)
         kp2d_edge[3] = [0.992, 0.5]   # near bottom edge (y ~ 254px)
 
-        # Use aggressive jitter to push edges out
-        self.ds.aug_crop_jitter_fraction = 0.15
-        self.ds.aug_scale_jitter_range = (0.8, 1.2)
+        # Use aggressive scale jitter — zoom in pushes edge keypoints out of frame
+        self.ds.aug_crop_jitter_fraction = 0.0
+        self.ds.aug_scale_jitter_range = (1.05, 1.4)
 
         masked_count = 0
         for seed in range(50):
@@ -487,7 +487,7 @@ class TestMultiViewConsistency:
         self.ds.aug_gaussian_blur_kernel_range = (3, 7)
         self.ds.aug_random_erasing_prob = 0.2
         self.ds.aug_random_erasing_scale_range = (0.02, 0.1)
-        self.ds.aug_crop_jitter_fraction = 0.05
+        self.ds.aug_crop_jitter_fraction = 0.0
         self.ds.aug_scale_jitter_range = (0.9, 1.1)
 
     def test_multiview_reprojection_all_views(self):
@@ -721,7 +721,7 @@ class TestRealDatasetAugmentation:
                 'gaussian_blur_kernel_range': (3, 7),
                 'random_erasing_prob': 0.2,
                 'random_erasing_scale_range': (0.02, 0.1),
-                'crop_jitter_fraction': 0.05,
+                'crop_jitter_fraction': 0.0,
                 'scale_jitter_range': (0.9, 1.1),
             },
         )
@@ -1028,7 +1028,7 @@ class TestRealDatasetAugmentation:
 
         ds_bare = object.__new__(SLEAPMultiViewDataset)
         ds_bare.augment = True
-        ds_bare.aug_crop_jitter_fraction = 0.05
+        ds_bare.aug_crop_jitter_fraction = 0.0
         ds_bare.aug_scale_jitter_range = (0.9, 1.1)
 
         target_res = d_noaug['target_res']
