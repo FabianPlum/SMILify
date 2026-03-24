@@ -1,4 +1,4 @@
-<!-- Created: 2026-02-27 | Last modified: 2026-02-27 -->
+<!-- Created: 2026-02-27 | Last modified: 2026-03-24 -->
 
 # Triangulation Consistency Loss
 
@@ -179,3 +179,11 @@ Example curriculum from `multiview_sticks.json`:
 | 200   | 0.5    | Dominant geometric signal for fine-tuning camera heads |
 
 The curriculum is designed so that as direct camera parameter supervision is reduced (the `cam_rot`/`cam_trans` weights drop to `1e-8` by epoch 150), the triangulation consistency loss ramps up to replace it with a purely geometric constraint. This transition encourages the cameras to be self-consistent rather than memorising GT parameters.
+
+## Status: Largely Disabled (March 2026)
+
+In practice this loss is kept at or near zero in current training configs. The primary training datasets use **calibrated cameras with ground-truth 3D keypoints** obtained from multi-view triangulation (SLEAP / Anipose). In this setting the triangulation consistency loss does not provide a meaningful learning signal: the GT 3D points are themselves the output of a solved camera system, so triangulating the GT 2D observations with predicted cameras and comparing against those same GT 3D points creates a circular constraint rather than an independent geometric one.
+
+The loss was originally designed for a scenario where camera parameters are learned from scratch without GT 3D supervision — there, enforcing cross-view geometric agreement through triangulation would provide genuine structure. With calibrated cameras and 3D GT already available, the direct `keypoint_3d`, `cam_rot`, `cam_trans`, and `fov` losses give stronger and more direct supervision.
+
+The implementation and tests are retained for future use cases where cameras must be discovered without calibration data.
