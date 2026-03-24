@@ -368,10 +368,11 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                  cross_attention_heads: int = 8,
                  cross_attention_dropout: float = 0.1,
                  use_gt_camera_init: bool = False,
+                 backbone_chunk_size: Optional[int] = None,
                  **kwargs):
         """
         Initialize the multi-view SMIL regressor.
-        
+
         Args:
             device: PyTorch device
             data_batch: Batch data for initialization
@@ -383,6 +384,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             cross_attention_layers: Number of cross-attention layers for feature fusion
             cross_attention_heads: Number of attention heads
             cross_attention_dropout: Dropout for attention layers
+            backbone_chunk_size: Max images to process through backbone at once.
+                None = all at once (default). Set to e.g. 6 to reduce peak VRAM
+                when using many views and/or large input resolutions.
             **kwargs: Additional arguments passed to parent SMILImageRegressor
         """
         # Initialize parent single-view regressor
@@ -392,6 +396,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         self.canonical_camera_order = canonical_camera_order or []
         self.num_canonical_cameras = len(self.canonical_camera_order) if self.canonical_camera_order else max_views
         self.use_gt_camera_init = use_gt_camera_init
+        self.backbone_chunk_size = backbone_chunk_size
         
         # Cross-attention feature fusion
         self.view_fusion = MultiViewFeatureFusion(
@@ -421,8 +426,16 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
 
         # Per-view positional embedding for patch tokens so the decoder's
         # cross-attention knows which view each spatial patch came from.
-        if self.head_type == 'transformer_decoder' and self.backbone_name.startswith('vit'):
-            self.patch_view_embed = nn.Embedding(self.num_canonical_cameras, self.feature_dim).to(device)
+        # Dimension must match the spatial feature channels, which equals
+        # feature_dim for ViT (patch dim == CLS dim) but may differ for
+        # UNet (decoder channels != bottleneck channels).
+        if self.head_type == 'transformer_decoder' and hasattr(self.backbone, 'forward_with_spatial'):
+            _patch_embed_dim = (
+                self.backbone.get_spatial_dim()
+                if hasattr(self.backbone, 'get_spatial_dim')
+                else self.feature_dim
+            )
+            self.patch_view_embed = nn.Embedding(self.num_canonical_cameras, _patch_embed_dim).to(device)
             nn.init.normal_(self.patch_view_embed.weight, mean=0.0, std=0.02)
     
     def forward_multiview(self, images_per_view: List[torch.Tensor], 
@@ -448,21 +461,50 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         batch_size = images_per_view[0].size(0)
         num_views = len(images_per_view)
         
-        # =================== OPTIMIZED: Single backbone pass for all views ===================
+        # =================== Backbone pass for all views ===================
         # Stack all views: List of (B, C, H, W) -> (B, V, C, H, W) -> (B*V, C, H, W)
-        # This gives 5-8x speedup vs sequential backbone calls
         all_images = torch.stack(images_per_view, dim=1)  # (B, V, C, H, W)
         B, V, C, H, W = all_images.shape
         all_images_flat = all_images.view(B * V, C, H, W)  # (B*V, C, H, W)
-        
-        # Single backbone forward pass for all views at once
-        # For ViT + transformer_decoder: also extract per-view patch tokens
-        # (B*V, 196, D) for rich spatial cross-attention context.
+
+        # Backbone forward pass — optionally chunked to reduce peak VRAM.
+        # When backbone_chunk_size is set, we process images in smaller batches
+        # through the backbone and concatenate results. This is mathematically
+        # equivalent to processing all at once since the backbone is per-image.
+        use_spatial = (self.head_type == 'transformer_decoder'
+                       and hasattr(self.backbone, 'forward_with_spatial'))
+        chunk = self.backbone_chunk_size
+
         patch_tokens = None
-        if self.head_type == 'transformer_decoder' and self.backbone_name.startswith('vit'):
+        if chunk is not None and chunk < B * V:
+            # Chunked backbone forward to reduce peak VRAM
+            feat_chunks = []
+            patch_chunks = [] if use_spatial else None
+            for i in range(0, B * V, chunk):
+                imgs_chunk = all_images_flat[i:i + chunk]
+                if use_spatial:
+                    f, p = self.backbone.forward_with_spatial(imgs_chunk)
+                    feat_chunks.append(f)
+                    patch_chunks.append(p)
+                else:
+                    feat_chunks.append(self.backbone(imgs_chunk))
+            all_features = torch.cat(feat_chunks, dim=0)
+            if use_spatial:
+                all_patches = torch.cat(patch_chunks, dim=0)
+                _spatial_dim = (
+                    self.backbone.get_spatial_dim()
+                    if hasattr(self.backbone, 'get_spatial_dim')
+                    else self.feature_dim
+                )
+                patch_tokens = all_patches.view(B, V, -1, _spatial_dim)
+        elif use_spatial:
             all_features, all_patches = self.backbone.forward_with_spatial(all_images_flat)
-            # all_features: (B*V, D) CLS tokens, all_patches: (B*V, 196, D)
-            patch_tokens = all_patches.view(B, V, -1, self.feature_dim)  # (B, V, 196, D)
+            _spatial_dim = (
+                self.backbone.get_spatial_dim()
+                if hasattr(self.backbone, 'get_spatial_dim')
+                else self.feature_dim
+            )
+            patch_tokens = all_patches.view(B, V, -1, _spatial_dim)  # (B, V, P, spatial_dim)
         else:
             all_features = self.backbone(all_images_flat)  # (B*V, feature_dim)
 
@@ -640,7 +682,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     view_emb = self.patch_view_embed(camera_indices)  # (B, V, D)
                     spatial_feats = patch_tokens + view_emb.unsqueeze(2)  # (B, V, P, D)
                     Bp, Vp, P, D = spatial_feats.shape
-                    spatial_feats = spatial_feats.view(Bp, Vp * P, D)  # (B, V*P, D)
+                    spatial_feats = spatial_feats.reshape(Bp, Vp * P, D)  # (B, V*P, D)
                 else:
                     spatial_feats = features  # (B, V, D) — one token per view
             else:
@@ -2144,7 +2186,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         canonical_joints = canonical_joints.float()
         faces_batch = faces_batch.long()
 
-        _, rendered_joints_raw = self.renderer(verts, canonical_joints, faces_batch)
+        _, rendered_joints_raw = self.renderer(verts, canonical_joints, faces_batch, joints_only=True)
         
         # Normalize rendered joints using the actual renderer image size
         # This ensures consistency between training loss and visualization
@@ -2366,7 +2408,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     sample_view_mask.append(True)
                 else:
                     # Pad with zeros
-                    dummy_img = torch.zeros(3, 224, 224, dtype=torch.float32, device=self.device)
+                    dummy_img = torch.zeros(3, self.input_resolution, self.input_resolution, dtype=torch.float32, device=self.device)
                     all_images_per_view[v].append(dummy_img)
                     sample_cam_indices.append(0)
                     sample_view_mask.append(False)
@@ -2417,9 +2459,11 @@ def create_multiview_regressor(device, batch_size, shape_family, use_unity_prior
         MultiViewSMILImageRegressor instance
     """
     # Create placeholder data batch
-    # Use input_resolution if provided, otherwise default to 224
+    # Derive input_resolution from backbone if not explicitly provided
     # This ensures the renderer is initialized with the correct size
-    input_resolution = kwargs.get('input_resolution', 224)
+    from backbone_factory import BackboneFactory
+    _backbone_name = kwargs.get('backbone_name', 'resnet152')
+    input_resolution = kwargs.get('input_resolution', BackboneFactory.get_default_input_resolution(_backbone_name))
     data_batch = torch.zeros(batch_size, 3, input_resolution, input_resolution, dtype=torch.float32, device=device)
     
     return MultiViewSMILImageRegressor(

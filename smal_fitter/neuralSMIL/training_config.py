@@ -581,23 +581,28 @@ class TrainingConfig:
                 config['model_config']['hidden_dim'] = 768
             elif 'large' in backbone_name:
                 config['model_config']['hidden_dim'] = 1024
+        elif backbone_name.startswith('unet_'):
+            _unet_hidden = {
+                'unet_efficientnet_b0': 512,
+                'unet_efficientnet_b3': 512,
+                'unet_resnet34': 512,
+                'unet_mobilenet_v3': 256,
+            }
+            config['model_config']['hidden_dim'] = _unet_hidden.get(backbone_name, 512)
         elif backbone_name.startswith('resnet'):
             config['model_config']['hidden_dim'] = 2048
-        
+
         # Adjust transformer config based on backbone
         if config['model_config']['head_type'] == 'transformer_decoder':
-            # For ViT backbones, use spatial features
             if backbone_name.startswith('vit'):
-                # ViT provides spatial features, so we can use them as context
+                # ViT provides spatial features via patch tokens
                 pass  # Keep default config
+            elif backbone_name.startswith('unet_'):
+                # UNet provides spatial features via decoder feature maps
+                pass  # context_dim is set dynamically from backbone.get_spatial_dim()
             else:
-                # For ResNet, we don't have spatial features
-                # Adjust context_dim to match feature_dim
-                if 'base' in backbone_name:
-                    config['model_config']['transformer_config']['context_dim'] = 768
-                elif 'large' in backbone_name:
-                    config['model_config']['transformer_config']['context_dim'] = 1024
-                elif backbone_name.startswith('resnet'):
+                # For ResNet, no spatial features — context_dim matches feature_dim
+                if backbone_name.startswith('resnet'):
                     config['model_config']['transformer_config']['context_dim'] = 2048
         
         return config
@@ -746,7 +751,13 @@ class TrainingConfig:
         
         # Print backbone-specific information
         backbone_name = config['model_config']['backbone_name']
-        print(f"  Backbone type: {'Vision Transformer' if backbone_name.startswith('vit') else 'ResNet'}")
+        if backbone_name.startswith('vit'):
+            _btype = 'Vision Transformer'
+        elif backbone_name.startswith('unet_'):
+            _btype = 'UNet (CNN encoder + decoder)'
+        else:
+            _btype = 'ResNet'
+        print(f"  Backbone type: {_btype}")
         print(f"  Feature dimension: {config['model_config']['hidden_dim']}")
         
         # Print head-specific information

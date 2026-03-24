@@ -387,7 +387,8 @@ def _create_singleview_model(
     apply_smal_file_override(smal_file, shape_family=shape_family)
 
     backbone_name = model_config["backbone_name"]
-    input_resolution = 224 if backbone_name.startswith("vit") else 512
+    from backbone_factory import BackboneFactory
+    input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
     log_fn(f"Singleview model config:")
     log_fn(f"  backbone: {backbone_name}")
@@ -855,6 +856,21 @@ def _run_multiview_benchmark(
         max_views = config_from_ckpt.get("max_views", dataset_max_views)
         log_fn(f"Using max_views={max_views} from checkpoint config or dataset")
 
+    # Infer hidden_dim from state_dict to avoid architecture mismatch when config is stale
+    if 'transformer_head.pos_embedding' in state_dict:
+        inferred_hidden_dim = state_dict['transformer_head.pos_embedding'].shape[-1]
+        config_hidden_dim = config_from_ckpt.get("hidden_dim", 1024)
+        if inferred_hidden_dim != config_hidden_dim:
+            log_fn(f"WARNING: config hidden_dim={config_hidden_dim} does not match checkpoint "
+                   f"transformer_head.pos_embedding dim={inferred_hidden_dim}. "
+                   f"Using inferred value.")
+        config_from_ckpt["hidden_dim"] = inferred_hidden_dim
+        # Also update transformer_config so the transformer head is built with the correct dim
+        if "transformer_config" not in config_from_ckpt or not isinstance(config_from_ckpt["transformer_config"], dict):
+            config_from_ckpt["transformer_config"] = {}
+        config_from_ckpt["transformer_config"]["hidden_dim"] = inferred_hidden_dim
+        log_fn(f"Inferred hidden_dim={inferred_hidden_dim} from checkpoint transformer_head.pos_embedding shape")
+
     canonical_camera_order = config_from_ckpt.get("canonical_camera_order", None)
     if canonical_camera_order is None:
         canonical_camera_order = dataset_canonical_camera_order
@@ -906,10 +922,8 @@ def _run_multiview_benchmark(
 
     # Create model (mirror training script)
     backbone_name = config_from_ckpt["backbone_name"]
-    if backbone_name.startswith("vit"):
-        input_resolution = 224
-    else:
-        input_resolution = 512
+    from backbone_factory import BackboneFactory
+    input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
     log_fn(f"\nUsing input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
 
     allow_mesh_scaling = config_from_ckpt.get("allow_mesh_scaling", False)
@@ -940,7 +954,8 @@ def _run_multiview_benchmark(
         input_resolution=input_resolution,
         allow_mesh_scaling=allow_mesh_scaling,
         mesh_scale_init=mesh_scale_init,
-        use_gt_camera_init=use_gt_camera_init
+        use_gt_camera_init=use_gt_camera_init,
+        transformer_config=config_from_ckpt.get("transformer_config", {})
     )
     model = model.to(device)
 

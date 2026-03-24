@@ -123,6 +123,9 @@ class MultiViewConfig(BaseTrainingConfig):
             'loss_weights': self.get_loss_weights_for_epoch(0),
             'reset_ief_token_embedding': self.training.reset_ief_token_embedding,
             'use_gt_camera_init': self.training.use_gt_camera_init,
+            'use_mixed_precision': self.training.use_mixed_precision,
+            'backbone_chunk_size': self.training.backbone_chunk_size,
+            'gradient_accumulation_steps': self.training.gradient_accumulation_steps,
 
             # Joint importance / ignored joints / loss curriculum — must be carried
             # through so that DDP worker processes (mp.spawn / torchrun) can re-sync

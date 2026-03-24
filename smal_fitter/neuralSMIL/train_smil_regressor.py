@@ -21,6 +21,7 @@ from torch.utils.data.distributed import DistributedSampler
 import numpy as np
 import os
 import sys
+import gc
 import random
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation
@@ -466,6 +467,10 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
             print(f"Error processing batch {batch_idx}: {e}")
             import traceback
             traceback.print_exc()
+            # Clean up GPU memory after OOM to prevent cascading failures.
+            if isinstance(e, torch.cuda.OutOfMemoryError):
+                gc.collect()
+                torch.cuda.empty_cache()
             continue
     
     # Average parameter errors over all batches
@@ -716,11 +721,8 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
                     # Create silhouette tensor
                     sil = torch.FloatTensor(x_data["input_image_mask"])[None, None, ...]
                     
-                    # Convert keypoints to pixel coordinates using backbone image size
-                    if model_config['backbone_name'].startswith('vit'):
-                        target_size = 224
-                    else:
-                        target_size = 512
+                    # Convert keypoints to pixel coordinates using model's actual resolution
+                    target_size = model.input_resolution
                         
                     pixel_coords = y_data["keypoints_2d"].copy()
                     pixel_coords[:, 0] = pixel_coords[:, 0] * target_size  # y coordinates  
@@ -774,11 +776,8 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
             # Set proper target joints and visibility for visualization
             # Convert normalized keypoints back to pixel coordinates for visualization
             if 'keypoints_2d' in y_data and 'keypoint_visibility' in y_data:
-                # Use backbone-specific image size for keypoint conversion
-                if model_config['backbone_name'].startswith('vit'):
-                    target_height, target_width = 224, 224  # ViT uses 224x224
-                else:
-                    target_height, target_width = 512, 512  # ResNet uses 512x512
+                # Use model's actual resolution for keypoint conversion
+                target_height, target_width = model.input_resolution, model.input_resolution
                 
                 # Convert normalized [0,1] coordinates to pixel coordinates
                 keypoints_2d = y_data['keypoints_2d']  # Shape: (num_joints, 2), already in [y_norm, x_norm] format
@@ -1549,16 +1548,13 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         print(f"Using backbone: {model_config['backbone_name']}")
     
     # Determine appropriate input resolution based on backbone
-    if model_config['backbone_name'].startswith('vit'):
-        # Vision Transformers expect 224x224 input
-        input_resolution = 224
-        if not is_distributed or rank == 0:
-            print(f"Using ViT input resolution: {input_resolution}x{input_resolution}")
-    else:
-        # ResNet can handle higher resolutions
-        input_resolution = dataset.get_input_resolution()
-        if not is_distributed or rank == 0:
-            print(f"Using ResNet input resolution: {input_resolution}x{input_resolution}")
+    from backbone_factory import BackboneFactory
+    input_resolution = model_config.get(
+        'input_resolution',
+        BackboneFactory.get_default_input_resolution(model_config['backbone_name'])
+    )
+    if not is_distributed or rank == 0:
+        print(f"Using input resolution: {input_resolution}x{input_resolution} (backbone: {model_config['backbone_name']})")
     
     model = SMILImageRegressor(
         device=device,

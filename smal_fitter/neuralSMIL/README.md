@@ -263,6 +263,11 @@ Multi-view training uses SLEAP-exported HDF5 files containing synchronized frame
 - GT camera parameters (rotation, translation, FOV) per view
 - 3D keypoint ground truth
 
+**Important: Undistortion requirement.** All input images and 2D keypoints must be undistorted before training. PyTorch3D's `FoVPerspectiveCameras` uses an ideal pinhole model and does not support lens distortion (e.g. barrel distortion). To ensure consistency:
+- Images are undistorted during preprocessing using the camera's intrinsic matrix (K) and distortion coefficients via `cv2.undistort()`.
+- 2D keypoints (from `reprojections.h5`) are produced by projecting triangulated 3D points through the ideal pinhole model (`P = K @ [R|t]`, no distortion), so they are natively in undistorted pixel space.
+- The renderer's 2D projections and the ground truth 2D keypoints are thus in the same coordinate system, ensuring correct reprojection loss computation.
+
 ### Optimized Single-View HDF5 Format
 
 ```

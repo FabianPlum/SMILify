@@ -144,6 +144,8 @@
     "pin_memory": true,
     "prefetch_factor": 4,
     "resume_checkpoint": "best_model.pth",
-    "use_gt_camera_init": true
+    "use_gt_camera_init": true,
+    "use_mixed_precision": true,
+    "backbone_chunk_size": 6
   }
 }
