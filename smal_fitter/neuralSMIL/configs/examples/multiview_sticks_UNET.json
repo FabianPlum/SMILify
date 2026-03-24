@@ -21,9 +21,9 @@
   },
 
   "model": {
-    "backbone_name": "unet_efficientnet_b3",
-    "freeze_backbone": true,
-    "backbone_unfreeze_epoch": 100,
+    "backbone_name": "unet_efficientnet_b5",
+    "freeze_backbone": false,
+    "backbone_unfreeze_epoch": null,
     "backbone_lr_multiplier": 0.1,
     "hidden_dim": 1024,
     "head_type": "transformer_decoder",
@@ -140,11 +140,11 @@
     "color_jitter_contrast": 0.2,
     "color_jitter_saturation": 0.15,
     "gaussian_noise_std": 0.015,
-    "gaussian_blur_prob": 0.3,
+    "gaussian_blur_prob": 0.1,
     "gaussian_blur_kernel_range": [3, 7],
-    "random_erasing_prob": 0.2,
+    "random_erasing_prob": 0.05,
     "random_erasing_scale_range": [0.02, 0.1],
-    "crop_jitter_fraction": 0.05,
+    "crop_jitter_fraction": 0.00,
     "scale_jitter_range": [0.9, 1.1]
   },
 
@@ -182,6 +182,6 @@
     "use_gt_camera_init": true,
     "use_mixed_precision": false,
     "backbone_chunk_size": 6,
-    "gradient_accumulation_steps": 4
+    "gradient_accumulation_steps": 2
   }
 }
