@@ -1,3 +1,5 @@
+<!-- Created: 2026-02-26 | Last modified: 2026-03-24 -->
+
 # Multiview Transformer Decoder — Architecture Issues
 
 Identified during deep review of `multiview_baseline.json` config and the
@@ -82,7 +84,7 @@ with normal equations and Tikhonov damping) and compares the result against
 detached body model 3D predictions. Gradients flow through the differentiable
 triangulation into the camera heads.
 
-See [docs/triangulation_consistency_loss.md](docs/triangulation_consistency_loss.md)
+See [triangulation_consistency_loss.md](triangulation_consistency_loss.md)
 for full details. Validated with 12 synthetic tests in
 `tests/test_triangulation_consistency.py`.
 
