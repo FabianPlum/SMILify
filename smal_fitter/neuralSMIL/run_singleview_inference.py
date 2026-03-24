@@ -646,7 +646,7 @@ def load_and_preprocess_image(image_path: str, model: SMILImageRegressor, crop_m
         # Preprocess with proper cropping
         target_resolution = model.input_resolution
         preprocessed_image, transform_info = preprocess_frame(
-            image_data, target_resolution, crop_mode, keypoints_2d=keypoints_2d
+            image_data, target_resolution, crop_mode
         )
         
         # Convert to tensor (C, H, W) format
