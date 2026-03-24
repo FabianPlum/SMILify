@@ -48,8 +48,10 @@ import sys
 import random
 import json
 from tqdm import tqdm
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 import argparse
+import gc
 import imageio
 from typing import Optional
 
@@ -556,67 +558,85 @@ def train_epoch(model: MultiViewSMILImageRegressor,
     total_loss = 0.0
     loss_components_sum = {}
     num_batches = 0
-    
+
+    accum_steps = training_config.get('gradient_accumulation_steps', 1)
+
     progress_bar = tqdm(train_loader, desc=f"Epoch {epoch}", disable=(rank != 0))
-    
+
     for batch_idx, (x_data_batch, y_data_batch) in enumerate(progress_bar):
-        optimizer.zero_grad()
-        
+        # Zero gradients only at the start of each accumulation window
+        if batch_idx % accum_steps == 0:
+            optimizer.zero_grad()
+
+        # Whether this is the last mini-batch in the current accumulation window
+        is_step_batch = ((batch_idx + 1) % accum_steps == 0
+                         or (batch_idx + 1) == len(train_loader))
+
+        # For DDP: suppress gradient all-reduce during accumulation steps.
+        # Sync only happens on the step batch to avoid redundant communication
+        # and incorrect gradient averaging mid-accumulation.
+        maybe_no_sync = (model.no_sync() if (is_distributed and accum_steps > 1
+                         and not is_step_batch) else nullcontext())
+
         try:
-            # Forward pass with mixed precision if enabled
-            if scaler is not None:
-                with torch.cuda.amp.autocast():
+            with maybe_no_sync:
+                # Forward pass with mixed precision if enabled
+                if scaler is not None:
+                    with torch.cuda.amp.autocast():
+                        predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
+                            x_data_batch, y_data_batch
+                        )
+
+                        if predicted_params is None:
+                            continue
+
+                        loss, loss_components = base_model.compute_multiview_batch_loss(
+                            predicted_params, y_data_batch,
+                            loss_weights=loss_weights,
+                            return_components=True
+                        )
+                        # Scale loss by accumulation steps so accumulated gradients
+                        # have the same magnitude as a single large batch
+                        loss = loss / accum_steps
+
+                    # Backward with scaling (gradients accumulate across mini-batches)
+                    scaler.scale(loss).backward()
+
+                    # Only step optimizer at the end of each accumulation window
+                    if is_step_batch:
+                        if training_config.get('gradient_clip_norm', 0) > 0:
+                            scaler.unscale_(optimizer)
+                            torch.nn.utils.clip_grad_norm_(
+                                model.parameters(),
+                                training_config['gradient_clip_norm']
+                            )
+                        scaler.step(optimizer)
+                        scaler.update()
+                else:
+                    # Standard forward/backward
                     predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
                         x_data_batch, y_data_batch
                     )
-                    
+
                     if predicted_params is None:
                         continue
-                    
+
                     loss, loss_components = base_model.compute_multiview_batch_loss(
                         predicted_params, y_data_batch,
                         loss_weights=loss_weights,
                         return_components=True
                     )
-                
-                # Backward with scaling
-                scaler.scale(loss).backward()
-                
-                # Gradient clipping
-                if training_config.get('gradient_clip_norm', 0) > 0:
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), 
-                        training_config['gradient_clip_norm']
-                    )
-                
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                # Standard forward/backward
-                predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
-                    x_data_batch, y_data_batch
-                )
-                
-                if predicted_params is None:
-                    continue
-                
-                loss, loss_components = base_model.compute_multiview_batch_loss(
-                    predicted_params, y_data_batch,
-                    loss_weights=loss_weights,
-                    return_components=True
-                )
-                
-                loss.backward()
-                
-                # Gradient clipping
-                if training_config.get('gradient_clip_norm', 0) > 0:
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(),
-                        training_config['gradient_clip_norm']
-                    )
-                
-                optimizer.step()
+                    loss = loss / accum_steps
+
+                    loss.backward()
+
+                    if is_step_batch:
+                        if training_config.get('gradient_clip_norm', 0) > 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                model.parameters(),
+                                training_config['gradient_clip_norm']
+                            )
+                        optimizer.step()
 
             # IEF refinement monitoring: track per-iteration pose delta norms.
             # ief_pose_delta_N = avg L2 distance between iter N and iter N-1 predictions.
@@ -630,19 +650,19 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                     key = f'ief_pose_delta_{i}'
                     loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
 
-            # Accumulate metrics
-            total_loss += loss.item()
+            # Accumulate metrics (use un-scaled loss for logging)
+            total_loss += loss.item() * accum_steps
             num_batches += 1
-            
+
             for key, value in loss_components.items():
                 if key not in loss_components_sum:
                     loss_components_sum[key] = 0.0
                 loss_components_sum[key] += value.item() if torch.is_tensor(value) else value
-            
+
             # Update progress bar
             if rank == 0:
                 progress_bar.set_postfix({
-                    'loss': f'{loss.item():.4f}',
+                    'loss': f'{loss.item() * accum_steps:.4f}',
                     'kp2d': f'{loss_components.get("keypoint_2d", torch.tensor(0.0)).item():.4f}'
                 })
             
@@ -654,7 +674,6 @@ def train_epoch(model: MultiViewSMILImageRegressor,
             # Without this, the failed forward pass's GPU tensors stay alive
             # and every subsequent batch also OOMs.
             if isinstance(e, torch.cuda.OutOfMemoryError):
-                import gc
                 gc.collect()
                 torch.cuda.empty_cache()
             continue
@@ -873,8 +892,13 @@ def visualize_multiview_training_progress(model: MultiViewSMILImageRegressor,
                 continue
         
         print(f"Generated {len(collected_samples)} multi-view visualizations for epoch {epoch} in {epoch_dir}")
-        
+
     finally:
+        # Free collected sample data (may hold GPU tensors) before restoring RNG
+        del collected_samples
+        gc.collect()
+        torch.cuda.empty_cache()
+
         # Restore random states
         torch.set_rng_state(torch_rng_state)
         np.random.set_state(numpy_rng_state)
@@ -1392,8 +1416,13 @@ def visualize_singleview_renders(model: MultiViewSMILImageRegressor,
                 torch.cuda.empty_cache()
         
         print(f"Generated single-view renders for {num_rendered} samples (epoch {epoch}) in {epoch_dir}")
-    
+
     finally:
+        # Free collected sample data (may hold GPU tensors) before restoring RNG
+        del collected_samples
+        gc.collect()
+        torch.cuda.empty_cache()
+
         # Restore random states
         torch.set_rng_state(torch_rng_state)
         np.random.set_state(numpy_rng_state)
@@ -1964,10 +1993,13 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
             print(f"Warning: Failed to render view {view_idx} for sample {sample_idx}: {e}")
             continue
         finally:
-            # Clean up GPU memory after each view to prevent OOM
-            # The SMALFitter creates a renderer with GPU resources that need to be freed
+            # Clean up GPU memory after each view to prevent OOM.
+            # SMALFitter (nn.Module) has circular refs that prevent immediate
+            # deallocation on `del`; gc.collect() breaks the cycles so
+            # empty_cache() can actually return the memory to CUDA.
             if 'temp_fitter' in locals():
                 del temp_fitter
+            gc.collect()
             torch.cuda.empty_cache()
     
     # Generate 3D keypoint visualization if 3D data is available
@@ -2260,14 +2292,39 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cud
     current_model = model.module if hasattr(model, 'module') else model
     current_state = current_model.state_dict()
 
+    # SMALFitter default parameters whose first dim is batch_size.
+    # These are not learned by the neural network — just init values for
+    # the optimization-based fitter.  A batch_size change should not be
+    # treated as an architecture change.
+    _batch_dim_keys = {
+        'global_rotation', 'joint_rotations', 'trans',
+        'log_beta_scales', 'betas_trans',
+    }
+
     filtered_state = {}
     skipped = []
+    resized = []
     for key, param in saved_state.items():
         if key in current_state and param.shape != current_state[key].shape:
-            skipped.append(f"  {key}: checkpoint {param.shape} vs model {current_state[key].shape}")
+            # Check if this is a batch-size-only mismatch on a SMALFitter default
+            cur_shape = current_state[key].shape
+            if (key in _batch_dim_keys
+                    and param.shape[1:] == cur_shape[1:]
+                    and param.shape[0] != cur_shape[0]):
+                # Adapt: take first slice or repeat to match new batch dim
+                new_bs = cur_shape[0]
+                adapted = param[:new_bs] if param.shape[0] >= new_bs else param[0:1].expand(new_bs, *param.shape[1:]).contiguous()
+                filtered_state[key] = adapted
+                resized.append(f"  {key}: {param.shape} -> {adapted.shape} (batch dim adapted)")
+            else:
+                skipped.append(f"  {key}: checkpoint {param.shape} vs model {cur_shape}")
         else:
             filtered_state[key] = param
 
+    if resized:
+        print(f"Adapted {len(resized)} SMALFitter default params to new batch size:")
+        for r in resized:
+            print(r)
     if skipped:
         print(f"Skipped {len(skipped)} mismatched keys (will use fresh init):")
         for s in skipped:
@@ -2525,7 +2582,8 @@ def main(config: dict):
         allow_mesh_scaling=allow_mesh_scaling,
         mesh_scale_init=mesh_scale_init,
         use_gt_camera_init=config.get('use_gt_camera_init', False),
-        transformer_config=config.get('transformer_config', {})
+        transformer_config=config.get('transformer_config', {}),
+        backbone_chunk_size=config.get('backbone_chunk_size', None)
     )
     
     model = model.to(device)
@@ -2543,6 +2601,13 @@ def main(config: dict):
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f"Total parameters: {total_params:,}")
         print(f"Trainable parameters: {trainable_params:,}")
+        if config.get('backbone_chunk_size'):
+            print(f"Backbone chunk size: {config['backbone_chunk_size']} (reduces peak VRAM)")
+        if config.get('use_mixed_precision'):
+            print(f"Mixed precision training: enabled")
+        accum = config.get('gradient_accumulation_steps', 1)
+        if accum > 1:
+            print(f"Gradient accumulation: {accum} steps (effective batch size: {config['batch_size'] * accum})")
     
     # Create optimizer
     optimizer = optim.AdamW(
@@ -2700,9 +2765,12 @@ def main(config: dict):
                 num_samples=config.get('num_visualization_samples', 3),
                 rank=rank
             )
-            
+            # Flush GPU memory between visualization passes
+            gc.collect()
+            torch.cuda.empty_cache()
+
             # Single-view mesh renders (full SMALFitter visualization per view)
-            singleview_dir = config.get('singleview_visualizations_dir', 
+            singleview_dir = config.get('singleview_visualizations_dir',
                                          config['visualizations_dir'].replace('visualizations', 'singleview_renders'))
             visualize_singleview_renders(
                 model=model,
@@ -2716,9 +2784,15 @@ def main(config: dict):
             )
 
             # Free GPU memory fragmented by visualization (SMALFitter instances, renderers, etc.)
-            import gc
             gc.collect()
             torch.cuda.empty_cache()
+
+        # Flush GPU memory on ALL ranks before starting the next epoch.
+        # Rank 0 gets cleanup inside the visualization block, but non-zero ranks
+        # sit at the barrier with stale training tensors (gradients, activations)
+        # still allocated — causing OOM when the next epoch's forward pass spikes usage.
+        gc.collect()
+        torch.cuda.empty_cache()
 
         # Sync all ranks after rank-0-only operations (visualization, checkpointing)
         # so non-zero ranks don't race ahead into the next epoch and deadlock.
@@ -2882,9 +2956,11 @@ if __name__ == "__main__":
     parser.add_argument("--master-port", type=str, default=None,
                        help="Master port for distributed training (default: from MASTER_PORT env var or 12355)")
     
-    # Mixed precision
+    # Mixed precision and memory optimization
     parser.add_argument("--use_mixed_precision", action="store_true",
                        help="Use mixed precision training")
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=None,
+                       help="Accumulate gradients over N mini-batches before optimizer step")
     parser.add_argument("--use_gt_camera_init", action="store_true", default=None,
                        help="Use GT camera params (when available) as base and predict deltas")
     
@@ -2944,6 +3020,9 @@ if __name__ == "__main__":
             if args.reset_ief_token_embedding:
                 cli_overrides['training'] = cli_overrides.get('training', {})
                 cli_overrides['training']['reset_ief_token_embedding'] = True
+            if args.gradient_accumulation_steps is not None:
+                cli_overrides['training'] = cli_overrides.get('training', {})
+                cli_overrides['training']['gradient_accumulation_steps'] = args.gradient_accumulation_steps
 
             new_config = load_config(
                 config_file=args.config,
