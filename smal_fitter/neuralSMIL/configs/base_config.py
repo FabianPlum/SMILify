@@ -350,8 +350,14 @@ class AugmentationConfig:
     """Image augmentation for training data.
 
     Only photometric augmentations are safe by default (no camera param changes).
-    Geometric augmentations (crop/scale jitter) update the camera intrinsics K
-    to maintain the projection relationship: 2D = K @ [R|t] @ X_3d.
+    Scale jitter updates the camera intrinsics K (fx, fy) to maintain the
+    projection relationship: 2D = K @ [R|t] @ X_3d.
+
+    Note: crop_jitter_fraction is kept at 0 because the training pipeline uses
+    FoVPerspectiveCameras which assumes the principal point is at the image
+    centre. A crop offset shifts cx/cy, but this is lost in the FoV conversion,
+    creating a mismatch. To enable crop jitter, the camera pipeline would need
+    to switch to PerspectiveCameras (which accepts full K).
     """
     enabled: bool = False
 
@@ -365,8 +371,8 @@ class AugmentationConfig:
     random_erasing_prob: float = 0.2
     random_erasing_scale_range: Tuple[float, float] = (0.02, 0.1)
 
-    # Geometric (per-view, requires K update)
-    crop_jitter_fraction: float = 0.05  # Max crop offset as fraction of image size
+    # Geometric (per-view, requires K update — centred scale jitter only)
+    crop_jitter_fraction: float = 0.0  # Disabled: incompatible with FoVPerspectiveCameras
     scale_jitter_range: Tuple[float, float] = (0.9, 1.1)
 
 
