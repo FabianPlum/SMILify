@@ -22,7 +22,7 @@
 
   "model": {
     "backbone_name": "unet_efficientnet_b3",
-    "freeze_backbone": false,
+    "freeze_backbone": true,
     "backbone_unfreeze_epoch": 100,
     "backbone_lr_multiplier": 0.1,
     "hidden_dim": 1024,
