@@ -69,6 +69,8 @@ class MultiViewConfig(BaseTrainingConfig):
             # Model config
             'backbone_name': self.model.backbone_name,
             'freeze_backbone': self.model.freeze_backbone,
+            'backbone_unfreeze_epoch': self.model.backbone_unfreeze_epoch,
+            'backbone_lr_multiplier': self.model.backbone_lr_multiplier,
             'head_type': self.model.head_type,
             'hidden_dim': hidden_dim,
             'transformer_config': {
@@ -152,6 +154,21 @@ class MultiViewConfig(BaseTrainingConfig):
                     (epoch, lr)
                     for epoch, lr in sorted(self.optimizer.lr_schedule.items())
                 ],
+            },
+
+            # Augmentation
+            'augmentation': {
+                'enabled': self.augmentation.enabled,
+                'color_jitter_brightness': self.augmentation.color_jitter_brightness,
+                'color_jitter_contrast': self.augmentation.color_jitter_contrast,
+                'color_jitter_saturation': self.augmentation.color_jitter_saturation,
+                'gaussian_noise_std': self.augmentation.gaussian_noise_std,
+                'gaussian_blur_prob': self.augmentation.gaussian_blur_prob,
+                'gaussian_blur_kernel_range': list(self.augmentation.gaussian_blur_kernel_range),
+                'random_erasing_prob': self.augmentation.random_erasing_prob,
+                'random_erasing_scale_range': list(self.augmentation.random_erasing_scale_range),
+                'crop_jitter_fraction': self.augmentation.crop_jitter_fraction,
+                'scale_jitter_range': list(self.augmentation.scale_jitter_range),
             },
         }
         return d
