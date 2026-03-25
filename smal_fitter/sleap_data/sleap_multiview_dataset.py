@@ -46,11 +46,10 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                  backbone_name: str = None,
                  augment: bool = False,
                  augmentation_config: Optional[Dict[str, Any]] = None,
-                 input_resolution: Optional[int] = None,
                  **kwargs):
         """
         Initialize the multi-view SLEAP dataset.
-
+        
         Args:
             hdf5_path: Path to the preprocessed multi-view HDF5 file
             rotation_representation: Rotation representation ('6d' or 'axis_angle')
@@ -61,11 +60,6 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             preferred_view: Which view to return if return_single_view=True
             random_view_sampling: If True, randomly sample views when more available
             backbone_name: Backbone name (for compatibility)
-            input_resolution: Target image resolution for model input. When set,
-                images are resized and converted to (3, H, W) float32 tensors in
-                __getitem__, enabling batched GPU transfer instead of per-image
-                preprocessing in the forward pass.  When None, images are returned
-                as raw numpy arrays (legacy behavior).
             **kwargs: Additional keyword arguments (for compatibility)
         """
         self.hdf5_path = hdf5_path
@@ -75,7 +69,6 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         self.preferred_view = preferred_view
         self.random_view_sampling = random_view_sampling
         self.augment = augment
-        self.input_resolution = input_resolution
 
         # Augmentation defaults (overridden by augmentation_config)
         aug = augmentation_config or {}
@@ -447,30 +440,8 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                     y_data['cam_trans_per_view'][vi] = T_p3d
                     y_data['cam_aspect_per_view'][vi, 0] = float(aspect)
 
-        # ── Pre-resize and convert to tensors (if input_resolution is set) ──
-        if self.input_resolution is not None:
-            x_data['images'] = self._images_to_tensors(x_data['images'])
-
         return x_data, y_data
-
-    def _images_to_tensors(self, images):
-        """Resize images to input_resolution and convert to (3,H,W) float32 tensors.
-
-        Called at the end of __getitem__ when self.input_resolution is set.
-        This moves preprocessing work into the DataLoader workers so the
-        training loop receives ready-to-use tensors.
-        """
-        import torch
-        target = (self.input_resolution, self.input_resolution)
-        tensors = []
-        for img in images:
-            # img: (H, W, 3) float32 numpy in [0, 1]
-            if img.shape[:2] != target:
-                img = cv2.resize(img, target)
-            # HWC → CHW, numpy → torch (zero-copy when contiguous)
-            tensors.append(torch.from_numpy(np.ascontiguousarray(img.transpose(2, 0, 1))))
-        return tensors
-
+    
     def _get_single_view_sample(self, idx: int) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Get a single-view sample (backward compatibility mode)."""
         f = self._file
@@ -825,65 +796,28 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
 def multiview_collate_fn(batch: List[Tuple[Dict, Dict]]) -> Tuple[List[Dict], List[Dict]]:
     """
     Custom collate function for multi-view batches.
-
-    When the dataset returns pre-processed torch tensors (input_resolution is
-    set), this function pads variable-view samples and stacks images into a
-    single (B, V, 3, H, W) tensor with an accompanying (B, V) view_mask and
-    (B, V) camera_indices tensor.  The stacked tensors are stored in the first
-    element of x_data_batch under special keys so that
-    ``predict_from_multiview_batch`` can detect and use them directly.
-
-    When images are still numpy arrays (legacy path), behavior is unchanged:
-    samples are returned as lists of dicts.
-
+    
+    Handles variable number of views per sample by keeping samples as lists
+    rather than stacking into tensors.
+    
     Args:
         batch: List of (x_data, y_data) tuples
-
+        
     Returns:
-        Tuple of (x_data_batch, y_data_batch) where each is a list of dicts.
-        When pre-batched tensors are available, x_data_batch[0] additionally
-        contains '_batched_images', '_batched_view_mask', and
-        '_batched_camera_indices'.
+        Tuple of (x_data_batch, y_data_batch) where each is a list of dicts
     """
-    import torch
-
     x_data_batch = []
     y_data_batch = []
-
+    
     for x_data, y_data in batch:
+        # Stack images into array if they're in list format
+        if 'images' in x_data and isinstance(x_data['images'], list):
+            # Keep as list for now - model will handle conversion
+            pass
+        
         x_data_batch.append(x_data)
         y_data_batch.append(y_data)
-
-    # --- Fast path: images are already (3,H,W) tensors from the dataset ---
-    first_images = x_data_batch[0].get('images', [])
-    if len(first_images) > 0 and isinstance(first_images[0], torch.Tensor):
-        B = len(x_data_batch)
-        max_views = max(x['num_active_views'] for x in x_data_batch)
-        C, H, W = first_images[0].shape  # (3, H, W)
-
-        # Pre-allocate padded tensors
-        batched_images = torch.zeros(B, max_views, C, H, W, dtype=torch.float32)
-        batched_mask = torch.zeros(B, max_views, dtype=torch.bool)
-        batched_cam_idx = torch.zeros(B, max_views, dtype=torch.long)
-
-        for i, x_data in enumerate(x_data_batch):
-            imgs = x_data['images']
-            nv = len(imgs)
-            for v in range(nv):
-                batched_images[i, v] = imgs[v]
-            batched_mask[i, :nv] = True
-
-            cam_indices = x_data.get('camera_indices', list(range(nv)))
-            for v in range(nv):
-                batched_cam_idx[i, v] = int(cam_indices[v]) if v < len(cam_indices) else v
-
-        # Attach batched tensors to the first x_data dict (avoids changing
-        # the return type, keeping backward compatibility with code that
-        # iterates x_data_batch as a list of dicts).
-        x_data_batch[0]['_batched_images'] = batched_images
-        x_data_batch[0]['_batched_view_mask'] = batched_mask
-        x_data_batch[0]['_batched_camera_indices'] = batched_cam_idx
-
+    
     return x_data_batch, y_data_batch
 
 

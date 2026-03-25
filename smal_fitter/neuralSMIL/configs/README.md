@@ -205,7 +205,6 @@ Curriculum stages example:
 | `num_workers` | int | `8` | DataLoader worker processes. |
 | `pin_memory` | bool | `true` | Pin DataLoader memory for faster GPU transfer. |
 | `prefetch_factor` | int | `4` | Batches prefetched per worker. |
-| `deterministic` | bool | `false` | Force deterministic cuDNN algorithms (slower). When `false`, enables `cudnn.benchmark` for faster kernel auto-tuning. |
 | `resume_checkpoint` | string or null | `null` | Path to checkpoint `.pth` file to resume from. |
 | `reset_ief_token_embedding` | bool | `false` | Re-initialize IEF token embeddings when resuming (useful when changing `transformer_ief_iters`). |
 | `use_gt_camera_init` | bool | `true` | Use ground-truth camera parameters as initialization base and predict deltas (multi-view). |

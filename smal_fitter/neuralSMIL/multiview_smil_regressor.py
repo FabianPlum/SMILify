@@ -2351,114 +2351,90 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         
         return loss + eps
     
-    def predict_from_multiview_batch(self, x_data_batch: List[Dict],
+    def predict_from_multiview_batch(self, x_data_batch: List[Dict], 
                                       y_data_batch: List[Dict]) -> Tuple[Dict, List[Dict], Dict]:
         """
         Process a multi-view batch for training.
-
-        Supports two input modes:
-
-        **Fast path** — when the collate function has pre-batched images into
-        tensors (``x_data_batch[0]`` contains ``'_batched_images'``), a single
-        bulk ``.to(device, non_blocking=True)`` replaces the previous
-        per-image Python loop + individual H2D copies.
-
-        **Legacy path** — when images are numpy arrays / lists (visualization,
-        inference), falls back to per-image ``preprocess_image()`` calls.
-
+        
         Args:
             x_data_batch: List of x_data dictionaries (one per sample)
             y_data_batch: List of y_data dictionaries (one per sample)
-
+            
         Returns:
             Tuple of (predicted_params, y_data_batch, auxiliary_data)
         """
-        # ── Fast path: pre-batched tensors from collate ──────────────
-        if '_batched_images' in x_data_batch[0]:
-            all_images = x_data_batch[0]['_batched_images']       # (B, V, 3, H, W)
-            view_mask = x_data_batch[0]['_batched_view_mask']     # (B, V)
-            camera_indices = x_data_batch[0]['_batched_camera_indices']  # (B, V)
-
-            # Single bulk transfer to GPU
-            all_images = all_images.to(self.device, non_blocking=True)
-            view_mask = view_mask.to(self.device, non_blocking=True)
-            camera_indices = camera_indices.to(self.device, non_blocking=True)
-
-            max_views = all_images.shape[1]
-            # Convert (B, V, 3, H, W) → list of (B, 3, H, W) per view
-            # (matches forward_multiview's expected input format)
-            images_per_view = [all_images[:, v] for v in range(max_views)]
-
-            predicted_params = self.forward_multiview(
-                images_per_view, camera_indices, view_mask, target_data=y_data_batch
-            )
-
-            auxiliary_data = {
-                'is_multiview': True,
-                'num_views': max_views,
-                'view_mask': view_mask,
-            }
-            return predicted_params, y_data_batch, auxiliary_data
-
-        # ── Legacy path: per-image preprocessing (visualization / inference) ─
         batch_size = len(x_data_batch)
-        max_views_in_batch = max(
-            x.get('num_active_views', 1) for x in x_data_batch
-        )
-
-        all_images_per_view = [[] for _ in range(max_views_in_batch)]
+        
+        # Collect images and camera info from all samples
+        all_images_per_view = []
         all_camera_indices = []
         all_view_masks = []
-
+        max_views_in_batch = 0
+        
+        # First pass: find max views and collect data
+        for x_data in x_data_batch:
+            num_views = x_data.get('num_active_views', 1)
+            max_views_in_batch = max(max_views_in_batch, num_views)
+        
+        # Initialize storage for each view position
+        for v in range(max_views_in_batch):
+            all_images_per_view.append([])
+        
+        # Second pass: organize images by view position
         for sample_idx, x_data in enumerate(x_data_batch):
             images = x_data.get('images', [])
             cam_indices = x_data.get('camera_indices', [])
             num_views = len(images)
-
+            
             sample_view_mask = []
             sample_cam_indices = []
-
+            
             for v in range(max_views_in_batch):
                 if v < num_views:
+                    # Preprocess image
                     img = images[v]
-                    img_tensor = self.preprocess_image(img).squeeze(0)
+                    img_tensor = self.preprocess_image(img).squeeze(0)  # Remove batch dim
+                    # Ensure tensor is on the correct device
                     img_tensor = img_tensor.to(self.device)
                     all_images_per_view[v].append(img_tensor)
-
+                    
+                    # Get camera index
                     if v < len(cam_indices):
                         sample_cam_indices.append(int(cam_indices[v]))
                     else:
-                        sample_cam_indices.append(v)
-
+                        sample_cam_indices.append(v)  # Default to view index
+                    
                     sample_view_mask.append(True)
                 else:
-                    dummy_img = torch.zeros(
-                        3, self.input_resolution, self.input_resolution,
-                        dtype=torch.float32, device=self.device,
-                    )
+                    # Pad with zeros
+                    dummy_img = torch.zeros(3, self.input_resolution, self.input_resolution, dtype=torch.float32, device=self.device)
                     all_images_per_view[v].append(dummy_img)
                     sample_cam_indices.append(0)
                     sample_view_mask.append(False)
-
+            
             all_camera_indices.append(sample_cam_indices)
             all_view_masks.append(sample_view_mask)
-
+        
+        # Stack into tensors
         images_per_view = [
             torch.stack(all_images_per_view[v]).to(self.device)
             for v in range(max_views_in_batch)
         ]
         camera_indices = torch.tensor(all_camera_indices, device=self.device)
         view_mask = torch.tensor(all_view_masks, device=self.device)
-
+        
+        # Forward pass
         predicted_params = self.forward_multiview(
             images_per_view, camera_indices, view_mask, target_data=y_data_batch
         )
-
+        
+        # Build auxiliary data
         auxiliary_data = {
             'is_multiview': True,
             'num_views': max_views_in_batch,
             'view_mask': view_mask,
         }
+        
         return predicted_params, y_data_batch, auxiliary_data
 
 

@@ -183,11 +183,9 @@
     "num_workers": 16,
     "pin_memory": true,
     "prefetch_factor": 8,
-    "deterministic": false,
     "resume_checkpoint": "multiview_checkpoints_Unet_512_EffB3/checkpoint_epoch_0229.pth",
     "reset_ief_token_embedding": false,
     "use_gt_camera_init": true,
-    "use_mixed_precision": true,
     "gradient_accumulation_steps": 1
   }
 }
