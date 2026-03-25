@@ -69,16 +69,28 @@ from training_config import TrainingConfig
 from configs import MultiViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
 
 
-def set_random_seeds(seed: int = 0):
-    """Set random seeds for reproducibility."""
+def set_random_seeds(seed: int = 0, deterministic: bool = False):
+    """Set random seeds for reproducibility.
+
+    Args:
+        seed: Random seed value.
+        deterministic: If True, forces deterministic cuDNN algorithms at the
+            cost of performance.  When False (default), enables cuDNN
+            auto-tuning (benchmark mode) for faster training.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = deterministic
+    torch.backends.cudnn.benchmark = not deterministic
+    # Enable TF32 on Ampere+ GPUs (A100, H100, etc.).  TF32 uses tensor
+    # cores for float32 matmuls with ~8x throughput vs pure FP32 and
+    # negligible precision loss for training.
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
 
 def is_distributed_launch():
@@ -405,7 +417,8 @@ class MultiViewTrainingConfig:
         merged['reset_ief_token_embedding'] = training_params.get('reset_ief_token_embedding', False)
         merged['num_workers'] = training_params.get('num_workers', 4)
         merged['pin_memory'] = training_params.get('pin_memory', True)
-        
+        merged['deterministic'] = training_params.get('deterministic', False)
+
         # Model config from TrainingConfig
         model_config = base_config['model_config']
         merged['backbone_name'] = model_config['backbone_name']
@@ -2568,7 +2581,7 @@ def main(config: dict):
     device_override = config.get('device_override', None)
 
     # Set random seeds
-    set_random_seeds(config['seed'])
+    set_random_seeds(config['seed'], deterministic=config.get('deterministic', False))
     
     # Set device
     if device_override:
