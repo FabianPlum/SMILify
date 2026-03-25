@@ -1154,14 +1154,19 @@ class TestRealDatasetAugmentation:
         print(f"  Saved: {out_path}")
 
     def test_no_aug_vs_aug_different(self):
-        """Augmented sample should differ from non-augmented sample."""
+        """Augmented sample should differ from non-augmented sample.
+
+        With geometric augmentation disabled by default, photometric
+        augmentation still changes pixel values so we compare images.
+        """
         np.random.seed(42)
-        _, y_aug = self.ds[0]
+        x_aug, _ = self.ds[0]
 
         np.random.seed(42)  # same seed but augment=False
-        _, y_noaug = self.ds_no_aug[0]
+        x_noaug, _ = self.ds_no_aug[0]
 
-        # The 2D keypoints should differ because geometric aug changes them
-        if y_aug.get('camera_intrinsics') is not None:
-            assert not np.allclose(y_aug['keypoints_2d'], y_noaug['keypoints_2d'], atol=1e-6), \
-                "Augmented and non-augmented 2D keypoints should differ"
+        # Photometric augmentation should change pixel values
+        aug_imgs = np.stack(x_aug['images'])
+        noaug_imgs = np.stack(x_noaug['images'])
+        assert not np.allclose(aug_imgs, noaug_imgs, atol=1e-6), \
+            "Augmented and non-augmented images should differ (photometric aug)"
