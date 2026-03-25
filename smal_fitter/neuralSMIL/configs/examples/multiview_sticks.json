@@ -136,6 +136,7 @@
 
   "augmentation": {
     "enabled": false,
+    "geometric_enabled": false,
     "color_jitter_brightness": 0.2,
     "color_jitter_contrast": 0.2,
     "color_jitter_saturation": 0.15,
@@ -166,6 +167,7 @@
     "singleview_visualizations_dir": "multiview_singleview_renders_STICKS_full_512_3D",
     "save_checkpoint_every": 10,
     "generate_visualizations_every": 5,
+    "plot_history_every": 5,
     "num_visualization_samples": 5
   },
 

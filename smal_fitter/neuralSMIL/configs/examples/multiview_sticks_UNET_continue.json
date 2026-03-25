@@ -140,6 +140,7 @@
 
   "augmentation": {
     "enabled": false,
+    "geometric_enabled": false,
     "color_jitter_brightness": 0.2,
     "color_jitter_contrast": 0.2,
     "color_jitter_saturation": 0.15,
@@ -170,6 +171,7 @@
     "singleview_visualizations_dir": "multiview_singleview_renders_Unet_512_EffB3",
     "save_checkpoint_every": 10,
     "generate_visualizations_every": 10,
+    "plot_history_every": 10,
     "num_visualization_samples": 5
   },
 
