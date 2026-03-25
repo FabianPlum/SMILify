@@ -69,16 +69,24 @@ from training_config import TrainingConfig
 from configs import MultiViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
 
 
-def set_random_seeds(seed: int = 0):
-    """Set random seeds for reproducibility."""
+def set_random_seeds(seed: int = 0, deterministic: bool = False):
+    """Set random seeds for reproducibility.
+
+    Args:
+        seed: Random seed value.
+        deterministic: If True, forces deterministic cuDNN algorithms at the
+            cost of performance.  When False (default), enables cuDNN
+            auto-tuning (benchmark mode) for significantly faster training,
+            especially on A100 and other datacenter GPUs.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = deterministic
+    torch.backends.cudnn.benchmark = not deterministic
 
 
 def is_distributed_launch():
@@ -228,87 +236,153 @@ def cleanup_ddp():
         dist.destroy_process_group()
 
 
-def create_fractional_train_loader(train_set, 
-                                   epoch: int,
-                                   config: dict,
-                                   is_distributed: bool,
-                                   collate_fn) -> DataLoader:
+class FractionalDistributedSampler(DistributedSampler):
+    """DistributedSampler that optionally selects a random subset each epoch.
+
+    When *dataset_fraction* < 1, a deterministic random subset (seeded by
+    ``base_seed + epoch``) is chosen **before** the standard distributed
+    partitioning, so every rank sees a consistent split of the same subset.
+
+    When *dataset_fraction* >= 1, this behaves identically to
+    :class:`DistributedSampler`.
     """
-    Create a DataLoader that samples a fraction of the training dataset.
-    
-    This function enables efficient training on very large datasets by sampling
-    a random subset of training examples at each epoch. The sampling is deterministic
-    based on (config['seed'] + epoch), ensuring all DDP processes use the same subset.
-    
-    Args:
-        train_set: The full training dataset (or Subset)
-        epoch: Current epoch number (used for deterministic sampling seed)
-        config: Training configuration dictionary containing:
-            - 'dataset_fraction': Fraction of data to use (0 < fraction <= 1)
-            - 'seed': Base random seed
-            - 'batch_size': Batch size
-            - 'num_workers': Number of data loading workers
-            - 'pin_memory': Whether to pin memory
-        is_distributed: Whether training is distributed (DDP)
-        collate_fn: Collate function for the DataLoader
-        
+
+    def __init__(self, dataset, dataset_fraction: float = 1.0,
+                 base_seed: int = 0, **kwargs):
+        super().__init__(dataset, **kwargs)
+        self.dataset_fraction = dataset_fraction
+        self.base_seed = base_seed
+
+    def __iter__(self):
+        if self.dataset_fraction >= 1.0:
+            return super().__iter__()
+
+        # Deterministic fractional subset — all ranks use the same seed so
+        # they agree on which samples are in this epoch's subset.
+        rng = torch.Generator()
+        rng.manual_seed(self.base_seed + self.epoch)
+
+        full_size = len(self.dataset)
+        n_samples = max(1, int(full_size * self.dataset_fraction))
+        subset_indices = torch.randperm(full_size, generator=rng)[:n_samples].tolist()
+
+        # Shuffle the subset (also deterministic per epoch)
+        if self.shuffle:
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            order = torch.randperm(len(subset_indices), generator=g).tolist()
+            subset_indices = [subset_indices[i] for i in order]
+
+        # Pad to make evenly divisible by num_replicas (same as base class)
+        padding_size = self.total_size - len(subset_indices)
+        if padding_size > 0:
+            if padding_size <= len(subset_indices):
+                subset_indices += subset_indices[:padding_size]
+            else:
+                subset_indices = (subset_indices * ((padding_size // len(subset_indices)) + 2))[:self.total_size]
+
+        # Subsample for this rank
+        indices = subset_indices[self.rank:self.total_size:self.num_replicas]
+        return iter(indices)
+
+    def __len__(self):
+        if self.dataset_fraction >= 1.0:
+            return super().__len__()
+        n_samples = max(1, int(len(self.dataset) * self.dataset_fraction))
+        # Same ceiling division as base class
+        import math
+        return math.ceil(n_samples / self.num_replicas)
+
+    @property
+    def total_size(self):
+        """Total padded size across all replicas."""
+        if self.dataset_fraction >= 1.0:
+            import math
+            return math.ceil(len(self.dataset) / self.num_replicas) * self.num_replicas
+        n_samples = max(1, int(len(self.dataset) * self.dataset_fraction))
+        import math
+        return math.ceil(n_samples / self.num_replicas) * self.num_replicas
+
+
+class FractionalRandomSampler(torch.utils.data.Sampler):
+    """Single-process sampler with optional fractional subset per epoch.
+
+    Mirrors the fractional logic of :class:`FractionalDistributedSampler` for
+    non-distributed training.
+    """
+
+    def __init__(self, dataset, dataset_fraction: float = 1.0,
+                 base_seed: int = 0):
+        self.dataset = dataset
+        self.dataset_fraction = dataset_fraction
+        self.base_seed = base_seed
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int):
+        self.epoch = epoch
+
+    def __iter__(self):
+        rng = torch.Generator()
+        rng.manual_seed(self.base_seed + self.epoch)
+
+        full_size = len(self.dataset)
+        if self.dataset_fraction >= 1.0:
+            indices = torch.randperm(full_size, generator=rng).tolist()
+        else:
+            n_samples = max(1, int(full_size * self.dataset_fraction))
+            indices = torch.randperm(full_size, generator=rng)[:n_samples].tolist()
+        return iter(indices)
+
+    def __len__(self):
+        if self.dataset_fraction >= 1.0:
+            return len(self.dataset)
+        return max(1, int(len(self.dataset) * self.dataset_fraction))
+
+
+def create_train_loader(train_set,
+                        config: dict,
+                        is_distributed: bool,
+                        collate_fn):
+    """Create a reusable training DataLoader with persistent workers.
+
+    Instead of rebuilding the DataLoader every epoch, this returns a single
+    DataLoader whose sampler supports :meth:`set_epoch` for both full-dataset
+    and fractional-dataset training.  Call ``sampler.set_epoch(epoch)`` at the
+    start of each epoch to get proper shuffling / fractional subset selection.
+
     Returns:
-        DataLoader configured with the fractional subset for this epoch
+        Tuple of (DataLoader, sampler) — keep a reference to the sampler so
+        you can call ``sampler.set_epoch(epoch)`` in the training loop.
     """
     dataset_fraction = config.get('dataset_fraction', 1.0)
-    
-    if dataset_fraction >= 1.0:
-        # Use full dataset - create standard sampler
-        if is_distributed:
-            sampler = DistributedSampler(train_set, shuffle=True)
-            sampler.set_epoch(epoch)
-        else:
-            sampler = None
-        
-        return DataLoader(
-            train_set,
-            batch_size=config['batch_size'],
-            shuffle=(sampler is None),
-            sampler=sampler,
-            num_workers=config['num_workers'],
-            pin_memory=config['pin_memory'],
-            collate_fn=collate_fn,
-            drop_last=True
-        )
-    
-    # Fractional sampling: create a deterministic subset for this epoch
-    # All processes use the same seed to get the same subset
-    subset_seed = config['seed'] + epoch
-    rng = torch.Generator()
-    rng.manual_seed(subset_seed)
-    
-    # Compute number of samples to use
-    full_size = len(train_set)
-    n_samples = max(1, int(full_size * dataset_fraction))
-    
-    # Generate random permutation and take first n_samples indices
-    all_indices = torch.randperm(full_size, generator=rng)[:n_samples].tolist()
-    
-    # Create a Subset view of the training data
-    epoch_subset = torch.utils.data.Subset(train_set, all_indices)
-    
-    # Create sampler for the subset
+    num_workers = config['num_workers']
+
     if is_distributed:
-        sampler = DistributedSampler(epoch_subset, shuffle=True)
-        sampler.set_epoch(epoch)
+        sampler = FractionalDistributedSampler(
+            train_set,
+            dataset_fraction=dataset_fraction,
+            base_seed=config['seed'],
+            shuffle=True,
+        )
     else:
-        sampler = None
-    
-    return DataLoader(
-        epoch_subset,
+        sampler = FractionalRandomSampler(
+            train_set,
+            dataset_fraction=dataset_fraction,
+            base_seed=config['seed'],
+        )
+
+    loader_kwargs = dict(
         batch_size=config['batch_size'],
-        shuffle=(sampler is None),
         sampler=sampler,
-        num_workers=config['num_workers'],
+        num_workers=num_workers,
         pin_memory=config['pin_memory'],
         collate_fn=collate_fn,
-        drop_last=True
+        drop_last=True,
+        prefetch_factor=config.get('prefetch_factor', 2) if num_workers > 0 else None,
+        persistent_workers=num_workers > 0,
     )
+
+    return DataLoader(train_set, **loader_kwargs), sampler
 
 
 def _print_component_metrics(train_components: dict, val_components: dict, indent: str = "    "):
@@ -405,6 +479,8 @@ class MultiViewTrainingConfig:
         merged['reset_ief_token_embedding'] = training_params.get('reset_ief_token_embedding', False)
         merged['num_workers'] = training_params.get('num_workers', 4)
         merged['pin_memory'] = training_params.get('pin_memory', True)
+        merged['prefetch_factor'] = training_params.get('prefetch_factor', 2)
+        merged['deterministic'] = training_params.get('deterministic', False)
         
         # Model config from TrainingConfig
         model_config = base_config['model_config']
@@ -2568,7 +2644,7 @@ def main(config: dict):
     device_override = config.get('device_override', None)
 
     # Set random seeds
-    set_random_seeds(config['seed'])
+    set_random_seeds(config['seed'], deterministic=config.get('deterministic', False))
     
     # Set device
     if device_override:
@@ -2708,18 +2784,27 @@ def main(config: dict):
     else:
         val_sampler = None
     
+    val_num_workers = config['num_workers']
     val_loader = DataLoader(
         val_set,
         batch_size=config['batch_size'],
         shuffle=False,
         sampler=val_sampler,
-        num_workers=config['num_workers'],
+        num_workers=val_num_workers,
         pin_memory=config['pin_memory'],
-        collate_fn=multiview_collate_fn
+        collate_fn=multiview_collate_fn,
+        prefetch_factor=config.get('prefetch_factor', 2) if val_num_workers > 0 else None,
+        persistent_workers=val_num_workers > 0,
     )
     
-    # Note: train_loader is created per-epoch to support fractional dataset sampling
-    # See create_fractional_train_loader() and the training loop below
+    # Create train_loader once (persistent workers survive across epochs).
+    # Fractional dataset sampling is handled inside the sampler via set_epoch().
+    train_loader, train_sampler = create_train_loader(
+        train_set=train_set,
+        config=config,
+        is_distributed=is_distributed,
+        collate_fn=multiview_collate_fn,
+    )
     
     # Create model
     if rank == 0:
@@ -2776,7 +2861,7 @@ def main(config: dict):
         # Extract GPU index from device string (e.g., "cuda:0" -> 0)
         # In single-node multi-GPU, this matches local_rank
         gpu_idx = int(device.split(':')[1]) if ':' in device else rank
-        model = DDP(model, device_ids=[gpu_idx], find_unused_parameters=True)
+        model = DDP(model, device_ids=[gpu_idx], static_graph=True)
     
     # Count parameters
     if rank == 0:
@@ -2871,15 +2956,9 @@ def main(config: dict):
     }
     
     for epoch in range(start_epoch, config['num_epochs']):
-        # Create train_loader for this epoch (supports fractional dataset sampling)
-        # This ensures DDP processes use the same random subset when dataset_fraction < 1
-        train_loader = create_fractional_train_loader(
-            train_set=train_set,
-            epoch=epoch,
-            config=config,
-            is_distributed=is_distributed,
-            collate_fn=multiview_collate_fn
-        )
+        # Update sampler epoch for shuffling / fractional subset selection.
+        # The sampler handles both full and fractional dataset modes internally.
+        train_sampler.set_epoch(epoch)
         
         # Staged backbone unfreeze
         unfreeze_epoch = config.get('backbone_unfreeze_epoch')

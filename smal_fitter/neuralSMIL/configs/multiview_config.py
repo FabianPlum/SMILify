@@ -64,6 +64,7 @@ class MultiViewConfig(BaseTrainingConfig):
             'resume_checkpoint': self.training.resume_checkpoint,
             'num_workers': self.training.num_workers,
             'pin_memory': self.training.pin_memory,
+            'prefetch_factor': self.training.prefetch_factor,
             'gradient_clip_norm': self.optimizer.gradient_clip_norm,
 
             # Model config
