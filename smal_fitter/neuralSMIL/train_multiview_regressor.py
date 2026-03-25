@@ -249,9 +249,15 @@ class FractionalDistributedSampler(DistributedSampler):
 
     def __init__(self, dataset, dataset_fraction: float = 1.0,
                  base_seed: int = 0, **kwargs):
+        # Let the parent set self.total_size, self.num_samples, etc.
         super().__init__(dataset, **kwargs)
         self.dataset_fraction = dataset_fraction
         self.base_seed = base_seed
+
+    def _fractional_total_size(self, n_samples: int) -> int:
+        """Padded size across all replicas for a fractional subset."""
+        import math
+        return math.ceil(n_samples / self.num_replicas) * self.num_replicas
 
     def __iter__(self):
         if self.dataset_fraction >= 1.0:
@@ -274,34 +280,24 @@ class FractionalDistributedSampler(DistributedSampler):
             subset_indices = [subset_indices[i] for i in order]
 
         # Pad to make evenly divisible by num_replicas (same as base class)
-        padding_size = self.total_size - len(subset_indices)
+        padded_size = self._fractional_total_size(n_samples)
+        padding_size = padded_size - len(subset_indices)
         if padding_size > 0:
             if padding_size <= len(subset_indices):
                 subset_indices += subset_indices[:padding_size]
             else:
-                subset_indices = (subset_indices * ((padding_size // len(subset_indices)) + 2))[:self.total_size]
+                subset_indices = (subset_indices * ((padding_size // len(subset_indices)) + 2))[:padded_size]
 
         # Subsample for this rank
-        indices = subset_indices[self.rank:self.total_size:self.num_replicas]
+        indices = subset_indices[self.rank:padded_size:self.num_replicas]
         return iter(indices)
 
     def __len__(self):
         if self.dataset_fraction >= 1.0:
             return super().__len__()
         n_samples = max(1, int(len(self.dataset) * self.dataset_fraction))
-        # Same ceiling division as base class
         import math
         return math.ceil(n_samples / self.num_replicas)
-
-    @property
-    def total_size(self):
-        """Total padded size across all replicas."""
-        if self.dataset_fraction >= 1.0:
-            import math
-            return math.ceil(len(self.dataset) / self.num_replicas) * self.num_replicas
-        n_samples = max(1, int(len(self.dataset) * self.dataset_fraction))
-        import math
-        return math.ceil(n_samples / self.num_replicas) * self.num_replicas
 
 
 class FractionalRandomSampler(torch.utils.data.Sampler):
