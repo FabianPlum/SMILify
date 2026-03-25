@@ -72,6 +72,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
 
         # Augmentation defaults (overridden by augmentation_config)
         aug = augmentation_config or {}
+        self.aug_geometric_enabled = aug.get('geometric_enabled', False)
         self.aug_color_jitter_brightness = aug.get('color_jitter_brightness', 0.2)
         self.aug_color_jitter_contrast = aug.get('color_jitter_contrast', 0.2)
         self.aug_color_jitter_saturation = aug.get('color_jitter_saturation', 0.15)
@@ -400,12 +401,20 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             vis = y_data['keypoint_visibility']  # (num_views, n_joints)
             K_aug = y_data.get('camera_intrinsics')  # (num_views, 3, 3) or None
 
+            # Sample geometric scale once per sample so all views share the
+            # same zoom level, preserving multi-view geometric consistency.
+            shared_scale = None
+            if self.aug_geometric_enabled and K_aug is not None:
+                lo, hi = self.aug_scale_jitter_range
+                shared_scale = np.random.uniform(lo, hi)
+
             for vi in range(len(images)):
                 # Geometric augmentation (per-view, updates K and 2D keypoints)
-                if K_aug is not None:
+                if shared_scale is not None:
                     images[vi], K_aug[vi], kp2d[vi], vis[vi] = (
                         self._apply_geometric_augmentation(
-                            images[vi], K_aug[vi], kp2d[vi], vis[vi]
+                            images[vi], K_aug[vi], kp2d[vi], vis[vi],
+                            scale=shared_scale,
                         )
                     )
                 # Photometric augmentation (per-view, independent randomness)
@@ -625,6 +634,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         K: np.ndarray,
         keypoints_2d: np.ndarray,
         visibility: np.ndarray,
+        scale: Optional[float] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Apply scale jitter, updating K and 2D keypoints consistently.
 
@@ -650,6 +660,10 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             keypoints_2d: (n_joints, 2) **normalized [0,1] in [y, x] order**
                 as stored in the HDF5 dataset.
             visibility: (n_joints,) boolean visibility mask.
+            scale: Pre-sampled scale factor. When provided, used directly
+                instead of sampling a new one.  Pass the same value for all
+                views of a multi-view sample to preserve multi-view geometric
+                consistency.
 
         Returns:
             (image, K, keypoints_2d, visibility) — all updated in-place-safe copies.
@@ -659,9 +673,10 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         keypoints_2d = keypoints_2d.copy()
         visibility = visibility.copy()
 
-        # 1. Random scale factor (centered zoom in/out)
-        lo, hi = self.aug_scale_jitter_range
-        scale = np.random.uniform(lo, hi)
+        # 1. Scale factor (centered zoom in/out)
+        if scale is None:
+            lo, hi = self.aug_scale_jitter_range
+            scale = np.random.uniform(lo, hi)
 
         # 2. Compute source crop region — always centred (no offset).
         #    scale > 1 means zoom in (smaller source crop), < 1 means zoom out.
