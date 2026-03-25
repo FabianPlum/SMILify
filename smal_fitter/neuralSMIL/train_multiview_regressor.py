@@ -87,6 +87,12 @@ def set_random_seeds(seed: int = 0, deterministic: bool = False):
         torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = deterministic
     torch.backends.cudnn.benchmark = not deterministic
+    # Enable TF32 on Ampere+ GPUs (A100, H100, etc.).  TF32 uses tensor
+    # cores for float32 matmuls with ~8x throughput vs pure FP32 and
+    # negligible precision loss.  Without this, A100 runs at 19.5 TFLOPS
+    # instead of 156 TFLOPS — slower per-GPU than a consumer RTX 4090.
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
 
 def is_distributed_launch():
@@ -2871,6 +2877,11 @@ def main(config: dict):
             print(f"Backbone chunk size: {config['backbone_chunk_size']} (reduces peak VRAM)")
         if config.get('use_mixed_precision'):
             print(f"Mixed precision training: enabled")
+        else:
+            gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else ''
+            if any(x in gpu_name for x in ['A100', 'A10', 'H100', 'H200', 'L40']):
+                print(f"WARNING: Mixed precision is DISABLED on {gpu_name}. "
+                      f"Enable with 'use_mixed_precision': true for ~2x throughput.")
         accum = config.get('gradient_accumulation_steps', 1)
         if accum > 1:
             print(f"Gradient accumulation: {accum} steps (effective batch size: {config['batch_size'] * accum})")
