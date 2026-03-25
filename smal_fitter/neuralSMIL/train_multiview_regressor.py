@@ -2669,7 +2669,16 @@ def main(config: dict):
     # Load dataset
     if rank == 0:
         print("Loading multi-view dataset...")
-    
+
+    # Resolve input_resolution early so the dataset can resize images in
+    # worker processes (avoids per-image preprocessing in the forward pass).
+    from backbone_factory import BackboneFactory
+    backbone_name = config['backbone_name']
+    input_resolution = config.get(
+        'input_resolution',
+        BackboneFactory.get_default_input_resolution(backbone_name),
+    )
+
     aug_config = config.get('augmentation', {})
     aug_enabled = aug_config.get('enabled', False)
     dataset = SLEAPMultiViewDataset(
@@ -2679,6 +2688,7 @@ def main(config: dict):
         random_view_sampling=True,
         augment=False,  # Toggled on/off around train vs val; see training loop
         augmentation_config=aug_config if aug_enabled else None,
+        input_resolution=input_resolution,
     )
     
     if rank == 0:
@@ -2806,15 +2816,7 @@ def main(config: dict):
     if rank == 0:
         print("\nCreating multi-view model...")
     
-    # Determine input resolution based on backbone
-    # This ensures the renderer is initialized with the correct size
-    backbone_name = config['backbone_name']
-    from backbone_factory import BackboneFactory
-    input_resolution = config.get(
-        'input_resolution',
-        BackboneFactory.get_default_input_resolution(backbone_name)
-    )
-
+    # input_resolution and backbone_name already resolved above (before dataset creation)
     if rank == 0:
         print(f"Using input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
     
