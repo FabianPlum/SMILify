@@ -227,20 +227,24 @@ class CameraHead(nn.Module):
             nn.Linear(hidden_dim // 2, self.total_cam_dim)
         )
         
+        # Identity rotation in 6D: first two columns of I_3x3
+        self.register_buffer('identity_6d',
+                             torch.tensor([1.0, 0.0, 0.0, 0.0, 1.0, 0.0]))
+
         self._init_weights()
-    
+
     def _init_weights(self):
         """Initialize weights with sensible defaults."""
         for module in self.layers:
             if isinstance(module, nn.Linear):
                 nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
                 nn.init.zeros_(module.bias)
-        
+
         # Initialize last layer with small weights for stable training
         last_linear = self.layers[-1]
         nn.init.xavier_uniform_(last_linear.weight, gain=0.01)
         nn.init.zeros_(last_linear.bias)
-    
+
     def _rotation_6d_to_matrix(self, rotation_6d: torch.Tensor) -> torch.Tensor:
         """
         Convert 6D rotation representation to 3x3 rotation matrix.
@@ -290,10 +294,7 @@ class CameraHead(nn.Module):
         # Rotation: 6D representation -> orthonormal 3x3 matrix
         rot_6d = output[:, idx:idx + self.cam_rot_dim]
         # Initialize close to identity: add identity's first two columns
-        # Identity 6D: [1,0,0, 0,1,0]
-        identity_6d = torch.tensor([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 
-                                   device=output.device, dtype=torch.float32)
-        rot_6d = rot_6d + identity_6d
+        rot_6d = rot_6d + self.identity_6d
         cam_rot = self._rotation_6d_to_matrix(rot_6d)
         idx += self.cam_rot_dim
         
@@ -327,9 +328,7 @@ class CameraHead(nn.Module):
 
         # Rotation delta as 6D -> matrix
         rot_6d = output[:, idx:idx + self.cam_rot_dim] * self.rot_delta_scale
-        identity_6d = torch.tensor([1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                                   device=output.device, dtype=torch.float32)
-        rot_6d = rot_6d + identity_6d
+        rot_6d = rot_6d + self.identity_6d
         delta_rot = self._rotation_6d_to_matrix(rot_6d)
         cam_rot = torch.matmul(delta_rot, base_cam_rot)
         idx += self.cam_rot_dim

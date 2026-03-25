@@ -360,6 +360,7 @@ class AugmentationConfig:
     to switch to PerspectiveCameras (which accepts full K).
     """
     enabled: bool = False
+    geometric_enabled: bool = False  # Scale jitter (updates K); off by default to avoid multi-view inconsistency
 
     # Photometric (per-view, no camera changes)
     color_jitter_brightness: float = 0.2
@@ -633,6 +634,7 @@ class BaseTrainingConfig:
             },
             'augmentation': {
                 'enabled': self.augmentation.enabled,
+                'geometric_enabled': self.augmentation.geometric_enabled,
                 'color_jitter_brightness': self.augmentation.color_jitter_brightness,
                 'color_jitter_contrast': self.augmentation.color_jitter_contrast,
                 'color_jitter_saturation': self.augmentation.color_jitter_saturation,
