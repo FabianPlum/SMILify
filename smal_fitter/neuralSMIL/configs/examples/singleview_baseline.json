@@ -107,6 +107,7 @@
 
   "augmentation": {
     "enabled": false,
+    "geometric_enabled": false,
     "color_jitter_brightness": 0.2,
     "color_jitter_contrast": 0.2,
     "color_jitter_saturation": 0.15,
