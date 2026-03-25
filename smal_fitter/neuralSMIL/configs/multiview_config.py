@@ -161,6 +161,7 @@ class MultiViewConfig(BaseTrainingConfig):
             # Augmentation
             'augmentation': {
                 'enabled': self.augmentation.enabled,
+                'geometric_enabled': self.augmentation.geometric_enabled,
                 'color_jitter_brightness': self.augmentation.color_jitter_brightness,
                 'color_jitter_contrast': self.augmentation.color_jitter_contrast,
                 'color_jitter_saturation': self.augmentation.color_jitter_saturation,
