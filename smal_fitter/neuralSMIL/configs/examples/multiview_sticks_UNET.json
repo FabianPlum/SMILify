@@ -178,10 +178,11 @@
     "num_workers": 32,
     "pin_memory": true,
     "prefetch_factor": 16,
+    "deterministic": false,
     "resume_checkpoint": null,
     "reset_ief_token_embedding": false,
     "use_gt_camera_init": true,
-    "use_mixed_precision": false,
+    "use_mixed_precision": true,
     "backbone_chunk_size": 6,
     "gradient_accumulation_steps": 2
   }

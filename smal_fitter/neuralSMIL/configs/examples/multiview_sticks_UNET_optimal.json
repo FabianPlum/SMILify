@@ -83,7 +83,7 @@
       "20": {
         "keypoint_3d": 1,
         "joint_angle_regularization": 1e-4,
-        "limb_scale_regularization": 0.001,
+        "limb_scale_regularizationthe ": 0.001,
         "limb_trans_regularization": 0.5
       },
       "50": {
@@ -178,6 +178,7 @@
     "num_workers": 16,
     "pin_memory": true,
     "prefetch_factor": 8,
+    "deterministic": false,
     "resume_checkpoint": null,
     "reset_ief_token_embedding": false,
     "use_gt_camera_init": true,
