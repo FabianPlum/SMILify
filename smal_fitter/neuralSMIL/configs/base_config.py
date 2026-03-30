@@ -47,6 +47,10 @@ class ModelConfig:
     """Neural network model architecture."""
     backbone_name: str = 'vit_large_patch16_224'
     freeze_backbone: bool = True
+    backbone_unfreeze_epoch: Optional[int] = None  # When set, backbone is frozen at init and unfrozen at this epoch.
+    # Overrides freeze_backbone (backbone is always frozen when this is set).
+    # Set to null/None to use freeze_backbone as-is.
+    backbone_lr_multiplier: float = 0.1  # Backbone LR = curriculum_lr * this multiplier after unfreeze
     hidden_dim: int = 1024  # Auto-adjusted based on backbone in validate()
     head_type: str = 'transformer_decoder'  # 'mlp' or 'transformer_decoder'
     use_unity_prior: bool = False
@@ -74,6 +78,14 @@ class ModelConfig:
     def validate(self):
         if self.head_type not in ('mlp', 'transformer_decoder'):
             raise ValueError(f"Invalid head_type '{self.head_type}', must be 'mlp' or 'transformer_decoder'")
+        if self.backbone_unfreeze_epoch is not None and not self.freeze_backbone:
+            import warnings
+            warnings.warn(
+                f"backbone_unfreeze_epoch={self.backbone_unfreeze_epoch} is set but "
+                f"freeze_backbone=False. The backbone will be frozen at init and "
+                f"unfrozen at epoch {self.backbone_unfreeze_epoch} regardless of "
+                f"freeze_backbone. Set freeze_backbone=True to silence this warning."
+            )
 
     def get_adjusted_hidden_dim(self) -> int:
         """Return hidden_dim adjusted for backbone architecture.
@@ -334,6 +346,38 @@ class MeshScalingConfig:
 
 
 @dataclass
+class AugmentationConfig:
+    """Image augmentation for training data.
+
+    Only photometric augmentations are safe by default (no camera param changes).
+    Scale jitter updates the camera intrinsics K (fx, fy) to maintain the
+    projection relationship: 2D = K @ [R|t] @ X_3d.
+
+    Note: crop_jitter_fraction is kept at 0 because the training pipeline uses
+    FoVPerspectiveCameras which assumes the principal point is at the image
+    centre. A crop offset shifts cx/cy, but this is lost in the FoV conversion,
+    creating a mismatch. To enable crop jitter, the camera pipeline would need
+    to switch to PerspectiveCameras (which accepts full K).
+    """
+    enabled: bool = False
+    geometric_enabled: bool = False  # Scale jitter (updates K); off by default to avoid multi-view inconsistency
+
+    # Photometric (per-view, no camera changes)
+    color_jitter_brightness: float = 0.2
+    color_jitter_contrast: float = 0.2
+    color_jitter_saturation: float = 0.15
+    gaussian_noise_std: float = 0.015
+    gaussian_blur_prob: float = 0.3
+    gaussian_blur_kernel_range: Tuple[int, int] = (3, 7)
+    random_erasing_prob: float = 0.2
+    random_erasing_scale_range: Tuple[float, float] = (0.02, 0.1)
+
+    # Geometric (per-view, requires K update — centred scale jitter only)
+    crop_jitter_fraction: float = 0.0  # Disabled: incompatible with FoVPerspectiveCameras
+    scale_jitter_range: Tuple[float, float] = (0.9, 1.1)
+
+
+@dataclass
 class IgnoredJointLocationsConfig:
     """Loss-level joint location exclusion for 2D and 3D keypoint losses.
 
@@ -452,6 +496,7 @@ class BaseTrainingConfig:
     loss_curriculum: LossCurriculumConfig = field(default_factory=LossCurriculumConfig)
     scale_trans_beta: ScaleTransBetaConfig = field(default_factory=ScaleTransBetaConfig)
     mesh_scaling: MeshScalingConfig = field(default_factory=MeshScalingConfig)
+    augmentation: AugmentationConfig = field(default_factory=AugmentationConfig)
     joint_importance: JointImportanceConfig = field(default_factory=JointImportanceConfig)
     ignored_joint_locations: IgnoredJointLocationsConfig = field(default_factory=IgnoredJointLocationsConfig)
     ignored_joints: IgnoredJointsConfig = field(default_factory=IgnoredJointsConfig)
@@ -529,6 +574,8 @@ class BaseTrainingConfig:
             'model_config': {
                 'backbone_name': self.model.backbone_name,
                 'freeze_backbone': self.model.freeze_backbone,
+                'backbone_unfreeze_epoch': self.model.backbone_unfreeze_epoch,
+                'backbone_lr_multiplier': self.model.backbone_lr_multiplier,
                 'hidden_dim': hidden_dim,
                 'input_resolution': self.model.get_input_resolution(),
                 'rgb_only': self.model.rgb_only,
@@ -584,5 +631,19 @@ class BaseTrainingConfig:
             'ignored_joint_locations': {
                 'enabled': self.ignored_joint_locations.enabled,
                 'ignored_joint_names': list(self.ignored_joint_locations.ignored_joint_names),
+            },
+            'augmentation': {
+                'enabled': self.augmentation.enabled,
+                'geometric_enabled': self.augmentation.geometric_enabled,
+                'color_jitter_brightness': self.augmentation.color_jitter_brightness,
+                'color_jitter_contrast': self.augmentation.color_jitter_contrast,
+                'color_jitter_saturation': self.augmentation.color_jitter_saturation,
+                'gaussian_noise_std': self.augmentation.gaussian_noise_std,
+                'gaussian_blur_prob': self.augmentation.gaussian_blur_prob,
+                'gaussian_blur_kernel_range': list(self.augmentation.gaussian_blur_kernel_range),
+                'random_erasing_prob': self.augmentation.random_erasing_prob,
+                'random_erasing_scale_range': list(self.augmentation.random_erasing_scale_range),
+                'crop_jitter_fraction': self.augmentation.crop_jitter_fraction,
+                'scale_jitter_range': list(self.augmentation.scale_jitter_range),
             },
         }

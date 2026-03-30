@@ -3,9 +3,9 @@
 
   "num_views_to_use": null,
   "min_views_per_sample": 2,
-  "cross_attention_layers": 6,
+  "cross_attention_layers": 4,
   "cross_attention_heads": 8,
-  "cross_attention_dropout": 0.1,
+  "cross_attention_dropout": 0.05,
 
   "smal_model": {
     "smal_file": "3D_model_prep/SMILy_STICK.pkl",
@@ -17,39 +17,40 @@
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
-    "dataset_fraction": 0.1
+    "dataset_fraction": 1.0
   },
 
   "model": {
-    "backbone_name": "unet_efficientnet_b3",
+    "backbone_name": "unet_efficientnet_b5",
     "freeze_backbone": true,
-    "backbone_unfreeze_epoch": 50,
-    "backbone_lr_multiplier": 0.1,
+    "backbone_unfreeze_epoch": 30,
+    "backbone_lr_multiplier": 0.05,
     "hidden_dim": 1024,
     "head_type": "transformer_decoder",
     "use_unity_prior": false,
     "rgb_only": false,
-    "transformer_depth": 4,
+    "transformer_depth": 6,
     "transformer_heads": 8,
     "transformer_dim_head": 64,
     "transformer_mlp_dim": 1024,
-    "transformer_dropout": 0.1,
-    "transformer_ief_iters": 1,
-    "transformer_trans_scale_factor": 1
+    "transformer_dropout": 0.05,
+    "transformer_ief_iters": 3,
+    "transformer_trans_scale_factor": 0.01
   },
 
   "optimizer": {
-    "learning_rate": 5e-5,
+    "learning_rate": 1e-4,
     "weight_decay": 1e-4,
     "gradient_clip_norm": 1.0,
     "optimizer_type": "adamw",
     "lr_schedule": {
-      "0": 5e-5,
-      "10": 3e-5,
-      "20": 2e-5,
+      "0": 1e-4,
+      "15": 5e-5,
+      "30": 3e-5,
       "60": 1e-5,
-      "100": 2e-6,
-      "200": 1e-6
+      "120": 5e-6,
+      "200": 2e-6,
+      "300": 1e-6
     }
   },
 
@@ -67,40 +68,37 @@
       "keypoint_2d": 0.1,
       "keypoint_3d": 0.25,
       "silhouette": 0.0,
-      "joint_angle_regularization": 0.001,
-      "limb_scale_regularization": 0.01,
+      "joint_angle_regularization": 0.01,
+      "limb_scale_regularization": 0.1,
       "limb_trans_regularization": 1,
       "triangulation_consistency": 0.0,
-      "ief_intermediate": 0.0
+      "ief_intermediate": 0.05
     },
     "curriculum_stages": {
-      "1": {
-        "joint_angle_regularization": 0.01,
-        "limb_scale_regularization": 0.1,
-        "limb_trans_regularization": 1
-      },
       "10": {
-        "joint_angle_regularization": 1e-4,
+        "joint_angle_regularization": 1e-3,
         "limb_scale_regularization": 0.01,
         "limb_trans_regularization": 1
       },
       "20": {
         "keypoint_3d": 1,
-        "joint_angle_regularization": 1e-5,
+        "joint_angle_regularization": 1e-4,
         "limb_scale_regularization": 0.001,
         "limb_trans_regularization": 0.5
       },
       "50": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-6,
-        "limb_scale_regularization": 1e-5,
-        "limb_trans_regularization": 0.5
+        "joint_angle_regularization": 1e-5,
+        "limb_scale_regularization": 1e-4,
+        "limb_trans_regularization": 0.5,
+        "ief_intermediate": 0.1
       },
       "100": {
         "keypoint_3d": 2,
-        "joint_angle_regularization": 1e-7,
+        "joint_angle_regularization": 1e-6,
         "limb_scale_regularization": 5e-6,
-        "limb_trans_regularization": 0.0001
+        "limb_trans_regularization": 0.0001,
+        "ief_intermediate": 0.1
       },
       "150": {
         "keypoint_3d": 2,
@@ -109,22 +107,24 @@
         "limb_trans_regularization": 0.0001,
         "fov": 1e-7,
         "cam_rot": 1e-8,
-        "cam_trans": 1e-8
+        "cam_trans": 1e-8,
+        "ief_intermediate": 0.05
       },
-      "200": {
+      "250": {
         "keypoint_3d": 2,
         "joint_angle_regularization": 1e-7,
         "limb_scale_regularization": 1e-6,
         "limb_trans_regularization": 0.00001,
         "fov": 1e-7,
         "cam_rot": 1e-8,
-        "cam_trans": 1e-8
+        "cam_trans": 1e-8,
+        "ief_intermediate": 0.02
       }
     }
   },
 
   "scale_trans_beta": {
-    "mode": "entangled_with_betas"
+    "mode": "separate"
   },
 
   "mesh_scaling": {
@@ -136,14 +136,14 @@
   "augmentation": {
     "enabled": true,
     "geometric_enabled": false,
-    "color_jitter_brightness": 0.1,
-    "color_jitter_contrast": 0.1,
+    "color_jitter_brightness": 0.15,
+    "color_jitter_contrast": 0.15,
     "color_jitter_saturation": 0.1,
     "gaussian_noise_std": 0.01,
-    "gaussian_blur_prob": 0.05,
-    "gaussian_blur_kernel_range": [3, 7],
-    "random_erasing_prob": 0.05,
-    "random_erasing_scale_range": [0.01, 0.05],
+    "gaussian_blur_prob": 0.1,
+    "gaussian_blur_kernel_range": [3, 5],
+    "random_erasing_prob": 0.1,
+    "random_erasing_scale_range": [0.01, 0.06],
     "crop_jitter_fraction": 0.0,
     "scale_jitter_range": [0.9, 1.1]
   },
@@ -160,10 +160,10 @@
   },
 
   "output": {
-    "checkpoint_dir": "multiview_checkpoints_sticky__512_reprojected",
-    "plots_dir": "multiview_plots_sticky__512_reprojected",
-    "visualizations_dir": "multiview_visualizations_sticky_512_reprojected",
-    "singleview_visualizations_dir": "multiview_singleview_renders_sticky_512_reprojected",
+    "checkpoint_dir": "multiview_checkpoints_optimal_EffB5_ief3",
+    "plots_dir": "multiview_plots_optimal_EffB5_ief3",
+    "visualizations_dir": "multiview_visualizations_optimal_EffB5_ief3",
+    "singleview_visualizations_dir": "multiview_singleview_renders_optimal_EffB5_ief3",
     "save_checkpoint_every": 10,
     "generate_visualizations_every": 5,
     "plot_history_every": 5,
@@ -172,17 +172,18 @@
 
   "training": {
     "batch_size": 2,
-    "num_epochs": 300,
+    "num_epochs": 400,
     "seed": 42,
     "rotation_representation": "6d",
-    "num_workers": 32,
+    "num_workers": 16,
     "pin_memory": true,
-    "prefetch_factor": 16,
+    "prefetch_factor": 8,
     "resume_checkpoint": null,
     "reset_ief_token_embedding": false,
     "use_gt_camera_init": true,
-    "use_mixed_precision": false,
-    "backbone_chunk_size": 6,
-    "gradient_accumulation_steps": 2
+    "use_mixed_precision": true,
+    "backbone_chunk_size": 4,
+    "gradient_accumulation_steps": 4,
+    "validate_every_n_epochs": 2
   }
 }

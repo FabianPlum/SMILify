@@ -23,6 +23,8 @@
   "model": {
     "backbone_name": "unet_efficientnet_b3",
     "freeze_backbone": false,
+    "backbone_unfreeze_epoch": null,
+    "backbone_lr_multiplier": 0.1,
     "hidden_dim": 1024,
     "head_type": "transformer_decoder",
     "use_unity_prior": false,
@@ -141,6 +143,21 @@
     "use_log_scale": true
   },
 
+  "augmentation": {
+    "enabled": false,
+    "geometric_enabled": false,
+    "color_jitter_brightness": 0.2,
+    "color_jitter_contrast": 0.2,
+    "color_jitter_saturation": 0.15,
+    "gaussian_noise_std": 0.015,
+    "gaussian_blur_prob": 0.3,
+    "gaussian_blur_kernel_range": [3, 7],
+    "random_erasing_prob": 0.2,
+    "random_erasing_scale_range": [0.02, 0.1],
+    "crop_jitter_fraction": 0.0,
+    "scale_jitter_range": [0.9, 1.1]
+  },
+
   "joint_importance": {
     "enabled": true,
     "important_joint_names": ["Nose", "paw_L_tip", "paw_R_tip", "Foot_L_tip", "Foot_R_tip", "Tail_07"],
@@ -159,6 +176,7 @@
     "singleview_visualizations_dir": "multiview_singleview_renders_MOUSE_Unet_512_EffB3_ief3",
     "save_checkpoint_every": 5,
     "generate_visualizations_every": 5,
+    "plot_history_every": 5,
     "num_visualization_samples": 5
   },
 

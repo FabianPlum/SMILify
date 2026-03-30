@@ -32,6 +32,7 @@ socket.getaddrinfo = _getaddrinfo_ipv4_only
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
 from mpl_toolkits.mplot3d import Axes3D  # For 3D plotting (imported for side effects)
 
 import torch
@@ -68,16 +69,28 @@ from training_config import TrainingConfig
 from configs import MultiViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
 
 
-def set_random_seeds(seed: int = 0):
-    """Set random seeds for reproducibility."""
+def set_random_seeds(seed: int = 0, deterministic: bool = False):
+    """Set random seeds for reproducibility.
+
+    Args:
+        seed: Random seed value.
+        deterministic: If True, forces deterministic cuDNN algorithms at the
+            cost of performance.  When False (default), enables cuDNN
+            auto-tuning (benchmark mode) for faster training.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = deterministic
+    torch.backends.cudnn.benchmark = not deterministic
+    # Enable TF32 on Ampere+ GPUs (A100, H100, etc.).  TF32 uses tensor
+    # cores for float32 matmuls with ~8x throughput vs pure FP32 and
+    # negligible precision loss for training.
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
 
 def is_distributed_launch():
@@ -355,11 +368,13 @@ class MultiViewTrainingConfig:
         'checkpoint_dir': 'multiview_checkpoints',
         'visualizations_dir': 'multiview_visualizations',
         'singleview_visualizations_dir': 'multiview_singleview_renders',
-        
+        'plots_dir': 'plots',
+
         # Validation/save frequency
         'save_every_n_epochs': 10,
         'validate_every_n_epochs': 1,
         'visualize_every_n_epochs': 10,
+        'plot_history_every': 10,
         'num_visualization_samples': 3,
         
         # Split ratios
@@ -402,7 +417,8 @@ class MultiViewTrainingConfig:
         merged['reset_ief_token_embedding'] = training_params.get('reset_ief_token_embedding', False)
         merged['num_workers'] = training_params.get('num_workers', 4)
         merged['pin_memory'] = training_params.get('pin_memory', True)
-        
+        merged['deterministic'] = training_params.get('deterministic', False)
+
         # Model config from TrainingConfig
         model_config = base_config['model_config']
         merged['backbone_name'] = model_config['backbone_name']
@@ -2362,7 +2378,13 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cud
             print("Optimizer state NOT loaded (architecture changed — momentum buffers have stale shapes).")
             print("Optimizer will start fresh with current LR schedule.")
         else:
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            saved_opt = checkpoint['optimizer_state_dict']
+            if len(saved_opt.get('param_groups', [])) != len(optimizer.param_groups):
+                print(f"Optimizer param group count changed "
+                      f"({len(saved_opt.get('param_groups', []))} -> {len(optimizer.param_groups)}). "
+                      f"Optimizer state NOT loaded — starting fresh.")
+            else:
+                optimizer.load_state_dict(saved_opt)
     
     if scheduler and checkpoint.get('scheduler_state_dict'):
         if skipped:
@@ -2376,10 +2398,148 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cud
     return epoch, checkpoint.get('metrics', {})
 
 
+def plot_training_history(training_history, save_path='training_history.png'):
+    """
+    Plot training and validation loss history.
+
+    Args:
+        training_history: Dict with 'train_loss' and 'val_loss' lists
+        save_path: Path to save the plot
+    """
+    train_losses = training_history['train_loss']
+    val_losses = training_history['val_loss']
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    train_epochs = list(range(len(train_losses)))
+    # val may be sparser than train if validate_every_n_epochs > 1
+    val_epochs = np.linspace(0, len(train_losses) - 1, len(val_losses)).astype(int) if val_losses else []
+
+    # Left: linear scale
+    axes[0].plot(train_epochs, train_losses, label='Train', color='blue')
+    if val_losses:
+        axes[0].plot(val_epochs, val_losses, label='Val', color='red')
+    axes[0].set_xlabel('Epoch')
+    axes[0].set_ylabel('Loss')
+    axes[0].set_title('Training & Validation Loss')
+    axes[0].xaxis.set_major_locator(MaxNLocator(integer=True))
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    # Right: log scale
+    axes[1].plot(train_epochs, train_losses, label='Train', color='blue')
+    if val_losses:
+        axes[1].plot(val_epochs, val_losses, label='Val', color='red')
+    axes[1].set_xlabel('Epoch')
+    axes[1].set_ylabel('Loss (log scale)')
+    axes[1].set_title('Training & Validation Loss (log)')
+    axes[1].set_yscale('log')
+    axes[1].xaxis.set_major_locator(MaxNLocator(integer=True))
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_loss_components(training_history, save_path='loss_components.png'):
+    """
+    Plot per-component loss history for train and validation.
+
+    Args:
+        training_history: Dict with 'loss_components' and 'val_loss_components' lists of dicts
+        save_path: Path to save the plot
+    """
+    train_components_list = training_history.get('loss_components', [])
+    val_components_list = training_history.get('val_loss_components', [])
+
+    if not train_components_list:
+        return
+
+    # Collect all component names across all epochs
+    all_keys = set()
+    for comp in train_components_list:
+        all_keys.update(comp.keys())
+    for comp in val_components_list:
+        all_keys.update(comp.keys())
+
+    all_keys = sorted(all_keys)
+    n_keys = len(all_keys)
+    if n_keys == 0:
+        return
+
+    n_cols = min(3, n_keys)
+    n_rows = (n_keys + n_cols - 1) // n_cols
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
+    if n_keys == 1:
+        axes = np.array([[axes]])
+    elif n_rows == 1:
+        axes = axes.reshape(1, -1)
+    elif n_cols == 1:
+        axes = axes.reshape(-1, 1)
+
+    for idx, key in enumerate(all_keys):
+        row, col = idx // n_cols, idx % n_cols
+        ax = axes[row, col]
+
+        train_vals = [comp.get(key, 0.0) for comp in train_components_list]
+        train_epochs = list(range(len(train_vals)))
+        ax.plot(train_epochs, train_vals, label='Train', color='blue', alpha=0.7)
+
+        if val_components_list:
+            val_vals = [comp.get(key, 0.0) for comp in val_components_list]
+            val_epochs = np.linspace(0, len(train_vals) - 1, len(val_vals)).astype(int)
+            ax.plot(val_epochs, val_vals, label='Val', color='red', alpha=0.7)
+
+        ax.set_title(key)
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Loss (log)')
+        ax.set_yscale('log')
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.legend(fontsize='small')
+        ax.grid(True, alpha=0.3)
+
+    # Hide unused subplots
+    for idx in range(n_keys, n_rows * n_cols):
+        row, col = idx // n_cols, idx % n_cols
+        axes[row, col].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_learning_rate(training_history, save_path='learning_rate.png'):
+    """
+    Plot learning rate schedule over training.
+
+    Args:
+        training_history: Dict with 'learning_rates' list
+        save_path: Path to save the plot
+    """
+    lrs = training_history.get('learning_rates', [])
+    if not lrs:
+        return
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(list(range(len(lrs))), lrs, color='green')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Learning Rate')
+    ax.set_title('Learning Rate Schedule')
+    ax.set_yscale('log')
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
 def main(config: dict):
     """
     Main training function for multi-view SMIL regressor.
-    
+
     Uses TrainingConfig for:
     - Loss curriculum (base_weights + curriculum_stages)
     - Learning rate curriculum (lr_stages)
@@ -2421,7 +2581,7 @@ def main(config: dict):
     device_override = config.get('device_override', None)
 
     # Set random seeds
-    set_random_seeds(config['seed'])
+    set_random_seeds(config['seed'], deterministic=config.get('deterministic', False))
     
     # Set device
     if device_override:
@@ -2445,16 +2605,21 @@ def main(config: dict):
     # Create output directories
     os.makedirs(config['checkpoint_dir'], exist_ok=True)
     os.makedirs(config['visualizations_dir'], exist_ok=True)
+    os.makedirs(config.get('plots_dir', 'plots'), exist_ok=True)
     
     # Load dataset
     if rank == 0:
         print("Loading multi-view dataset...")
     
+    aug_config = config.get('augmentation', {})
+    aug_enabled = aug_config.get('enabled', False)
     dataset = SLEAPMultiViewDataset(
         hdf5_path=config['dataset_path'],
         rotation_representation=config['rotation_representation'],
         num_views_to_use=config.get('num_views_to_use'),
-        random_view_sampling=True
+        random_view_sampling=True,
+        augment=False,  # Toggled on/off around train vs val; see training loop
+        augmentation_config=aug_config if aug_enabled else None,
     )
     
     if rank == 0:
@@ -2543,7 +2708,13 @@ def main(config: dict):
             print(f"\n  Dataset fraction: {dataset_fraction:.1%}")
             print(f"  Samples per epoch: {samples_per_epoch} (of {len(train_set)} total)")
             print(f"  Note: Different random subset sampled each epoch for diversity")
-    
+        if aug_enabled:
+            geo_enabled = aug_config.get('geometric_enabled', False)
+            aug_types = "photometric" + (" + geometric" if geo_enabled else "")
+            print(f"  Augmentation: enabled ({aug_types})")
+        else:
+            print(f"  Augmentation: disabled")
+
     # Create validation data loader (always uses full validation set)
     if is_distributed:
         val_sampler = DistributedSampler(val_set, shuffle=False)
@@ -2597,7 +2768,7 @@ def main(config: dict):
         cross_attention_heads=config['cross_attention_heads'],
         cross_attention_dropout=config['cross_attention_dropout'],
         backbone_name=backbone_name,
-        freeze_backbone=config['freeze_backbone'],
+        freeze_backbone=config['freeze_backbone'] or config.get('backbone_unfreeze_epoch') is not None,
         head_type=config['head_type'],
         hidden_dim=config['hidden_dim'],
         rotation_representation=config['rotation_representation'],
@@ -2633,13 +2804,22 @@ def main(config: dict):
         accum = config.get('gradient_accumulation_steps', 1)
         if accum > 1:
             print(f"Gradient accumulation: {accum} steps (effective batch size: {config['batch_size'] * accum})")
-    
-    # Create optimizer
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr=config['learning_rate'],
-        weight_decay=config['weight_decay']
-    )
+        if config.get('backbone_unfreeze_epoch') is not None:
+            print(f"Staged backbone freezing: frozen until epoch {config['backbone_unfreeze_epoch']}, "
+                  f"then LR multiplier {config.get('backbone_lr_multiplier', 0.1)}")
+
+    # Create optimizer with separate param groups for backbone vs head.
+    # This enables discriminative learning rates after backbone unfreeze.
+    base_model = model.module if hasattr(model, 'module') else model
+    backbone_param_ids = {id(p) for p in base_model.backbone.parameters()}
+    head_params = [p for p in model.parameters() if id(p) not in backbone_param_ids]
+    backbone_params = list(base_model.backbone.parameters())
+
+    backbone_lr_multiplier = config.get('backbone_lr_multiplier', 0.1)
+    optimizer = optim.AdamW([
+        {'params': head_params, 'lr': config['learning_rate']},
+        {'params': backbone_params, 'lr': config['learning_rate'] * backbone_lr_multiplier},
+    ], weight_decay=config['weight_decay'])
     
     # Create scheduler
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
@@ -2714,22 +2894,35 @@ def main(config: dict):
             collate_fn=multiview_collate_fn
         )
         
+        # Staged backbone unfreeze
+        unfreeze_epoch = config.get('backbone_unfreeze_epoch')
+        if unfreeze_epoch is not None and epoch == unfreeze_epoch:
+            _backbone = model.module.backbone if hasattr(model, 'module') else model.backbone
+            for param in _backbone.parameters():
+                param.requires_grad = True
+            if rank == 0:
+                trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                print(f"\nEpoch {epoch}: Unfroze backbone (LR multiplier: {backbone_lr_multiplier}). "
+                      f"Trainable params: {trainable:,}")
+
         # Update learning rate based on curriculum from TrainingConfig
         curriculum_lr = MultiViewTrainingConfig.get_learning_rate_for_epoch(epoch)
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = curriculum_lr
+        optimizer.param_groups[0]['lr'] = curriculum_lr  # head
+        optimizer.param_groups[1]['lr'] = curriculum_lr * backbone_lr_multiplier  # backbone
         
-        # Train
+        # Train (with augmentation enabled)
+        dataset.augment = aug_enabled
         train_metrics = train_epoch(
             model, train_loader, optimizer, device, epoch, config,
             scaler=scaler, is_distributed=is_distributed, rank=rank
         )
-        
+        dataset.augment = False
+
         training_history['train_loss'].append(train_metrics['avg_loss'])
         training_history['loss_components'].append(train_metrics['loss_components'])
         training_history['learning_rates'].append(curriculum_lr)
-        
-        # Validate
+
+        # Validate (augmentation disabled)
         if epoch % config['validate_every_n_epochs'] == 0:
             val_metrics = validate(model, val_loader, device, config, epoch=epoch, rank=rank)
             training_history['val_loss'].append(val_metrics['avg_loss'])
@@ -2812,6 +3005,23 @@ def main(config: dict):
             gc.collect()
             torch.cuda.empty_cache()
 
+        # Plot training history periodically
+        plot_every = config.get('plot_history_every', 10)
+        plots_dir = config.get('plots_dir', 'plots')
+        if rank == 0 and plot_every > 0 and (epoch + 1) % plot_every == 0:
+            plot_training_history(
+                training_history,
+                os.path.join(plots_dir, f'training_history_epoch_{epoch}.png')
+            )
+            plot_loss_components(
+                training_history,
+                os.path.join(plots_dir, f'loss_components_epoch_{epoch}.png')
+            )
+            plot_learning_rate(
+                training_history,
+                os.path.join(plots_dir, f'learning_rate_epoch_{epoch}.png')
+            )
+
         # Flush GPU memory on ALL ranks before starting the next epoch.
         # Rank 0 gets cleanup inside the visualization block, but non-zero ranks
         # sit at the barrier with stale training tensors (gradients, activations)
@@ -2836,9 +3046,16 @@ def main(config: dict):
         with open(os.path.join(config['checkpoint_dir'], 'training_history.json'), 'w') as f:
             json.dump(training_history, f, indent=2)
         
+        # Save final training plots
+        plots_dir = config.get('plots_dir', 'plots')
+        plot_training_history(training_history, os.path.join(plots_dir, 'final_training_history.png'))
+        plot_loss_components(training_history, os.path.join(plots_dir, 'final_loss_components.png'))
+        plot_learning_rate(training_history, os.path.join(plots_dir, 'final_learning_rate.png'))
+
         print(f"\nTraining completed!")
         print(f"Best validation loss: {best_val_loss:.4f}")
         print(f"Checkpoints saved to: {config['checkpoint_dir']}")
+        print(f"Training plots saved to: {plots_dir}")
 
 
 def ddp_main(rank, world_size, config, master_port):
