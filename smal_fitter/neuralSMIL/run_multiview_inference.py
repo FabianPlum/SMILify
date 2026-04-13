@@ -56,6 +56,7 @@ from smal_fitter import SMALFitter
 from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
 from configs import apply_smal_file_override
 import config
+from animation_export import build_recorder_from_config, build_multiview_cameras
 
 
 DEFAULT_CHECKPOINTS = [
@@ -877,6 +878,69 @@ def _compute_rank_indices(
     return indices
 
 
+def _export_animation(
+    raw_predictions: List[Tuple[int, dict]],
+    rank: int,
+    world_size: int,
+    dataset: SLEAPMultiViewDataset,
+    model: MultiViewSMILImageRegressor,
+    checkpoint_path: Path,
+    dataset_path: Path,
+    export_path: str,
+    fps: float,
+) -> None:
+    """Gather predictions to rank 0 and write an AMASS-style .npz + .json clip.
+
+    The export captures the *raw*, pre-smoothing network predictions so downstream
+    consumers (Blender addon, etc.) can apply their own smoothing if desired.
+    """
+    if world_size > 1:
+        # Reuse the existing temp-dir gather machinery dedicated to this export.
+        export_temp_base = Path.cwd() / f".animation_export_temp_{dataset_path.stem}"
+        if rank == 0:
+            if export_temp_base.exists():
+                shutil.rmtree(export_temp_base)
+            export_temp_base.mkdir(parents=True, exist_ok=True)
+        dist.barrier()
+
+        write_predictions_to_temp(raw_predictions, export_temp_base, rank)
+        dist.barrier()
+
+        if rank == 0:
+            all_predictions = load_all_predictions_from_temp(export_temp_base, world_size)
+        else:
+            all_predictions = None
+
+        dist.barrier()
+        if rank == 0:
+            shutil.rmtree(export_temp_base, ignore_errors=True)
+    else:
+        all_predictions = sorted(raw_predictions, key=lambda x: x[0])
+
+    if rank != 0 or not all_predictions:
+        return
+
+    recorder = build_recorder_from_config(
+        output_path=export_path,
+        rotation_representation=getattr(model, "rotation_representation", "6d"),
+        fps=fps,
+        source_checkpoint=str(checkpoint_path),
+        source_input=str(dataset_path),
+        model_id=getattr(model, "model_id", None),
+    )
+
+    cameras = build_multiview_cameras(all_predictions, dataset.get_canonical_camera_order())
+    if cameras:
+        recorder.set_cameras(cameras)
+
+    for _, params in all_predictions:
+        recorder.record(params)
+
+    written = recorder.write()
+    print(f"Animation export written: {written['npz']} + {written['json']} "
+          f"({recorder.num_frames()} frames)")
+
+
 def run_inference_phase(
     dataset: SLEAPMultiViewDataset,
     model: MultiViewSMILImageRegressor,
@@ -1308,6 +1372,21 @@ def main_inference(
     # Free GPU memory after inference — rendering will reload params to device as needed
     torch.cuda.empty_cache()
 
+    # ── Phase 1b: Optional animation export (raw, pre-smoothing) ────────
+    export_animation_path = getattr(args, "export_animation", None)
+    if export_animation_path:
+        _export_animation(
+            raw_predictions=raw_predictions,
+            rank=rank,
+            world_size=world_size,
+            dataset=dataset,
+            model=model,
+            checkpoint_path=checkpoint_path,
+            dataset_path=dataset_path,
+            export_path=export_animation_path,
+            fps=float(args.fps),
+        )
+
     # ── Phase 2: Gather + smooth predictions ────────────────────────────
     smoothing_window = args.smoothing_window
     dataset_name = dataset_path.stem
@@ -1501,6 +1580,10 @@ def main():
     parser.add_argument("--smal_file", type=str, default=None, help="Path to SMAL model file to override config.py SMAL_FILE (optional)")
     parser.add_argument("--shape_family", type=int, default=None, help="Shape family to use with --smal_file (optional, defaults to config.SHAPE_FAMILY)")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint (.pth) to use for inference (default: auto-detected from multiview_checkpoints/)")
+    parser.add_argument("--export_animation", type=str, default=None,
+                        help="Optional output path stem for SMIL animation export. "
+                             "Writes <stem>.npz + <stem>.json with raw (pre-smoothing) parameters "
+                             "and per-view cameras. Gathered to rank 0 in multi-GPU runs.")
     args = parser.parse_args()
     
     # Get master port from args or environment variable
