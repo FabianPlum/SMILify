@@ -161,7 +161,12 @@ class SMILTransformerDecoderHead(nn.Module):
 
         # Positional embedding for tokens
         self.pos_embedding = nn.Parameter(torch.randn(1, 1, hidden_dim))
-        
+
+        # Dropout applied after token embedding (before transformer layers)
+        # and before prediction heads (after transformer layers)
+        self.token_dropout = nn.Dropout(dropout)
+        self.head_dropout = nn.Dropout(dropout)
+
         # Transformer decoder layers
         self.layers = nn.ModuleList([
             TransformerDecoderLayer(
@@ -401,14 +406,16 @@ class SMILTransformerDecoderHead(nn.Module):
             # the pooled visual representation.
             token = self.token_embedding(param_state).unsqueeze(1) + img_token  # (batch_size, 1, hidden_dim)
             token = token + self.pos_embedding
-            
+            token = self.token_dropout(token)
+
             # Pass through transformer decoder layers
             for layer in self.layers:
                 token = layer(token, spatial_features)
-            
+
             # Extract predictions (residual updates)
             token_out = token.squeeze(1)  # (batch_size, hidden_dim)
-            
+            token_out = self.head_dropout(token_out)
+
             # Apply residual updates
             pred_pose = pred_pose + self.pose_head(token_out)
             pred_betas = pred_betas + self.betas_head(token_out)

@@ -32,6 +32,7 @@ plots/
 visualizations/
 visualizations_train/
 test_visualizations/
+tests/test_output/
 checkpoints/
 
 #ignore other repos cloned during dev / debugging

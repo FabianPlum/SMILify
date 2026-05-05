@@ -38,7 +38,10 @@ TIMM_BACKBONES = {
     # UNet encoder models
     "unet_efficientnet_b0": "efficientnet_b0",
     "unet_efficientnet_b3": "efficientnet_b3",
+    "unet_efficientnet_b5": "efficientnet_b5",
     "unet_resnet34": "resnet34",
+    "unet_resnet50": "resnet50",
+    "unet_convnext_base": "convnext_base",
     "unet_mobilenet_v3": "mobilenetv3_large_100",
 }
 
