@@ -16,7 +16,7 @@ import numpy as np
 import torch
 
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 
 def rotation_6d_to_axis_angle(d6: torch.Tensor) -> torch.Tensor:
@@ -82,6 +82,7 @@ class AnimationRecorder:
         self._betas: List[np.ndarray] = []
         self._log_beta_scales: List[np.ndarray] = []
         self._betas_trans: List[np.ndarray] = []
+        self._mesh_scale: List[np.ndarray] = []
 
         # Per-frame camera buffers (singleview). Multi-view cameras are stored
         # via set_cameras() because they're static per view for a given clip.
@@ -122,6 +123,8 @@ class AnimationRecorder:
             self._log_beta_scales.append(_to_numpy(predicted_params["log_beta_scales"][0]))
         if predicted_params.get("betas_trans", None) is not None:
             self._betas_trans.append(_to_numpy(predicted_params["betas_trans"][0]))
+        if predicted_params.get("mesh_scale", None) is not None:
+            self._mesh_scale.append(_to_numpy(predicted_params["mesh_scale"][0]).reshape(-1))
 
         # Singleview cameras (one per frame); averaged on write.
         if predicted_params.get("cam_rot", None) is not None:
@@ -180,6 +183,11 @@ class AnimationRecorder:
             payload["log_beta_scales"] = np.stack(self._log_beta_scales).astype(np.float32)
         if self._betas_trans:
             payload["betas_trans"] = np.stack(self._betas_trans).astype(np.float32)
+        if self._mesh_scale:
+            # Store as (F,) — global isotropic scale applied around the root joint:
+            # rendered_v = (v - J0) * mesh_scale + trans. Importers must subtract the
+            # rest-pose root joint position before scaling and re-apply the trans.
+            payload["mesh_scale"] = np.stack(self._mesh_scale).astype(np.float32).reshape(-1)
 
         np.savez(npz_path, **payload)
 
