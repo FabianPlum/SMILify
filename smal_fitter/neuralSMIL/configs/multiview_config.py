@@ -69,6 +69,8 @@ class MultiViewConfig(BaseTrainingConfig):
             # Model config
             'backbone_name': self.model.backbone_name,
             'freeze_backbone': self.model.freeze_backbone,
+            'backbone_unfreeze_epoch': self.model.backbone_unfreeze_epoch,
+            'backbone_lr_multiplier': self.model.backbone_lr_multiplier,
             'head_type': self.model.head_type,
             'hidden_dim': hidden_dim,
             'transformer_config': {
@@ -95,9 +97,11 @@ class MultiViewConfig(BaseTrainingConfig):
             'checkpoint_dir': self.output.checkpoint_dir,
             'visualizations_dir': self.output.visualizations_dir,
             'singleview_visualizations_dir': getattr(self.output, 'singleview_visualizations_dir', 'multiview_singleview_renders'),
+            'plots_dir': self.output.plots_dir,
             'save_every_n_epochs': self.output.save_checkpoint_every,
             'validate_every_n_epochs': 1,
             'visualize_every_n_epochs': self.output.generate_visualizations_every,
+            'plot_history_every': self.output.plot_history_every,
             'num_visualization_samples': self.output.num_visualization_samples,
 
             # Split ratios
@@ -152,6 +156,22 @@ class MultiViewConfig(BaseTrainingConfig):
                     (epoch, lr)
                     for epoch, lr in sorted(self.optimizer.lr_schedule.items())
                 ],
+            },
+
+            # Augmentation
+            'augmentation': {
+                'enabled': self.augmentation.enabled,
+                'geometric_enabled': self.augmentation.geometric_enabled,
+                'color_jitter_brightness': self.augmentation.color_jitter_brightness,
+                'color_jitter_contrast': self.augmentation.color_jitter_contrast,
+                'color_jitter_saturation': self.augmentation.color_jitter_saturation,
+                'gaussian_noise_std': self.augmentation.gaussian_noise_std,
+                'gaussian_blur_prob': self.augmentation.gaussian_blur_prob,
+                'gaussian_blur_kernel_range': list(self.augmentation.gaussian_blur_kernel_range),
+                'random_erasing_prob': self.augmentation.random_erasing_prob,
+                'random_erasing_scale_range': list(self.augmentation.random_erasing_scale_range),
+                'crop_jitter_fraction': self.augmentation.crop_jitter_fraction,
+                'scale_jitter_range': list(self.augmentation.scale_jitter_range),
             },
         }
         return d
