@@ -3533,6 +3533,10 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
         betas_avg = npz_data["betas"]       # (N_BETAS,)
         betas_per_frame = npz_data["betas_per_frame"] if "betas_per_frame" in npz_data.files else None
         log_beta_scales = npz_data["log_beta_scales"] if "log_beta_scales" in npz_data.files else None
+        # Optional global mesh scale (root-centered). When present, the inference
+        # renderer applied: rendered_v = (v - J0) * mesh_scale + trans. We must
+        # mirror that with armature.scale and an offset to armature.location.
+        mesh_scale = npz_data["mesh_scale"] if "mesh_scale" in npz_data.files else None
         fps = float(npz_data["fps"]) if "fps" in npz_data.files else float(sidecar.get("fps", 30.0))
 
         n_frames, n_joints, _ = poses.shape
@@ -3598,6 +3602,16 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
             R_rest = np.array(armature.pose.bones[bone_name].bone.matrix_local.to_3x3(), dtype=np.float64)
             rest_rot_inv_per_joint.append(R_rest.T)  # orthonormal: T == inv
 
+        # Rest position of the root joint (joints[0]) in armature-local space.
+        # Needed when mesh_scale is present: the inference renderer applies
+        # rendered_v = (v - J0) * mesh_scale + trans. To replicate this with
+        # armature.scale = s and armature.location = L, the visible vertex
+        # becomes L + s * v, which equals (v - J0) * s + trans iff
+        # L = trans - s * J0.
+        root_joint_rest = np.array(
+            armature.pose.bones[joint_names[0]].bone.head_local, dtype=np.float64
+        )
+
         for f in range(n_frames):
             scene.frame_set(f)
 
@@ -3620,8 +3634,15 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
                         pb.scale = (float(s[0]), float(s[1]), float(s[2]))
                         pb.keyframe_insert(data_path="scale", frame=f)
 
-            # Root translation on the armature object.
-            armature.location = (float(trans[f, 0]), float(trans[f, 1]), float(trans[f, 2]))
+            # Root translation (and global mesh scale, when present).
+            if mesh_scale is not None:
+                s = float(mesh_scale[f])
+                loc = trans[f].astype(np.float64) - s * root_joint_rest
+                armature.scale = (s, s, s)
+                armature.keyframe_insert(data_path="scale", frame=f)
+            else:
+                loc = trans[f].astype(np.float64)
+            armature.location = (float(loc[0]), float(loc[1]), float(loc[2]))
             armature.keyframe_insert(data_path="location", frame=f)
 
             # Per-frame shape keys (only in static-skeleton mode).
