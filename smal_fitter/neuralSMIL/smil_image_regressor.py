@@ -363,7 +363,10 @@ class SMILImageRegressor(SMALFitter):
             # Assume values are in [0, 255] range
             image_data = image_data.astype(np.float32) / 255.0
         
-        # Resize to the model's configured input resolution
+        # Resize to the model's configured input resolution. Per-channel
+        # mean/std normalization is intentionally NOT applied here — each
+        # backbone owns its own pretraining stats and applies them as the
+        # first op inside its forward pass (see BackboneInterface._normalize).
         target_size = (self.input_resolution, self.input_resolution)
         if len(image_data.shape) == 4:
             # Batch of images
