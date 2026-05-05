@@ -3586,16 +3586,32 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
         for bone_name in joint_names:
             armature.pose.bones[bone_name].rotation_mode = "AXIS_ANGLE"
 
+        # Cache each bone's rest rotation (armature space). SMAL pose rotations
+        # are expressed in a frame that is world-aligned at rest; Blender's
+        # rotation_axis_angle is in the bone's local rest frame. SMIL armatures
+        # build every bone with head→tail along world +Z (see
+        # create_armature_and_weights), so each bone's rest rotation R_0 is
+        # non-trivial and we must conjugate: R_basis = R_0ᵀ · R_smal · R_0,
+        # which for axis-angle reduces to angle unchanged, axis = R_0ᵀ · axis.
+        rest_rot_inv_per_joint = []
+        for bone_name in joint_names:
+            R_rest = np.array(armature.pose.bones[bone_name].bone.matrix_local.to_3x3(), dtype=np.float64)
+            rest_rot_inv_per_joint.append(R_rest.T)  # orthonormal: T == inv
+
         for f in range(n_frames):
             scene.frame_set(f)
 
             # Per-joint axis-angle rotation.
             for j, bone_name in enumerate(joint_names):
-                aa = poses[f, j]                    # (3,)
+                aa = poses[f, j]                    # (3,) world-aligned axis-angle
                 angle = float(np.linalg.norm(aa))
-                axis = (aa / angle) if angle > 1e-8 else np.array([0.0, 0.0, 1.0])
+                if angle > 1e-8:
+                    axis_world = aa / angle
+                    axis_local = rest_rot_inv_per_joint[j] @ axis_world
+                else:
+                    axis_local = np.array([0.0, 0.0, 1.0])
                 pb = armature.pose.bones[bone_name]
-                pb.rotation_axis_angle = (angle, float(axis[0]), float(axis[1]), float(axis[2]))
+                pb.rotation_axis_angle = (angle, float(axis_local[0]), float(axis_local[1]), float(axis_local[2]))
                 pb.keyframe_insert(data_path="rotation_axis_angle", frame=f)
 
                 if self.apply_joint_scales and log_beta_scales is not None:
@@ -3646,12 +3662,20 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
             cam_obj = bpy.data.objects.new(name=name, object_data=cam_data)
             bpy.context.collection.objects.link(cam_obj)
 
-            # R/t from the inference pipeline are world->view (PyTorch3D convention).
-            # The camera object's transform is camera->world, so invert.
+            # PyTorch3D's FoVPerspectiveCameras uses the row-vector world→view
+            # convention: p_view = p_world @ R + T. In column-vector form this
+            # is p_view = Rᵀ · p_world + T, so the world-to-view matrix is
+            # [Rᵀ | T] and camera-to-world is [R | -R · T].
+            #
+            # Additionally, PyTorch3D camera local axes are (+X left, +Y up,
+            # +Z forward) while Blender's are (+X right, +Y up, -Z forward).
+            # Right-multiplying by diag(-1, 1, -1) flips the camera's local X
+            # and Z so it looks the same direction in Blender as in PyTorch3D.
+            cam_axis_flip = np.diag([-1.0, 1.0, -1.0])
             mat = np.eye(4)
-            mat[:3, :3] = R
-            mat[:3, 3] = t
-            cam_obj.matrix_world = Matrix(mat.tolist()).inverted()
+            mat[:3, :3] = R @ cam_axis_flip
+            mat[:3, 3] = -R @ t
+            cam_obj.matrix_world = Matrix(mat.tolist())
 
 
 class SMPLProperties(bpy.types.PropertyGroup):
