@@ -55,8 +55,9 @@ Example 4-5 camera inference results with a molde trained on data collected from
 
 4. some more dependencies
    ```
-   pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psutil
+   pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psutil pandas toml
    ```
+   (`pandas` and `toml` are required by `smal_fitter/sleap_data/` — needed whenever you run the multi-view training or inference scripts.)
    
 5. Test your installation
    ```
