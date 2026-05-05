@@ -29,7 +29,41 @@ class BackboneInterface(nn.Module, ABC):
     registered when assigned as attributes of parent modules (e.g.
     SMILImageRegressor.backbone), making them visible to
     model.parameters(), optimizers, and checkpoint saving.
+
+    Input normalization contract
+    ----------------------------
+    Callers pass images as float tensors in [0, 1] with shape (B, 3, H, W).
+    Each backbone owns its own per-channel mean/std (matching the stats used
+    to pretrain its weights) and applies normalization as the first step of
+    its forward pass via ``_normalize``. This keeps training, inference and
+    benchmarking pipelines consistent without any caller-side bookkeeping.
     """
+
+    def __init__(self):
+        super().__init__()
+        # Default to identity; subclasses overwrite these buffers in __init__
+        # with the per-channel mean/std that match their pretrained weights.
+        # Registered as buffers so they move with .to(device) and are saved
+        # in checkpoints — inference code that only loads the model gets the
+        # correct normalization automatically.
+        self.register_buffer('pixel_mean', torch.zeros(1, 3, 1, 1))
+        self.register_buffer('pixel_std', torch.ones(1, 3, 1, 1))
+
+    def _normalize(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply per-channel normalization matching pretraining stats."""
+        return (x - self.pixel_mean) / self.pixel_std
+
+    def _set_normalization(self, mean, std) -> None:
+        """Overwrite the normalization buffers from (mean, std) sequences."""
+        mean_t = torch.as_tensor(mean, dtype=torch.float32).view(1, 3, 1, 1)
+        std_t = torch.as_tensor(std, dtype=torch.float32).view(1, 3, 1, 1)
+        self.pixel_mean.copy_(mean_t)
+        self.pixel_std.copy_(std_t)
+        print(
+            f"[{type(self).__name__}:{getattr(self, 'model_name', '?')}] "
+            f"input normalization: mean={mean_t.flatten().tolist()}, "
+            f"std={std_t.flatten().tolist()}"
+        )
 
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -83,25 +117,38 @@ class ResNetBackbone(BackboneInterface):
         
         # Load pretrained ResNet model
         if model_name == 'resnet50':
-            self.backbone = models.resnet50(weights=models.ResNet50_Weights.DEFAULT if pretrained else None)
+            weights = models.ResNet50_Weights.DEFAULT if pretrained else None
+            self.backbone = models.resnet50(weights=weights)
             self.feature_dim = 2048
         elif model_name == 'resnet101':
-            self.backbone = models.resnet101(weights=models.ResNet101_Weights.DEFAULT if pretrained else None)
+            weights = models.ResNet101_Weights.DEFAULT if pretrained else None
+            self.backbone = models.resnet101(weights=weights)
             self.feature_dim = 2048
         elif model_name == 'resnet152':
-            self.backbone = models.resnet152(weights=models.ResNet152_Weights.DEFAULT if pretrained else None)
+            weights = models.ResNet152_Weights.DEFAULT if pretrained else None
+            self.backbone = models.resnet152(weights=weights)
             self.feature_dim = 2048
         else:
             raise ValueError(f"Unsupported ResNet model: {model_name}")
-        
+
         # Remove the final classification layer
         self.backbone = nn.Sequential(*list(self.backbone.children())[:-1])
-        
+
+        # Pull pretraining normalization stats from torchvision's weights
+        # metadata when available (falls back to standard ImageNet stats).
+        mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+        if weights is not None:
+            tfm = weights.transforms()
+            mean = list(getattr(tfm, 'mean', mean))
+            std = list(getattr(tfm, 'std', std))
+        self._set_normalization(mean, std)
+
         if freeze:
             self.freeze_weights()
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through ResNet backbone."""
+        x = self._normalize(x)
         features = self.backbone(x)  # (batch_size, 2048, 1, 1)
         return features.view(x.size(0), -1)  # (batch_size, 2048)
     
@@ -149,12 +196,12 @@ class ViTBackbone(BackboneInterface):
         
         # Load pretrained ViT model from timm
         self.backbone = timm.create_model(
-            model_name, 
+            model_name,
             pretrained=pretrained,
             num_classes=0,  # Remove classification head
             global_pool='',  # Don't apply global pooling
         )
-        
+
         # Get feature dimension based on model
         if 'base' in model_name:
             self.feature_dim = 768
@@ -162,39 +209,47 @@ class ViTBackbone(BackboneInterface):
             self.feature_dim = 1024
         else:
             raise ValueError(f"Unsupported ViT model: {model_name}")
-        
+
+        # ViT pretraining stats vary by variant (e.g. augreg/IN21k weights use
+        # Inception-style [0.5, 0.5, 0.5] rather than standard ImageNet).
+        # Ask timm for the stats attached to the actual loaded weights.
+        data_cfg = timm.data.resolve_model_data_config(self.backbone)
+        self._set_normalization(data_cfg['mean'], data_cfg['std'])
+
         if freeze:
             self.freeze_weights()
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through ViT backbone."""
+        x = self._normalize(x)
         # ViT outputs (batch_size, num_patches + 1, feature_dim) where +1 is for CLS token
         features = self.backbone.forward_features(x)  # (batch_size, 197, 768) for 224x224 input
-        
+
         # Use CLS token (first token) as global representation
         cls_token = features[:, 0]  # (batch_size, 768, 1024 for large)
-        
+
         return cls_token
-    
+
     def forward_with_spatial(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass through ViT backbone returning both global and spatial features.
-        
+
         Args:
             x: Input tensor of shape (batch_size, 3, height, width)
-            
+
         Returns:
             Tuple of (global_features, spatial_features)
             - global_features: CLS token (batch_size, feature_dim)
             - spatial_features: Patch tokens (batch_size, num_patches, feature_dim)
         """
+        x = self._normalize(x)
         # ViT outputs (batch_size, num_patches + 1, feature_dim) where +1 is for CLS token
         features = self.backbone.forward_features(x)  # (batch_size, 197, 768) for 224x224 input
-        
+
         # Split CLS token and patch tokens
         cls_token = features[:, 0]  # (batch_size, feature_dim)
         patch_tokens = features[:, 1:]  # (batch_size, num_patches, feature_dim)
-        
+
         return cls_token, patch_tokens
     
     def get_feature_dim(self) -> int:
@@ -354,6 +409,11 @@ class UNetBackbone(BackboneInterface):
         # ── Combined module (for BackboneInterface compatibility) ─────────────
         self.backbone = _UNetModule(encoder, decode_blocks, nn.AdaptiveAvgPool2d(1))
 
+        # Pull pretraining normalization stats from the timm encoder's data
+        # config (differs across efficientnet/convnext/mobilenet variants).
+        data_cfg = timm.data.resolve_model_data_config(self.backbone.encoder)
+        self._set_normalization(data_cfg['mean'], data_cfg['std'])
+
         if freeze:
             self.freeze_weights()
 
@@ -366,6 +426,7 @@ class UNetBackbone(BackboneInterface):
             bottleneck: feature map from the deepest encoder stage (B, C, H, W)
             decoder_outputs: list of feature maps from each decode block (coarse→fine)
         """
+        x = self._normalize(x)
         enc_feats = self.backbone.encoder(x)  # list: [fine … coarse]
         bottleneck = enc_feats[-1]
 

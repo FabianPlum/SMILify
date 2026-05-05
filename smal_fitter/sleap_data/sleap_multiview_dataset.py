@@ -408,6 +408,11 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                 lo, hi = self.aug_scale_jitter_range
                 shared_scale = np.random.uniform(lo, hi)
 
+            # Sample photometric params once per sample so all views share the
+            # same brightness/contrast/saturation/blur/erasing, preserving
+            # multi-view appearance consistency for the cross-attention decoder.
+            shared_photometric = self._sample_photometric_params()
+
             for vi in range(len(images)):
                 # Geometric augmentation (per-view, updates K and 2D keypoints)
                 if shared_scale is not None:
@@ -417,8 +422,10 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                             scale=shared_scale,
                         )
                     )
-                # Photometric augmentation (per-view, independent randomness)
-                images[vi] = self._apply_photometric_augmentation(images[vi])
+                # Photometric augmentation (shared scalar params across views)
+                images[vi] = self._apply_photometric_augmentation(
+                    images[vi], shared_params=shared_photometric,
+                )
 
             x_data['images'] = images
             y_data['keypoints_2d'] = kp2d
@@ -570,60 +577,122 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
 
     # ── Augmentation ─────────────────────────────────────────────────────
 
-    def _apply_photometric_augmentation(self, image: np.ndarray) -> np.ndarray:
+    def _sample_photometric_params(self) -> Dict[str, Any]:
+        """Sample scalar photometric augmentation parameters once per sample.
+
+        Call site samples this once per multi-view sample and passes the
+        result to `_apply_photometric_augmentation` for every view, so all
+        views receive the same brightness/contrast/saturation shift, the
+        same blur kernel (or none), and the same erasing region (or none).
+        Gaussian sensor noise is resampled per view inside the application
+        function — physically, each camera has its own sensor noise.
+
+        Random erasing is parameterised in normalized coords so the same
+        relative region is erased in every view, even if views have
+        different pixel resolutions.
+        """
+        params: Dict[str, Any] = {
+            'brightness_delta': None,
+            'contrast_factor': None,
+            'saturation_factor': None,
+            'blur_kernel': None,
+            'erase': None,
+        }
+
+        if self.aug_color_jitter_brightness > 0:
+            params['brightness_delta'] = float(np.random.uniform(
+                -self.aug_color_jitter_brightness,
+                self.aug_color_jitter_brightness,
+            ))
+
+        if self.aug_color_jitter_contrast > 0:
+            params['contrast_factor'] = float(np.random.uniform(
+                max(0, 1 - self.aug_color_jitter_contrast),
+                1 + self.aug_color_jitter_contrast,
+            ))
+
+        if self.aug_color_jitter_saturation > 0:
+            params['saturation_factor'] = float(np.random.uniform(
+                max(0, 1 - self.aug_color_jitter_saturation),
+                1 + self.aug_color_jitter_saturation,
+            ))
+
+        if (self.aug_gaussian_blur_prob > 0
+                and np.random.random() < self.aug_gaussian_blur_prob):
+            lo, hi = self.aug_gaussian_blur_kernel_range
+            params['blur_kernel'] = int(np.random.choice(range(lo, hi + 1, 2)))
+
+        if (self.aug_random_erasing_prob > 0
+                and np.random.random() < self.aug_random_erasing_prob):
+            lo_s, hi_s = self.aug_random_erasing_scale_range
+            params['erase'] = {
+                'area_frac': float(np.random.uniform(lo_s, hi_s)),
+                'aspect': float(np.random.uniform(0.3, 1.0 / 0.3)),
+                'y0_frac': float(np.random.uniform(0.0, 1.0)),
+                'x0_frac': float(np.random.uniform(0.0, 1.0)),
+            }
+
+        return params
+
+    def _apply_photometric_augmentation(
+        self,
+        image: np.ndarray,
+        shared_params: Optional[Dict[str, Any]] = None,
+    ) -> np.ndarray:
         """Apply photometric augmentation to a single image.
 
         Args:
             image: (H, W, 3) float32 RGB in [0, 1].
+            shared_params: Optional pre-sampled parameters from
+                `_sample_photometric_params()`. When provided, scalar
+                parameters (brightness/contrast/saturation/blur/erase)
+                are reused so all views of a multi-view sample receive
+                matching augmentation. When None, parameters are sampled
+                fresh (single-view / standalone use).
 
         Returns:
             Augmented image, same shape and dtype, clipped to [0, 1].
         """
-        # Brightness: additive shift
-        if self.aug_color_jitter_brightness > 0:
-            delta = np.random.uniform(-self.aug_color_jitter_brightness,
-                                       self.aug_color_jitter_brightness)
-            image = image + delta
+        if shared_params is None:
+            shared_params = self._sample_photometric_params()
 
-        # Contrast: scale around mean
-        if self.aug_color_jitter_contrast > 0:
-            factor = np.random.uniform(max(0, 1 - self.aug_color_jitter_contrast),
-                                       1 + self.aug_color_jitter_contrast)
+        # Brightness: additive shift
+        if shared_params['brightness_delta'] is not None:
+            image = image + shared_params['brightness_delta']
+
+        # Contrast: scale around the per-view mean, with a shared factor.
+        # Keeping the mean local preserves "scale around mean" semantics
+        # when views have different overall luminance.
+        if shared_params['contrast_factor'] is not None:
             mean = image.mean()
-            image = (image - mean) * factor + mean
+            image = (image - mean) * shared_params['contrast_factor'] + mean
 
         # Saturation: blend with grayscale
-        if self.aug_color_jitter_saturation > 0:
-            factor = np.random.uniform(max(0, 1 - self.aug_color_jitter_saturation),
-                                       1 + self.aug_color_jitter_saturation)
+        if shared_params['saturation_factor'] is not None:
             gray = image.mean(axis=2, keepdims=True)
-            image = gray + (image - gray) * factor
+            image = gray + (image - gray) * shared_params['saturation_factor']
 
-        # Gaussian noise
+        # Gaussian noise (per-view realization — physical sensor noise)
         if self.aug_gaussian_noise_std > 0:
             noise = np.random.normal(0, self.aug_gaussian_noise_std,
                                      image.shape).astype(np.float32)
             image = image + noise
 
-        # Gaussian blur
-        if self.aug_gaussian_blur_prob > 0 and np.random.random() < self.aug_gaussian_blur_prob:
-            lo, hi = self.aug_gaussian_blur_kernel_range
-            # Kernel size must be odd
-            k = np.random.choice(range(lo, hi + 1, 2))
+        # Gaussian blur (shared kernel size across views)
+        if shared_params['blur_kernel'] is not None:
+            k = shared_params['blur_kernel']
             image = cv2.GaussianBlur(image, (k, k), 0)
 
-        # Random erasing (rectangular cutout filled with mean)
-        if self.aug_random_erasing_prob > 0 and np.random.random() < self.aug_random_erasing_prob:
+        # Random erasing (same relative region across views)
+        erase = shared_params['erase']
+        if erase is not None:
             h, w = image.shape[:2]
-            lo_s, hi_s = self.aug_random_erasing_scale_range
-            area_frac = np.random.uniform(lo_s, hi_s)
-            erase_area = int(h * w * area_frac)
-            aspect = np.random.uniform(0.3, 1.0 / 0.3)
-            eh = int(np.sqrt(erase_area * aspect))
-            ew = int(np.sqrt(erase_area / aspect))
+            erase_area = int(h * w * erase['area_frac'])
+            eh = int(np.sqrt(erase_area * erase['aspect']))
+            ew = int(np.sqrt(erase_area / erase['aspect']))
             eh, ew = min(eh, h), min(ew, w)
-            y0 = np.random.randint(0, h - eh + 1)
-            x0 = np.random.randint(0, w - ew + 1)
+            y0 = int(erase['y0_frac'] * max(0, h - eh))
+            x0 = int(erase['x0_frac'] * max(0, w - ew))
             image[y0:y0 + eh, x0:x0 + ew] = image.mean()
 
         return np.clip(image, 0.0, 1.0)

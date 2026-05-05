@@ -154,18 +154,8 @@ class SMILTransformerDecoderHead(nn.Module):
         # Token embedding: projects concatenated parameter estimates into hidden_dim
         self.token_embedding = nn.Linear(self._param_feedback_dim, hidden_dim)
 
-        # Global feature projection: injects pooled image features into the
-        # decoder token so the decoder has direct access to visual information,
-        # not only through cross-attention to the (potentially few) spatial tokens.
-        self.global_feat_proj = nn.Linear(feature_dim, hidden_dim)
-
         # Positional embedding for tokens
         self.pos_embedding = nn.Parameter(torch.randn(1, 1, hidden_dim))
-
-        # Dropout applied after token embedding (before transformer layers)
-        # and before prediction heads (after transformer layers)
-        self.token_dropout = nn.Dropout(dropout)
-        self.head_dropout = nn.Dropout(dropout)
 
         # Transformer decoder layers
         self.layers = nn.ModuleList([
@@ -218,7 +208,7 @@ class SMILTransformerDecoderHead(nn.Module):
         self.betas_dim = config.N_BETAS
         self.trans_dim = 3
         self.fov_dim = 1
-        self.cam_rot_dim = 9  # 3x3 rotation matrix (flattened)
+        self.cam_rot_dim = 6  # 6D continuous rotation representation (Zhou et al. 2019)
         self.cam_trans_dim = 3
         
         # Handle scale and translation dimensions based on mode
@@ -266,30 +256,25 @@ class SMILTransformerDecoderHead(nn.Module):
         nn.init.xavier_uniform_(self.token_embedding.weight, gain=0.1)
         nn.init.constant_(self.token_embedding.bias, 0)
 
-        # Global feature projection — small gain so it starts near-zero and
-        # doesn't disrupt a pretrained decoder when first introduced.
-        nn.init.xavier_uniform_(self.global_feat_proj.weight, gain=0.1)
-        nn.init.constant_(self.global_feat_proj.bias, 0)
-
         # Initialize positional embedding
         nn.init.normal_(self.pos_embedding, std=0.02)
-        
-        # Initialize output heads with very small weights for IEF stability
-        for head in [self.pose_head, self.betas_head, self.trans_head, 
+
+        # Output head init — matches HMR2's INIT_DECODER_XAVIER gain (0.01).
+        for head in [self.pose_head, self.betas_head, self.trans_head,
                     self.fov_head, self.cam_rot_head, self.cam_trans_head]:
-            nn.init.xavier_uniform_(head.weight, gain=0.001)  # Even smaller gain
+            nn.init.xavier_uniform_(head.weight, gain=0.01)
             nn.init.constant_(head.bias, 0)
-        
+
         if self.scales_dim > 0:
-            nn.init.xavier_uniform_(self.scales_head.weight, gain=0.001)
+            nn.init.xavier_uniform_(self.scales_head.weight, gain=0.01)
             nn.init.constant_(self.scales_head.bias, 0)
-        
+
         if self.joint_trans_dim > 0:
-            nn.init.xavier_uniform_(self.joint_trans_head.weight, gain=0.001)
+            nn.init.xavier_uniform_(self.joint_trans_head.weight, gain=0.01)
             nn.init.constant_(self.joint_trans_head.bias, 0)
-        
+
         if self.allow_mesh_scaling:
-            nn.init.xavier_uniform_(self.mesh_scale_head.weight, gain=0.001)
+            nn.init.xavier_uniform_(self.mesh_scale_head.weight, gain=0.01)
             nn.init.constant_(self.mesh_scale_head.bias, 0)  # log(1.0) = 0
     
     def _initialize_prediction_buffers(self):
@@ -312,7 +297,8 @@ class SMILTransformerDecoderHead(nn.Module):
         self.register_buffer('init_trans', torch.zeros(1, self.trans_dim))
         # Initialize FOV with reasonable value based on ground truth (typically around 8 degrees)
         self.register_buffer('init_fov', torch.tensor([[8.0]]))
-        self.register_buffer('init_cam_rot', torch.eye(3).flatten().unsqueeze(0))
+        # 6D rotation: first two columns of identity rotation matrix
+        self.register_buffer('init_cam_rot', torch.tensor([[1., 0., 0., 0., 1., 0.]]))
         # Initialize camera translation with reasonable values based on ground truth range
         # Ground truth camera translation is typically around [0, 0, 100-150]
         self.register_buffer('init_cam_trans', torch.tensor([[0.0, 0.0, 100.0]]))
@@ -383,10 +369,12 @@ class SMILTransformerDecoderHead(nn.Module):
         if self.allow_mesh_scaling:
             pred_mesh_scale_list = []
         
-        # Project global image features once (constant across IEF iterations)
-        img_token = self.global_feat_proj(features).unsqueeze(1)  # (batch_size, 1, hidden_dim)
-
-        # Iterative Error Feedback (IEF)
+        # Iterative Error Feedback (IEF).
+        # Visual signal enters the decoder ONLY through cross-attention to
+        # spatial_features (HMR2-style). The decoder query token carries the
+        # current parameter estimate; previously we also added a pooled global
+        # feature to the token, which gave the head a memorisable image-level
+        # fingerprint and appeared to drive train/val divergence on betas.
         for i in range(self.ief_iters):
             # Concatenate all current parameter estimates as feedback
             param_tokens = [pred_pose, pred_betas, pred_trans, pred_fov, pred_cam_rot, pred_cam_trans]
@@ -401,20 +389,16 @@ class SMILTransformerDecoderHead(nn.Module):
             # (pose ~1, cam_trans ~100) without hardcoded assumptions.
             param_state = self.param_norm(param_state)
 
-            # Project current parameter state into a single decoder token and
-            # add global image features so the decoder has direct access to
-            # the pooled visual representation.
-            token = self.token_embedding(param_state).unsqueeze(1) + img_token  # (batch_size, 1, hidden_dim)
-            token = token + self.pos_embedding
-            token = self.token_dropout(token)
+            # Project current parameter state into a single decoder token.
+            token = self.token_embedding(param_state).unsqueeze(1) + self.pos_embedding
 
-            # Pass through transformer decoder layers
+            # Pass through transformer decoder layers (dropout lives inside
+            # the attention/FF blocks; no extra per-iter token dropout).
             for layer in self.layers:
                 token = layer(token, spatial_features)
 
             # Extract predictions (residual updates)
             token_out = token.squeeze(1)  # (batch_size, hidden_dim)
-            token_out = self.head_dropout(token_out)
 
             # Apply residual updates
             pred_pose = pred_pose + self.pose_head(token_out)
@@ -503,8 +487,10 @@ class SMILTransformerDecoderHead(nn.Module):
             pred_global_rot = global_rot_aa
             pred_joint_rot = joint_rot_aa
         
-        # Reshape camera rotation to 3x3 matrix
-        pred_cam_rot_mat = pred_cam_rot.view(batch_size, 3, 3)
+        # Convert 6D camera rotation (Zhou et al. 2019) to 3x3 matrix via
+        # Gram-Schmidt. The IEF accumulates raw 6D residuals; the rotation
+        # only needs to live on SO(3) at the output boundary.
+        pred_cam_rot_mat = rotation_6d_to_matrix(pred_cam_rot)
         
         # Prepare output dictionary
         output = {
