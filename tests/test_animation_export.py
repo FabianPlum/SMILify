@@ -39,6 +39,7 @@ def _make_params_axis_angle(seed: int) -> dict:
         "betas": torch.randn(1, N_BETAS, generator=g),
         "log_beta_scales": torch.randn(1, N_JOINTS, 3, generator=g),
         "betas_trans": torch.randn(1, N_JOINTS, 3, generator=g),
+        "mesh_scale": torch.rand(1, 1, generator=g) + 0.5,
         "cam_rot": torch.eye(3).unsqueeze(0),
         "cam_trans": torch.randn(1, 3, generator=g),
         "fov": torch.tensor([[45.0]]),
@@ -78,6 +79,7 @@ def test_round_trip_axis_angle(tmp_path):
     assert data["betas_per_frame"].shape == (5, N_BETAS)
     assert data["log_beta_scales"].shape == (5, N_JOINTS, 3)
     assert data["betas_trans"].shape == (5, N_JOINTS, 3)
+    assert data["mesh_scale"].shape == (5,)
     assert float(data["fps"]) == pytest.approx(30.0)
 
     # poses[f, 0] must equal global_rot; poses[f, 1:] must equal joint_rot.
@@ -143,6 +145,7 @@ def test_optional_fields_absent_when_not_recorded(tmp_path):
     data = np.load(out["npz"])
     assert "log_beta_scales" not in data.files
     assert "betas_trans" not in data.files
+    assert "mesh_scale" not in data.files
     with open(out["json"]) as fh:
         sidecar = json.load(fh)
     assert sidecar["cameras"] == []
