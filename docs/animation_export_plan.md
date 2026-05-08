@@ -1,7 +1,7 @@
 # SMIL Animation Export & Blender Import — Implementation Plan & Status
 
 **Branch:** `inference_animation_export` (rebased onto `augmentation-robustness`)
-**Last updated:** 2026-04-13
+**Last updated:** 2026-05-08
 
 ## Goal
 
@@ -224,6 +224,20 @@ d416d5c  Wire --export_animation into multiview inference
   `betas` at frame 0 (for users who want a fixed body).
 - `apply_joint_scales: BoolProperty` — toggle `log_beta_scales` keyframing.
 - `create_cameras: BoolProperty` — toggle camera creation from sidecar.
+
+### Outstanding items for Phase 2 (TODO — to be implemented)
+
+Items surfaced from end-to-end testing in Blender; deferred for follow-up:
+
+- **Imported model scaling.** Update the scaling applied to the SMIL model when
+  it's brought into Blender so the imported armature/mesh lands at the expected
+  world-space size (matches the inference rig / per-frame `mesh_scale`).
+- **Camera parameters.** A few sidecar-driven camera parameters need
+  adjustment on the importer side (specifics TBD during implementation).
+- **Default range of shape parameters (blend-shape weights).** Adjust the
+  default min/max range of the imported SMIL model's shape-key (blend-shape)
+  weights so per-frame `betas_per_frame` values keyframe within the allowed
+  range without being clamped.
 
 ### Out of scope for Phase 2
 
