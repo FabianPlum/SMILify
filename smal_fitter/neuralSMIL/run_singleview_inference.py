@@ -55,6 +55,7 @@ from training_config import TrainingConfig
 from smal_fitter import SMALFitter
 from Unreal2Pytorch3D import return_placeholder_data
 import config
+from animation_export import AnimationRecorder, build_recorder_from_config
 from sleap_data_loader import SLEAPDataLoader
 import importlib.util
 import importlib
@@ -1200,7 +1201,8 @@ def process_video(model: SMILImageRegressor, video_path: str, output_folder: str
                  camera_smoothing_window: int = 10,
                  sleap_helper: Optional[SLEAPCroppingHelper] = None,
                  sleap_camera: Optional[str] = None,
-                 video_export_mode: str = 'overlay') -> None:
+                 video_export_mode: str = 'overlay',
+                 animation_recorder: Optional[AnimationRecorder] = None) -> None:
     """
     Process a video file for inference.
     
@@ -1327,7 +1329,11 @@ def process_video(model: SMILImageRegressor, video_path: str, output_folder: str
                 
                 # Run inference
                 predicted_params = run_inference_on_image(model, preprocessed_tensor, device)
-                
+
+                # Record raw (pre-smoothing) parameters for Phase 1 animation export.
+                if animation_recorder is not None:
+                    animation_recorder.record(predicted_params)
+
                 # Apply camera parameter smoothing
                 if camera_smoothing_window > 0:
                     smoothed_params = smooth_camera_parameters(
@@ -1463,7 +1469,13 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
                        help='Path to SLEAP project directory (required for bbox_crop)')
     parser.add_argument('--sleap_camera', type=str, default=None,
                        help='Optional camera name override when using bbox_crop with SLEAP data')
-    
+
+    # Animation export (Phase 1)
+    parser.add_argument('--export_animation', type=str, default=None,
+                       help='Optional output path stem for SMIL animation export. '
+                            'Writes <stem>.npz + <stem>.json alongside the MP4. '
+                            'Only active when --input_video is used.')
+
     args = parser.parse_args()
     
     print("=" * 60)
@@ -1547,14 +1559,34 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
             # Process video
             print("\n" + "="*40)
             print("Running inference on video...")
+
+            animation_recorder: Optional[AnimationRecorder] = None
+            if args.export_animation:
+                output_fps = args.fps if args.fps is not None else cv2.VideoCapture(args.input_video).get(cv2.CAP_PROP_FPS)
+                animation_recorder = build_recorder_from_config(
+                    output_path=args.export_animation,
+                    rotation_representation=model.rotation_representation,
+                    fps=float(output_fps),
+                    source_checkpoint=args.checkpoint,
+                    source_input=args.input_video,
+                    model_id=getattr(model, "model_id", None),
+                )
+                print(f"Animation export enabled: {args.export_animation}.[npz|json]")
+
             process_video(
                 model, args.input_video, args.output_folder,
                 device, args.crop_mode, args.fps, args.save_frames, args.max_frames,
                 args.camera_smoothing,
                 sleap_helper=sleap_helper,
                 sleap_camera=args.sleap_camera,
-                video_export_mode=args.video_export_mode
+                video_export_mode=args.video_export_mode,
+                animation_recorder=animation_recorder,
             )
+
+            if animation_recorder is not None and animation_recorder.num_frames() > 0:
+                written = animation_recorder.write()
+                print(f"Animation export written: {written['npz']} + {written['json']} "
+                      f"({animation_recorder.num_frames()} frames)")
         
         print("\n" + "="*60)
         print("Inference completed successfully!")

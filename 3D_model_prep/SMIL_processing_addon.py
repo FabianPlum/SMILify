@@ -924,15 +924,24 @@ def create_shapekeys_from_pkl_shapedirs(data, obj):
     if not obj.data.shape_keys:
         obj.shape_key_add(name="Basis")
     
+    # PCA-derived betas can fall well outside Blender's default 0..1 slider range.
+    # Widen the range so animation imports load weights verbatim instead of clipping.
+    pkl_shape_key_slider_min = -10.0
+    pkl_shape_key_slider_max = 10.0
+
     # Create shapekeys from shapedirs
     for i in range(num_shapekeys):
         shape_key_name = f"Shape_{i}"
         shape_key = obj.shape_key_add(name=shape_key_name)
-        
+
         # Apply displacements from shapedirs
         for vert_index in range(num_vertices):
             displacement = shapedirs[vert_index, :, i]
             shape_key.data[vert_index].co = base_vertices[vert_index] + displacement
+
+        shape_key.slider_min = pkl_shape_key_slider_min
+        shape_key.slider_max = pkl_shape_key_slider_max
+        shape_key.value = 0.0
     
     # Create covariance matrix and mean betas
     # For independent shapekeys, use identity matrix
@@ -1803,6 +1812,14 @@ class SMPL_PT_Panel(bpy.types.Panel):
             icon="INFO",
         )
         layout.operator("smpl.apply_pose_correctives", text="Apply Pose Correctives")
+
+        layout.separator()
+        layout.operator("smpl.import_animation", text="Import SMIL Animation (.npz)")
+        # Stays greyed out until SMPL_OT_ExportAnimationGLTF.poll() finds
+        # SMIL_Animation_Root in the scene.
+        layout.operator(
+            "smpl.export_animation_gltf", text="Export animated model as glTF"
+        )
 
 
 def store_smpl_data(context, data, obj=None):
@@ -3418,6 +3435,395 @@ class SMPL_OT_ClearMorphPCA(bpy.types.Operator):
         return {'FINISHED'}
 
 
+def _resolve_shape_key_for_beta(obj, beta_index):
+    """Return the shape key block that corresponds to beta_index, or None.
+
+    Prefers 'Shape_<i>' (direct shapedir mapping as written by create_shapekeys_from_pkl_shapedirs),
+    falls back to 'PC_<i+1>' (1-indexed PCA mapping from create_shapekeys), then to positional
+    order skipping the Basis key.
+    """
+    if not obj.data.shape_keys:
+        return None
+    keys = obj.data.shape_keys.key_blocks
+    for candidate in (f"Shape_{beta_index}", f"PC_{beta_index + 1}"):
+        if candidate in keys:
+            return keys[candidate]
+    non_basis = [k for k in keys if k.name != "Basis"]
+    if beta_index < len(non_basis):
+        return non_basis[beta_index]
+    return None
+
+
+def _apply_betas_to_shape_keys(obj, betas, frame=None):
+    """Set shape-key values from a flat betas vector, optionally keyframing at `frame`."""
+    for i, value in enumerate(betas):
+        key = _resolve_shape_key_for_beta(obj, i)
+        if key is None:
+            break
+        key.value = float(value)
+        if frame is not None:
+            key.keyframe_insert(data_path="value", frame=frame)
+
+
+def _load_animation_files(npz_path):
+    """Load .npz + sidecar .json from a path (sidecar path derived by suffix swap)."""
+    import json
+    npz_data = np.load(npz_path)
+    json_path = os.path.splitext(npz_path)[0] + ".json"
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(f"Sidecar .json not found next to {npz_path}")
+    with open(json_path, "r") as f:
+        sidecar = json.load(f)
+    return npz_data, sidecar
+
+
+def _find_mesh_with_armature(context):
+    """Return (mesh_obj, armature_obj) for the active object, or (None, None)."""
+    obj = context.active_object
+    if obj is None:
+        return None, None
+    if obj.type == "ARMATURE":
+        for child in obj.children:
+            if child.type == "MESH":
+                return child, obj
+        return None, obj
+    if obj.type == "MESH":
+        armature = obj.find_armature()
+        if armature is not None:
+            return obj, armature
+    return None, None
+
+
+class SMPL_OT_ImportAnimation(bpy.types.Operator):
+    bl_idname = "smpl.import_animation"
+    bl_label = "Import Inference Animation"
+    bl_description = (
+        "Import a SMIL inference animation (.npz + sidecar .json) onto the active "
+        "SMIL rig. Drives per-bone rotation/scale, root translation, and (when "
+        "skeleton is static) per-frame shape-key weights."
+    )
+
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")
+    filter_glob: bpy.props.StringProperty(default="*.npz", options={"HIDDEN"})
+
+    static_shape: bpy.props.BoolProperty(
+        name="Static shape (use clip-averaged betas)",
+        description=(
+            "Apply only the clip-averaged betas once at frame 0 instead of per-frame "
+            "shape keyframes. Forced on when static_joint_locs is False in the sidecar."
+        ),
+        default=False,
+    )
+    apply_joint_scales: bpy.props.BoolProperty(
+        name="Apply per-joint scale",
+        description="Keyframe bone.scale from log_beta_scales (exp-applied).",
+        default=True,
+    )
+    create_cameras: bpy.props.BoolProperty(
+        name="Create cameras from sidecar",
+        default=True,
+    )
+
+    # PyTorch3D and Blender disagree on natural scene scale: inference clips look
+    # tiny in a default Blender scene. Multiplying the rig's root transform and
+    # the camera world positions by IMPORT_SCALE brings them to a comfortable
+    # working size without touching focal length, per-bone rotation/scale, or
+    # the camera object's own size.
+    IMPORT_SCALE = 10.0
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    # ------------------------------------------------------------------ main
+
+    def execute(self, context):
+        try:
+            npz_data, sidecar = _load_animation_files(bpy.path.abspath(self.filepath))
+        except Exception as e:
+            self.report({"ERROR"}, f"Failed to load animation files: {e}")
+            return {"CANCELLED"}
+
+        mesh_obj, armature = _find_mesh_with_armature(context)
+        if armature is None:
+            self.report({"ERROR"}, "Select a SMIL mesh or its armature before importing.")
+            return {"CANCELLED"}
+
+        poses = npz_data["poses"]           # (F, N_JOINTS, 3)
+        trans = npz_data["trans"]           # (F, 3)
+        betas_avg = npz_data["betas"]       # (N_BETAS,)
+        betas_per_frame = npz_data["betas_per_frame"] if "betas_per_frame" in npz_data.files else None
+        log_beta_scales = npz_data["log_beta_scales"] if "log_beta_scales" in npz_data.files else None
+        # Optional global mesh scale (root-centered). When present, the inference
+        # renderer applied: rendered_v = (v - J0) * mesh_scale + trans. We must
+        # mirror that with armature.scale and an offset to armature.location.
+        mesh_scale = npz_data["mesh_scale"] if "mesh_scale" in npz_data.files else None
+        fps = float(npz_data["fps"]) if "fps" in npz_data.files else float(sidecar.get("fps", 30.0))
+
+        n_frames, n_joints, _ = poses.shape
+        joint_names = sidecar.get("joint_names", [])
+
+        # Joint-count validation against the active armature.
+        armature_bone_names = [b.name for b in armature.pose.bones]
+        missing = [name for name in joint_names if name not in armature_bone_names]
+        if missing:
+            self.report(
+                {"ERROR"},
+                f"Armature is missing {len(missing)} bones from the animation "
+                f"(first: {missing[:3]}). Import a matching SMIL model first.",
+            )
+            return {"CANCELLED"}
+
+        # Branch on skeleton mode (see docs/animation export plan).
+        static_joint_locs = bool(sidecar.get("static_joint_locs", False))
+        effective_static_shape = self.static_shape or not static_joint_locs
+
+        if not static_joint_locs:
+            # Apply averaged betas statically, then recompute joint locations once.
+            if mesh_obj is not None:
+                _apply_betas_to_shape_keys(mesh_obj, betas_avg, frame=None)
+                if mesh_obj.get("static_joint_locs", False) is False:
+                    prev_active = context.view_layer.objects.active
+                    context.view_layer.objects.active = mesh_obj
+                    try:
+                        bpy.ops.smpl.recompute_joint_positions()
+                    except Exception as e:
+                        self.report({"WARNING"}, f"Joint recomputation failed: {e}")
+                    finally:
+                        context.view_layer.objects.active = prev_active
+            self.report(
+                {"INFO"},
+                "static_joint_locs=False: applied averaged betas and recomputed joints; "
+                "per-frame shape animation is disabled for this clip.",
+            )
+
+        # Configure scene frame range and fps.
+        scene = context.scene
+        scene.frame_start = 0
+        scene.frame_end = n_frames - 1
+        scene.render.fps = max(1, int(round(fps)))
+
+        # Inference cameras are assumed square; default the render output to 1080x1080
+        # so viewport/render framing matches the camera intrinsics out of the box.
+        scene.render.resolution_x = 1080
+        scene.render.resolution_y = 1080
+        scene.render.resolution_percentage = 100
+
+        # Per-frame keyframing.
+        context.view_layer.objects.active = armature
+        bpy.ops.object.mode_set(mode="POSE")
+
+        # Ensure axis-angle rotation mode on all pose bones we drive.
+        for bone_name in joint_names:
+            armature.pose.bones[bone_name].rotation_mode = "AXIS_ANGLE"
+
+        # Cache each bone's rest rotation (armature space). SMAL pose rotations
+        # are expressed in a frame that is world-aligned at rest; Blender's
+        # rotation_axis_angle is in the bone's local rest frame. SMIL armatures
+        # build every bone with head→tail along world +Z (see
+        # create_armature_and_weights), so each bone's rest rotation R_0 is
+        # non-trivial and we must conjugate: R_basis = R_0ᵀ · R_smal · R_0,
+        # which for axis-angle reduces to angle unchanged, axis = R_0ᵀ · axis.
+        rest_rot_inv_per_joint = []
+        for bone_name in joint_names:
+            R_rest = np.array(armature.pose.bones[bone_name].bone.matrix_local.to_3x3(), dtype=np.float64)
+            rest_rot_inv_per_joint.append(R_rest.T)  # orthonormal: T == inv
+
+        # Rest position of the root joint (joints[0]) in armature-local space.
+        # Needed when mesh_scale is present: the inference renderer applies
+        # rendered_v = (v - J0) * mesh_scale + trans. To replicate this with
+        # armature.scale = s and armature.location = L, the visible vertex
+        # becomes L + s * v, which equals (v - J0) * s + trans iff
+        # L = trans - s * J0.
+        root_joint_rest = np.array(
+            armature.pose.bones[joint_names[0]].bone.head_local, dtype=np.float64
+        )
+
+        for f in range(n_frames):
+            scene.frame_set(f)
+
+            # Per-joint axis-angle rotation.
+            for j, bone_name in enumerate(joint_names):
+                aa = poses[f, j]                    # (3,) world-aligned axis-angle
+                angle = float(np.linalg.norm(aa))
+                if angle > 1e-8:
+                    axis_world = aa / angle
+                    axis_local = rest_rot_inv_per_joint[j] @ axis_world
+                else:
+                    axis_local = np.array([0.0, 0.0, 1.0])
+                pb = armature.pose.bones[bone_name]
+                pb.rotation_axis_angle = (angle, float(axis_local[0]), float(axis_local[1]), float(axis_local[2]))
+                pb.keyframe_insert(data_path="rotation_axis_angle", frame=f)
+
+                if self.apply_joint_scales and log_beta_scales is not None:
+                    if log_beta_scales.ndim == 3 and log_beta_scales.shape[1] == n_joints:
+                        s = np.exp(log_beta_scales[f, j])
+                        pb.scale = (float(s[0]), float(s[1]), float(s[2]))
+                        pb.keyframe_insert(data_path="scale", frame=f)
+
+            # Root translation (and global mesh scale, when present).
+            # IMPORT_SCALE multiplies both the rig's world scale and its world
+            # translation so the visible vertex (location + scale * vertex)
+            # ends up at IMPORT_SCALE * (inference vertex), matching what the
+            # cameras (also scaled below) expect.
+            if mesh_scale is not None:
+                s = float(mesh_scale[f])
+                loc = self.IMPORT_SCALE * (trans[f].astype(np.float64) - s * root_joint_rest)
+                rig_scale = self.IMPORT_SCALE * s
+            else:
+                loc = self.IMPORT_SCALE * trans[f].astype(np.float64)
+                rig_scale = self.IMPORT_SCALE
+            armature.scale = (rig_scale, rig_scale, rig_scale)
+            armature.keyframe_insert(data_path="scale", frame=f)
+            armature.location = (float(loc[0]), float(loc[1]), float(loc[2]))
+            armature.keyframe_insert(data_path="location", frame=f)
+
+            # Per-frame shape keys (only in static-skeleton mode).
+            if mesh_obj is not None and not effective_static_shape and betas_per_frame is not None:
+                _apply_betas_to_shape_keys(mesh_obj, betas_per_frame[f], frame=f)
+
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+        # Static-shape single keyframe (applies to both user-forced and skeleton-forced paths).
+        if effective_static_shape and mesh_obj is not None:
+            _apply_betas_to_shape_keys(mesh_obj, betas_avg, frame=0)
+
+        # Cameras.
+        created_cams = []
+        if self.create_cameras:
+            created_cams = self._create_cameras(sidecar.get("cameras", []))
+
+        # Group armature + cameras under a single empty so the whole imported
+        # scene can be rotated/oriented as one. The mesh is intentionally left
+        # parented to the armature — re-parenting it here would break the
+        # Armature modifier's deformation chain.
+        scene_root = bpy.data.objects.new(name="SMIL_Animation_Root", object_data=None)
+        scene_root.empty_display_type = "ARROWS"
+        context.collection.objects.link(scene_root)
+        for child in (armature, *created_cams):
+            child.parent = scene_root
+            # Empty is at identity, so leaving matrix_parent_inverse as identity
+            # preserves each child's existing world transform.
+
+        scene.frame_set(0)
+        self.report(
+            {"INFO"},
+            f"Imported {n_frames} frames at {fps:.2f} fps "
+            f"(static_shape={'on' if effective_static_shape else 'off'}).",
+        )
+        return {"FINISHED"}
+
+    # ------------------------------------------------------------------ cameras
+
+    def _create_cameras(self, cameras):
+        import math
+        from mathutils import Matrix
+        created = []
+        for cam in cameras:
+            name = str(cam.get("view_name", "smil_cam"))
+            R = np.array(cam.get("R", np.eye(3).tolist()), dtype=np.float64).reshape(3, 3)
+            t = np.array(cam.get("t", [0.0, 0.0, 0.0]), dtype=np.float64).reshape(-1)
+            fov_deg = float(cam.get("fov", 45.0))
+
+            cam_data = bpy.data.cameras.new(name=name)
+            cam_data.angle = math.radians(fov_deg)
+            cam_obj = bpy.data.objects.new(name=name, object_data=cam_data)
+            bpy.context.collection.objects.link(cam_obj)
+
+            # PyTorch3D's FoVPerspectiveCameras uses the row-vector world→view
+            # convention: p_view = p_world @ R + T. In column-vector form this
+            # is p_view = Rᵀ · p_world + T, so the world-to-view matrix is
+            # [Rᵀ | T] and camera-to-world is [R | -R · T].
+            #
+            # Additionally, PyTorch3D camera local axes are (+X left, +Y up,
+            # +Z forward) while Blender's are (+X right, +Y up, -Z forward).
+            # Right-multiplying by diag(-1, 1, -1) flips the camera's local X
+            # and Z so it looks the same direction in Blender as in PyTorch3D.
+            cam_axis_flip = np.diag([-1.0, 1.0, -1.0])
+            mat = np.eye(4)
+            mat[:3, :3] = R @ cam_axis_flip
+            # Scale the world-space camera position (not the camera object's
+            # own scale) by IMPORT_SCALE so cameras stay framed on the rig
+            # after the rig itself has been scaled up.
+            mat[:3, 3] = self.IMPORT_SCALE * (-R @ t)
+            cam_obj.matrix_world = Matrix(mat.tolist())
+            created.append(cam_obj)
+        return created
+
+
+class SMPL_OT_ExportAnimationGLTF(bpy.types.Operator):
+    bl_idname = "smpl.export_animation_gltf"
+    bl_label = "Export Animated Model as glTF"
+    bl_description = (
+        "Export the imported SMIL animation (rig, mesh, cameras) as a glTF 2.0 "
+        "file via Blender's built-in exporter. Available once Import SMIL "
+        "Animation has produced a SMIL_Animation_Root empty."
+    )
+
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")
+    filter_glob: bpy.props.StringProperty(
+        default="*.glb;*.gltf", options={"HIDDEN"}
+    )
+
+    @classmethod
+    def poll(cls, context):
+        # poll() drives the UI auto-grey-out — true only when a previous
+        # import succeeded and left the root empty in place.
+        return bpy.data.objects.get("SMIL_Animation_Root") is not None
+
+    def invoke(self, context, event):
+        if not self.filepath:
+            self.filepath = "smil_animation.glb"
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        root = bpy.data.objects.get("SMIL_Animation_Root")
+        if root is None:
+            self.report(
+                {"WARNING"},
+                "No imported SMIL animation found (SMIL_Animation_Root missing).",
+            )
+            return {"CANCELLED"}
+
+        prev_active = context.view_layer.objects.active
+        prev_selected = [o for o in context.view_layer.objects if o.select_get()]
+        try:
+            bpy.ops.object.select_all(action="DESELECT")
+            export_objs = [root] + list(root.children_recursive)
+            for obj in export_objs:
+                obj.select_set(True)
+            context.view_layer.objects.active = root
+
+            filepath = bpy.path.abspath(self.filepath)
+            bpy.ops.export_scene.gltf(
+                filepath=filepath,
+                use_selection=True,
+                export_animations=True,
+                export_apply=False,
+            )
+        except Exception as e:
+            self.report({"WARNING"}, f"glTF export failed: {e}")
+            return {"CANCELLED"}
+        finally:
+            try:
+                bpy.ops.object.select_all(action="DESELECT")
+            except Exception:
+                pass
+            for obj in prev_selected:
+                try:
+                    obj.select_set(True)
+                except Exception:
+                    pass
+            try:
+                context.view_layer.objects.active = prev_active
+            except Exception:
+                pass
+
+        self.report({"INFO"}, f"Exported glTF animation to {filepath}")
+        return {"FINISHED"}
+
+
 class SMPLProperties(bpy.types.PropertyGroup):
     pkl_filepath: bpy.props.StringProperty(
         name="PKL Filepath",
@@ -3721,6 +4127,8 @@ classes = (
     SMPL_OT_LoadAllUnposedMeshes,
     SMPL_OT_RecomputeJointPositions,  # <-- Add here
     SMPL_OT_ClearMorphPCA,
+    SMPL_OT_ImportAnimation,
+    SMPL_OT_ExportAnimationGLTF,
     SMPLProperties,
 )
 
