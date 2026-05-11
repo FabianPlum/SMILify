@@ -3591,6 +3591,12 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
         scene.frame_end = n_frames - 1
         scene.render.fps = max(1, int(round(fps)))
 
+        # Inference cameras are assumed square; default the render output to 1080x1080
+        # so viewport/render framing matches the camera intrinsics out of the box.
+        scene.render.resolution_x = 1080
+        scene.render.resolution_y = 1080
+        scene.render.resolution_percentage = 100
+
         # Per-frame keyframing.
         context.view_layer.objects.active = armature
         bpy.ops.object.mode_set(mode="POSE")
