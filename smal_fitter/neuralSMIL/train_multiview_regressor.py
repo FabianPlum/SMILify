@@ -67,6 +67,12 @@ from smal_fitter import SMALFitter
 import config
 from training_config import TrainingConfig
 from configs import MultiViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
+from multiview_visualization import (
+    create_multiview_visualization,
+    create_rendered_view_with_keypoints,
+    print_joint_scale_diagnostics,
+    run_forward_multiview_single_sample,
+)
 
 
 def set_random_seeds(seed: int = 0, deterministic: bool = False):
@@ -917,10 +923,17 @@ def visualize_multiview_training_progress(model: MultiViewSMILImageRegressor,
         # Process each sample
         for sample_idx, (x_data, y_data) in enumerate(collected_samples):
             try:
-                visualization = create_multiview_visualization(
-                    base_model, x_data, y_data, device, training_config
+                predicted_params = run_forward_multiview_single_sample(
+                    base_model, x_data, y_data, device
                 )
-                
+                if predicted_params is not None:
+                    print_joint_scale_diagnostics(
+                        base_model, predicted_params, label=f"Multiview Sample {sample_idx}"
+                    )
+                visualization = create_multiview_visualization(
+                    base_model, x_data, y_data, device, predicted_params=predicted_params
+                )
+
                 if visualization is not None:
                     # Save visualization
                     output_path = os.path.join(epoch_dir, f'sample_{sample_idx:03d}_epoch_{epoch:03d}.png')
@@ -946,331 +959,6 @@ def visualize_multiview_training_progress(model: MultiViewSMILImageRegressor,
         random.setstate(python_rng_state)
         if torch.cuda.is_available():
             torch.cuda.set_rng_state(cuda_rng_state)
-
-
-def create_multiview_visualization(model: MultiViewSMILImageRegressor,
-                                    x_data: dict,
-                                    y_data: dict,
-                                    device: str,
-                                    training_config: dict) -> np.ndarray:
-    """
-    Create a grid visualization for a single multi-view sample.
-    
-    Layout:
-    ┌────────────┬────────────┬────────────┬─────┐
-    │  Input V0  │  Input V1  │  Input V2  │ ... │  <- Input images
-    ├────────────┼────────────┼────────────┼─────┤
-    │ Render V0  │ Render V1  │ Render V2  │ ... │  <- Rendered with keypoints
-    └────────────┴────────────┴────────────┴─────┘
-    
-    Args:
-        model: MultiViewSMILImageRegressor
-        x_data: Input data dictionary for one sample
-        y_data: Target data dictionary for one sample
-        device: PyTorch device
-        training_config: Training configuration
-        
-    Returns:
-        Numpy array of the visualization image (H, W, 3) uint8
-    """
-    images = x_data.get('images', [])
-    num_views = len(images)
-    
-    if num_views == 0:
-        return None
-    
-    # Get camera indices
-    cam_indices = x_data.get('camera_indices', list(range(num_views)))
-    if isinstance(cam_indices, np.ndarray):
-        cam_indices = cam_indices.tolist()
-    
-    # Preprocess images and prepare batch
-    images_per_view = []
-    for img in images:
-        img_tensor = model.preprocess_image(img).to(device)  # (1, 3, H, W)
-        images_per_view.append(img_tensor.squeeze(0))  # (3, H, W)
-    
-    # Stack into tensors for model
-    images_tensors = [img.unsqueeze(0) for img in images_per_view]  # List of (1, 3, H, W)
-    camera_indices_tensor = torch.tensor([cam_indices], device=device)  # (1, num_views)
-    view_mask = torch.ones(1, num_views, dtype=torch.bool, device=device)  # (1, num_views)
-    
-    # Forward pass through model (no gradient needed for visualization)
-    with torch.no_grad():
-        predicted_params = model.forward_multiview(
-            images_tensors,
-            camera_indices_tensor,
-            view_mask,
-            target_data=[y_data]
-        )
-    
-    # Print joint scales with joint names
-    if 'log_beta_scales' in predicted_params:
-        try:
-            from training_config import TrainingConfig
-            scale_trans_config = TrainingConfig.get_scale_trans_config()
-            use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
-            
-            if model.scale_trans_mode == 'separate' and use_pca_transformation:
-                # PCA weights - transform to per-joint values
-                scale_weights = predicted_params['log_beta_scales'][0]  # (N_BETAS,) - PCA weights
-                trans_weights = predicted_params.get('betas_trans', None)
-                if trans_weights is not None:
-                    trans_weights = trans_weights[0:1]  # (1, N_BETAS)
-                log_beta_scales_joint, _ = model._transform_separate_pca_weights_to_joint_values(
-                    scale_weights.unsqueeze(0), trans_weights
-                )
-                log_beta_scales_joint = log_beta_scales_joint[0]  # (n_joints, 3)
-            else:
-                # Already per-joint values - use directly
-                log_beta_scales_joint = predicted_params['log_beta_scales'][0]  # (n_joints, 3)
-            
-            # Convert log scales to linear scales for readability
-            scales_joint = torch.exp(log_beta_scales_joint)  # (n_joints, 3)
-            
-            # Get joint names
-            joint_names = config.dd["J_names"]
-            
-            # Print scales for each joint
-            print(f"\n=== Joint Scales for Multiview Sample ===")
-            print(f"Mode: {model.scale_trans_mode}")
-            print(f"{'Joint Name':<20} {'Scale X':>10} {'Scale Y':>10} {'Scale Z':>10} {'Mean Scale':>12}")
-            print("-" * 70)
-            
-            for joint_idx, joint_name in enumerate(joint_names):
-                if joint_idx < scales_joint.shape[0]:
-                    scale_xyz = scales_joint[joint_idx].cpu().numpy()  # (3,)
-                    mean_scale = scale_xyz.mean()
-                    print(f"{joint_name:<20} {scale_xyz[0]:>10.4f} {scale_xyz[1]:>10.4f} {scale_xyz[2]:>10.4f} {mean_scale:>12.4f}")
-            
-            # Print summary statistics
-            all_scales = scales_joint.cpu().numpy()
-            print(f"\nSummary Statistics:")
-            print(f"  Mean scale (all joints, all axes): {all_scales.mean():.4f}")
-            print(f"  Std scale (all joints, all axes): {all_scales.std():.4f}")
-            print(f"  Min scale: {all_scales.min():.4f}")
-            print(f"  Max scale: {all_scales.max():.4f}")
-            print(f"  Joints with scale > 1.1: {((all_scales > 1.1).any(axis=1).sum().item())}")
-            print(f"  Joints with scale < 0.9: {((all_scales < 0.9).any(axis=1).sum().item())}")
-            print("=" * 70 + "\n")
-            
-        except Exception as e:
-            print(f"Warning: Failed to print joint scales: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    # Visualization parameters — derive from model's actual renderer resolution
-    # so that visualization is correct for any backbone (ViT=224, ResNet/UNet=512, etc.)
-    img_size = int(model.renderer.image_size)
-    margin = 5
-    
-    # Create visualization grid
-    grid_width = num_views * img_size + (num_views + 1) * margin
-    grid_height = 2 * img_size + 3 * margin  # 2 rows: input + rendered
-    
-    # Create canvas with dark background
-    canvas = np.ones((grid_height, grid_width, 3), dtype=np.uint8) * 40
-    
-    # Get target keypoints for each view
-    target_keypoints = y_data.get('keypoints_2d', None)
-    target_visibility = y_data.get('keypoint_visibility', None)
-    
-    for v in range(num_views):
-        x_offset = margin + v * (img_size + margin)
-        
-        # === TOP ROW: Input images ===
-        input_img = images[v]
-        if isinstance(input_img, np.ndarray):
-            # Resize to visualization size if needed
-            if input_img.shape[0] != img_size or input_img.shape[1] != img_size:
-                from PIL import Image
-                pil_img = Image.fromarray((input_img * 255).astype(np.uint8) if input_img.max() <= 1 else input_img.astype(np.uint8))
-                pil_img = pil_img.resize((img_size, img_size), Image.BILINEAR)
-                input_img = np.array(pil_img)
-            
-            # Ensure uint8 format
-            if input_img.max() <= 1.0:
-                input_img = (input_img * 255).astype(np.uint8)
-            else:
-                input_img = input_img.astype(np.uint8)
-            
-            # Ensure RGB (3 channels)
-            if len(input_img.shape) == 2:
-                input_img = np.stack([input_img] * 3, axis=-1)
-            elif input_img.shape[-1] == 4:
-                input_img = input_img[:, :, :3]
-            
-            canvas[margin:margin + img_size, x_offset:x_offset + img_size] = input_img
-        
-        # === BOTTOM ROW: Rendered mesh with keypoints ===
-        try:
-            # Extract aspect ratio for this view if available
-            aspect_ratio = None
-            try:
-                if y_data.get('cam_aspect_per_view') is not None:
-                    aspect_ratio = float(np.array(y_data['cam_aspect_per_view'][v]).reshape(-1)[0])
-            except Exception:
-                aspect_ratio = None
-            
-            # Create rendered image with keypoint overlays
-            rendered_img = create_rendered_view_with_keypoints(
-                model, predicted_params, v, 
-                target_keypoints, target_visibility,
-                device, img_size, aspect_ratio=aspect_ratio
-            )
-            
-            canvas[2 * margin + img_size:2 * margin + 2 * img_size, 
-                   x_offset:x_offset + img_size] = rendered_img
-            
-        except Exception as e:
-            print(f"Warning: Could not render view {v}: {e}")
-            # Fill with placeholder
-            placeholder = np.ones((img_size, img_size, 3), dtype=np.uint8) * 128
-            canvas[2 * margin + img_size:2 * margin + 2 * img_size,
-                   x_offset:x_offset + img_size] = placeholder
-    
-    # Add row labels
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-        pil_canvas = Image.fromarray(canvas)
-        draw = ImageDraw.Draw(pil_canvas)
-        
-        # Try to use a basic font
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-        except:
-            font = ImageFont.load_default()
-        
-        # Add labels
-        draw.text((5, margin + img_size // 2 - 6), "Input", fill=(255, 255, 255), font=font)
-        draw.text((5, 2 * margin + img_size + img_size // 2 - 6), "Pred", fill=(255, 255, 255), font=font)
-        
-        # Add view labels
-        for v in range(num_views):
-            x_pos = margin + v * (img_size + margin) + img_size // 2 - 10
-            cam_name = x_data.get('camera_names', [f'V{v}'])[v] if v < len(x_data.get('camera_names', [])) else f'V{v}'
-            draw.text((x_pos, 2), str(cam_name)[:8], fill=(255, 255, 255), font=font)
-        
-        canvas = np.array(pil_canvas)
-    except ImportError:
-        pass  # PIL not available for text, skip labels
-    
-    return canvas
-
-
-def create_rendered_view_with_keypoints(model: MultiViewSMILImageRegressor,
-                                         predicted_params: dict,
-                                         view_idx: int,
-                                         target_keypoints: np.ndarray,
-                                         target_visibility: np.ndarray,
-                                         device: str,
-                                         img_size: int,
-                                         aspect_ratio: Optional[float] = None) -> np.ndarray:
-    """
-    Create a rendered view with keypoint overlays.
-    
-    Args:
-        model: The multi-view model
-        predicted_params: Output from forward_multiview
-        view_idx: Which view to render
-        target_keypoints: Ground truth keypoints (num_views, n_joints, 2) or (n_joints, 2)
-        target_visibility: Ground truth visibility (num_views, n_joints) or (n_joints,)
-        device: PyTorch device
-        img_size: Output image size
-        aspect_ratio: Optional camera aspect ratio for correct projection
-        
-    Returns:
-        Rendered image with keypoint overlays (img_size, img_size, 3) uint8
-    """
-    from smil_image_regressor import rotation_6d_to_axis_angle
-    
-    # Get camera parameters for this view
-    fov = predicted_params['fov_per_view'][view_idx]  # (batch_size, 1)
-    cam_rot = predicted_params['cam_rot_per_view'][view_idx]  # (batch_size, 3, 3)
-    cam_trans = predicted_params['cam_trans_per_view'][view_idx]  # (batch_size, 3)
-    
-    # Render 2D keypoints using body params + view camera
-    try:
-        with torch.no_grad():
-            # Convert aspect_ratio to tensor if provided
-            aspect_tensor = None
-            if aspect_ratio is not None:
-                aspect_tensor = torch.tensor([aspect_ratio], dtype=torch.float32, device=device)
-            
-            rendered_joints = model._render_keypoints_with_camera(
-                predicted_params, fov, cam_rot, cam_trans, aspect_ratio=aspect_tensor
-            )  # (batch_size, n_joints, 2)
-        
-        # Convert to numpy for visualization
-        pred_kps = rendered_joints[0].detach().cpu().numpy()  # (n_joints, 2)
-        pred_kps = pred_kps * img_size  # Scale to image coordinates
-        
-    except Exception as e:
-        print(f"Keypoint rendering failed: {e}")
-        pred_kps = None
-    
-    # Create base image (gray background for now, could be rendered mesh later)
-    # Use a subtle blue gradient to differentiate views (avoids conflict with red pred markers)
-    img = np.ones((img_size, img_size, 3), dtype=np.uint8) * 50
-    
-    # Add a pleasant blue tint that increases with view index
-    # Blue channel increases, slight decrease in red to create cooler tones
-    blue_intensity = min(255, 70 + view_idx * 25)
-    img[:, :, 2] = blue_intensity  # Blue channel
-    img[:, :, 1] = min(255, 55 + view_idx * 8)  # Slight green for pleasant tone
-    img[:, :, 0] = 45  # Keep red low for cool blue appearance
-    
-    # Get target keypoints for this view
-    gt_kps = None
-    gt_vis = None
-    if target_keypoints is not None:
-        if len(target_keypoints.shape) == 3:
-            # Multi-view format: (num_views, n_joints, 2)
-            if view_idx < target_keypoints.shape[0]:
-                gt_kps = target_keypoints[view_idx] * img_size  # (n_joints, 2)
-                if target_visibility is not None and view_idx < target_visibility.shape[0]:
-                    gt_vis = target_visibility[view_idx]  # (n_joints,)
-        elif len(target_keypoints.shape) == 2 and view_idx == 0:
-            # Single-view format: (n_joints, 2)
-            gt_kps = target_keypoints * img_size
-            gt_vis = target_visibility
-    
-    # Draw keypoints on image
-    from PIL import Image, ImageDraw
-    pil_img = Image.fromarray(img)
-    draw = ImageDraw.Draw(pil_img)
-    
-    # Draw ground truth keypoints (green circles)
-    if gt_kps is not None:
-        for j, (y, x) in enumerate(gt_kps):
-            if gt_vis is None or gt_vis[j] > 0.5:
-                # Keypoints are in (y, x) format, need (x, y) for PIL
-                x, y = float(x), float(y)
-                if 0 <= x < img_size and 0 <= y < img_size:
-                    draw.ellipse([x - 3, y - 3, x + 3, y + 3], outline='green', width=2)
-    
-    # Draw predicted keypoints (red crosses)
-    if pred_kps is not None:
-        for j, (y, x) in enumerate(pred_kps):
-            x, y = float(x), float(y)
-            if 0 <= x < img_size and 0 <= y < img_size:
-                # Draw cross
-                draw.line([x - 4, y, x + 4, y], fill='red', width=2)
-                draw.line([x, y - 4, x, y + 4], fill='red', width=2)
-    
-    # Add legend
-    try:
-        from PIL import ImageFont
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
-        except:
-            font = ImageFont.load_default()
-        draw.text((5, img_size - 25), "○ GT", fill='green', font=font)
-        draw.text((5, img_size - 12), "+ Pred", fill='red', font=font)
-    except:
-        pass
-    
-    return np.array(pil_img)
 
 
 def draw_keypoints_on_image(image_rgb: np.ndarray,
@@ -1526,61 +1214,10 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
             target_data=[y_data]
         )
     
-    # Print joint scales with joint names (once per sample)
-    if 'log_beta_scales' in predicted_params:
-        try:
-            from training_config import TrainingConfig
-            scale_trans_config = TrainingConfig.get_scale_trans_config()
-            use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
-            
-            if model.scale_trans_mode == 'separate' and use_pca_transformation:
-                # PCA weights - transform to per-joint values
-                scale_weights = predicted_params['log_beta_scales'][0]  # (N_BETAS,) - PCA weights
-                trans_weights = predicted_params.get('betas_trans', None)
-                if trans_weights is not None:
-                    trans_weights = trans_weights[0:1]  # (1, N_BETAS)
-                log_beta_scales_joint, _ = model._transform_separate_pca_weights_to_joint_values(
-                    scale_weights.unsqueeze(0), trans_weights
-                )
-                log_beta_scales_joint = log_beta_scales_joint[0]  # (n_joints, 3)
-            else:
-                # Already per-joint values - use directly
-                log_beta_scales_joint = predicted_params['log_beta_scales'][0]  # (n_joints, 3)
-            
-            # Convert log scales to linear scales for readability
-            scales_joint = torch.exp(log_beta_scales_joint)  # (n_joints, 3)
-            
-            # Get joint names
-            joint_names = config.dd["J_names"]
-            
-            # Print scales for each joint
-            print(f"\n=== Joint Scales for Sample {sample_idx} (Single-View Renders) ===")
-            print(f"Mode: {model.scale_trans_mode}")
-            print(f"{'Joint Name':<20} {'Scale X':>10} {'Scale Y':>10} {'Scale Z':>10} {'Mean Scale':>12}")
-            print("-" * 70)
-            
-            for joint_idx, joint_name in enumerate(joint_names):
-                if joint_idx < scales_joint.shape[0]:
-                    scale_xyz = scales_joint[joint_idx].cpu().numpy()  # (3,)
-                    mean_scale = scale_xyz.mean()
-                    print(f"{joint_name:<20} {scale_xyz[0]:>10.4f} {scale_xyz[1]:>10.4f} {scale_xyz[2]:>10.4f} {mean_scale:>12.4f}")
-            
-            # Print summary statistics
-            all_scales = scales_joint.cpu().numpy()
-            print(f"\nSummary Statistics:")
-            print(f"  Mean scale (all joints, all axes): {all_scales.mean():.4f}")
-            print(f"  Std scale (all joints, all axes): {all_scales.std():.4f}")
-            print(f"  Min scale: {all_scales.min():.4f}")
-            print(f"  Max scale: {all_scales.max():.4f}")
-            print(f"  Joints with scale > 1.1: {((all_scales > 1.1).any(axis=1).sum().item())}")
-            print(f"  Joints with scale < 0.9: {((all_scales < 0.9).any(axis=1).sum().item())}")
-            print("=" * 70 + "\n")
-            
-        except Exception as e:
-            print(f"Warning: Failed to print joint scales for sample {sample_idx}: {e}")
-            import traceback
-            traceback.print_exc()
-    
+    print_joint_scale_diagnostics(
+        model, predicted_params, label=f"Sample {sample_idx} (Single-View Renders)"
+    )
+
     # Render each view separately using SMALFitter
     views_rendered = 0
     
