@@ -3684,8 +3684,21 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
             _apply_betas_to_shape_keys(mesh_obj, betas_avg, frame=0)
 
         # Cameras.
+        created_cams = []
         if self.create_cameras:
-            self._create_cameras(sidecar.get("cameras", []))
+            created_cams = self._create_cameras(sidecar.get("cameras", []))
+
+        # Group armature + cameras under a single empty so the whole imported
+        # scene can be rotated/oriented as one. The mesh is intentionally left
+        # parented to the armature — re-parenting it here would break the
+        # Armature modifier's deformation chain.
+        scene_root = bpy.data.objects.new(name="SMIL_Animation_Root", object_data=None)
+        scene_root.empty_display_type = "ARROWS"
+        context.collection.objects.link(scene_root)
+        for child in (armature, *created_cams):
+            child.parent = scene_root
+            # Empty is at identity, so leaving matrix_parent_inverse as identity
+            # preserves each child's existing world transform.
 
         scene.frame_set(0)
         self.report(
@@ -3700,6 +3713,7 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
     def _create_cameras(self, cameras):
         import math
         from mathutils import Matrix
+        created = []
         for cam in cameras:
             name = str(cam.get("view_name", "smil_cam"))
             R = np.array(cam.get("R", np.eye(3).tolist()), dtype=np.float64).reshape(3, 3)
@@ -3728,6 +3742,8 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
             # after the rig itself has been scaled up.
             mat[:3, 3] = self.IMPORT_SCALE * (-R @ t)
             cam_obj.matrix_world = Matrix(mat.tolist())
+            created.append(cam_obj)
+        return created
 
 
 class SMPLProperties(bpy.types.PropertyGroup):
