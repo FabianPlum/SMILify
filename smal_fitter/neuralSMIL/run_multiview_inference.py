@@ -6,7 +6,8 @@ This script mirrors the visualization logic used during training in
 `train_multiview_regressor.py`, but runs over all samples in a preprocessed
 multi-view HDF5 dataset and writes two videos in the current working directory:
 
-  - "<DATASET>_multiview_inference.mp4" (multi-view grid visualization)
+  - "<DATASET>_multiview_inference.avi" (multi-view grid visualization, AVI+MJPG
+    so wide grids exceed MPEG-4's 8192px width cap)
   - "<DATASET>_smultiview_first_camera_render.mp4" (single-view render for view 0)
 """
 
@@ -56,6 +57,11 @@ from smal_fitter import SMALFitter
 from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
 from configs import apply_smal_file_override
 import config
+from animation_export import build_recorder_from_config, build_multiview_cameras
+from multiview_visualization import (
+    compute_multiview_grid_layout,
+    create_multiview_visualization,
+)
 
 
 DEFAULT_CHECKPOINTS = [
@@ -426,211 +432,6 @@ def load_multiview_model_from_checkpoint(checkpoint_path: Path,
     return model
 
 
-def create_multiview_visualization(model: MultiViewSMILImageRegressor,
-                                   x_data: dict,
-                                   y_data: dict,
-                                   device: str,
-                                   disable_scaling: bool = False,
-                                   disable_translation: bool = False,
-                                   predicted_params: Optional[dict] = None) -> Optional[np.ndarray]:
-    """
-    Create multi-view grid visualization matching training visualization exactly.
-
-    CRITICAL: This function must match the training visualization in train_multiview_regressor.py
-    exactly, especially for PCA transformation and parameter application order.
-
-    Args:
-        model: MultiViewSMILImageRegressor model
-        x_data: Input data dictionary
-        y_data: Target data dictionary
-        device: PyTorch device
-        disable_scaling: If True, zero out log_beta_scales for visualization (testing/debugging)
-        disable_translation: If True, zero out betas_trans for visualization (testing/debugging)
-        predicted_params: Pre-computed predicted parameters. If None, runs forward pass internally.
-    """
-    images = x_data.get("images", [])
-    num_views = len(images)
-    if num_views == 0:
-        return None
-
-    # Run forward pass if predicted_params not provided
-    if predicted_params is None:
-        predicted_params = run_forward_multiview(model, x_data, y_data, device)
-        if predicted_params is None:
-            return None
-
-    # Calculate grid dimensions dynamically based on actual num_views (same as training)
-    # This allows samples with fewer views than max_views to be visualized correctly
-    # Derive img_size from the model's renderer resolution so visualization is correct
-    # for any backbone (ViT=224, ResNet/UNet=512, etc.)
-    img_size = int(model.renderer.image_size)
-    margin = 5
-    grid_width = num_views * img_size + (num_views + 1) * margin
-    grid_height = 2 * img_size + 3 * margin
-
-    canvas = np.ones((grid_height, grid_width, 3), dtype=np.uint8) * 40
-    target_keypoints = y_data.get("keypoints_2d", None)
-    target_visibility = y_data.get("keypoint_visibility", None)
-
-    for v in range(num_views):
-        x_offset = margin + v * (img_size + margin)
-        input_img = images[v]
-        if isinstance(input_img, np.ndarray):
-            if input_img.shape[0] != img_size or input_img.shape[1] != img_size:
-                from PIL import Image
-                pil_img = Image.fromarray((input_img * 255).astype(np.uint8) if input_img.max() <= 1 else input_img.astype(np.uint8))
-                pil_img = pil_img.resize((img_size, img_size), Image.BILINEAR)
-                input_img = np.array(pil_img)
-            if input_img.max() <= 1.0:
-                input_img = (input_img * 255).astype(np.uint8)
-            else:
-                input_img = input_img.astype(np.uint8)
-            if len(input_img.shape) == 2:
-                input_img = np.stack([input_img] * 3, axis=-1)
-            elif input_img.shape[-1] == 4:
-                input_img = input_img[:, :, :3]
-            canvas[margin:margin + img_size, x_offset:x_offset + img_size] = input_img
-
-        try:
-            # Extract aspect ratio for this view if available
-            aspect_ratio = None
-            try:
-                if y_data.get("cam_aspect_per_view") is not None:
-                    aspect_ratio = float(np.array(y_data["cam_aspect_per_view"][v]).reshape(-1)[0])
-            except Exception:
-                aspect_ratio = None
-            
-            rendered_img = create_rendered_view_with_keypoints(
-                model, predicted_params, v,
-                target_keypoints, target_visibility,
-                device, img_size, aspect_ratio=aspect_ratio,
-                disable_scaling=disable_scaling,
-                disable_translation=disable_translation
-            )
-            canvas[2 * margin + img_size:2 * margin + 2 * img_size,
-                   x_offset:x_offset + img_size] = rendered_img
-        except Exception as e:
-            print(f"Warning: Could not render view {v}: {e}")
-            placeholder = np.ones((img_size, img_size, 3), dtype=np.uint8) * 128
-            canvas[2 * margin + img_size:2 * margin + 2 * img_size,
-                   x_offset:x_offset + img_size] = placeholder
-
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-        pil_canvas = Image.fromarray(canvas)
-        draw = ImageDraw.Draw(pil_canvas)
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-        except Exception:
-            font = ImageFont.load_default()
-        draw.text((5, margin + img_size // 2 - 6), "Input", fill=(255, 255, 255), font=font)
-        draw.text((5, 2 * margin + img_size + img_size // 2 - 6), "Pred", fill=(255, 255, 255), font=font)
-        for v in range(num_views):
-            x_pos = margin + v * (img_size + margin) + img_size // 2 - 10
-            cam_name = x_data.get("camera_names", [f"V{v}"])[v] if v < len(x_data.get("camera_names", [])) else f"V{v}"
-            draw.text((x_pos, 2), str(cam_name)[:8], fill=(255, 255, 255), font=font)
-        canvas = np.array(pil_canvas)
-    except Exception:
-        pass
-
-    return canvas
-
-
-def create_rendered_view_with_keypoints(model: MultiViewSMILImageRegressor,
-                                        predicted_params: dict,
-                                        view_idx: int,
-                                        target_keypoints: np.ndarray,
-                                        target_visibility: np.ndarray,
-                                        device: str,
-                                        img_size: int,
-                                        aspect_ratio: Optional[float] = None,
-                                        disable_scaling: bool = False,
-                                        disable_translation: bool = False) -> np.ndarray:
-    """
-    Create a rendered view with keypoint overlays matching training visualization exactly.
-    
-    CRITICAL: This function must match the training visualization in train_multiview_regressor.py
-    exactly, especially for PCA transformation and parameter application order.
-    
-    Args:
-        model: MultiViewSMILImageRegressor model
-        predicted_params: Dictionary of predicted parameters (NOT modified by this function)
-        view_idx: Which view to render
-        target_keypoints: Ground truth keypoints
-        target_visibility: Ground truth visibility
-        device: PyTorch device
-        img_size: Output image size
-        aspect_ratio: Optional camera aspect ratio for correct projection
-        disable_scaling: If True, zero out log_beta_scales for visualization (testing/debugging)
-        disable_translation: If True, zero out betas_trans for visualization (testing/debugging)
-    """
-    # Create a modified copy of predicted_params for visualization if flags are set
-    # This ensures we don't modify the original params dict
-    vis_params = predicted_params
-    if disable_scaling or disable_translation:
-        vis_params = predicted_params.copy()
-        if disable_scaling and "log_beta_scales" in vis_params:
-            vis_params["log_beta_scales"] = torch.zeros_like(vis_params["log_beta_scales"])
-        if disable_translation and "betas_trans" in vis_params:
-            vis_params["betas_trans"] = torch.zeros_like(vis_params["betas_trans"])
-    
-    fov = vis_params["fov_per_view"][view_idx]
-    cam_rot = vis_params["cam_rot_per_view"][view_idx]
-    cam_trans = vis_params["cam_trans_per_view"][view_idx]
-
-    pred_kps = None
-    try:
-        with torch.no_grad():
-            # Convert aspect_ratio to tensor if provided
-            aspect_tensor = None
-            if aspect_ratio is not None:
-                aspect_tensor = torch.tensor([aspect_ratio], dtype=torch.float32, device=device)
-            
-            rendered_joints = model._render_keypoints_with_camera(
-                vis_params, fov, cam_rot, cam_trans, aspect_ratio=aspect_tensor
-            )
-        pred_kps = rendered_joints[0].detach().cpu().numpy()
-        pred_kps = pred_kps * img_size
-    except Exception as e:
-        print(f"Keypoint rendering failed: {e}")
-
-    img = np.ones((img_size, img_size, 3), dtype=np.uint8) * 60
-    for i in range(img_size):
-        img[i, :, 0] = min(255, 60 + view_idx * 30)
-
-    gt_kps = None
-    gt_vis = None
-    if target_keypoints is not None:
-        if len(target_keypoints.shape) == 3:
-            if view_idx < target_keypoints.shape[0]:
-                gt_kps = target_keypoints[view_idx] * img_size
-                if target_visibility is not None and view_idx < target_visibility.shape[0]:
-                    gt_vis = target_visibility[view_idx]
-        elif len(target_keypoints.shape) == 2 and view_idx == 0:
-            gt_kps = target_keypoints * img_size
-            gt_vis = target_visibility
-
-    from PIL import Image, ImageDraw
-    pil_img = Image.fromarray(img)
-    draw = ImageDraw.Draw(pil_img)
-
-    if gt_kps is not None:
-        for j, (y, x) in enumerate(gt_kps):
-            if gt_vis is None or gt_vis[j] > 0.5:
-                x, y = float(x), float(y)
-                if 0 <= x < img_size and 0 <= y < img_size:
-                    draw.ellipse([x - 3, y - 3, x + 3, y + 3], outline="green", width=2)
-
-    if pred_kps is not None:
-        for j, (y, x) in enumerate(pred_kps):
-            x, y = float(x), float(y)
-            if 0 <= x < img_size and 0 <= y < img_size:
-                draw.line([x - 4, y, x + 4, y], fill="red", width=2)
-                draw.line([x, y - 4, x, y + 4], fill="red", width=2)
-
-    return np.array(pil_img)
-
-
 class _InMemoryImageExporter:
     def __init__(self):
         self.image = None
@@ -859,22 +660,132 @@ def _compute_rank_indices(
     rank: int,
     world_size: int,
     sampler: Optional[DistributedSampler],
-    max_frames: Optional[int] = None,
+    start_idx: int = 0,
+    end_idx: Optional[int] = None,
 ) -> List[int]:
-    """Return the global dataset indices assigned to *rank*."""
+    """Return the global dataset indices in ``[start_idx, end_idx)`` assigned to *rank*.
+
+    With ``world_size > 1`` the range is striped across ranks (rank 0 takes
+    ``start_idx``, ``start_idx + world_size``, ...), matching the original
+    distributed behavior over the full dataset.
+    """
+    if end_idx is None:
+        end_idx = len(dataset)
+    end_idx = min(end_idx, len(dataset))
+    start_idx = max(0, start_idx)
+
     if sampler is not None:
         sampler.set_epoch(0)
-        indices = list(range(rank, len(dataset), world_size))
+        indices = list(range(start_idx + rank, end_idx, world_size))
     else:
-        indices = list(range(len(dataset)))
-
-    if max_frames is not None:
-        frames_per_rank = max(1, max_frames // world_size)
-        indices = indices[:frames_per_rank]
-        if rank == 0:
-            print(f"Limiting to {max_frames} total frames ({frames_per_rank} per rank)")
+        indices = list(range(start_idx, end_idx))
 
     return indices
+
+
+def _compute_subclip_ranges(
+    dataset_size: int,
+    max_frames: Optional[int],
+    num_subclips: int,
+    rank: int = 0,
+) -> List[Tuple[int, int]]:
+    """Return ``(start, end)`` index ranges (end exclusive) for each subclip.
+
+    With ``num_subclips > 1`` the dataset is divided into evenly-spaced slots
+    of size ``dataset_size // num_subclips``; each subclip starts at slot ``i``
+    and runs for ``max_frames`` frames. Falls back to a single full-dataset
+    clip when subclips can't fit (``--max_frames`` not set or per-slot space
+    smaller than ``max_frames``).
+    """
+    if num_subclips <= 1:
+        end = min(max_frames, dataset_size) if max_frames is not None else dataset_size
+        return [(0, end)]
+
+    if max_frames is None:
+        if rank == 0:
+            print(f"WARNING: --generate_num_subclips={num_subclips} requires --max_frames; "
+                  f"falling back to a single full-dataset clip.")
+        return [(0, dataset_size)]
+
+    slot_size = dataset_size // num_subclips
+    if slot_size < max_frames:
+        if rank == 0:
+            print(f"WARNING: dataset has {dataset_size} frames; {num_subclips} subclips of "
+                  f"{max_frames} frames each don't fit (only {slot_size} frames per slot). "
+                  f"Falling back to a single full-dataset clip.")
+        return [(0, dataset_size)]
+
+    ranges: List[Tuple[int, int]] = []
+    for i in range(num_subclips):
+        start = i * dataset_size // num_subclips
+        end = min(start + max_frames, dataset_size)
+        ranges.append((start, end))
+    return ranges
+
+
+def _export_animation(
+    raw_predictions: List[Tuple[int, dict]],
+    rank: int,
+    world_size: int,
+    dataset: SLEAPMultiViewDataset,
+    model: MultiViewSMILImageRegressor,
+    checkpoint_path: Path,
+    dataset_path: Path,
+    export_path: str,
+    fps: float,
+) -> None:
+    """Gather predictions to rank 0 and write an AMASS-style .npz + .json clip.
+
+    The export captures the *raw*, pre-smoothing network predictions so downstream
+    consumers (Blender addon, etc.) can apply their own smoothing if desired.
+    """
+    if world_size > 1:
+        # Reuse the existing temp-dir gather machinery dedicated to this export.
+        # Derive the temp dir name from the export path so it stays unique when
+        # multiple subclips are exported in the same run.
+        export_temp_base = Path.cwd() / f".animation_export_temp_{Path(export_path).name}"
+        if rank == 0:
+            if export_temp_base.exists():
+                shutil.rmtree(export_temp_base)
+            export_temp_base.mkdir(parents=True, exist_ok=True)
+        dist.barrier()
+
+        write_predictions_to_temp(raw_predictions, export_temp_base, rank)
+        dist.barrier()
+
+        if rank == 0:
+            all_predictions = load_all_predictions_from_temp(export_temp_base, world_size)
+        else:
+            all_predictions = None
+
+        dist.barrier()
+        if rank == 0:
+            shutil.rmtree(export_temp_base, ignore_errors=True)
+    else:
+        all_predictions = sorted(raw_predictions, key=lambda x: x[0])
+
+    if rank != 0 or not all_predictions:
+        return
+
+    recorder = build_recorder_from_config(
+        output_path=export_path,
+        rotation_representation=getattr(model, "rotation_representation", "6d"),
+        fps=fps,
+        source_checkpoint=str(checkpoint_path),
+        source_input=str(dataset_path),
+        model_id=getattr(model, "model_id", None),
+    )
+
+    cameras = build_multiview_cameras(all_predictions, dataset.get_canonical_camera_order())
+    if cameras:
+        recorder.set_cameras(cameras)
+
+    for _, params in all_predictions:
+        recorder.record(params)
+
+    written = recorder.write()
+    print(f"Animation export written: {written['npz']} + {written['json']} "
+          f"({recorder.num_frames()} frames)")
 
 
 def run_inference_phase(
@@ -923,6 +834,7 @@ def run_render_phase(
     disable_scaling: bool = False,
     disable_translation: bool = False,
     view_indices: Optional[List[int]] = None,
+    total_view_slots: Optional[int] = None,
 ) -> Tuple[List[np.ndarray], Dict[int, List[np.ndarray]], List[int], Dict[int, List[int]]]:
     """Render visualizations for the assigned indices using pre-computed smoothed params.
 
@@ -953,6 +865,7 @@ def run_render_phase(
                 disable_scaling=disable_scaling,
                 disable_translation=disable_translation,
                 predicted_params=params,
+                total_view_slots=total_view_slots,
             )
             if mv_frame is not None:
                 mv_frame = _pad_or_resize(mv_frame, (grid_width, grid_height))
@@ -1122,14 +1035,21 @@ def merge_frames_and_write_videos(
     
     print(f"Writing {len(all_mv_entries)} multiview frames...")
     
-    # Write multiview video
+    # Write multiview video. MPEG-4 caps frame dimensions at 8192 px, so wide
+    # multi-camera grids fall over silently with mp4v. AVI+MJPG has no such
+    # cap and stays well-supported everywhere we play these back.
     if len(all_mv_entries) > 0:
         multiview_writer = cv2.VideoWriter(
             str(multiview_out),
-            cv2.VideoWriter_fourcc(*"mp4v"),
+            cv2.VideoWriter_fourcc(*"MJPG"),
             fps,
             (grid_width, grid_height),
         )
+        if not multiview_writer.isOpened():
+            raise RuntimeError(
+                f"Failed to open multiview VideoWriter for {multiview_out} "
+                f"at {grid_width}x{grid_height}"
+            )
         for _, frame_path in all_mv_entries:
             frame = cv2.imread(frame_path)
             if frame is not None:
@@ -1218,6 +1138,8 @@ def main_inference(
         print(f"Checkpoint: {args.checkpoint if args.checkpoint else '(auto-detect)'}")
         if args.max_frames is not None:
             print(f"Max frames: {args.max_frames} (testing mode)")
+        if args.generate_num_subclips > 1:
+            print(f"Subclips: {args.generate_num_subclips} (per-clip length: {args.max_frames})")
         if args.disable_scaling:
             print(f"Part scaling: DISABLED (comparison mode)")
         if args.disable_translation:
@@ -1277,11 +1199,17 @@ def main_inference(
     if world_size > 1:
         sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=False)
 
-    # Calculate frame dimensions — derive from the model's renderer resolution
+    # Calculate frame dimensions — derive from the model's renderer resolution.
+    # Layout (single-row vs wrapped 6-per-row block layout for >12 views) is
+    # decided once from model.max_views so every frame in the output video has
+    # identical dimensions, even when individual samples have fewer views.
     img_size = int(model.renderer.image_size)
-    margin = 5
-    grid_width = model_max_views * img_size + (model_max_views + 1) * margin
-    grid_height = 2 * img_size + 3 * margin
+    mv_layout = compute_multiview_grid_layout(model_max_views, img_size)
+    grid_width = mv_layout['grid_width']
+    grid_height = mv_layout['grid_height']
+    if rank == 0:
+        print(f"Multiview grid layout: {mv_layout['num_blocks']} block(s) × "
+              f"{mv_layout['cols']} col(s) → {grid_width}×{grid_height}")
 
     # Determine singleview frame size (use first sample to get actual size)
     singleview_size = (img_size, img_size)  # Default, overridden below by test render
@@ -1295,165 +1223,208 @@ def main_inference(
         except Exception:
             pass  # Use default
 
-    # Compute which dataset indices this rank is responsible for
-    assigned_indices = _compute_rank_indices(
-        dataset, rank, world_size, sampler, max_frames=args.max_frames
-    )
-
-    # ── Phase 1: Inference (all ranks in parallel) ──────────────────────
-    if rank == 0:
-        print("\n── Phase 1: Running inference ──")
-    raw_predictions = run_inference_phase(dataset, model, device, assigned_indices, rank)
-
-    # Free GPU memory after inference — rendering will reload params to device as needed
-    torch.cuda.empty_cache()
-
-    # ── Phase 2: Gather + smooth predictions ────────────────────────────
-    smoothing_window = args.smoothing_window
-    dataset_name = dataset_path.stem
-    temp_base = Path.cwd() / f".inference_temp_{dataset_name}"
-
-    if world_size > 1 and smoothing_window > 0:
-        # Multi-GPU with smoothing: gather all predictions so every rank
-        # can build the full temporally-ordered sequence for correct smoothing.
-        if rank == 0:
-            print(f"\n── Phase 2: Gathering predictions across {world_size} ranks for smoothing (window={smoothing_window}) ──")
-            if temp_base.exists():
-                shutil.rmtree(temp_base)
-            temp_base.mkdir(parents=True, exist_ok=True)
-        dist.barrier()
-
-        write_predictions_to_temp(raw_predictions, temp_base, rank)
-        dist.barrier()
-
-        all_predictions = load_all_predictions_from_temp(temp_base, world_size)
-
-        # Apply smoothing over the full sorted sequence
-        smoother = PredictionSmoother(smoothing_window)
-        smoothed_params: Dict[int, dict] = {}
-        iterator = tqdm(all_predictions, desc="Applying temporal smoothing", disable=(rank != 0))
-        for global_idx, params in iterator:
-            smoothed_params[global_idx] = smoother(params)
-
-        # Clean up prediction temp files (keep temp_base for frame storage later)
-        for rank_idx in range(world_size):
-            pred_path = temp_base / f"rank_{rank_idx}" / "predictions.pkl"
-            if pred_path.exists():
-                pred_path.unlink()
-
-        del raw_predictions, all_predictions
-
-    elif smoothing_window > 0:
-        # Single GPU with smoothing
-        if rank == 0:
-            print(f"\n── Phase 2: Applying temporal smoothing (window={smoothing_window}) ──")
-        raw_predictions.sort(key=lambda x: x[0])
-        smoother = PredictionSmoother(smoothing_window)
-        smoothed_params = {}
-        for global_idx, params in tqdm(raw_predictions, desc="Applying temporal smoothing", disable=(rank != 0)):
-            smoothed_params[global_idx] = smoother(params)
-        del raw_predictions
-
-    else:
-        # No smoothing: use raw predictions directly
-        if rank == 0:
-            print("\n── Phase 2: No smoothing (window=0) ──")
-        smoothed_params = {idx: params for idx, params in raw_predictions}
-        del raw_predictions
-
-    # ── Phase 3: Render visualizations (all ranks in parallel) ──────────
-    if rank == 0:
-        print("\n── Phase 3: Rendering visualizations ──")
-    multiview_frames, singleview_frames_per_view, mv_frame_indices, sv_frame_indices_per_view = run_render_phase(
-        dataset=dataset,
-        model=model,
-        device=device,
-        smoothed_params=smoothed_params,
-        indices=assigned_indices,
+    # Determine subclip ranges (single full-dataset clip by default).
+    subclip_ranges = _compute_subclip_ranges(
+        dataset_size=len(dataset),
+        max_frames=args.max_frames,
+        num_subclips=args.generate_num_subclips,
         rank=rank,
-        grid_width=grid_width,
-        grid_height=grid_height,
-        singleview_size=singleview_size,
-        disable_scaling=args.disable_scaling,
-        disable_translation=args.disable_translation,
-        view_indices=view_indices,
     )
-    del smoothed_params
+    multi_subclip = len(subclip_ranges) > 1
 
-    # ── Phase 4: Write output videos ────────────────────────────────────
-    if rank == 0:
-        print("\n── Phase 4: Writing output videos ──")
-    multiview_out = Path(f"{dataset_name}_multiview_inference.mp4")
-    singleview_out_base = Path(f"{dataset_name}_singleview_inference.mp4")
+    dataset_name = dataset_path.stem
+    smoothing_window = args.smoothing_window
+    export_animation_path = getattr(args, "export_animation", None)
 
-    if world_size > 1:
-        if rank == 0:
-            if not temp_base.exists():
-                temp_base.mkdir(parents=True, exist_ok=True)
-        dist.barrier()
+    for clip_idx, (start_idx, end_idx) in enumerate(subclip_ranges):
+        if multi_subclip and rank == 0:
+            print(f"\n{'#'*60}")
+            print(f"# SUBCLIP {clip_idx + 1}/{len(subclip_ranges)}: "
+                  f"frames [{start_idx}, {end_idx}) ({end_idx - start_idx} frames)")
+            print(f"{'#'*60}")
 
-        write_frames_to_temp_storage(
-            multiview_frames=multiview_frames,
-            singleview_frames_per_view=singleview_frames_per_view,
-            mv_frame_indices=mv_frame_indices,
-            sv_frame_indices_per_view=sv_frame_indices_per_view,
-            temp_dir=temp_base,
-            rank=rank,
+        range_suffix = f"_frames{start_idx:06d}-{end_idx:06d}" if multi_subclip else ""
+
+        # Compute which dataset indices this rank is responsible for in this subclip
+        assigned_indices = _compute_rank_indices(
+            dataset, rank, world_size, sampler,
+            start_idx=start_idx, end_idx=end_idx,
         )
-        del multiview_frames, singleview_frames_per_view, mv_frame_indices, sv_frame_indices_per_view
+
+        # ── Phase 1: Inference (all ranks in parallel) ──────────────────────
+        if rank == 0:
+            print("\n── Phase 1: Running inference ──")
+        raw_predictions = run_inference_phase(dataset, model, device, assigned_indices, rank)
+
+        # Free GPU memory after inference — rendering will reload params to device as needed
         torch.cuda.empty_cache()
 
-        dist.barrier()
-
-        if rank == 0:
-            merge_frames_and_write_videos(
-                temp_dir=temp_base,
+        # ── Phase 1b: Optional animation export (raw, pre-smoothing) ────────
+        if export_animation_path:
+            clip_export_path = f"{export_animation_path}{range_suffix}"
+            _export_animation(
+                raw_predictions=raw_predictions,
+                rank=rank,
                 world_size=world_size,
-                multiview_out=multiview_out,
-                singleview_out_base=singleview_out_base,
-                fps=args.fps,
-                grid_width=grid_width,
-                grid_height=grid_height,
-                singleview_size=singleview_size,
-                view_indices=view_indices,
+                dataset=dataset,
+                model=model,
+                checkpoint_path=checkpoint_path,
+                dataset_path=dataset_path,
+                export_path=clip_export_path,
+                fps=float(args.fps),
             )
-            print(f"Cleaning up temporary directory: {temp_base}")
-            shutil.rmtree(temp_base)
 
-        dist.barrier()
-    else:
-        # Single GPU: write directly
-        if len(multiview_frames) > 0:
-            multiview_writer = cv2.VideoWriter(
-                str(multiview_out),
-                cv2.VideoWriter_fourcc(*"mp4v"),
-                args.fps,
-                (grid_width, grid_height),
+        # ── Phase 2: Gather + smooth predictions ────────────────────────────
+        temp_base = Path.cwd() / f".inference_temp_{dataset_name}{range_suffix}"
+
+        if world_size > 1 and smoothing_window > 0:
+            # Multi-GPU with smoothing: gather all predictions so every rank
+            # can build the full temporally-ordered sequence for correct smoothing.
+            if rank == 0:
+                print(f"\n── Phase 2: Gathering predictions across {world_size} ranks for smoothing (window={smoothing_window}) ──")
+                if temp_base.exists():
+                    shutil.rmtree(temp_base)
+                temp_base.mkdir(parents=True, exist_ok=True)
+            dist.barrier()
+
+            write_predictions_to_temp(raw_predictions, temp_base, rank)
+            dist.barrier()
+
+            all_predictions = load_all_predictions_from_temp(temp_base, world_size)
+
+            # Apply smoothing over the full sorted sequence
+            smoother = PredictionSmoother(smoothing_window)
+            smoothed_params: Dict[int, dict] = {}
+            iterator = tqdm(all_predictions, desc="Applying temporal smoothing", disable=(rank != 0))
+            for global_idx, params in iterator:
+                smoothed_params[global_idx] = smoother(params)
+
+            # Clean up prediction temp files (keep temp_base for frame storage later)
+            for rank_idx in range(world_size):
+                pred_path = temp_base / f"rank_{rank_idx}" / "predictions.pkl"
+                if pred_path.exists():
+                    pred_path.unlink()
+
+            del raw_predictions, all_predictions
+
+        elif smoothing_window > 0:
+            # Single GPU with smoothing
+            if rank == 0:
+                print(f"\n── Phase 2: Applying temporal smoothing (window={smoothing_window}) ──")
+            raw_predictions.sort(key=lambda x: x[0])
+            smoother = PredictionSmoother(smoothing_window)
+            smoothed_params = {}
+            for global_idx, params in tqdm(raw_predictions, desc="Applying temporal smoothing", disable=(rank != 0)):
+                smoothed_params[global_idx] = smoother(params)
+            del raw_predictions
+
+        else:
+            # No smoothing: use raw predictions directly
+            if rank == 0:
+                print("\n── Phase 2: No smoothing (window=0) ──")
+            smoothed_params = {idx: params for idx, params in raw_predictions}
+            del raw_predictions
+
+        # ── Phase 3: Render visualizations (all ranks in parallel) ──────────
+        if rank == 0:
+            print("\n── Phase 3: Rendering visualizations ──")
+        multiview_frames, singleview_frames_per_view, mv_frame_indices, sv_frame_indices_per_view = run_render_phase(
+            dataset=dataset,
+            model=model,
+            device=device,
+            smoothed_params=smoothed_params,
+            indices=assigned_indices,
+            rank=rank,
+            grid_width=grid_width,
+            grid_height=grid_height,
+            singleview_size=singleview_size,
+            disable_scaling=args.disable_scaling,
+            disable_translation=args.disable_translation,
+            view_indices=view_indices,
+            total_view_slots=model_max_views,
+        )
+        del smoothed_params
+
+        # ── Phase 4: Write output videos ────────────────────────────────────
+        if rank == 0:
+            print("\n── Phase 4: Writing output videos ──")
+        multiview_out = Path(f"{dataset_name}{range_suffix}_multiview_inference.avi")
+        singleview_out_base = Path(f"{dataset_name}{range_suffix}_singleview_inference.mp4")
+
+        if world_size > 1:
+            if rank == 0:
+                if not temp_base.exists():
+                    temp_base.mkdir(parents=True, exist_ok=True)
+            dist.barrier()
+
+            write_frames_to_temp_storage(
+                multiview_frames=multiview_frames,
+                singleview_frames_per_view=singleview_frames_per_view,
+                mv_frame_indices=mv_frame_indices,
+                sv_frame_indices_per_view=sv_frame_indices_per_view,
+                temp_dir=temp_base,
+                rank=rank,
             )
-            for frame in multiview_frames:
-                multiview_writer.write(frame)
-            multiview_writer.release()
-            print(f"Wrote {multiview_out}")
+            del multiview_frames, singleview_frames_per_view, mv_frame_indices, sv_frame_indices_per_view
+            torch.cuda.empty_cache()
 
-        for view_idx in view_indices:
-            frames = singleview_frames_per_view.get(view_idx, [])
-            if len(frames) > 0:
-                if len(view_indices) == 1:
-                    singleview_out = singleview_out_base
-                else:
-                    stem = singleview_out_base.stem
-                    singleview_out = singleview_out_base.parent / f"{stem}_view{view_idx}.mp4"
+            dist.barrier()
 
-                singleview_writer = cv2.VideoWriter(
-                    str(singleview_out),
-                    cv2.VideoWriter_fourcc(*"mp4v"),
-                    args.fps,
-                    singleview_size,
+            if rank == 0:
+                merge_frames_and_write_videos(
+                    temp_dir=temp_base,
+                    world_size=world_size,
+                    multiview_out=multiview_out,
+                    singleview_out_base=singleview_out_base,
+                    fps=args.fps,
+                    grid_width=grid_width,
+                    grid_height=grid_height,
+                    singleview_size=singleview_size,
+                    view_indices=view_indices,
                 )
-                for frame in frames:
-                    singleview_writer.write(frame)
-                singleview_writer.release()
-                print(f"Wrote {singleview_out} ({len(frames)} frames)")
+                print(f"Cleaning up temporary directory: {temp_base}")
+                shutil.rmtree(temp_base)
+
+            dist.barrier()
+        else:
+            # Single GPU: write directly. See note in merge_frames_and_write_videos
+            # for why multiview uses AVI+MJPG instead of MP4.
+            if len(multiview_frames) > 0:
+                multiview_writer = cv2.VideoWriter(
+                    str(multiview_out),
+                    cv2.VideoWriter_fourcc(*"MJPG"),
+                    args.fps,
+                    (grid_width, grid_height),
+                )
+                if not multiview_writer.isOpened():
+                    raise RuntimeError(
+                        f"Failed to open multiview VideoWriter for {multiview_out} "
+                        f"at {grid_width}x{grid_height}"
+                    )
+                for frame in multiview_frames:
+                    multiview_writer.write(frame)
+                multiview_writer.release()
+                print(f"Wrote {multiview_out}")
+
+            for view_idx in view_indices:
+                frames = singleview_frames_per_view.get(view_idx, [])
+                if len(frames) > 0:
+                    if len(view_indices) == 1:
+                        singleview_out = singleview_out_base
+                    else:
+                        stem = singleview_out_base.stem
+                        singleview_out = singleview_out_base.parent / f"{stem}_view{view_idx}.mp4"
+
+                    singleview_writer = cv2.VideoWriter(
+                        str(singleview_out),
+                        cv2.VideoWriter_fourcc(*"mp4v"),
+                        args.fps,
+                        singleview_size,
+                    )
+                    for frame in frames:
+                        singleview_writer.write(frame)
+                    singleview_writer.release()
+                    print(f"Wrote {singleview_out} ({len(frames)} frames)")
 
 
 def ddp_main_inference(rank: int, world_size: int, args, master_port: str):
@@ -1491,9 +1462,15 @@ def main():
     )
     parser.add_argument("--dataset", required=True, type=str, help="Path to preprocessed SLEAP HDF5 dataset")
     parser.add_argument("--fps", type=int, default=60, help="Output video FPS (default: 60)")
-    parser.add_argument("--max_frames", type=int, default=None, help="Maximum number of frames to process (default: all frames). Useful for quick testing.")
+    parser.add_argument("--max_frames", type=int, default=None, help="Maximum number of frames to process (default: all frames). Useful for quick testing. With --generate_num_subclips > 1, this is the length of each subclip.")
+    parser.add_argument("--generate_num_subclips", type=int, default=1,
+                        help="Generate N subclips evenly spaced across the dataset, each --max_frames "
+                             "long. Subclip i starts at index i * len(dataset) / N. Each output "
+                             "video and exported animation file is suffixed with the frame range. "
+                             "Falls back to a single full-dataset clip if subclips don't fit. "
+                             "Default: 1 (single clip).")
     parser.add_argument("--disable_scaling", action="store_true", help="Disable part scaling (log_beta_scales) for comparison/debugging")
-    parser.add_argument("--disable_translation", action="store_true", default=True, help="Disable part translation (betas_trans) for comparison/debugging")
+    parser.add_argument("--disable_translation", action=argparse.BooleanOptionalAction, default=True, help="Disable part translation (betas_trans) for comparison/debugging. Pass --no-disable_translation to keep translation enabled.")
     parser.add_argument("--view_indices", type=str, default="0", help="Comma-separated list of camera view indices to render for singleview output (default: '0'). E.g., '0,4,11' renders views 0, 4, and 11.")
     parser.add_argument("--smoothing_window", type=int, default=0, help="Number of frames to average predictions over for temporal smoothing (default: 0, disabled)")
     parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs to use (default: 1, ignored when using torchrun)")
@@ -1501,6 +1478,10 @@ def main():
     parser.add_argument("--smal_file", type=str, default=None, help="Path to SMAL model file to override config.py SMAL_FILE (optional)")
     parser.add_argument("--shape_family", type=int, default=None, help="Shape family to use with --smal_file (optional, defaults to config.SHAPE_FAMILY)")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint (.pth) to use for inference (default: auto-detected from multiview_checkpoints/)")
+    parser.add_argument("--export_animation", type=str, default=None,
+                        help="Optional output path stem for SMIL animation export. "
+                             "Writes <stem>.npz + <stem>.json with raw (pre-smoothing) parameters "
+                             "and per-view cameras. Gathered to rank 0 in multi-GPU runs.")
     args = parser.parse_args()
     
     # Get master port from args or environment variable
