@@ -6,7 +6,8 @@ This script mirrors the visualization logic used during training in
 `train_multiview_regressor.py`, but runs over all samples in a preprocessed
 multi-view HDF5 dataset and writes two videos in the current working directory:
 
-  - "<DATASET>_multiview_inference.mp4" (multi-view grid visualization)
+  - "<DATASET>_multiview_inference.avi" (multi-view grid visualization, AVI+MJPG
+    so wide grids exceed MPEG-4's 8192px width cap)
   - "<DATASET>_smultiview_first_camera_render.mp4" (single-view render for view 0)
 """
 
@@ -57,6 +58,10 @@ from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
 from configs import apply_smal_file_override
 import config
 from animation_export import build_recorder_from_config, build_multiview_cameras
+from multiview_visualization import (
+    compute_multiview_grid_layout,
+    create_multiview_visualization,
+)
 
 
 DEFAULT_CHECKPOINTS = [
@@ -425,211 +430,6 @@ def load_multiview_model_from_checkpoint(checkpoint_path: Path,
     model.load_state_dict(nn_state_dict, strict=False)
     model.eval()
     return model
-
-
-def create_multiview_visualization(model: MultiViewSMILImageRegressor,
-                                   x_data: dict,
-                                   y_data: dict,
-                                   device: str,
-                                   disable_scaling: bool = False,
-                                   disable_translation: bool = False,
-                                   predicted_params: Optional[dict] = None) -> Optional[np.ndarray]:
-    """
-    Create multi-view grid visualization matching training visualization exactly.
-
-    CRITICAL: This function must match the training visualization in train_multiview_regressor.py
-    exactly, especially for PCA transformation and parameter application order.
-
-    Args:
-        model: MultiViewSMILImageRegressor model
-        x_data: Input data dictionary
-        y_data: Target data dictionary
-        device: PyTorch device
-        disable_scaling: If True, zero out log_beta_scales for visualization (testing/debugging)
-        disable_translation: If True, zero out betas_trans for visualization (testing/debugging)
-        predicted_params: Pre-computed predicted parameters. If None, runs forward pass internally.
-    """
-    images = x_data.get("images", [])
-    num_views = len(images)
-    if num_views == 0:
-        return None
-
-    # Run forward pass if predicted_params not provided
-    if predicted_params is None:
-        predicted_params = run_forward_multiview(model, x_data, y_data, device)
-        if predicted_params is None:
-            return None
-
-    # Calculate grid dimensions dynamically based on actual num_views (same as training)
-    # This allows samples with fewer views than max_views to be visualized correctly
-    # Derive img_size from the model's renderer resolution so visualization is correct
-    # for any backbone (ViT=224, ResNet/UNet=512, etc.)
-    img_size = int(model.renderer.image_size)
-    margin = 5
-    grid_width = num_views * img_size + (num_views + 1) * margin
-    grid_height = 2 * img_size + 3 * margin
-
-    canvas = np.ones((grid_height, grid_width, 3), dtype=np.uint8) * 40
-    target_keypoints = y_data.get("keypoints_2d", None)
-    target_visibility = y_data.get("keypoint_visibility", None)
-
-    for v in range(num_views):
-        x_offset = margin + v * (img_size + margin)
-        input_img = images[v]
-        if isinstance(input_img, np.ndarray):
-            if input_img.shape[0] != img_size or input_img.shape[1] != img_size:
-                from PIL import Image
-                pil_img = Image.fromarray((input_img * 255).astype(np.uint8) if input_img.max() <= 1 else input_img.astype(np.uint8))
-                pil_img = pil_img.resize((img_size, img_size), Image.BILINEAR)
-                input_img = np.array(pil_img)
-            if input_img.max() <= 1.0:
-                input_img = (input_img * 255).astype(np.uint8)
-            else:
-                input_img = input_img.astype(np.uint8)
-            if len(input_img.shape) == 2:
-                input_img = np.stack([input_img] * 3, axis=-1)
-            elif input_img.shape[-1] == 4:
-                input_img = input_img[:, :, :3]
-            canvas[margin:margin + img_size, x_offset:x_offset + img_size] = input_img
-
-        try:
-            # Extract aspect ratio for this view if available
-            aspect_ratio = None
-            try:
-                if y_data.get("cam_aspect_per_view") is not None:
-                    aspect_ratio = float(np.array(y_data["cam_aspect_per_view"][v]).reshape(-1)[0])
-            except Exception:
-                aspect_ratio = None
-            
-            rendered_img = create_rendered_view_with_keypoints(
-                model, predicted_params, v,
-                target_keypoints, target_visibility,
-                device, img_size, aspect_ratio=aspect_ratio,
-                disable_scaling=disable_scaling,
-                disable_translation=disable_translation
-            )
-            canvas[2 * margin + img_size:2 * margin + 2 * img_size,
-                   x_offset:x_offset + img_size] = rendered_img
-        except Exception as e:
-            print(f"Warning: Could not render view {v}: {e}")
-            placeholder = np.ones((img_size, img_size, 3), dtype=np.uint8) * 128
-            canvas[2 * margin + img_size:2 * margin + 2 * img_size,
-                   x_offset:x_offset + img_size] = placeholder
-
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-        pil_canvas = Image.fromarray(canvas)
-        draw = ImageDraw.Draw(pil_canvas)
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-        except Exception:
-            font = ImageFont.load_default()
-        draw.text((5, margin + img_size // 2 - 6), "Input", fill=(255, 255, 255), font=font)
-        draw.text((5, 2 * margin + img_size + img_size // 2 - 6), "Pred", fill=(255, 255, 255), font=font)
-        for v in range(num_views):
-            x_pos = margin + v * (img_size + margin) + img_size // 2 - 10
-            cam_name = x_data.get("camera_names", [f"V{v}"])[v] if v < len(x_data.get("camera_names", [])) else f"V{v}"
-            draw.text((x_pos, 2), str(cam_name)[:8], fill=(255, 255, 255), font=font)
-        canvas = np.array(pil_canvas)
-    except Exception:
-        pass
-
-    return canvas
-
-
-def create_rendered_view_with_keypoints(model: MultiViewSMILImageRegressor,
-                                        predicted_params: dict,
-                                        view_idx: int,
-                                        target_keypoints: np.ndarray,
-                                        target_visibility: np.ndarray,
-                                        device: str,
-                                        img_size: int,
-                                        aspect_ratio: Optional[float] = None,
-                                        disable_scaling: bool = False,
-                                        disable_translation: bool = False) -> np.ndarray:
-    """
-    Create a rendered view with keypoint overlays matching training visualization exactly.
-    
-    CRITICAL: This function must match the training visualization in train_multiview_regressor.py
-    exactly, especially for PCA transformation and parameter application order.
-    
-    Args:
-        model: MultiViewSMILImageRegressor model
-        predicted_params: Dictionary of predicted parameters (NOT modified by this function)
-        view_idx: Which view to render
-        target_keypoints: Ground truth keypoints
-        target_visibility: Ground truth visibility
-        device: PyTorch device
-        img_size: Output image size
-        aspect_ratio: Optional camera aspect ratio for correct projection
-        disable_scaling: If True, zero out log_beta_scales for visualization (testing/debugging)
-        disable_translation: If True, zero out betas_trans for visualization (testing/debugging)
-    """
-    # Create a modified copy of predicted_params for visualization if flags are set
-    # This ensures we don't modify the original params dict
-    vis_params = predicted_params
-    if disable_scaling or disable_translation:
-        vis_params = predicted_params.copy()
-        if disable_scaling and "log_beta_scales" in vis_params:
-            vis_params["log_beta_scales"] = torch.zeros_like(vis_params["log_beta_scales"])
-        if disable_translation and "betas_trans" in vis_params:
-            vis_params["betas_trans"] = torch.zeros_like(vis_params["betas_trans"])
-    
-    fov = vis_params["fov_per_view"][view_idx]
-    cam_rot = vis_params["cam_rot_per_view"][view_idx]
-    cam_trans = vis_params["cam_trans_per_view"][view_idx]
-
-    pred_kps = None
-    try:
-        with torch.no_grad():
-            # Convert aspect_ratio to tensor if provided
-            aspect_tensor = None
-            if aspect_ratio is not None:
-                aspect_tensor = torch.tensor([aspect_ratio], dtype=torch.float32, device=device)
-            
-            rendered_joints = model._render_keypoints_with_camera(
-                vis_params, fov, cam_rot, cam_trans, aspect_ratio=aspect_tensor
-            )
-        pred_kps = rendered_joints[0].detach().cpu().numpy()
-        pred_kps = pred_kps * img_size
-    except Exception as e:
-        print(f"Keypoint rendering failed: {e}")
-
-    img = np.ones((img_size, img_size, 3), dtype=np.uint8) * 60
-    for i in range(img_size):
-        img[i, :, 0] = min(255, 60 + view_idx * 30)
-
-    gt_kps = None
-    gt_vis = None
-    if target_keypoints is not None:
-        if len(target_keypoints.shape) == 3:
-            if view_idx < target_keypoints.shape[0]:
-                gt_kps = target_keypoints[view_idx] * img_size
-                if target_visibility is not None and view_idx < target_visibility.shape[0]:
-                    gt_vis = target_visibility[view_idx]
-        elif len(target_keypoints.shape) == 2 and view_idx == 0:
-            gt_kps = target_keypoints * img_size
-            gt_vis = target_visibility
-
-    from PIL import Image, ImageDraw
-    pil_img = Image.fromarray(img)
-    draw = ImageDraw.Draw(pil_img)
-
-    if gt_kps is not None:
-        for j, (y, x) in enumerate(gt_kps):
-            if gt_vis is None or gt_vis[j] > 0.5:
-                x, y = float(x), float(y)
-                if 0 <= x < img_size and 0 <= y < img_size:
-                    draw.ellipse([x - 3, y - 3, x + 3, y + 3], outline="green", width=2)
-
-    if pred_kps is not None:
-        for j, (y, x) in enumerate(pred_kps):
-            x, y = float(x), float(y)
-            if 0 <= x < img_size and 0 <= y < img_size:
-                draw.line([x - 4, y, x + 4, y], fill="red", width=2)
-                draw.line([x, y - 4, x, y + 4], fill="red", width=2)
-
-    return np.array(pil_img)
 
 
 class _InMemoryImageExporter:
@@ -1034,6 +834,7 @@ def run_render_phase(
     disable_scaling: bool = False,
     disable_translation: bool = False,
     view_indices: Optional[List[int]] = None,
+    total_view_slots: Optional[int] = None,
 ) -> Tuple[List[np.ndarray], Dict[int, List[np.ndarray]], List[int], Dict[int, List[int]]]:
     """Render visualizations for the assigned indices using pre-computed smoothed params.
 
@@ -1064,6 +865,7 @@ def run_render_phase(
                 disable_scaling=disable_scaling,
                 disable_translation=disable_translation,
                 predicted_params=params,
+                total_view_slots=total_view_slots,
             )
             if mv_frame is not None:
                 mv_frame = _pad_or_resize(mv_frame, (grid_width, grid_height))
@@ -1233,14 +1035,21 @@ def merge_frames_and_write_videos(
     
     print(f"Writing {len(all_mv_entries)} multiview frames...")
     
-    # Write multiview video
+    # Write multiview video. MPEG-4 caps frame dimensions at 8192 px, so wide
+    # multi-camera grids fall over silently with mp4v. AVI+MJPG has no such
+    # cap and stays well-supported everywhere we play these back.
     if len(all_mv_entries) > 0:
         multiview_writer = cv2.VideoWriter(
             str(multiview_out),
-            cv2.VideoWriter_fourcc(*"mp4v"),
+            cv2.VideoWriter_fourcc(*"MJPG"),
             fps,
             (grid_width, grid_height),
         )
+        if not multiview_writer.isOpened():
+            raise RuntimeError(
+                f"Failed to open multiview VideoWriter for {multiview_out} "
+                f"at {grid_width}x{grid_height}"
+            )
         for _, frame_path in all_mv_entries:
             frame = cv2.imread(frame_path)
             if frame is not None:
@@ -1390,11 +1199,17 @@ def main_inference(
     if world_size > 1:
         sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=False)
 
-    # Calculate frame dimensions — derive from the model's renderer resolution
+    # Calculate frame dimensions — derive from the model's renderer resolution.
+    # Layout (single-row vs wrapped 6-per-row block layout for >12 views) is
+    # decided once from model.max_views so every frame in the output video has
+    # identical dimensions, even when individual samples have fewer views.
     img_size = int(model.renderer.image_size)
-    margin = 5
-    grid_width = model_max_views * img_size + (model_max_views + 1) * margin
-    grid_height = 2 * img_size + 3 * margin
+    mv_layout = compute_multiview_grid_layout(model_max_views, img_size)
+    grid_width = mv_layout['grid_width']
+    grid_height = mv_layout['grid_height']
+    if rank == 0:
+        print(f"Multiview grid layout: {mv_layout['num_blocks']} block(s) × "
+              f"{mv_layout['cols']} col(s) → {grid_width}×{grid_height}")
 
     # Determine singleview frame size (use first sample to get actual size)
     singleview_size = (img_size, img_size)  # Default, overridden below by test render
@@ -1526,13 +1341,14 @@ def main_inference(
             disable_scaling=args.disable_scaling,
             disable_translation=args.disable_translation,
             view_indices=view_indices,
+            total_view_slots=model_max_views,
         )
         del smoothed_params
 
         # ── Phase 4: Write output videos ────────────────────────────────────
         if rank == 0:
             print("\n── Phase 4: Writing output videos ──")
-        multiview_out = Path(f"{dataset_name}{range_suffix}_multiview_inference.mp4")
+        multiview_out = Path(f"{dataset_name}{range_suffix}_multiview_inference.avi")
         singleview_out_base = Path(f"{dataset_name}{range_suffix}_singleview_inference.mp4")
 
         if world_size > 1:
@@ -1571,14 +1387,20 @@ def main_inference(
 
             dist.barrier()
         else:
-            # Single GPU: write directly
+            # Single GPU: write directly. See note in merge_frames_and_write_videos
+            # for why multiview uses AVI+MJPG instead of MP4.
             if len(multiview_frames) > 0:
                 multiview_writer = cv2.VideoWriter(
                     str(multiview_out),
-                    cv2.VideoWriter_fourcc(*"mp4v"),
+                    cv2.VideoWriter_fourcc(*"MJPG"),
                     args.fps,
                     (grid_width, grid_height),
                 )
+                if not multiview_writer.isOpened():
+                    raise RuntimeError(
+                        f"Failed to open multiview VideoWriter for {multiview_out} "
+                        f"at {grid_width}x{grid_height}"
+                    )
                 for frame in multiview_frames:
                     multiview_writer.write(frame)
                 multiview_writer.release()
