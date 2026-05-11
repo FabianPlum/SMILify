@@ -1815,6 +1815,11 @@ class SMPL_PT_Panel(bpy.types.Panel):
 
         layout.separator()
         layout.operator("smpl.import_animation", text="Import SMIL Animation (.npz)")
+        # Stays greyed out until SMPL_OT_ExportAnimationGLTF.poll() finds
+        # SMIL_Animation_Root in the scene.
+        layout.operator(
+            "smpl.export_animation_gltf", text="Export animated model as glTF"
+        )
 
 
 def store_smpl_data(context, data, obj=None):
@@ -3746,6 +3751,79 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
         return created
 
 
+class SMPL_OT_ExportAnimationGLTF(bpy.types.Operator):
+    bl_idname = "smpl.export_animation_gltf"
+    bl_label = "Export Animated Model as glTF"
+    bl_description = (
+        "Export the imported SMIL animation (rig, mesh, cameras) as a glTF 2.0 "
+        "file via Blender's built-in exporter. Available once Import SMIL "
+        "Animation has produced a SMIL_Animation_Root empty."
+    )
+
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")
+    filter_glob: bpy.props.StringProperty(
+        default="*.glb;*.gltf", options={"HIDDEN"}
+    )
+
+    @classmethod
+    def poll(cls, context):
+        # poll() drives the UI auto-grey-out — true only when a previous
+        # import succeeded and left the root empty in place.
+        return bpy.data.objects.get("SMIL_Animation_Root") is not None
+
+    def invoke(self, context, event):
+        if not self.filepath:
+            self.filepath = "smil_animation.glb"
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        root = bpy.data.objects.get("SMIL_Animation_Root")
+        if root is None:
+            self.report(
+                {"WARNING"},
+                "No imported SMIL animation found (SMIL_Animation_Root missing).",
+            )
+            return {"CANCELLED"}
+
+        prev_active = context.view_layer.objects.active
+        prev_selected = [o for o in context.view_layer.objects if o.select_get()]
+        try:
+            bpy.ops.object.select_all(action="DESELECT")
+            export_objs = [root] + list(root.children_recursive)
+            for obj in export_objs:
+                obj.select_set(True)
+            context.view_layer.objects.active = root
+
+            filepath = bpy.path.abspath(self.filepath)
+            bpy.ops.export_scene.gltf(
+                filepath=filepath,
+                use_selection=True,
+                export_animations=True,
+                export_apply=False,
+            )
+        except Exception as e:
+            self.report({"WARNING"}, f"glTF export failed: {e}")
+            return {"CANCELLED"}
+        finally:
+            try:
+                bpy.ops.object.select_all(action="DESELECT")
+            except Exception:
+                pass
+            for obj in prev_selected:
+                try:
+                    obj.select_set(True)
+                except Exception:
+                    pass
+            try:
+                context.view_layer.objects.active = prev_active
+            except Exception:
+                pass
+
+        self.report({"INFO"}, f"Exported glTF animation to {filepath}")
+        return {"FINISHED"}
+
+
 class SMPLProperties(bpy.types.PropertyGroup):
     pkl_filepath: bpy.props.StringProperty(
         name="PKL Filepath",
@@ -4050,6 +4128,7 @@ classes = (
     SMPL_OT_RecomputeJointPositions,  # <-- Add here
     SMPL_OT_ClearMorphPCA,
     SMPL_OT_ImportAnimation,
+    SMPL_OT_ExportAnimationGLTF,
     SMPLProperties,
 )
 
