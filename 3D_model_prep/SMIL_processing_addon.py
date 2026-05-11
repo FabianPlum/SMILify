@@ -924,15 +924,24 @@ def create_shapekeys_from_pkl_shapedirs(data, obj):
     if not obj.data.shape_keys:
         obj.shape_key_add(name="Basis")
     
+    # PCA-derived betas can fall well outside Blender's default 0..1 slider range.
+    # Widen the range so animation imports load weights verbatim instead of clipping.
+    pkl_shape_key_slider_min = -10.0
+    pkl_shape_key_slider_max = 10.0
+
     # Create shapekeys from shapedirs
     for i in range(num_shapekeys):
         shape_key_name = f"Shape_{i}"
         shape_key = obj.shape_key_add(name=shape_key_name)
-        
+
         # Apply displacements from shapedirs
         for vert_index in range(num_vertices):
             displacement = shapedirs[vert_index, :, i]
             shape_key.data[vert_index].co = base_vertices[vert_index] + displacement
+
+        shape_key.slider_min = pkl_shape_key_slider_min
+        shape_key.slider_max = pkl_shape_key_slider_max
+        shape_key.value = 0.0
     
     # Create covariance matrix and mean betas
     # For independent shapekeys, use identity matrix
