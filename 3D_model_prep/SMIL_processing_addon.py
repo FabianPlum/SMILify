@@ -3519,6 +3519,13 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
         default=True,
     )
 
+    # PyTorch3D and Blender disagree on natural scene scale: inference clips look
+    # tiny in a default Blender scene. Multiplying the rig's root transform and
+    # the camera world positions by IMPORT_SCALE brings them to a comfortable
+    # working size without touching focal length, per-bone rotation/scale, or
+    # the camera object's own size.
+    IMPORT_SCALE = 10.0
+
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
@@ -3650,13 +3657,19 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
                         pb.keyframe_insert(data_path="scale", frame=f)
 
             # Root translation (and global mesh scale, when present).
+            # IMPORT_SCALE multiplies both the rig's world scale and its world
+            # translation so the visible vertex (location + scale * vertex)
+            # ends up at IMPORT_SCALE * (inference vertex), matching what the
+            # cameras (also scaled below) expect.
             if mesh_scale is not None:
                 s = float(mesh_scale[f])
-                loc = trans[f].astype(np.float64) - s * root_joint_rest
-                armature.scale = (s, s, s)
-                armature.keyframe_insert(data_path="scale", frame=f)
+                loc = self.IMPORT_SCALE * (trans[f].astype(np.float64) - s * root_joint_rest)
+                rig_scale = self.IMPORT_SCALE * s
             else:
-                loc = trans[f].astype(np.float64)
+                loc = self.IMPORT_SCALE * trans[f].astype(np.float64)
+                rig_scale = self.IMPORT_SCALE
+            armature.scale = (rig_scale, rig_scale, rig_scale)
+            armature.keyframe_insert(data_path="scale", frame=f)
             armature.location = (float(loc[0]), float(loc[1]), float(loc[2]))
             armature.keyframe_insert(data_path="location", frame=f)
 
@@ -3710,7 +3723,10 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
             cam_axis_flip = np.diag([-1.0, 1.0, -1.0])
             mat = np.eye(4)
             mat[:3, :3] = R @ cam_axis_flip
-            mat[:3, 3] = -R @ t
+            # Scale the world-space camera position (not the camera object's
+            # own scale) by IMPORT_SCALE so cameras stay framed on the rig
+            # after the rig itself has been scaled up.
+            mat[:3, 3] = self.IMPORT_SCALE * (-R @ t)
             cam_obj.matrix_world = Matrix(mat.tolist())
 
 
