@@ -17,7 +17,7 @@ Example 18 camera inference results, using a newly developed [parametric mouse m
 
 <img src="docs/peruphasma_4_cam_smil.gif" width="800">
 
-Example 4-5 camera inference results with a molde trained on data collected from an Omni-Directional Treadmill (ODT) using a [parametric multi species stick insect model](3D_model_prep/SMILy_STICK.pkl) configured with the [Blender SMIL Addon](3D_model_prep/SMIL_processing_addon.py).
+Example 4-5 camera inference results with a model trained on data collected from an Omni-Directional Treadmill (ODT) using a [parametric multi species stick insect model](3D_model_prep/SMILy_STICK.pkl) configured with the [Blender SMIL Addon](3D_model_prep/SMIL_processing_addon.py).
 
 
 ## Installation
