@@ -1285,7 +1285,10 @@ def load_SMIL_Unreal_multiview_sample(
         keypoint_names = []
         for key in pose_data.keys():
             keypoint_names.append(key)
-            # Extract from current camera's JSON (2D positions are per-camera)
+            # Intentional axis swap (norm_x <- y/H, norm_y <- x/W) — mirrors the
+            # single-view path above. The downstream ID-mask lookup pixel-indexes
+            # against these values with the same swap, so don't "fix" one side
+            # without updating the other.
             try:
                 norm_x = pose_data[key]["2DPos"]["y"] / image_height
                 norm_y = pose_data[key]["2DPos"]["x"] / image_width
