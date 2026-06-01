@@ -223,13 +223,24 @@ def _reparameterize_view(R_model_p3d, t_model_p3d, R_v, T_v):
     return R_new, T_new
 
 
-def render_per_view(dataset_path, frame_index, output_dir):
+def render_per_view(dataset_path, frame_index, output_dir,
+                    canonical_frame=True, label="canonical"):
     """Mirror Render_SMAL_Model_from_Unreal_data for each view, write a grid PNG.
 
     Strategy: load multi-view data, derive the shared model-world transform,
     then for every view build a single-view-style (x_v, y_v) with the
     per-view reparameterisation applied and run the SMALFitter visualisation.
     Collect each view's collage from disk and stitch into one composite.
+
+    canonical_frame controls the loader call. When True, R_model_p3d derived
+    from raw pose_data quaternion is right-multiplied by R_0 to compose
+    body->world with world->canonical — the renderer formula
+    R_new = Rz @ R_model_p3d @ R_v, T_new = t_model @ R_v + T_v is then
+    pixel-identical under the canonical transformation (see derivation
+    in Unreal2Pytorch3D.py:load_SMIL_Unreal_multiview_sample).
+
+    Returns the list of (cam_id, collage_path) so callers (e.g. the
+    --compare_frames stitcher) can assemble combined plots.
     """
     _lazy_render_imports()
     torch = _TORCH
@@ -240,18 +251,22 @@ def render_per_view(dataset_path, frame_index, output_dir):
         frame_index=frame_index,
         camera_indices=None,
         load_images=True,
+        canonical_frame=canonical_frame,
         verbose=False,
     )
     pose_data = y_mv["pose_data"]
     root_key = config.ROOT_JOINT if config.ROOT_JOINT in pose_data else next(iter(pose_data))
 
     R_model_p3d = _build_model_world_rotation(pose_data, root_key)
+    if canonical_frame:
+        R_0_np, _ = y_mv["canonical_to_world"]
+        R_model_p3d = (R_model_p3d @ R_0_np).astype(np.float32)
     t_model_p3d = np.asarray(y_mv["root_loc"], dtype=np.float32)
 
-    print(f"\n--- Per-view rendering ---")
-    print(f"  root_key={root_key!r}  t_model={t_model_p3d}")
+    print(f"\n--- Per-view rendering ({label}) ---")
+    print(f"  root_key={root_key!r}  t_model={t_model_p3d}  canonical_cam={y_mv.get('canonical_cam_id')}")
 
-    render_root = (Path(output_dir) / f"frame_{frame_index:05d}_renders").resolve()
+    render_root = (Path(output_dir) / f"frame_{frame_index:05d}_renders_{label}").resolve()
     render_root.mkdir(parents=True, exist_ok=True)
 
     # Render_SMAL_Model_from_Unreal_data writes via ImageExporter("LOCAL_TEST", …)
@@ -308,7 +323,7 @@ def render_per_view(dataset_path, frame_index, output_dir):
 
     if not rendered_paths:
         print("  No renders produced.")
-        return
+        return []
 
     # Assemble the grid.
     n = len(rendered_paths)
@@ -322,12 +337,153 @@ def render_per_view(dataset_path, frame_index, output_dir):
         ax.axis("off")
     for j in range(len(rendered_paths), n_rows * n_cols):
         axes.flatten()[j].axis("off")
-    fig.suptitle(f"Frame {frame_index} — per-view SMAL renders via single-view path", fontsize=12)
+    fig.suptitle(
+        f"Frame {frame_index} — per-view SMAL renders ({label} frame)",
+        fontsize=12,
+    )
     fig.tight_layout()
-    grid_path = Path(output_dir) / f"frame_{frame_index:05d}_render_grid.png"
+    grid_path = Path(output_dir) / f"frame_{frame_index:05d}_render_grid_{label}.png"
     fig.savefig(grid_path, dpi=100, bbox_inches="tight")
+    plt.close(fig)
     print(f"\n  Grid saved → {grid_path}")
     print(f"  Individual collages under: {render_root}/LOCAL_TEST/")
+    return rendered_paths
+
+
+def compare_frames_test(dataset_path, frame_index, output_dir, per_camera, cam_ids):
+    """Run raw + canonical loader paths side-by-side and validate equivalence.
+
+    Three checks:
+      1. Numeric round-trip: |kp3d_world - (kp3d_can - t_0) @ R_0.T| ~ 0.
+      2. Reprojection per camera in both frames; both should hit ~0 px GT error.
+      3. Visual mesh render in both frames; pixel-identical implies the
+         camera/extrinsics/model-rotation composition is correct.
+    """
+    # 1. Numeric round-trip on the canonical-frame loader output.
+    _, y_can = load_SMIL_Unreal_multiview_sample(
+        data_path=str(dataset_path),
+        frame_index=frame_index,
+        camera_indices=None,
+        load_images=False,
+        canonical_frame=True,
+        verbose=False,
+    )
+    _, y_raw = load_SMIL_Unreal_multiview_sample(
+        data_path=str(dataset_path),
+        frame_index=frame_index,
+        camera_indices=None,
+        load_images=False,
+        canonical_frame=False,
+        verbose=False,
+    )
+    R_0, t_0 = y_can["canonical_to_world"]
+    kp_world_from_can = (y_can["keypoints_3d"] - t_0) @ R_0.T
+    rt_diff = np.max(np.abs(kp_world_from_can - y_can["keypoints_3d_world"]))
+    print("\n--- Canonical frame: round-trip check ---")
+    print(f"  canonical_cam_id: {y_can['canonical_cam_id']}")
+    print(f"  max |kp3d_world - (kp3d_can - t_0) @ R_0.T| = {rt_diff:.3e}")
+    if rt_diff > 1e-3:
+        print(f"  WARN: round-trip residual above 1e-3 — math suspect.")
+    # Also check raw == canonical-world-recovery on the camera extrinsics
+    R_v0_raw = y_raw["cam_rot_per_view"][0].numpy()
+    R_v0_can = y_can["cam_rot_per_view"][0].numpy()
+    print(f"  cam[0] R should be identity in canonical frame: "
+          f"max |R_v0_can - I| = {np.max(np.abs(R_v0_can - np.eye(3))):.3e}")
+    t_v0_can = y_can["cam_trans_per_view"][0].numpy()
+    print(f"  cam[0] t should be zero in canonical frame:     "
+          f"max |t_v0_can| = {np.max(np.abs(t_v0_can)):.3e}")
+
+    # 2. Reprojection check in both frames, using the loader's stored
+    #    cam_rot_per_view / cam_trans_per_view (row-vector,
+    #    PyTorch3D-mirrored) and the loader's keypoints_3d / _world.
+    def _project_via_loader(kp3d, R_v, t_v, fx, fy, cx, cy):
+        # All inputs are in PyTorch3D-mirrored frame (x-axis negated vs raw
+        # Unreal). The raw-frame projection convention u = fx*x/z + cx then
+        # flips to u = -fx*x/z + cx after the mirror; v keeps its sign.
+        x_cam = kp3d @ R_v + t_v
+        depth = x_cam[:, 2]
+        safe = np.where(np.abs(depth) < 1e-8, 1e-8, depth)
+        u = -fx * x_cam[:, 0] / safe + cx
+        v = -fy * x_cam[:, 1] / safe + cy
+        return u, v, depth
+
+    print("\n--- Loader-frame reprojection: raw vs canonical ---")
+    print(f"{'CAM':>5}  {'raw_mean':>10}  {'raw_max':>10}  "
+          f"{'can_mean':>10}  {'can_max':>10}")
+    for v, cid in enumerate(cam_ids):
+        gt = per_camera[cid]["kp2d_pixels"]
+        # Build a 2D-GT array indexed the same way as keypoints_3d (model J_names order).
+        gt_mapped = np.zeros((len(config.dd["J_names"]), 2))
+        for o, jn in enumerate(config.dd["J_names"]):
+            if jn in per_camera[cid]["names"]:
+                src_idx = per_camera[cid]["names"].index(jn)
+                gt_mapped[o] = gt[src_idx]
+        valid = ~np.all(gt_mapped == 0, axis=1)
+        fx, fy = y_raw["fx_per_view"][v], y_raw["fy_per_view"][v]
+        cx, cy = y_raw["cx_per_view"][v], y_raw["cy_per_view"][v]
+
+        u_r, v_r, d_r = _project_via_loader(
+            y_raw["keypoints_3d_world"],
+            y_raw["cam_rot_per_view"][v].numpy(),
+            y_raw["cam_trans_per_view"][v].numpy(),
+            fx, fy, cx, cy,
+        )
+        u_c, v_c, d_c = _project_via_loader(
+            y_can["keypoints_3d"],
+            y_can["cam_rot_per_view"][v].numpy(),
+            y_can["cam_trans_per_view"][v].numpy(),
+            fx, fy, cx, cy,
+        )
+
+        def _err(u, v, d):
+            mask = valid & (d > 0)
+            if not mask.any():
+                return float("nan"), float("nan")
+            e = np.sqrt((u[mask] - gt_mapped[mask, 0]) ** 2 +
+                        (v[mask] - gt_mapped[mask, 1]) ** 2)
+            return float(e.mean()), float(e.max())
+
+        raw_mean, raw_max = _err(u_r, v_r, d_r)
+        can_mean, can_max = _err(u_c, v_c, d_c)
+        print(f"{cid:>5}  {raw_mean:>10.3f}  {raw_max:>10.3f}  "
+              f"{can_mean:>10.3f}  {can_max:>10.3f}")
+
+    # 3. Visual mesh renders, raw and canonical, side by side.
+    raw_paths = render_per_view(
+        dataset_path, frame_index, output_dir,
+        canonical_frame=False, label="raw",
+    )
+    can_paths = render_per_view(
+        dataset_path, frame_index, output_dir,
+        canonical_frame=True, label="canonical",
+    )
+
+    if not raw_paths or not can_paths:
+        print("  Skipping side-by-side stitch — one render set empty.")
+        return
+
+    raw_by_cam = dict(raw_paths)
+    can_by_cam = dict(can_paths)
+    common = [c for c, _ in raw_paths if c in can_by_cam]
+    n_rows = len(common)
+    fig, axes = plt.subplots(n_rows, 2, figsize=(12, 4 * n_rows), squeeze=False)
+    for r, cid in enumerate(common):
+        axes[r, 0].imshow(imageio.imread(raw_by_cam[cid]))
+        axes[r, 0].set_title(f"CAM{cid}  RAW (world frame)")
+        axes[r, 0].axis("off")
+        axes[r, 1].imshow(imageio.imread(can_by_cam[cid]))
+        axes[r, 1].set_title(f"CAM{cid}  CANONICAL frame")
+        axes[r, 1].axis("off")
+    fig.suptitle(
+        f"Frame {frame_index} — raw vs canonical SMAL render "
+        "(should be pixel-identical)",
+        fontsize=12,
+    )
+    fig.tight_layout()
+    side_by_side = Path(output_dir) / f"frame_{frame_index:05d}_compare_frames.png"
+    fig.savefig(side_by_side, dpi=100, bbox_inches="tight")
+    plt.close(fig)
+    print(f"\n  Side-by-side grid saved → {side_by_side}")
 
 
 def report_loader_smoke(dataset_path, frame_index):
@@ -368,6 +524,10 @@ def main():
     parser.add_argument("--render", action="store_true",
                         help="Also render the posed SMAL mesh through each view's camera. "
                              "Requires --smal_file and GPU; mirrors the single-view render path.")
+    parser.add_argument("--compare_frames", action="store_true",
+                        help="Run the canonical-camera-frame validation: numeric "
+                             "round-trip, side-by-side reprojection check, and raw-vs-"
+                             "canonical mesh renders. Requires --smal_file and GPU.")
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset_path)
@@ -477,8 +637,12 @@ def main():
 
         if args.render:
             render_per_view(dataset_path, args.frame_index, output_dir)
-    elif args.render:
-        print("\n⚠ --render requires --smal_file; skipping render stage.")
+        if args.compare_frames:
+            compare_frames_test(
+                dataset_path, args.frame_index, output_dir, per_camera, cam_ids,
+            )
+    elif args.render or args.compare_frames:
+        print("\n⚠ --render / --compare_frames requires --smal_file; skipping.")
 
 
 if __name__ == "__main__":
