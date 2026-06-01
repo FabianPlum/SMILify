@@ -5,6 +5,7 @@ import cv2
 import torch
 import os
 import imageio
+import re
 import sys
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
@@ -1122,12 +1123,6 @@ def load_SMIL_Unreal_multiview_sample(
                   - cam_trans_per_view: List of translation vectors
                   - fx_per_view, fy_per_view, cx_per_view, cy_per_view: Lists of intrinsics
     """
-    from pathlib import Path
-    from typing import List, Tuple, Dict, Optional
-    import re
-
-    import re
-
     x_output = {}
     y_output = {}
 
