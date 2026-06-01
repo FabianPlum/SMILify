@@ -1086,6 +1086,7 @@ def load_SMIL_Unreal_multiview_sample(
     propagate_scaling: bool = True,
     translation_factor: float = 0.01,
     load_images: bool = True,
+    canonical_frame: bool = True,
     verbose: bool = False
 ):
     """
@@ -1102,6 +1103,13 @@ def load_SMIL_Unreal_multiview_sample(
         propagate_scaling (bool): Whether to propagate scaling to child joints
         translation_factor (float): Factor to multiply translation by
         load_images (bool): Whether to load image data
+        canonical_frame (bool): If True (default), re-express all camera
+            extrinsics and model pose in the canonical camera's frame
+            (lowest CAM ID -> R=I, t=0). If False, leave everything in
+            raw PyTorch3D-mirrored world frame. See the canonical-frame
+            block below for the transformation, conventions, and the
+            decision to store the FORWARD transform under
+            `canonical_to_world`.
         verbose (bool): Whether to print verbose output
 
     Returns:
@@ -1116,6 +1124,17 @@ def load_SMIL_Unreal_multiview_sample(
             - y_output (dict): Shared and per-view parameters
                 - Shared data (identical across cameras):
                   - joint_angles, shape_betas, root_loc, root_rot, etc.
+                  - keypoints_3d: (n_joints, 3) GT 3D in canonical frame
+                    when canonical_frame=True, otherwise world frame.
+                    Mapped to model J_names order; zeros for missing.
+                  - keypoints_3d_world: same shape; always raw
+                    PyTorch3D-mirrored world frame (kept for round-trip
+                    checks and convention-switch flexibility).
+                  - canonical_to_world: tuple (R_0, t_0) — the FORWARD
+                    transform world -> canonical (x_can = x_w @ R_0 + t_0).
+                    Invert at decode time: x_w = (x_can - t_0) @ R_0.T.
+                  - canonical_cam_id: int — CAM ID used as canonical, or
+                    -1 when canonical_frame=False.
                 - Per-camera data:
                   - keypoints_2d_per_view: List of [n_joints, 2] arrays
                   - keypoint_visibility_per_view: List of [n_joints] visibility arrays
@@ -1353,6 +1372,98 @@ def load_SMIL_Unreal_multiview_sample(
 
         if verbose:
             print(f"  CAM{cam_id}: fx={fx:.2f}, fy={fy:.2f}, visible_joints={int(np.sum(visibility))}/{len(visibility)}")
+
+    # ------------------------------------------------------------------
+    # 3D ground-truth keypoints in raw world frame (PyTorch3D-mirrored,
+    # same convention as cam_rot_per_view / cam_trans_per_view / model_loc).
+    # ------------------------------------------------------------------
+    kp3d_by_name = {}
+    for k, kp in pose_data.items():
+        p3 = kp.get("3DPos")
+        if p3 is not None:
+            kp3d_by_name[k] = np.array(
+                [-p3["x"], p3["y"], p3["z"]], dtype=np.float32
+            )
+    keypoints_3d_world = np.zeros(
+        (len(config.dd["J_names"]), 3), dtype=np.float32
+    )
+    for o, j in enumerate(config.dd["J_names"]):
+        if j in kp3d_by_name:
+            keypoints_3d_world[o] = kp3d_by_name[j]
+
+    # ------------------------------------------------------------------
+    # Canonical-camera-frame transformation.
+    #
+    # Pick the lowest CAM ID (camera_indices[0] after the sort above) as
+    # the canonical camera. Define a new world frame in which that
+    # camera's extrinsics are identity — i.e. the canonical frame IS
+    # cam-0's view — and re-express everything relative to it.
+    #
+    # Forward transform world -> canonical:
+    #     x_can = x_world @ R_0 + t_0
+    # where (R_0, t_0) are cam-0's row-vector PyTorch3D-mirrored
+    # extrinsics. Derivation (row-vector convention throughout):
+    #     R_v'                  = R_0.T @ R_v
+    #     t_v'                  = t_v - t_0 @ R_v'
+    #     root_loc'             = root_loc @ R_0 + t_0
+    #     R_root_can_col        = R_0.T @ R_root_col   (scipy col-vec form)
+    #     keypoints_3d_can      = keypoints_3d_world @ R_0 + t_0
+    #
+    # Storage choice: y_output emits `canonical_to_world = (R_0, t_0)`
+    # as the FORWARD transform — not its inverse. We picked forward
+    # because (R_0, t_0) IS the artifact computed at the canonical site,
+    # storing it avoids drift from re-deriving, and the canonical
+    # frame's definition stays visible at the storage point. Consumers
+    # that need world-frame coordinates apply the inverse explicitly:
+    #     x_world = (x_canonical - t_0) @ R_0.T
+    # ------------------------------------------------------------------
+    if canonical_frame:
+        canonical_cam_idx = 0  # lowest CAM ID, first in sorted camera_indices
+        R_0 = cam_rot_per_view[canonical_cam_idx].clone()
+        t_0 = cam_trans_per_view[canonical_cam_idx].clone()
+        R_0_np = R_0.numpy()
+        t_0_np = t_0.numpy()
+
+        for v in range(len(camera_indices)):
+            R_v = cam_rot_per_view[v]
+            t_v = cam_trans_per_view[v]
+            R_v_can = R_0.T @ R_v
+            t_v_can = t_v - t_0 @ R_v_can
+            cam_rot_per_view[v] = R_v_can
+            cam_trans_per_view[v] = t_v_can
+
+        model_loc = (model_loc @ R_0_np + t_0_np).astype(np.float32)
+
+        R_root_col = Rotation.from_rotvec(global_rotation_np).as_matrix()
+        R_root_can_col = R_0_np.T @ R_root_col
+        global_rotation_np = (
+            Rotation.from_matrix(R_root_can_col).as_rotvec().astype(np.float32)
+        )
+
+        keypoints_3d = (keypoints_3d_world @ R_0_np + t_0_np).astype(np.float32)
+
+        canonical_to_world = (
+            R_0_np.astype(np.float32),
+            t_0_np.astype(np.float32),
+        )
+        canonical_cam_id = int(camera_indices[canonical_cam_idx])
+    else:
+        keypoints_3d = keypoints_3d_world.copy()
+        canonical_to_world = (
+            np.eye(3, dtype=np.float32),
+            np.zeros(3, dtype=np.float32),
+        )
+        canonical_cam_id = -1  # sentinel: no canonical frame applied
+
+    # Overwrite the earlier raw-frame assignments with (possibly)
+    # canonical-frame values. pose_data is left untouched for
+    # backwards compatibility with consumers that re-derive from it.
+    y_output["root_loc"] = model_loc
+    y_output["root_rot"] = global_rotation_np
+    y_output["keypoints_3d"] = keypoints_3d
+    y_output["keypoints_3d_world"] = keypoints_3d_world
+    y_output["canonical_to_world"] = canonical_to_world
+    y_output["canonical_cam_id"] = canonical_cam_id
 
     # Populate x_output
     x_output["image_data"] = image_data
