@@ -1399,6 +1399,7 @@ def load_SMIL_Unreal_multiview_sample(
 
     keypoints_2d_per_view = []
     keypoint_visibility_per_view = []
+    keypoint_in_dataset_per_view = []
     cam_rot_per_view = []
     cam_trans_per_view = []
     fx_per_view = []
@@ -1473,20 +1474,31 @@ def load_SMIL_Unreal_multiview_sample(
                 norm_y = 0.5
             keypoints_2d.append([norm_x, norm_y])
 
-        # Map to SMIL joint order
+        # Map to SMIL joint order. Track which model J_names actually
+        # have a matching dataset entry this view; model-only joints
+        # have no GT 2D (left at the [0, 0] sentinel) and must NOT be
+        # treated as visible — see the visibility initialisation below.
         mapped_keypoints_2d = np.zeros((len(config.dd["J_names"]), 2), float)
+        in_dataset_this_view = np.zeros(len(config.dd["J_names"]), dtype=bool)
         for o, orig_joint in enumerate(config.dd["J_names"]):
             for m, mapped_joint in enumerate(keypoint_names):
                 if orig_joint == mapped_joint:
                     mapped_keypoints_2d[o] = keypoints_2d[m]
+                    in_dataset_this_view[o] = True
 
         keypoints_2d_per_view.append(mapped_keypoints_2d)
+        keypoint_in_dataset_per_view.append(in_dataset_this_view)
 
-        # Compute per-camera visibility using ID mask
-        visibility = np.ones(len(config.dd["J_names"]))
+        # Initialise visibility from the in-dataset bitmap so model-only
+        # joints stay invisible regardless of where their [0, 0]
+        # sentinel happens to land on the ID/depth pass. The bounds /
+        # mask / depth steps below can only ever decrease visibility.
+        visibility = in_dataset_this_view.astype(np.float64)
         if mask_data[-1] is not None:
             id_mask = mask_data[-1]
             for i, (norm_x, norm_y) in enumerate(mapped_keypoints_2d):
+                if visibility[i] == 0.0:
+                    continue  # not in dataset — never visible
                 # Check bounds
                 if not (0 <= norm_x <= 1.0 and 0 <= norm_y <= 1.0):
                     visibility[i] = 0.0
@@ -1499,6 +1511,8 @@ def load_SMIL_Unreal_multiview_sample(
         else:
             # Fallback: only check bounds
             for i, (norm_x, norm_y) in enumerate(mapped_keypoints_2d):
+                if visibility[i] == 0.0:
+                    continue  # not in dataset — never visible
                 if not (0 <= norm_x <= 1.0 and 0 <= norm_y <= 1.0):
                     visibility[i] = 0.0
 
@@ -1654,6 +1668,7 @@ def load_SMIL_Unreal_multiview_sample(
     # Populate y_output with per-view data
     y_output["keypoints_2d_per_view"] = keypoints_2d_per_view
     y_output["keypoint_visibility_per_view"] = keypoint_visibility_per_view
+    y_output["keypoint_in_dataset_per_view"] = keypoint_in_dataset_per_view
     y_output["cam_rot_per_view"] = cam_rot_per_view
     y_output["cam_trans_per_view"] = cam_trans_per_view
     y_output["fx_per_view"] = fx_per_view
