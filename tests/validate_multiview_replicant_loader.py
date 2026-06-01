@@ -1,28 +1,31 @@
-"""Visual validation for multi-view replicAnt camera geometry.
+"""Visual validation for multi-view replicAnt camera geometry + model fit.
 
-For each view of one frame:
-  1. Read raw 3D world keypoints from that camera's JSON.
-  2. Read raw 2D keypoints from the same JSON.
-  3. Read raw camera extrinsics (R, t) via parse_projection_components,
-     and intrinsics (fx, fy, cx, cy) via parse_camera_intrinsics.
-  4. Project the 3D keypoints through (R, t, K) and overlay the result
-     on the camera image alongside the raw 2D ground truth.
+Two checks per frame:
 
-If raw 2D (green) and projected 3D (red) coincide pixel-for-pixel, the
-single-camera projection geometry is correct. This is the prerequisite
-for any per-view multi-view storage convention.
+1. **Camera geometry (always run)**: for each view, read raw 3D world
+   keypoints, raw 2D keypoints, and raw extrinsics+intrinsics from that
+   camera's JSON. Project the 3D through (R, t, K) and overlay against
+   the raw 2D. Green (GT 2D) and red (projected 3D) should coincide
+   pixel-for-pixel.
 
-This script intentionally **bypasses** `load_SMIL_Unreal_multiview_sample`
-for now — the current draft hard-codes `config.ROOT_JOINT` (= 'b_t') which
-doesn't exist in this dataset's joint set ('Mskel', 'Lumbar-Vertebrae', …).
-Fixing that is part of the Phase 1 cleanup; once it's done, we'll extend
-this script to also overlay the loader's output for end-to-end validation.
+2. **Model-fit compatibility (only when --smal_file is passed)**: load
+   the specified SMAL pickle via apply_smal_file_override and report
+   how the model's ``J_names`` compare to the dataset's joint names —
+   overlap count, dataset-only joints, model-only joints. Also runs
+   ``load_SMIL_Unreal_multiview_sample`` end-to-end and reports root /
+   shape / joint angle extraction.
 
 Usage:
+    # geometry only
+    python tests/validate_multiview_replicant_loader.py \\
+        --dataset_path /mnt/c/replicAnt-dataset-multi-cam-mice \\
+        --frame_index 0
+
+    # geometry + model-fit compatibility
     python tests/validate_multiview_replicant_loader.py \\
         --dataset_path /mnt/c/replicAnt-dataset-multi-cam-mice \\
         --frame_index 0 \\
-        --output_dir TEST_plots/multiview_loader
+        --smal_file 3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs_fix_eyes.pkl
 """
 
 import argparse
@@ -42,11 +45,50 @@ import numpy as np  # noqa: E402
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "smal_fitter"))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "smal_fitter", "neuralSMIL"))
 
+
+# Parse --smal_file first so we can apply the override *before* importing
+# Unreal2Pytorch3D (which pulls in `config.dd`).
+def _early_parse():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--smal_file", default=None)
+    p.add_argument("--shape_family", type=int, default=None)
+    known, _ = p.parse_known_args()
+    return known
+
+
+_early = _early_parse()
+if _early.smal_file:
+    from configs.config_utils import apply_smal_file_override  # noqa: E402
+    apply_smal_file_override(_early.smal_file, shape_family=_early.shape_family)
+
+import config  # noqa: E402
 from Unreal2Pytorch3D import (  # noqa: E402
+    load_SMIL_Unreal_multiview_sample,
     parse_camera_intrinsics,
     parse_projection_components,
 )
+
+# Rendering deps (heavy — only used when --render is passed).
+_TORCH = None
+_SMALFitter = None
+_ImageExporter = None
+_R_scipy = None
+
+
+def _lazy_render_imports():
+    global _TORCH, _SMALFitter, _ImageExporter, _R_scipy
+    if _TORCH is not None:
+        return
+    import torch as _t  # noqa: F401
+    from smal_fitter import SMALFitter as _SF  # noqa: F401
+    from optimize_to_joints import ImageExporter as _IE  # noqa: F401
+    from scipy.spatial.transform import Rotation as _R  # noqa: F401
+    _TORCH = _t
+    _SMALFitter = _SF
+    _ImageExporter = _IE
+    _R_scipy = _R
 
 
 def project_row_vector(X_world, R, t, fx, fy, cx, cy):
@@ -133,12 +175,199 @@ def load_per_camera(dataset_path: Path, dataset_name: str, frame_index: int, cam
     }
 
 
+def report_joint_name_overlap(dataset_names, model_names):
+    ds = list(dict.fromkeys(dataset_names))  # preserve order, drop duplicates
+    md = list(dict.fromkeys(model_names))
+    ds_set, md_set = set(ds), set(md)
+    overlap = [n for n in ds if n in md_set]
+    ds_only = [n for n in ds if n not in md_set]
+    md_only = [n for n in md if n not in ds_set]
+    print("\n--- Joint name overlap (dataset vs. loaded SMAL model J_names) ---")
+    print(f"  Dataset joints: {len(ds)}")
+    print(f"  Model J_names:  {len(md)}")
+    print(f"  Overlap:        {len(overlap)}/{max(len(ds), len(md))}  "
+          f"(perfect-match needs both numbers to equal overlap)")
+    if ds_only:
+        print(f"  Dataset-only ({len(ds_only)}): {ds_only}")
+    if md_only:
+        print(f"  Model-only   ({len(md_only)}): {md_only}")
+    if not ds_only and not md_only:
+        print("  ✓ Joint sets are identical.")
+
+
+MIRROR_MAT = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float32)
+
+
+def _build_model_world_rotation(pose_data, root_key):
+    """Compute R_model_p3d from the root joint's globalRotation, matching the
+    single-view path at Unreal2Pytorch3D.py:998-1008.
+    """
+    grot = pose_data[root_key]["globalRotation"]
+    rot_model_ue = _R_scipy.from_quat(
+        [-grot["x"], -grot["y"], -grot["z"], grot["w"]], scalar_first=False
+    )
+    R_model_ue = rot_model_ue.as_matrix().astype(np.float32)
+    return MIRROR_MAT @ R_model_ue @ MIRROR_MAT.T
+
+
+def _reparameterize_view(R_model_p3d, t_model_p3d, R_v, T_v):
+    """Per-view single-view-style reparameterisation:
+        R_cam_new = Rz(180°) @ R_model @ R_v
+        T_cam_new = t_model @ R_v + T_v
+    Mirrors Unreal2Pytorch3D.py:1015-1026 (note: Rz applied to R only, not to T —
+    matches the single-view convention).
+    """
+    Rz = np.array([[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    R_new = (Rz @ R_model_p3d @ R_v).astype(np.float32)
+    T_new = (t_model_p3d @ R_v + T_v).astype(np.float32)
+    return R_new, T_new
+
+
+def render_per_view(dataset_path, frame_index, output_dir):
+    """Mirror Render_SMAL_Model_from_Unreal_data for each view, write a grid PNG.
+
+    Strategy: load multi-view data, derive the shared model-world transform,
+    then for every view build a single-view-style (x_v, y_v) with the
+    per-view reparameterisation applied and run the SMALFitter visualisation.
+    Collect each view's collage from disk and stitch into one composite.
+    """
+    _lazy_render_imports()
+    torch = _TORCH
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    x_mv, y_mv = load_SMIL_Unreal_multiview_sample(
+        data_path=str(dataset_path),
+        frame_index=frame_index,
+        camera_indices=None,
+        load_images=True,
+        verbose=False,
+    )
+    pose_data = y_mv["pose_data"]
+    root_key = config.ROOT_JOINT if config.ROOT_JOINT in pose_data else next(iter(pose_data))
+
+    R_model_p3d = _build_model_world_rotation(pose_data, root_key)
+    t_model_p3d = np.asarray(y_mv["root_loc"], dtype=np.float32)
+
+    print(f"\n--- Per-view rendering ---")
+    print(f"  root_key={root_key!r}  t_model={t_model_p3d}")
+
+    render_root = (Path(output_dir) / f"frame_{frame_index:05d}_renders").resolve()
+    render_root.mkdir(parents=True, exist_ok=True)
+
+    # Render_SMAL_Model_from_Unreal_data writes via ImageExporter("LOCAL_TEST", …)
+    # to the *current* working directory. To redirect the output without
+    # touching the Unreal2Pytorch3D module, we cd into render_root for the
+    # duration of the renders. Critical: absolutise any relative paths in
+    # config that the renderer will try to open (e.g. SMAL_FILE) before chdir.
+    if not os.path.isabs(config.SMAL_FILE):
+        config.SMAL_FILE = str((Path(prev_cwd_root := os.getcwd()) / config.SMAL_FILE).resolve())
+    prev_cwd = os.getcwd()
+    os.chdir(render_root)
+    rendered_paths = []
+    try:
+        for v, cam_id in enumerate(x_mv["camera_ids"]):
+            R_v = np.asarray(y_mv["cam_rot_per_view"][v], dtype=np.float32)
+            T_v = np.asarray(y_mv["cam_trans_per_view"][v], dtype=np.float32)
+            R_new, T_new = _reparameterize_view(R_model_p3d, t_model_p3d, R_v, T_v)
+
+            x_v = {
+                "input_image": x_mv["image_paths"][v],
+                "input_image_data": x_mv["image_data"][v],
+                "input_image_mask": x_mv["input_image_mask"][v],
+            }
+            y_v = dict(y_mv)  # shallow copy of shared fields
+            y_v["cam_rot"] = torch.tensor(R_new, dtype=torch.float32)
+            y_v["cam_trans"] = torch.tensor(T_new, dtype=torch.float32)
+            y_v["root_loc"] = np.zeros(3, dtype=np.float32)
+            y_v["root_rot"] = np.zeros(3, dtype=np.float32)
+            y_v["cam_fov"] = [float(y_mv["fov_per_view"][v])]
+            y_v["fx"] = float(y_mv["fx_per_view"][v])
+            y_v["fy"] = float(y_mv["fy_per_view"][v])
+            y_v["cx"] = float(y_mv["cx_per_view"][v])
+            y_v["cy"] = float(y_mv["cy_per_view"][v])
+            y_v["keypoints_2d"] = y_mv["keypoints_2d_per_view"][v]
+            y_v["keypoint_visibility"] = y_mv["keypoint_visibility_per_view"][v]
+
+            print(f"  CAM{cam_id}: rendering ...", flush=True)
+            from Unreal2Pytorch3D import Render_SMAL_Model_from_Unreal_data
+            try:
+                Render_SMAL_Model_from_Unreal_data(x_v, y_v, device, verbose=False)
+            except Exception as e:
+                print(f"  CAM{cam_id}: render FAILED — {e}")
+                continue
+
+            # ImageExporter writes LOCAL_TEST/<basename>/st0_ep0.png in current cwd.
+            basename = os.path.splitext(os.path.basename(x_mv["image_paths"][v]))[0]
+            collage_path = Path("LOCAL_TEST") / basename / "st0_ep0.png"
+            if collage_path.exists():
+                rendered_paths.append((cam_id, collage_path.resolve()))
+            else:
+                print(f"  CAM{cam_id}: expected collage at {collage_path} not found")
+    finally:
+        os.chdir(prev_cwd)
+
+    if not rendered_paths:
+        print("  No renders produced.")
+        return
+
+    # Assemble the grid.
+    n = len(rendered_paths)
+    n_cols = min(4, n)
+    n_rows = (n + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 4 * n_rows), squeeze=False)
+    for ax, (cam_id, path) in zip(axes.flatten(), rendered_paths):
+        img = imageio.imread(path)
+        ax.imshow(img)
+        ax.set_title(f"CAM{cam_id}")
+        ax.axis("off")
+    for j in range(len(rendered_paths), n_rows * n_cols):
+        axes.flatten()[j].axis("off")
+    fig.suptitle(f"Frame {frame_index} — per-view SMAL renders via single-view path", fontsize=12)
+    fig.tight_layout()
+    grid_path = Path(output_dir) / f"frame_{frame_index:05d}_render_grid.png"
+    fig.savefig(grid_path, dpi=100, bbox_inches="tight")
+    print(f"\n  Grid saved → {grid_path}")
+    print(f"  Individual collages under: {render_root}/LOCAL_TEST/")
+
+
+def report_loader_smoke(dataset_path, frame_index):
+    print("\n--- Loader smoke test: load_SMIL_Unreal_multiview_sample ---")
+    x, y = load_SMIL_Unreal_multiview_sample(
+        data_path=str(dataset_path),
+        frame_index=frame_index,
+        camera_indices=None,
+        load_images=False,
+        verbose=False,
+    )
+    print(f"  num_views:        {x['num_views']}")
+    print(f"  camera_ids:       {x['camera_ids']}")
+    print(f"  shape_betas[:5]:  {y['shape_betas'][:5]}")
+    print(f"  joint_angles:     shape={y['joint_angles'].shape}")
+    print(f"  root_loc:         {y['root_loc']}")
+    print(f"  root_rot:         {y['root_rot']}")
+    if y.get("scale_weights") is not None:
+        print(f"  scale_weights:    present, shape={np.asarray(y['scale_weights']).shape}")
+    else:
+        print("  scale_weights:    None")
+    # Verify joint_angles aren't all zero (would indicate mapping failure).
+    nonzero = int(np.any(np.abs(y["joint_angles"]) > 1e-6, axis=1).sum())
+    print(f"  joint_angles non-zero rows: {nonzero}/{y['joint_angles'].shape[0]}")
+    if nonzero == 0:
+        print("  ⚠ All joint_angles are zero — likely a model/dataset joint-name mismatch.")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_path", required=True)
     parser.add_argument("--frame_index", type=int, default=0)
     parser.add_argument("--output_dir", default="TEST_plots/multiview_loader")
     parser.add_argument("--camera_indices", type=int, nargs="*", default=None)
+    parser.add_argument("--smal_file", default=None,
+                        help="If given, run model-fit compatibility checks against this SMAL pickle.")
+    parser.add_argument("--shape_family", type=int, default=None)
+    parser.add_argument("--render", action="store_true",
+                        help="Also render the posed SMAL mesh through each view's camera. "
+                             "Requires --smal_file and GPU; mirrors the single-view render path.")
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset_path)
@@ -235,6 +464,21 @@ def main():
     print(f"\n{'CAM':>5}  {'conv':>30}  {'mean_px':>8}  {'max_px':>8}  {'in_front':>8}  {'gt_pts':>6}")
     for cid, conv, mean_err, max_err, in_front, gt_pts in summary:
         print(f"{cid:>5}  {conv:>30}  {mean_err:>8.2f}  {max_err:>8.2f}  {in_front:>8}  {gt_pts:>6}")
+
+    # Optional model-fit compatibility report (requires --smal_file).
+    if args.smal_file:
+        first_cam = cam_ids[0]
+        dataset_joint_names = per_camera[first_cam]["names"]
+        model_joint_names = list(config.dd["J_names"])
+        print(f"\nActive SMAL model: {config.SMAL_FILE}")
+        print(f"Active ROOT_JOINT: {config.ROOT_JOINT!r}")
+        report_joint_name_overlap(dataset_joint_names, model_joint_names)
+        report_loader_smoke(dataset_path, args.frame_index)
+
+        if args.render:
+            render_per_view(dataset_path, args.frame_index, output_dir)
+    elif args.render:
+        print("\n⚠ --render requires --smal_file; skipping render stage.")
 
 
 if __name__ == "__main__":
