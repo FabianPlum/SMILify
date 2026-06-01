@@ -68,6 +68,9 @@ from Unreal2Pytorch3D import (  # noqa: E402
     load_SMIL_Unreal_multiview_sample,
     parse_camera_intrinsics,
     parse_projection_components,
+    return_placeholder_data,
+    sample_pca_transforms_from_dirs,
+    set_axes_equal,
 )
 
 # Rendering deps (heavy — only used when --render is passed).
@@ -486,6 +489,227 @@ def compare_frames_test(dataset_path, frame_index, output_dir, per_camera, cam_i
     print(f"\n  Side-by-side grid saved → {side_by_side}")
 
 
+def _compute_posed_smal_joints(x_mv, y_mv, device):
+    """Run SMAL forward with the loader's pose params and return (N_joints, 3)
+    in canonical world frame. Mirrors the path in
+    Render_SMAL_Model_from_Unreal_data with apply_UE_transform=True but
+    skips the rendering step.
+    """
+    torch = _TORCH
+    SMALFitter = _SMALFitter
+
+    data_json, _ = return_placeholder_data(
+        input_image=x_mv["image_paths"][0],
+        num_joints=len(y_mv["joint_angles"]),
+        keypoints_2d=y_mv["keypoints_2d_per_view"][0],
+        keypoint_visibility=y_mv["keypoint_visibility_per_view"][0],
+        silhouette=x_mv["input_image_mask"][0],
+    )
+
+    model = SMALFitter(device, data_json, config.WINDOW_SIZE, config.SHAPE_FAMILY, False)
+    model.betas = torch.nn.Parameter(torch.Tensor(y_mv["shape_betas"]).to(device))
+
+    if ("scaledirs" in config.dd and "transdirs" in config.dd
+            and y_mv.get("scale_weights") is not None
+            and y_mv.get("trans_weights") is not None):
+        trans_out, scale_out = sample_pca_transforms_from_dirs(
+            config.dd, y_mv["scale_weights"], y_mv["trans_weights"]
+        )
+        model.log_beta_scales = torch.nn.Parameter(
+            torch.from_numpy(np.log(scale_out))[None, ...].float().to(device)
+        )
+        model.betas_trans = torch.nn.Parameter(
+            torch.from_numpy(trans_out * y_mv["translation_factor"])[None, ...].float().to(device)
+        )
+        model.propagate_scaling = y_mv["propagate_scaling"]
+
+    model.joint_rotations = torch.nn.Parameter(
+        torch.Tensor(y_mv["joint_angles"][1:])
+        .reshape((1, y_mv["joint_angles"][1:].shape[0], 3))
+        .to(device)
+    )
+    model.global_rotation = torch.nn.Parameter(
+        torch.from_numpy(y_mv["root_rot"]).float().to(device).unsqueeze(0)
+    )
+    model.trans = torch.nn.Parameter(
+        torch.Tensor(np.array([y_mv["root_loc"]])).to(device)
+    )
+
+    batch_params = {
+        "global_rotation": model.global_rotation * model.global_mask,
+        "joint_rotations": model.joint_rotations * model.rotation_mask,
+        "betas": model.betas.expand(1, model.n_betas),
+        "trans": model.trans,
+    }
+    if config.ignore_hardcoded_body:
+        batch_params["log_betascale"] = model.log_beta_scales.expand(
+            1, model.joint_rotations.shape[1] + 1, 3
+        ).to(device)
+        if hasattr(model, "betas_trans"):
+            batch_params["betas_trans"] = model.betas_trans.expand(
+                1, model.joint_rotations.shape[1] + 1, 3
+            ).to(device)
+    else:
+        batch_params["log_betascale"] = model.log_beta_scales.expand(1, 6)
+
+    with torch.no_grad():
+        _, joints, _, _ = model.smal_model(
+            batch_params["betas"],
+            torch.cat([
+                batch_params["global_rotation"].unsqueeze(1),
+                batch_params["joint_rotations"]], dim=1),
+            betas_logscale=batch_params.get("log_betascale", None),
+            betas_trans=batch_params.get("betas_trans", None),
+            propagate_scaling=getattr(model, "propagate_scaling", None),
+        )
+        # Match generate_visualization's apply_UE_transform=True path.
+        root_joint = joints[:, 0:1, :]
+        joints = (joints - root_joint) * 10 + batch_params["trans"].unsqueeze(1)
+
+    return joints.squeeze(0).cpu().numpy().astype(np.float32)
+
+
+def _project_canonical(kp3d, R_v, t_v, fx, fy, cx, cy):
+    """Project canonical-frame 3D points through a canonical-frame camera
+    in the PyTorch3D-mirrored convention (see _project_via_loader)."""
+    x_cam = kp3d @ R_v + t_v
+    depth = x_cam[:, 2]
+    safe = np.where(np.abs(depth) < 1e-8, 1e-8, depth)
+    u = -fx * x_cam[:, 0] / safe + cx
+    v = -fy * x_cam[:, 1] / safe + cy
+    return u, v, depth
+
+
+def visualize_named_keypoints(dataset_path, frame_index, output_dir, cam_ids):
+    """High-res per-camera 2D overlay + 3D side-by-side plot with joint
+    names labelled. Compares loader GT (green) against SMAL forward
+    posed joints (red) so we can spot per-joint indexing issues.
+    """
+    _lazy_render_imports()
+    torch = _TORCH
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    x_mv, y_mv = load_SMIL_Unreal_multiview_sample(
+        data_path=str(dataset_path),
+        frame_index=frame_index,
+        camera_indices=cam_ids,
+        load_images=True,
+        canonical_frame=True,
+        verbose=False,
+    )
+
+    j_names = list(y_mv["joint_names"])
+    n_joints = len(j_names)
+    gt_3d_can = np.asarray(y_mv["keypoints_3d"], dtype=np.float32)  # (N, 3)
+    posed_3d_can = _compute_posed_smal_joints(x_mv, y_mv, device)  # (N, 3)
+    if posed_3d_can.shape[0] != n_joints:
+        print(f"  WARN: SMAL produced {posed_3d_can.shape[0]} joints, expected {n_joints}")
+        n_joints = min(posed_3d_can.shape[0], n_joints)
+
+    # --- Per-camera 2D overlay grid (high-res, joint names labelled) ---
+    print(f"\n--- Named 2D overlay (frame {frame_index}) ---")
+    n_views = len(cam_ids)
+    n_cols = min(4, n_views)
+    n_rows = (n_views + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(8 * n_cols, 6 * n_rows),
+                             squeeze=False)
+    axes_flat = axes.flatten()
+    gt_present = ~np.all(gt_3d_can == 0, axis=1)  # joints the dataset actually has
+
+    for v, cid in enumerate(cam_ids):
+        ax = axes_flat[v]
+        img = x_mv["image_data"][v]
+        if img is None:
+            ax.set_title(f"CAM{cid} - no image")
+            ax.axis("off")
+            continue
+        H, W = img.shape[:2]
+        ax.imshow(img)
+
+        R_v = y_mv["cam_rot_per_view"][v].numpy()
+        t_v = y_mv["cam_trans_per_view"][v].numpy()
+        fx, fy = y_mv["fx_per_view"][v], y_mv["fy_per_view"][v]
+        cx, cy = y_mv["cx_per_view"][v], y_mv["cy_per_view"][v]
+
+        gt_u, gt_v_, gt_d = _project_canonical(gt_3d_can, R_v, t_v, fx, fy, cx, cy)
+        ps_u, ps_v_, ps_d = _project_canonical(posed_3d_can[:n_joints],
+                                               R_v, t_v, fx, fy, cx, cy)
+
+        for i in range(n_joints):
+            name = j_names[i]
+            if gt_present[i] and gt_d[i] > 0:
+                ax.plot(gt_u[i], gt_v_[i], marker="o", color="lime",
+                        markersize=6, markerfacecolor="none", markeredgewidth=1.4)
+                ax.annotate(name, (gt_u[i], gt_v_[i]), color="lime",
+                            xytext=(4, -4), textcoords="offset points",
+                            fontsize=5, alpha=0.9)
+            if ps_d[i] > 0:
+                ax.plot(ps_u[i], ps_v_[i], marker="+", color="red",
+                        markersize=8, markeredgewidth=1.4)
+                ax.annotate(name, (ps_u[i], ps_v_[i]), color="red",
+                            xytext=(4, 8), textcoords="offset points",
+                            fontsize=5, alpha=0.9)
+
+        ax.set_title(f"CAM{cid}  GT (lime o) vs posed model (red +)", fontsize=10)
+        ax.set_xlim(0, W)
+        ax.set_ylim(H, 0)
+        ax.set_aspect("equal")
+        ax.axis("off")
+
+    for j in range(n_views, len(axes_flat)):
+        axes_flat[j].axis("off")
+
+    fig.suptitle(
+        f"Frame {frame_index} - per-view named GT vs posed-model joints "
+        "(canonical frame). Same joint name on both colours should land on "
+        "the same anatomy.",
+        fontsize=12,
+    )
+    fig.tight_layout()
+    overlay_path = Path(output_dir) / f"frame_{frame_index:05d}_named_overlay.png"
+    fig.savefig(overlay_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  2D overlay grid (high-res) -> {overlay_path}")
+
+    # --- 3D side-by-side ---
+    print(f"\n--- Named 3D plot (canonical frame, frame {frame_index}) ---")
+    fig = plt.figure(figsize=(16, 10))
+    ax = fig.add_subplot(111, projection="3d")
+
+    gt_pts = gt_3d_can[gt_present]
+    ax.scatter(gt_pts[:, 0], gt_pts[:, 1], gt_pts[:, 2],
+               c="green", s=50, label="GT (loader)", depthshade=False)
+    ax.scatter(posed_3d_can[:n_joints, 0], posed_3d_can[:n_joints, 1],
+               posed_3d_can[:n_joints, 2],
+               c="red", s=50, marker="+", label="Posed model (SMAL fwd)",
+               depthshade=False)
+
+    for i in range(n_joints):
+        name = j_names[i]
+        if gt_present[i]:
+            ax.text(gt_3d_can[i, 0], gt_3d_can[i, 1], gt_3d_can[i, 2],
+                    f"  {name}", color="green", fontsize=6, alpha=0.85)
+        ax.text(posed_3d_can[i, 0], posed_3d_can[i, 1], posed_3d_can[i, 2],
+                f"  {name}", color="red", fontsize=6, alpha=0.85)
+
+    # Equal axes for honest visual distance.
+    all_pts = np.concatenate([gt_pts, posed_3d_can[:n_joints]], axis=0)
+    ax.set_xlim(all_pts[:, 0].min(), all_pts[:, 0].max())
+    ax.set_ylim(all_pts[:, 1].min(), all_pts[:, 1].max())
+    ax.set_zlim(all_pts[:, 2].min(), all_pts[:, 2].max())
+    set_axes_equal(ax)
+    ax.set_xlabel("X (canonical)")
+    ax.set_ylabel("Y (canonical)")
+    ax.set_zlabel("Z (canonical)")
+    ax.set_title(f"Frame {frame_index} - 3D GT (green) vs posed model (red), "
+                 "joint names labelled.")
+    ax.legend()
+    out_3d = Path(output_dir) / f"frame_{frame_index:05d}_named_3d.png"
+    fig.savefig(out_3d, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  3D named plot -> {out_3d}")
+
+
 def report_loader_smoke(dataset_path, frame_index):
     print("\n--- Loader smoke test: load_SMIL_Unreal_multiview_sample ---")
     x, y = load_SMIL_Unreal_multiview_sample(
@@ -528,6 +752,11 @@ def main():
                         help="Run the canonical-camera-frame validation: numeric "
                              "round-trip, side-by-side reprojection check, and raw-vs-"
                              "canonical mesh renders. Requires --smal_file and GPU.")
+    parser.add_argument("--named_overlay", action="store_true",
+                        help="High-res per-camera overlay + 3D side-by-side plot "
+                             "with joint name labels. Compares loader GT against "
+                             "SMAL forward posed joints in canonical frame. "
+                             "Requires --smal_file and GPU.")
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset_path)
@@ -641,8 +870,12 @@ def main():
             compare_frames_test(
                 dataset_path, args.frame_index, output_dir, per_camera, cam_ids,
             )
-    elif args.render or args.compare_frames:
-        print("\n⚠ --render / --compare_frames requires --smal_file; skipping.")
+        if args.named_overlay:
+            visualize_named_keypoints(
+                dataset_path, args.frame_index, output_dir, cam_ids,
+            )
+    elif args.render or args.compare_frames or args.named_overlay:
+        print("\n⚠ --render / --compare_frames / --named_overlay requires --smal_file; skipping.")
 
 
 if __name__ == "__main__":
