@@ -156,7 +156,10 @@ def _view_geometry(x_payload, y_payload, view_idx):
     # uses (col, row) as (x, y), so col = norm_y*W, row = norm_x*H.
     px_col = kp2d[:, 1] * W
     px_row = kp2d[:, 0] * H
-    in_frame = (px_col >= 0) & (px_col < W) & (px_row >= 0) & (px_row < H)
+    # AND in-dataset so model-only joints (left at the [0, 0] sentinel by
+    # the loader) don't get drawn at the image corner.
+    in_dataset = y_payload["keypoint_in_dataset_per_view"][view_idx]
+    in_frame = in_dataset & (px_col >= 0) & (px_col < W) & (px_row >= 0) & (px_row < H)
 
     depth_path = Path(x_payload["depth_paths"][view_idx])
     if depth_path.exists():
