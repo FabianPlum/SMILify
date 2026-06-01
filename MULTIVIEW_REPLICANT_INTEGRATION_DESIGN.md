@@ -11,6 +11,28 @@ This document outlines the architecture for integrating multi-camera replicAnt d
 
 ---
 
+## Status (2026-06-01)
+
+| Phase | What | State |
+|---|---|---|
+| 1 | `load_SMIL_Unreal_multiview_sample` loader | **COMPLETE** |
+| 3 | HDF5 preprocessor (`replicAntMultiViewPreprocessor`) | **NEXT** |
+| 4 | `UnifiedSMILDataset.from_path()` auto-detection | pending |
+| 2 | `MultiViewreplicAntSMILDataset` PyTorch test seam | pending, low priority |
+| 5 | Single-view sampler | deferred per design |
+| — | Step-0 smoke test (preprocess + short training) | follows Phase 3 |
+
+**Phase 1 highlights** (see commit history on `multiview-replicant-integration`):
+- Canonical-camera-frame storage (lowest CAM ID → R=I, t=0), forward-transform `canonical_to_world` for round-trip
+- Depth-buffer self-occlusion visibility refinement at load time (commit `eb5b5f8`)
+- Explicit `keypoint_in_dataset_per_view` bitmap so model-only joints stay invisible regardless of where the `[0, 0]` sentinel lands (commit `600f913`)
+- Diagnostics: `tests/validate_multiview_replicant_loader.py` (`--compare_frames`, `--named_overlay`) and `smal_fitter/replicAnt_data/visualize_multiview_depth_occlusion.py`
+- Empirical: 0.00 px reprojection error on 12 cameras (frame 0), 7.6e-06 max abs round-trip on 3D keypoints, canonical-cam extrinsics R=I and t=0 to numerical precision, 328 → 259 keypoints kept after depth refinement on frame 100 (mouse model)
+
+**Important architectural shift from the original draft** — depth handling: the depth-buffer self-occlusion check runs at load time inside the loader, not as a post-process on stored bytes. The HDF5 schema therefore does NOT include a `/multiview_depth/` group, and the preprocessor does NOT take an `--include_depth_map` flag. Depth parameters are pass-through CLI args, recorded in `/metadata` attrs for reproducibility. See §Phase 3 below.
+
+---
+
 ## Current Architecture Analysis
 
 ### Single-View Data Pipeline
@@ -95,8 +117,8 @@ SLEAP sessions (multiple cameras per frame)
   frame_idx[num_samples]
   session_name[num_samples] (vlen str)                      # replicAnt: dataset name
   camera_names[num_samples, max_views] (vlen str)           # canonical camera name per slot
-  canonical_to_world_R[num_samples, 3, 3]                   # inverse of per-frame canonical-camera-frame
-  canonical_to_world_t[num_samples, 3]                      # ↳ enables round-trip to raw world coords
+  canonical_to_world_R[num_samples, 3, 3]                   # = R_0; FORWARD world->canonical transform
+  canonical_to_world_t[num_samples, 3]                      # = t_0; invert as (x_can - t_0) @ R_0.T to recover raw world
 ```
 
 **Note on the frame convention**: All `R`, `t`, `trans`, `global_rot`, and
@@ -160,7 +182,7 @@ replicAnt-dataset-multi-cam-mice/
      - `.JPG` — RGB image (always present)
      - `.json` — per-camera metadata (always present)
      - `_ID_CAM{id}.png` — ID/visibility mask (always present)
-     - `_Depth_CAM{id}.png` — depth map (optional; loaded only when `--include_depth_map` is set)
+     - `_Depth_CAM{id}.png` — depth map (loaded by the multi-view loader when `depth_occlusion_check=True`; falls back silently to ID-mask-only visibility if missing)
 3. **Per-camera metadata** (in `.json` files):
    - Same format as single-view replicAnt JSON
    - Contains camera parameters (view matrix, FOV, location, rotation)
@@ -175,101 +197,86 @@ replicAnt-dataset-multi-cam-mice/
 
 ## Implementation Strategy
 
-### Phase 1: Extend Unreal2Pytorch3D.py
+### Phase 1: `load_SMIL_Unreal_multiview_sample` — COMPLETE
 
-**New Functions** (add without breaking existing ones):
+Implemented in `smal_fitter/Unreal2Pytorch3D.py`. The original draft is gone; this section documents the **landed API** for downstream consumers (Phase 3 preprocessor, validation diagnostics).
+
+**Signature**:
 
 ```python
 def load_SMIL_Unreal_multiview_sample(
-    data_path,                # Path to dataset directory
-    frame_index,              # Frame number (0-padded as needed)
-    camera_indices=None,      # List of camera indices to load (None = all)
-    plot_tests=False,
-    propagate_scaling=True,
-    translation_factor=0.01,
-    load_images=True,
-    verbose=False
+    data_path: str,
+    frame_index: int,
+    camera_indices: list = None,           # None -> all cameras present for that frame
+    propagate_scaling: bool = True,
+    translation_factor: float = 0.01,
+    load_images: bool = True,
+    canonical_frame: bool = True,          # canonical-camera-frame storage on by default
+    depth_occlusion_check: bool = True,    # depth-buffer self-occlusion refinement
+    depth_max_cm: float = 1000.0,
+    depth_tolerance_cm: float = 5.0,
+    depth_neighborhood: int = 1,           # half-window, so 1 => 3x3 patch
+    verbose: bool = False,
 ) -> Tuple[Dict, Dict]:
-    """
-    Load multi-view replicAnt data from a flat-directory dataset for a specific frame.
-    
-    Dataset structure:
-    - Flat directory: {dataset_name}_{frame_idx:05d}_CAM{cam_id}.{ext}
-    - Per-camera files: .json (metadata), .JPG (image), _ID_CAM{id}.png (visibility mask)
-    - Synchronized frames: all cameras for same frame_idx are temporally aligned
-    - Shared pose/shape: identical across all cameras (only camera params differ)
-    
-    Args:
-        data_path: Path to dataset directory
-        frame_index: Frame number to load (e.g., 0, 1, 2, ...)
-        camera_indices: List of camera IDs to load (e.g., [1, 2, 3] or None for all)
-        
-    Returns:
-        x_output: Dictionary with per-view data
-            - image_paths: List[str] - paths to images per camera
-            - image_data: List[np.ndarray] - loaded images, shape (H, W, 3)
-            - mask_data: List[np.ndarray] - per-camera ID/visibility masks, shape (H, W)
-            - mask_paths: List[str] - paths to ID map files
-            - num_views: int - number of views loaded
-            - camera_ids: List[int] - camera IDs in order
-            
-        y_output: Dictionary with shared + per-view data
-            - pose_data: dict - raw pose data (from first camera)
-            - joint_angles: np.ndarray[n_joints, 3] - shared joint rotations
-            - joint_names: list - joint names
-            - shape_betas: np.ndarray[n_betas] - shared shape
-            
-            - cam_rot_per_view: List[np.ndarray] - rotation matrices per camera [3, 3]
-            - cam_trans_per_view: List[np.ndarray] - translation vectors per camera [3]
-            - fx_per_view: List[float] - focal length X per camera
-            - fy_per_view: List[float] - focal length Y per camera
-            - cx_per_view: List[float] - principal point X per camera
-            - cy_per_view: List[float] - principal point Y per camera
-            
-            - keypoints_2d_per_view: List[np.ndarray] - normalized 2D keypoints per camera
-            - keypoint_visibility_per_view: List[np.ndarray] - **PER-CAMERA VISIBILITY**
-                                           computed as: in_bounds AND (id_mask_pixel > 0)
-    """
-    # 1. Detect camera count and dataset name from _BatchData_*.json
-    # 2. Determine which camera indices to load (all or subset)
-    # 3. Build the per-frame canonical camera list:
-    #    a. Sort the resolved camera indices ascending.
-    #    b. The lowest-index resolved camera becomes canonical slot 0
-    #       (defines the per-frame world frame: R=I, t=0).
-    #    c. Subsequent resolved cameras fill slots 1..N-1 in order.
-    # 4. From the canonical-slot-0 camera's JSON:
-    #    a. Extract shared pose, shape, joint_angles via load_SMIL_Unreal_sample()
-    #       (or its inner helpers) to get raw world-frame values.
-    #    b. Capture (R_0, t_0) as canonical_to_world for the inverse transform.
-    # 5. For each canonical slot v:
-    #    a. Parse that camera's JSON (extrinsics + intrinsics).
-    #    b. Load image and ID mask.
-    #    c. Compute per-view keypoint visibility (see below).
-    # 6. Re-express in canonical-camera frame (see "Frame Convention" section):
-    #    a. Per-view extrinsics: (R_v, t_v) → relative to (R_0, t_0).
-    #    b. Model trans, global_rot, keypoints_3d → re-expressed in canonical frame.
-    # 7. Return consolidated multi-view data + canonical_to_world for round-trip.
 ```
 
-**Key Implementation Details**:
-- All output is in **canonical-camera frame** (see Frame Convention section below).
-  The raw world-frame values are computed internally then transformed; only the
-  transformed values plus `canonical_to_world = (R_0, t_0)` are returned.
-- Per-camera parameters extracted independently from each camera's JSON.
-- Per-camera ID masks loaded from `_ID_CAM{id}.png` files.
-- Per-camera visibility uses the existing `compute_keypoint_visibility()` logic:
-  ```python
-  visibility[cam] = 1.0 if (
-      keypoint within image bounds [0, 1] AND
-      id_mask[int(norm_y * H), int(norm_x * W)] > 0
-  ) else 0.0
-  ```
-- ID mask files follow pattern: `{dataset_name}_{frame_idx:05d}_ID_CAM{cam_id}.png`.
+**Behaviour**:
+- Auto-detects `dataset_name` and frame count from `_BatchData_*.json`.
+- Builds canonical camera ordering from `sorted(camera_indices)`; the lowest-numbered camera present this frame becomes canonical slot 0.
+- Maps each camera's keypoints into model `J_names` order; tracks an in-dataset bitmap so model-only joints (no dataset GT) stay invisible regardless of mask content.
+- Per-view visibility = `in_dataset AND in_bounds AND id_mask_pass AND depth_pass` (depth term skipped when `depth_occlusion_check=False` or the `_Depth_CAM{id}.png` file is missing).
+- When `canonical_frame=True` (default), re-expresses all camera extrinsics, model `root_loc`, `root_rot`, and `keypoints_3d` relative to canonical cam 0. Emits `canonical_to_world = (R_0, t_0)` as the forward transform; the inverse `x_world = (x_can - t_0) @ R_0.T` recovers the original world frame.
 
-**Backward Compatibility**: 
-- Keep `load_SMIL_Unreal_sample()` unchanged
-- Add `load_SMIL_Unreal_multiview_sample()` as new function
-- Both work with existing code paths
+**`x_output` schema**:
+```python
+{
+    "image_data":         List[np.ndarray | None],  # V x (H, W, 3) uint8 (None when load_images=False)
+    "image_paths":        List[str],                 # V
+    "input_image_mask":   List[np.ndarray | None],   # V x (H, W) binary id mask
+    "mask_paths":         List[str],                 # V
+    "depth_paths":        List[str],                 # V — file paths only, no in-memory depth
+    "num_views":          int,
+    "camera_ids":         List[int],                 # sorted ascending; index 0 == canonical
+}
+```
+
+**`y_output` schema** (shared fields first, then per-view):
+```python
+{
+    # Shared across all cameras
+    "shape_betas":        np.ndarray,                # (n_betas,)
+    "joint_angles":       np.ndarray,                # (n_joints, 3) axis-angle, J_names order
+    "joint_names":        list,                      # config.dd["J_names"]
+    "root_loc":           np.ndarray,                # (3,)   canonical-frame translation
+    "root_rot":           np.ndarray,                # (3,)   canonical-frame axis-angle
+    "scale_weights":      np.ndarray | None,         # PCA scale weights (if present in JSON)
+    "trans_weights":      np.ndarray | None,         # PCA trans weights (if present in JSON)
+    "translation_factor": float,
+    "propagate_scaling":  bool,
+    "pose_data":          dict,                      # raw cam-0 keypoints dict (back-compat)
+    "keypoints_3d":       np.ndarray,                # (n_joints, 3) canonical frame, J_names order
+    "keypoints_3d_world": np.ndarray,                # (n_joints, 3) raw PyTorch3D-mirrored world frame
+    "canonical_to_world": (np.ndarray, np.ndarray),  # (R_0 (3,3), t_0 (3,)) forward transform
+    "canonical_cam_id":   int,                       # canonical cam ID, or -1 when canonical_frame=False
+
+    # Per-view (V entries each)
+    "keypoints_2d_per_view":        List[np.ndarray],   # V x (n_joints, 2) [y/H, x/W] axis-swapped
+    "keypoint_visibility_per_view": List[np.ndarray],   # V x (n_joints,) float {0, 1}
+    "keypoint_in_dataset_per_view": List[np.ndarray],   # V x (n_joints,) bool — has dataset GT
+    "cam_rot_per_view":             List[torch.Tensor], # V x (3, 3) row-vector world->cam
+    "cam_trans_per_view":           List[torch.Tensor], # V x (3,)
+    "fx_per_view", "fy_per_view":   List[float],        # V
+    "cx_per_view", "cy_per_view":   List[float],        # V
+    "fov_per_view":                 List[float],        # V (degrees, from camera JSON)
+}
+```
+
+**Conventions to be aware of when consuming this**:
+- 2D keypoints are stored with an **intentional axis swap**: `kp[:, 0] = 2DPos.y / H`, `kp[:, 1] = 2DPos.x / W`. Downstream ID-mask and depth lookups depend on this. Don't "fix" without updating both sides.
+- All extrinsics and 3D points are in **PyTorch3D-mirrored** convention (x-axis negated vs raw Unreal). Projection: `u = -fx * X_cam.x / X_cam.z + cx`, `v = -fy * X_cam.y / X_cam.z + cy`.
+- `keypoint_in_dataset_per_view` is True iff the joint name appears in that camera's `keypoints` dict. Use it to distinguish "missing from dataset" from "present but culled by ID/depth".
+
+**Backward compatibility**: `load_SMIL_Unreal_sample()` (single-view) is unchanged.
 
 ---
 
@@ -336,6 +343,9 @@ class MultiViewreplicAntSMILDataset(torch.utils.data.Dataset):
             x_output: Dict with per-view images and masks
             y_output: Dict with shared pose + per-view camera parameters
         """
+        # The loader defaults (canonical_frame=True, depth_occlusion_check=True)
+        # match what the preprocessor uses, so production-side training stays
+        # byte-equivalent to direct-loader sampling for tests.
         x, y = load_SMIL_Unreal_multiview_sample(
             data_path=self.data_path,
             frame_index=idx,
@@ -343,88 +353,114 @@ class MultiViewreplicAntSMILDataset(torch.utils.data.Dataset):
             propagate_scaling=True,
             translation_factor=0.01,
             load_images=True,
-            verbose=False
         )
-        
-        # Convert rotation representations if needed
+
         if self.rotation_representation == '6d':
-            # Convert root rotation and joint angles
             if 'root_rot' in y:
                 y['root_rot'] = axis_angle_to_rotation_6d(y['root_rot'])
             if 'joint_angles' in y:
                 y['joint_angles'] = axis_angle_to_rotation_6d(y['joint_angles'])
-        
+
         return x, y
-        
+
     def __len__(self):
         return self.num_frames
 ```
 
 ---
 
-### Phase 3: Preprocessing to HDF5
+### Phase 3: HDF5 preprocessor — NEXT
 
-**New module**: `smal_fitter/sleap_data/preprocess_replicant_multiview_dataset.py` —
-sibling of `preprocess_sleap_multiview_dataset.py`, with the same output schema so
-`SLEAPMultiViewDataset` and `train_multiview_regressor.py` consume it unchanged.
+**New module**: `smal_fitter/replicAnt_data/preprocess_replicant_multiview_dataset.py`. Lives alongside `visualize_multiview_depth_occlusion.py` in the `replicAnt_data` package. (NOT in `sleap_data/` — the SLEAP and replicAnt code paths are siblings, not nested.)
 
-**Class**: `replicAntMultiViewPreprocessor`
+**Output schema**: identical to `SLEAPMultiViewDataset`'s expected HDF5 layout (`/metadata`, `/multiview_images`, `/multiview_keypoints`, `/parameters`, `/auxiliary` — see the SLEAP overview section above for the full table). The trainer (`train_multiview_regressor.py`) consumes both paths interchangeably.
+
+`canonical_camera_order` in `/metadata` attrs is `["CAM1", "CAM2", ...]` derived from `sorted(camera_indices)` on the first scanned frame.
+
+**Class**:
 
 ```python
 class replicAntMultiViewPreprocessor:
     def __init__(
         self,
-        target_resolution: int = 224,
-        backbone_name: str = 'vit_large_patch16_224',
+        target_resolution: int = 512,         # store at native; dataset class resizes at train time
+        backbone_name: str = "vit_large_patch16_224",
         jpeg_quality: int = 95,
         chunk_size: int = 8,
-        compression: str = 'gzip',
+        compression: str = "gzip",
         compression_level: int = 6,
         frame_skip: int = 1,
         camera_subset: Optional[List[int]] = None,
-        include_depth_map: bool = False,        # gate for /multiview_depth/ group
+        # Depth visibility-refinement passthrough to the loader.
+        # Defaults match load_SMIL_Unreal_multiview_sample.
+        depth_occlusion_check: bool = True,
+        depth_max_cm: float = 1000.0,
+        depth_tolerance_cm: float = 5.0,
+        depth_neighborhood: int = 1,
         propagate_scaling: bool = True,
         translation_factor: float = 0.01,
         debug: bool = False,
     ):
         ...
 
-    def preprocess(self, input_dir: str, output_hdf5: str, num_workers: int = 8):
-        """Produce an HDF5 file that matches the SLEAPMultiViewDataset schema."""
+    def preprocess(self, input_dir: str, output_hdf5: str,
+                   num_workers: int = 8,
+                   max_frames: Optional[int] = None) -> None:
+        """Produce an HDF5 matching the SLEAPMultiViewDataset schema."""
 ```
 
-**Output schema**: identical to the schema documented in the SLEAP overview above
-(`/metadata`, `/multiview_images`, `/multiview_keypoints`, `/parameters`,
-`/auxiliary`). `canonical_camera_order` is `["CAM1", "CAM2", ...]` derived from
-the first scanned frame.
+**Image storage**:
+- `/multiview_images/image_jpeg_view_{v}` as `vlen uint8` (JPEG-encoded). `jpeg_quality=95`.
+- Stored at the **native 512x512** of the replicAnt source. The dataset class resizes to backbone input size at training time. This keeps the HDF5 backbone-agnostic at the cost of ~2x disk versus pre-resizing to 224. Re-evaluate if disk pressure becomes real.
+- 12 cams x 10k frames lands in the ~5-10 GB range vs ~90 GB raw.
 
-**Image storage** (matches SLEAP preprocessor):
-- Per-view images are **JPEG-encoded in the HDF5** as variable-length `uint8` arrays
-  under `/multiview_images/image_jpeg_view_{v}` (one dataset per view slot).
-- `jpeg_quality` defaults to 95 (same as SLEAP path).
-- This keeps the 12-cam × 10k-frame replicAnt clip in the ~5–10 GB range rather
-  than ~90 GB raw.
+**Depth handling (architectural shift vs original draft)**:
+- Depth-buffer self-occlusion is applied at **load time** by `load_SMIL_Unreal_multiview_sample` (Phase 1). The HDF5 stores depth-refined visibility under `/multiview_keypoints/keypoint_visibility`.
+- **No `/multiview_depth/` group is written. No `--include_depth_map` flag exists.** Raw depth PNGs are not persisted in the HDF5.
+- The preprocessor passes the four depth knobs straight through to the loader and records the values used as `/metadata` attrs so the visibility computation is reproducible:
+  ```
+  /metadata attrs (depth additions vs SLEAP schema):
+    depth_occlusion_check: bool
+    depth_max_cm:          float
+    depth_tolerance_cm:    float
+    depth_neighborhood:    int
+  ```
+- **Implication**: changing the depth thresholds requires re-preprocessing. If a future caller needs runtime-tunable thresholds, the lowest-friction option is to add the `/multiview_depth/` group at that point and refresh from stored bytes. Keep the schema minimal until that need is proven.
 
 **Failure handling**:
-- Frames that fail to load any view (corrupt JSON, missing files, projection
-  failure, etc.) are **flagged and skipped**: the preprocessor logs the
-  `(frame_idx, reason)` and continues with the next `idx`. A summary count is
-  printed at the end and stored in `/metadata` attrs (`num_skipped_frames`,
-  `skipped_frame_indices`).
-- Per-camera failures within an otherwise-loadable frame mark just that view's
-  `view_mask[i, v] = False` and `camera_indices[i, v] = -1`; the frame is kept
-  as long as ≥1 view loads.
+- Per-frame: load failures (corrupt JSON, missing image, projection failure, etc.) are caught, logged as `(frame_idx, reason)`, and skipped. A summary count plus the skipped index list are written to `/metadata` attrs (`num_skipped_frames`, `skipped_frame_indices`).
+- Per-camera within a kept frame: failures mark just that view's `view_mask[i, v] = False` and `camera_indices[i, v] = -1`. Frame kept as long as >= 1 view loads.
+- HDF5 uses **contiguous sample slots**: `num_samples = number of successfully preprocessed frames`. The mapping back to source frame numbers is via `/auxiliary/frame_idx[sample_idx]`. There are no gaps in the sample axis.
 
-**Optional depth (`--include_depth_map`)**:
-- When set, an additional `/multiview_depth/` group is written:
-  ```
-  /multiview_depth/
-    depth_png_view_{v}[num_samples] (vlen uint8)    # PNG-encoded raw depth
-    depth_mask[num_samples, max_views]              # 1 if depth present, 0 otherwise
-  ```
-- When unset (default), depth files are ignored even if present on disk.
-- Future self-occlusion visibility refinement will read this group when
-  available; the trainer does not require it.
+**Parallelism**:
+- `concurrent.futures.ProcessPoolExecutor` with default 8 workers, one frame per task.
+- Each worker calls `load_SMIL_Unreal_multiview_sample`, JPEG-encodes the per-view images, returns a typed dict to the main process.
+- Main process drains the result queue in input order and writes to HDF5 sequentially (HDF5 is not thread-safe).
+- Workers must call `apply_smal_file_override(smal_file)` and `import config` at init, then `from Unreal2Pytorch3D import load_SMIL_Unreal_multiview_sample`. Use a top-level worker `initializer` function passed to the ProcessPoolExecutor — this is how `apply_smal_file_override` flows into each child.
+
+**Streaming HDF5 write**:
+- Pre-allocate all fixed-shape datasets at `num_samples_alloc = ceil(num_input_frames / frame_skip)`; resize down at the end after counting actual successes.
+- Apply `chunks=(chunk_size, ...)` and `compression="gzip"`, `compression_opts=6` on every dataset.
+- The vlen `uint8` JPEG datasets use `dtype=h5py.vlen_dtype(np.uint8)` and grow by per-sample element assignment.
+
+**CLI** (inside `__main__`):
+```
+--input_dir          (required)  flat-directory replicAnt dataset
+--output_hdf5        (required)
+--smal_file                       SMAL/SMIL .pkl matching the dataset's skeleton
+--shape_family                    optional
+--num_workers        8
+--jpeg_quality       95
+--chunk_size         8
+--frame_skip         1
+--camera_subset                   optional, list of ints
+--max_frames                      optional; for Step-0 smoke testing
+--depth_occlusion_check           default True; --no_depth_occlusion_check to disable
+--depth_max_cm       1000.0
+--depth_tolerance_cm 5.0
+--depth_neighborhood 1
+--debug              flag
+```
 
 ---
 
@@ -600,47 +636,35 @@ y_data = {
 
 ## Files to Create/Modify
 
-### New Files:
-1. `smal_fitter/sleap_data/preprocess_replicant_multiview_dataset.py` —
-   `replicAntMultiViewPreprocessor`, writes the SLEAP-compatible HDF5 schema.
-2. `smal_fitter/neuralSMIL/multiview_replicant_dataset.py` —
-   `MultiViewreplicAntSMILDataset` (test seam; thin wrapper around
-   `load_SMIL_Unreal_multiview_sample`).
-3. CLI entry, either:
-   - extend an existing `preprocess_dataset.py`, or
-   - add `smal_fitter/sleap_data/preprocess_replicant_multiview_dataset.py`'s
-     own `__main__` block (matches the SLEAP equivalent).
+### New Files (pending):
+1. `smal_fitter/replicAnt_data/preprocess_replicant_multiview_dataset.py` — `replicAntMultiViewPreprocessor` + `__main__` CLI. **Phase 3, NEXT.**
+2. `smal_fitter/neuralSMIL/multiview_replicant_dataset.py` — `MultiViewreplicAntSMILDataset` (Phase 2, test seam only; production reads HDF5).
 
-### Modify Existing Files:
-1. `smal_fitter/Unreal2Pytorch3D.py` — already contains the Phase 1 draft of
-   `load_SMIL_Unreal_multiview_sample()` (uncommitted). Needs cleanup +
-   reparameterisation parity with `load_SMIL_Unreal_sample()` (see Open Items).
-2. `smal_fitter/neuralSMIL/smil_datasets.py` — extend
-   `UnifiedSMILDataset.from_path()` with the flat-directory `_CAM*.json`
-   detection branch.
+### Modified Files:
+1. `smal_fitter/Unreal2Pytorch3D.py` — **Phase 1 complete.** Multi-view loader with canonical-frame storage and depth visibility refinement. See §Status for commit references.
+2. `smal_fitter/replicAnt_data/__init__.py` — created during Phase 1's depth work; advertises the planned preprocessor.
+3. `smal_fitter/replicAnt_data/visualize_multiview_depth_occlusion.py` — created during Phase 1; per-view depth-occlusion diagnostic.
+4. `smal_fitter/neuralSMIL/smil_datasets.py` — **Phase 4**: extend `UnifiedSMILDataset.from_path()` with the flat-directory `_CAM*.json` detection branch.
 
 ### No Changes Needed:
-- `train_multiview_regressor.py`, `multiview_smil_regressor.py`,
-  `sleap_multiview_dataset.py` — Phase 3 produces an HDF5 that already
-  matches the SLEAP schema.
-- `train_smil_regressor.py`, `smil_image_regressor.py` — touched only when the
-  single-view sampler is added later.
+- `train_multiview_regressor.py`, `multiview_smil_regressor.py`, `sleap_multiview_dataset.py` — Phase 3 produces an HDF5 that already matches the SLEAP schema.
+- `train_smil_regressor.py`, `smil_image_regressor.py` — single-view sampler is Phase 5 (deferred).
 
 ---
 
 ## Implementation Order
 
-1. **Step 1**: Clean up the Phase 1 draft in `Unreal2Pytorch3D.py`
-   (deduplicate imports, add coord-swap comment, add reparameterisation —
-   see Open Items).
-2. **Step 2**: Add `MultiViewreplicAntSMILDataset` (test seam).
-3. **Step 3**: Implement `replicAntMultiViewPreprocessor` + CLI (matches
-   SLEAP HDF5 schema; JPEG-encoded images; optional `--include_depth_map`).
-4. **Step 4**: Extend `UnifiedSMILDataset.from_path()` auto-detection.
-5. **Step 5**: Round-trip tests
-   (load → preprocess → SLEAPMultiViewDataset → assert tensor shapes/contents).
-6. **Step 6**: Example multiview config under
-   `smal_fitter/neuralSMIL/configs/examples/`.
+1. **Step 1** — Phase 1 loader: canonical-frame storage, depth visibility refinement, in-dataset bitmap. **DONE** (see §Status).
+2. **Step 2** [NEXT] — Phase 3: implement `replicAntMultiViewPreprocessor` and `__main__` CLI.
+3. **Step 3** — Step-0 smoke test (see §"Open empirical question" near the bottom):
+   - Preprocess `--max_frames 500` to a small HDF5.
+   - HDF5 round-trip check: open via `SLEAPMultiViewDataset`, take sample 0, apply inverse `canonical_to_world` (`R_0.T`, `-t_0 @ R_0.T`) to `keypoints_3d`, assert <= 1e-3 against the loader's `keypoints_3d_world` for the same source frame.
+   - Short multi-view training run (~50 epochs on the 500-frame subset). Pass criterion: per-view reprojection loss converges normally; `trans` head behaves under direct supervision.
+4. **Step 4** — Phase 4: extend `UnifiedSMILDataset.from_path()` auto-detection.
+5. **Step 5** — Phase 2: add `MultiViewreplicAntSMILDataset` test seam (low priority; production reads HDF5).
+6. **Step 6** — Example multi-view config JSON under `smal_fitter/neuralSMIL/configs/examples/`.
+
+After Step 3 passes, the full preprocess (all 10k frames) and the production training run unblock; everything else above is wrap-up.
 
 ---
 
@@ -676,17 +700,28 @@ This convention:
   and 2D reprojections are byte-equivalent to the raw world-frame version.
 - Has a clean bridge to single-view sampling: one composition folds canonical
   cam → selected cam → model-at-origin, producing samples byte-equivalent to
-  the existing single-view `load_SMIL_Unreal_sample()` output. (Out of scope
-  for this PR, but the design supports it.)
+  the existing single-view `load_SMIL_Unreal_sample()` output. (Phase 5,
+  deferred per §Status; the design supports it.)
 
 ### Inverse transform stored for validation
 
 The canonical-camera-frame conversion is reversible. Store the per-frame
-canonical-camera-to-world rigid transform under `/auxiliary/canonical_to_world`
-(`R: (num_samples, 3, 3)`, `t: (num_samples, 3)`) so:
-- Tests can validate that round-tripping reproduces the raw extrinsics.
+**forward** world->canonical transform under
+`/auxiliary/canonical_to_world_R` and `/auxiliary/canonical_to_world_t`
+(equal to the canonical camera's row-vector extrinsics `(R_0, t_0)`).
+Consumers that need raw world coordinates apply the inverse explicitly:
+
+```python
+x_world = (x_canonical - t_0) @ R_0.T
+```
+
+We picked forward storage over storing the inverse because `(R_0, t_0)`
+is the artifact computed at the canonical site — storing it avoids
+drift from re-deriving, and the inverse is a one-liner at decode time.
+The field is used for:
+- Tests validating that round-tripping reproduces the raw extrinsics.
 - Downstream tools that *do* want absolute world coords (rendering at a
-  specific scene location, debugging procgen, etc.) can recover them.
+  specific scene location, debugging procgen, etc.) recovering them.
 - Training pipeline ignores this field; it's metadata only.
 
 For procedural replicAnt scenes the absolute world coordinates carry no
@@ -699,10 +734,10 @@ The SLEAP preprocessor currently stores camera extrinsics in the rig's
 calibration-tool-defined world frame. To keep both paths producing
 byte-equivalent on-disk conventions:
 
-- **TODO (separate change, not in this PR)**: apply canonical-camera-frame
-  normalisation in `preprocess_sleap_multiview_dataset.py` too. For SLEAP
-  this is a no-op for learning (rig is fixed, so it's a constant shift) but
-  makes the data format symmetric across the two paths.
+- **TODO (out of scope for the replicAnt preprocessor work)**: apply
+  canonical-camera-frame normalisation in `preprocess_sleap_multiview_dataset.py`
+  too. For SLEAP this is a no-op for learning (rig is fixed, so it's a
+  constant shift) but makes the data format symmetric across the two paths.
 
 ### Open empirical question (not blocking implementation)
 
@@ -736,15 +771,3 @@ gradient — not a "relearn" situation — so the risk is low.
   `trans` in the stored data (degrading to no direct supervision, matching
   past SLEAP behaviour).
 
-## Phase 1 cleanup (separate from frame convention)
-
-- Remove duplicate `from pathlib import Path` / `from typing import ...` /
-  `import re` lines inside the function body.
-- Add a comment near the `norm_x = ...['y'] / image_height` block flagging
-  that the x↔y swap matches the existing single-view convention.
-- Replace the current raw-extrinsics emission with canonical-camera-frame
-  output per the convention above. The function will compute the canonical
-  camera's `(R_0, t_0)` from the first resolved-on-disk camera index, then
-  re-express every per-view `(R_v, t_v)`, model `trans`, model `global_rot`,
-  and `keypoints_3d` relative to that frame. Store `canonical_to_world` as
-  `(R_0, t_0)` for round-trip validation.
