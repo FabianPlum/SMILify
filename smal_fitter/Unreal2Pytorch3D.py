@@ -671,16 +671,118 @@ def create_sphere_meshes_at_points(
     return spheres_mesh
 
 
+def refine_visibility_with_depth(
+    visibility,
+    keypoints_2d_normalized,
+    keypoints_3d_world_raw,
+    camera_location_world_raw,
+    depth_image,
+    image_width,
+    image_height,
+    depth_max_cm=1000.0,
+    depth_tolerance_cm=5.0,
+    depth_neighborhood=1,
+):
+    """
+    Refine a per-joint visibility array with a replicAnt depth-buffer
+    self-occlusion check. Mirrors the convention used in the sungaya
+    pipeline so the two stay byte-equivalent.
+
+    Encoding: replicAnt's depth pass packs a Euclidean camera-to-surface
+    distance (in cm) into the RED channel of an RGBA uint8 PNG via a
+    linear map `surface_cm = (R / 255) * depth_max_cm`. A joint is
+    occluded when the keypoint's true distance to the camera exceeds
+    the front-most surface distance (over a small neighborhood) by more
+    than `depth_tolerance_cm`.
+
+    Coordinates here are in raw Unreal world frame (cm, no PyTorch3D
+    x-mirror). The (R/255)*range mapping is preserved, and distances
+    are coordinate-frame agnostic as long as keypoint and camera live
+    in the same frame.
+
+    The refinement is monotone: it can only turn 1.0 -> 0.0, never the
+    other way. Joints already at 0.0 and joints whose 3D ground truth
+    is missing (NaN) are skipped.
+
+    Args:
+        visibility (np.array): Current visibility per joint (1.0 or 0.0). Refined in place AND returned.
+        keypoints_2d_normalized (np.array): (n_joints, 2) — same axis-swapped
+            (norm_x = 2DPos.y / H, norm_y = 2DPos.x / W) convention as the
+            rest of this module. (row_idx, col_idx) = (norm_x * H, norm_y * W).
+        keypoints_3d_world_raw (np.array): (n_joints, 3) — raw Unreal 3DPos
+            in cm. NaN for joints with no ground-truth 3D position.
+        camera_location_world_raw (np.array): (3,) — raw Unreal camera
+            `Location` in cm.
+        depth_image (np.array): (H, W, 4) uint8 RGBA loaded via imageio. Depth
+            is in channel 0. Pass None to skip the refinement (visibility
+            returned unchanged).
+        image_width (int), image_height (int): Reference resolution that
+            `keypoints_2d_normalized` was normalised against.
+        depth_max_cm (float): Encoded range for the depth pass (cm).
+        depth_tolerance_cm (float): Margin added to the surface distance
+            before declaring a keypoint occluded. NB the depth pass is
+            8-bit over `depth_max_cm` so one LSB ≈ depth_max_cm/255 cm
+            (~3.92 cm at the 1000 cm default) — set tolerance to at
+            least one LSB plus the expected interior-joint offset, or
+            interior skeletal joints will get clipped.
+        depth_neighborhood (int): Half-window in pixels for the surface
+            min-depth lookup. `0` samples exactly one pixel; `1` uses 3x3.
+
+    Returns:
+        np.array: Updated visibility array (same object as input).
+    """
+    if depth_image is None:
+        return visibility
+    if depth_image.ndim != 3 or depth_image.shape[2] < 1:
+        return visibility
+    if (
+        depth_image.shape[0] != image_height
+        or depth_image.shape[1] != image_width
+    ):
+        return visibility
+
+    cam_loc = np.asarray(camera_location_world_raw, dtype=np.float64)
+
+    for j in range(len(visibility)):
+        if visibility[j] == 0.0:
+            continue
+        p3 = keypoints_3d_world_raw[j]
+        if not np.isfinite(p3).all():
+            continue
+
+        norm_x, norm_y = keypoints_2d_normalized[j]
+        if not (0.0 <= norm_x <= 1.0 and 0.0 <= norm_y <= 1.0):
+            continue
+        pixel_row = int(np.clip(norm_x * image_height, 0, image_height - 1))
+        pixel_col = int(np.clip(norm_y * image_width, 0, image_width - 1))
+
+        if depth_neighborhood <= 0:
+            r_val = int(depth_image[pixel_row, pixel_col, 0])
+        else:
+            r0 = max(0, pixel_row - depth_neighborhood)
+            r1 = min(image_height, pixel_row + depth_neighborhood + 1)
+            c0 = max(0, pixel_col - depth_neighborhood)
+            c1 = min(image_width, pixel_col + depth_neighborhood + 1)
+            r_val = int(depth_image[r0:r1, c0:c1, 0].min())
+
+        surface_cm = (r_val / 255.0) * depth_max_cm
+        dist_cm = float(np.linalg.norm(p3.astype(np.float64) - cam_loc))
+        if dist_cm > (surface_cm + depth_tolerance_cm):
+            visibility[j] = 0.0
+
+    return visibility
+
+
 def compute_keypoint_visibility(keypoints_2d, mask, image_width, image_height):
     """
     Compute keypoint visibility based on mask and image bounds.
-    
+
     Args:
         keypoints_2d (np.array): Normalized 2D keypoint coordinates [0, 1]
         mask (np.array): Binary mask of the object (None if not available, already dilated when loaded)
         image_width (int): Image width in pixels
         image_height (int): Image height in pixels
-        
+
     Returns:
         np.array: Visibility array (1 for visible, 0 for not visible)
     """
@@ -1087,6 +1189,10 @@ def load_SMIL_Unreal_multiview_sample(
     translation_factor: float = 0.01,
     load_images: bool = True,
     canonical_frame: bool = True,
+    depth_occlusion_check: bool = True,
+    depth_max_cm: float = 1000.0,
+    depth_tolerance_cm: float = 5.0,
+    depth_neighborhood: int = 1,
     verbose: bool = False
 ):
     """
@@ -1103,6 +1209,22 @@ def load_SMIL_Unreal_multiview_sample(
         propagate_scaling (bool): Whether to propagate scaling to child joints
         translation_factor (float): Factor to multiply translation by
         load_images (bool): Whether to load image data
+        depth_occlusion_check (bool): If True (default), refine per-view
+            visibility with the replicAnt depth-buffer self-occlusion test.
+            AND-composed with the existing ID-mask check. Falls back
+            silently to id-mask-only visibility for any view whose
+            `_Depth_CAM{id}.png` is absent.
+        depth_max_cm (float): Encoded range of the depth pass in cm.
+            replicAnt defaults to 1000 cm; tune only if the depth pass was
+            re-exported with a different range.
+        depth_tolerance_cm (float): Margin added to the surface distance
+            before declaring a joint occluded. Default of 5 cm is one
+            depth-LSB (~3.92 cm at the 1000 cm range) plus ~1 cm
+            interior-joint slack; bump if interior joints still get
+            clipped.
+        depth_neighborhood (int): Half-window in pixels for the surface
+            min-depth sample. 0 = exact pixel; 1 = 3x3 patch (default,
+            matches sungaya).
         canonical_frame (bool): If True (default), re-express all camera
             extrinsics and model pose in the canonical camera's frame
             (lowest CAM ID -> R=I, t=0). If False, leave everything in
@@ -1249,11 +1371,31 @@ def load_SMIL_Unreal_multiview_sample(
     y_output["root_rot"] = global_rotation_np
     y_output["pose_data"] = pose_data  # Keep raw pose data for compatibility
 
+    # Raw-Unreal-frame 3D keypoints (no x-mirror). Needed for the depth
+    # occlusion check, where the camera Location is read from the JSON
+    # un-mirrored and distances must be computed in a consistent frame.
+    # Missing joints stay NaN so the depth helper skips them.
+    keypoints_3d_unreal_raw = np.full(
+        (len(config.dd["J_names"]), 3), np.nan, dtype=np.float32
+    )
+    if depth_occlusion_check:
+        kp3d_raw_by_name = {}
+        for k, kp in pose_data.items():
+            p3 = kp.get("3DPos")
+            if p3 is not None:
+                kp3d_raw_by_name[k] = np.array(
+                    [p3["x"], p3["y"], p3["z"]], dtype=np.float32
+                )
+        for o, j in enumerate(config.dd["J_names"]):
+            if j in kp3d_raw_by_name:
+                keypoints_3d_unreal_raw[o] = kp3d_raw_by_name[j]
+
     # Per-camera lists
     image_data = []
     image_paths = []
     mask_data = []
     mask_paths = []
+    depth_paths = []
 
     keypoints_2d_per_view = []
     keypoint_visibility_per_view = []
@@ -1298,6 +1440,17 @@ def load_SMIL_Unreal_multiview_sample(
         else:
             mask_data.append(None)
         mask_paths.append(str(mask_path))
+
+        # Load depth pass for the self-occlusion refinement. Optional —
+        # if the file is missing we fall back to id-mask-only visibility
+        # for this view per the design decision.
+        depth_path = json_path.with_name(
+            f"{dataset_name}_{frame_index:05d}_Depth_CAM{cam_id}.png"
+        )
+        depth_paths.append(str(depth_path))
+        depth_image = None
+        if depth_occlusion_check and depth_path.exists():
+            depth_image = imageio.v2.imread(str(depth_path))
 
         # Extract per-camera 2D keypoints. The shared `pose_data` above was
         # read from the first camera's JSON; 2DPos is per-camera, so we re-
@@ -1348,6 +1501,30 @@ def load_SMIL_Unreal_multiview_sample(
             for i, (norm_x, norm_y) in enumerate(mapped_keypoints_2d):
                 if not (0 <= norm_x <= 1.0 and 0 <= norm_y <= 1.0):
                     visibility[i] = 0.0
+
+        # Depth-buffer self-occlusion refinement (AND with id-mask result).
+        # No-op when depth_image is None (missing file or check disabled).
+        if depth_occlusion_check and depth_image is not None:
+            cam_loc_unreal_raw = np.array(
+                [
+                    cam_data["iterationData"]["camera"]["Location"]["x"],
+                    cam_data["iterationData"]["camera"]["Location"]["y"],
+                    cam_data["iterationData"]["camera"]["Location"]["z"],
+                ],
+                dtype=np.float32,
+            )
+            refine_visibility_with_depth(
+                visibility=visibility,
+                keypoints_2d_normalized=mapped_keypoints_2d,
+                keypoints_3d_world_raw=keypoints_3d_unreal_raw,
+                camera_location_world_raw=cam_loc_unreal_raw,
+                depth_image=depth_image,
+                image_width=image_width,
+                image_height=image_height,
+                depth_max_cm=depth_max_cm,
+                depth_tolerance_cm=depth_tolerance_cm,
+                depth_neighborhood=depth_neighborhood,
+            )
 
         keypoint_visibility_per_view.append(visibility)
 
@@ -1470,6 +1647,7 @@ def load_SMIL_Unreal_multiview_sample(
     x_output["image_paths"] = image_paths
     x_output["input_image_mask"] = mask_data
     x_output["mask_paths"] = mask_paths
+    x_output["depth_paths"] = depth_paths
     x_output["num_views"] = len(camera_indices)
     x_output["camera_ids"] = camera_indices
 
