@@ -6,6 +6,8 @@ import torch
 import os
 import imageio
 import sys
+from pathlib import Path
+from typing import List, Tuple, Dict, Optional
 from scipy.spatial.transform import Rotation
 
 sys.path.append(os.path.dirname(sys.path[0]))
@@ -154,6 +156,23 @@ def sample_pca_transforms_from_dirs(dd: dict, scale_weights, trans_weights, bone
 """
 Unreal data parsing functions
 """
+
+
+def _detect_pose_root(pose_data):
+    """Return the name of the hierarchical root joint in a replicAnt pose_data dict.
+
+    Strategy:
+      1. If ``config.ROOT_JOINT`` is a key in pose_data, use it (legacy
+         bug-skeleton datasets generated against the active SMAL model rely
+         on this — preserves backwards compatibility).
+      2. Otherwise fall back to the first key, which by Unreal serialisation
+         convention is the root of the skeleton hierarchy (e.g. ``'Mskel'``
+         for the mouse rig, ``'b_t'`` for the bug rig). This makes the loader
+         independent of which SMAL model happens to be loaded in ``config``.
+    """
+    if config.ROOT_JOINT in pose_data:
+        return config.ROOT_JOINT
+    return next(iter(pose_data))
 
 
 def parse_projection_components(iteration_data_file):
@@ -368,6 +387,7 @@ def get_joint_angles_from_pose_data(pose_data):
 
     joint_angles = []
     joint_names = []
+    root_key = _detect_pose_root(pose_data)
 
     for key in pose_data:
         joint_names.append(key)
@@ -385,7 +405,7 @@ def get_joint_angles_from_pose_data(pose_data):
         rot_eul = rot.as_euler("zyx", degrees=False)
 
         # ignore root bone:
-        if key != config.ROOT_JOINT:
+        if key != root_key:
             theta, vector = eulerangles.euler2angle_axis(
                 z=-rot_eul[0], y=rot_eul[1], x=-rot_eul[2]
             )
@@ -888,21 +908,22 @@ def load_SMIL_Unreal_sample(json_file_path,
     y_output["cam_trans"] = T
 
     # get the model location
+    root_key = _detect_pose_root(pose_data)
     model_loc = np.array(
         [
-            -pose_data[config.ROOT_JOINT]["3DPos"]["x"],
-            pose_data[config.ROOT_JOINT]["3DPos"]["y"],
-            pose_data[config.ROOT_JOINT]["3DPos"]["z"],
+            -pose_data[root_key]["3DPos"]["x"],
+            pose_data[root_key]["3DPos"]["y"],
+            pose_data[root_key]["3DPos"]["z"],
         ],
         dtype=np.float32,
     )
 
     rot = Rotation.from_quat(
         [
-            pose_data[config.ROOT_JOINT]["globalRotation"]["x"],
-            pose_data[config.ROOT_JOINT]["globalRotation"]["y"],
-            pose_data[config.ROOT_JOINT]["globalRotation"]["z"],
-            pose_data[config.ROOT_JOINT]["globalRotation"]["w"],
+            pose_data[root_key]["globalRotation"]["x"],
+            pose_data[root_key]["globalRotation"]["y"],
+            pose_data[root_key]["globalRotation"]["z"],
+            pose_data[root_key]["globalRotation"]["w"],
         ],
         scalar_first=False,
     )
@@ -995,10 +1016,10 @@ def load_SMIL_Unreal_sample(json_file_path,
     # Derive model rotation directly from Unreal quaternion and mirror to PyTorch3D
     rot_model_ue = Rotation.from_quat(
         [
-            -pose_data[config.ROOT_JOINT]["globalRotation"]["x"],
-            -pose_data[config.ROOT_JOINT]["globalRotation"]["y"],
-            -pose_data[config.ROOT_JOINT]["globalRotation"]["z"],
-            pose_data[config.ROOT_JOINT]["globalRotation"]["w"],
+            -pose_data[root_key]["globalRotation"]["x"],
+            -pose_data[root_key]["globalRotation"]["y"],
+            -pose_data[root_key]["globalRotation"]["z"],
+            pose_data[root_key]["globalRotation"]["w"],
         ],
         scalar_first=False,
     )
@@ -1053,6 +1074,306 @@ def load_SMIL_Unreal_sample(json_file_path,
 
     if verbose:
         print("\nINFO: Sucessfully loaded data from", json_file_path)
+
+    return x_output, y_output
+
+
+def load_SMIL_Unreal_multiview_sample(
+    data_path: str,
+    frame_index: int,
+    camera_indices: list = None,
+    propagate_scaling: bool = True,
+    translation_factor: float = 0.01,
+    load_images: bool = True,
+    verbose: bool = False
+):
+    """
+    Load a multi-view SMIL sample from replicAnt flat-directory dataset.
+
+    Handles multi-camera replicAnt data where each frame/camera has separate JSON and image files.
+    File naming: {dataset_name}_{frame_idx:05d}_CAM{camera_id}.{ext}
+
+    Args:
+        data_path (str): Root directory of the multi-camera dataset
+        frame_index (int): Frame index to load (0-9999)
+        camera_indices (list, optional): List of camera IDs to load (e.g., [1,2,3]).
+                                        If None, loads all 12 cameras.
+        propagate_scaling (bool): Whether to propagate scaling to child joints
+        translation_factor (float): Factor to multiply translation by
+        load_images (bool): Whether to load image data
+        verbose (bool): Whether to print verbose output
+
+    Returns:
+        tuple: (x_output, y_output)
+            - x_output (dict): Per-camera input data
+                - image_data: List of image arrays per camera
+                - image_paths: List of image file paths
+                - input_image_mask: List of ID mask arrays per camera
+                - mask_paths: List of mask file paths
+                - num_views: Number of valid cameras loaded
+                - camera_ids: List of camera IDs loaded
+            - y_output (dict): Shared and per-view parameters
+                - Shared data (identical across cameras):
+                  - joint_angles, shape_betas, root_loc, root_rot, etc.
+                - Per-camera data:
+                  - keypoints_2d_per_view: List of [n_joints, 2] arrays
+                  - keypoint_visibility_per_view: List of [n_joints] visibility arrays
+                  - cam_rot_per_view: List of rotation matrices
+                  - cam_trans_per_view: List of translation vectors
+                  - fx_per_view, fy_per_view, cx_per_view, cy_per_view: Lists of intrinsics
+    """
+    from pathlib import Path
+    from typing import List, Tuple, Dict, Optional
+    import re
+
+    import re
+
+    x_output = {}
+    y_output = {}
+
+    data_path = Path(data_path)
+
+    # Detect dataset name from _BatchData_*.json files
+    batch_files = list(data_path.glob("_BatchData_*.json"))
+    if not batch_files:
+        raise FileNotFoundError(f"No _BatchData_*.json found in {data_path}")
+
+    batch_data_path = batch_files[0]
+    dataset_name = batch_data_path.stem.replace("_BatchData_", "")
+
+    with open(batch_data_path, "r") as f:
+        batch_data_file = json.load(f)
+
+    # Determine camera indices to load
+    if camera_indices is None:
+        # Auto-detect: look for CAM files for this frame
+        cam_files = list(data_path.glob(f"{dataset_name}_{frame_index:05d}_CAM*.json"))
+        camera_indices = sorted([
+            int(re.search(r'CAM(\d+)', f.name).group(1))
+            for f in cam_files
+        ])
+
+    if not camera_indices:
+        raise FileNotFoundError(
+            f"No camera files found for frame {frame_index:05d} in {data_path}"
+        )
+
+    if verbose:
+        print(f"Loading frame {frame_index:05d} with cameras: {camera_indices}")
+
+    # Load shared data from first camera (pose/shape identical across all cameras)
+    first_camera_json = data_path / f"{dataset_name}_{frame_index:05d}_CAM{camera_indices[0]}.json"
+    with open(first_camera_json, "r") as f:
+        first_camera_data = json.load(f)
+
+    # Extract shared pose and shape data
+    pose_data = first_camera_data["iterationData"]["subject Data"][0]["1"]["keypoints"]
+
+    # Extract shape betas (same across all cameras)
+    try:
+        shape_betas = first_camera_data["iterationData"]["subject Data"][0]["1"]["shape betas"]
+        if isinstance(shape_betas, dict):
+            shape_betas = [v for v in shape_betas.values()]
+    except KeyError:
+        shape_betas = []
+
+    if len(shape_betas) == 0:
+        shape_betas = np.zeros(config.dd["shapedirs"].shape[2])
+    else:
+        shape_betas = np.array(shape_betas)
+
+    y_output["shape_betas"] = shape_betas
+
+    # Extract joint angles from pose data (same across cameras)
+    joint_angles, joint_names = get_joint_angles_from_pose_data(pose_data)
+    np_joint_angles_mapped = map_joint_order(
+        config.dd["J_names"], joint_names, joint_angles
+    )
+    y_output["joint_angles"] = np_joint_angles_mapped
+    y_output["joint_names"] = config.dd["J_names"]
+
+    # Extract scale and translation weights if available
+    try:
+        scale_weights = first_camera_data["iterationData"]["subject Data"][0]["1"]["ScaleWeights"]
+        trans_weights = first_camera_data["iterationData"]["subject Data"][0]["1"]["TranslationWeights"]
+    except KeyError:
+        scale_weights = None
+        trans_weights = None
+
+    y_output["scale_weights"] = scale_weights
+    y_output["trans_weights"] = trans_weights
+    y_output["translation_factor"] = translation_factor
+    y_output["propagate_scaling"] = propagate_scaling
+
+    # Extract shared global rotation and translation from pose data
+    root_key = _detect_pose_root(pose_data)
+    model_loc = np.array(
+        [
+            -pose_data[root_key]["3DPos"]["x"],
+            pose_data[root_key]["3DPos"]["y"],
+            pose_data[root_key]["3DPos"]["z"],
+        ],
+        dtype=np.float32,
+    )
+
+    rot = Rotation.from_quat(
+        [
+            pose_data[root_key]["globalRotation"]["x"],
+            pose_data[root_key]["globalRotation"]["y"],
+            pose_data[root_key]["globalRotation"]["z"],
+            pose_data[root_key]["globalRotation"]["w"],
+        ],
+        scalar_first=False,
+    )
+    rot_eul = rot.as_euler("zyx", degrees=False)
+    theta, vector = eulerangles.euler2angle_axis(
+        z=-rot_eul[0] + np.pi, y=-rot_eul[1], x=rot_eul[2]
+    )
+    global_rotation_np = vector * theta
+
+    y_output["root_loc"] = model_loc
+    y_output["root_rot"] = global_rotation_np
+    y_output["pose_data"] = pose_data  # Keep raw pose data for compatibility
+
+    # Per-camera lists
+    image_data = []
+    image_paths = []
+    mask_data = []
+    mask_paths = []
+
+    keypoints_2d_per_view = []
+    keypoint_visibility_per_view = []
+    cam_rot_per_view = []
+    cam_trans_per_view = []
+    fx_per_view = []
+    fy_per_view = []
+    cx_per_view = []
+    cy_per_view = []
+    fov_per_view = []
+
+    image_width = batch_data_file["Image Resolution"]["x"]
+    image_height = batch_data_file["Image Resolution"]["y"]
+
+    # Load per-camera data
+    for cam_id in camera_indices:
+        json_path = data_path / f"{dataset_name}_{frame_index:05d}_CAM{cam_id}.json"
+
+        with open(json_path, "r") as f:
+            cam_data = json.load(f)
+
+        # Load image
+        image_path = json_path.with_suffix(".JPG")
+        if load_images and image_path.exists():
+            img = imageio.v2.imread(str(image_path))
+            image_data.append(img)
+        else:
+            image_data.append(None)
+        image_paths.append(str(image_path))
+
+        # Load ID mask for visibility computation
+        mask_path = json_path.with_name(
+            f"{dataset_name}_{frame_index:05d}_ID_CAM{cam_id}.png"
+        )
+        if mask_path.exists():
+            id_mask = imageio.v2.imread(str(mask_path))
+            # Convert to binary mask
+            if len(id_mask.shape) > 2:
+                id_mask = id_mask[:, :, 0]
+            id_mask = cv2.threshold(id_mask, 0, 255, cv2.THRESH_BINARY)[1]
+            mask_data.append(id_mask)
+        else:
+            mask_data.append(None)
+        mask_paths.append(str(mask_path))
+
+        # Extract per-camera 2D keypoints
+        keypoints_2d = []
+        keypoint_names = []
+        for key in pose_data.keys():
+            keypoint_names.append(key)
+            # Extract from current camera's JSON (2D positions are per-camera)
+            try:
+                norm_x = pose_data[key]["2DPos"]["y"] / image_height
+                norm_y = pose_data[key]["2DPos"]["x"] / image_width
+            except (KeyError, TypeError):
+                # Fallback if 2D positions not in this camera's data
+                norm_x = 0.5
+                norm_y = 0.5
+            keypoints_2d.append([norm_x, norm_y])
+
+        # Map to SMIL joint order
+        mapped_keypoints_2d = np.zeros((len(config.dd["J_names"]), 2), float)
+        for o, orig_joint in enumerate(config.dd["J_names"]):
+            for m, mapped_joint in enumerate(keypoint_names):
+                if orig_joint == mapped_joint:
+                    mapped_keypoints_2d[o] = keypoints_2d[m]
+
+        keypoints_2d_per_view.append(mapped_keypoints_2d)
+
+        # Compute per-camera visibility using ID mask
+        visibility = np.ones(len(config.dd["J_names"]))
+        if mask_data[-1] is not None:
+            id_mask = mask_data[-1]
+            for i, (norm_x, norm_y) in enumerate(mapped_keypoints_2d):
+                # Check bounds
+                if not (0 <= norm_x <= 1.0 and 0 <= norm_y <= 1.0):
+                    visibility[i] = 0.0
+                    continue
+                # Check ID mask at keypoint location
+                pixel_x = int(np.clip(norm_x * image_height, 0, image_height - 1))
+                pixel_y = int(np.clip(norm_y * image_width, 0, image_width - 1))
+                if id_mask[pixel_x, pixel_y] == 0:
+                    visibility[i] = 0.0
+        else:
+            # Fallback: only check bounds
+            for i, (norm_x, norm_y) in enumerate(mapped_keypoints_2d):
+                if not (0 <= norm_x <= 1.0 and 0 <= norm_y <= 1.0):
+                    visibility[i] = 0.0
+
+        keypoint_visibility_per_view.append(visibility)
+
+        # Extract per-camera camera parameters
+        cam_rot, cam_trans = parse_projection_components(cam_data)
+        cx, cy, fx, fy = parse_camera_intrinsics(batch_data_file, cam_data)
+        fov = cam_data["iterationData"]["camera"]["FOV"]
+
+        # Mirror rotation matrix for PyTorch3D
+        mirror_matrix = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        mirrored_rot = mirror_matrix @ cam_rot.T @ mirror_matrix.T
+        R = torch.tensor(mirrored_rot, dtype=torch.float32)
+        T = torch.tensor([-cam_trans[0], cam_trans[1], cam_trans[2]], dtype=torch.float32)
+
+        cam_rot_per_view.append(R)
+        cam_trans_per_view.append(T)
+        fx_per_view.append(fx)
+        fy_per_view.append(fy)
+        cx_per_view.append(cx)
+        cy_per_view.append(cy)
+        fov_per_view.append(fov)
+
+        if verbose:
+            print(f"  CAM{cam_id}: fx={fx:.2f}, fy={fy:.2f}, visible_joints={int(np.sum(visibility))}/{len(visibility)}")
+
+    # Populate x_output
+    x_output["image_data"] = image_data
+    x_output["image_paths"] = image_paths
+    x_output["input_image_mask"] = mask_data
+    x_output["mask_paths"] = mask_paths
+    x_output["num_views"] = len(camera_indices)
+    x_output["camera_ids"] = camera_indices
+
+    # Populate y_output with per-view data
+    y_output["keypoints_2d_per_view"] = keypoints_2d_per_view
+    y_output["keypoint_visibility_per_view"] = keypoint_visibility_per_view
+    y_output["cam_rot_per_view"] = cam_rot_per_view
+    y_output["cam_trans_per_view"] = cam_trans_per_view
+    y_output["fx_per_view"] = fx_per_view
+    y_output["fy_per_view"] = fy_per_view
+    y_output["cx_per_view"] = cx_per_view
+    y_output["cy_per_view"] = cy_per_view
+    y_output["fov_per_view"] = fov_per_view
+
+    if verbose:
+        print(f"Successfully loaded frame {frame_index:05d} with {len(camera_indices)} cameras")
 
     return x_output, y_output
 
