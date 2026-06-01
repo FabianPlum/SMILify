@@ -1280,18 +1280,21 @@ def load_SMIL_Unreal_multiview_sample(
             mask_data.append(None)
         mask_paths.append(str(mask_path))
 
-        # Extract per-camera 2D keypoints
+        # Extract per-camera 2D keypoints. The shared `pose_data` above was
+        # read from the first camera's JSON; 2DPos is per-camera, so we re-
+        # read from the current camera's own keypoints dict here.
+        cam_pose = cam_data["iterationData"]["subject Data"][0]["1"]["keypoints"]
         keypoints_2d = []
         keypoint_names = []
-        for key in pose_data.keys():
+        for key in cam_pose.keys():
             keypoint_names.append(key)
             # Intentional axis swap (norm_x <- y/H, norm_y <- x/W) — mirrors the
             # single-view path above. The downstream ID-mask lookup pixel-indexes
             # against these values with the same swap, so don't "fix" one side
             # without updating the other.
             try:
-                norm_x = pose_data[key]["2DPos"]["y"] / image_height
-                norm_y = pose_data[key]["2DPos"]["x"] / image_width
+                norm_x = cam_pose[key]["2DPos"]["y"] / image_height
+                norm_y = cam_pose[key]["2DPos"]["x"] / image_width
             except (KeyError, TypeError):
                 # Fallback if 2D positions not in this camera's data
                 norm_x = 0.5
