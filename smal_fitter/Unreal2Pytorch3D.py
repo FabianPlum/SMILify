@@ -1186,7 +1186,7 @@ def load_SMIL_Unreal_multiview_sample(
     frame_index: int,
     camera_indices: list = None,
     propagate_scaling: bool = True,
-    translation_factor: float = 0.01,
+    translation_factor: float = 0.1,
     load_images: bool = True,
     canonical_frame: bool = True,
     depth_occlusion_check: bool = True,
@@ -1207,7 +1207,13 @@ def load_SMIL_Unreal_multiview_sample(
         camera_indices (list, optional): List of camera IDs to load (e.g., [1,2,3]).
                                         If None, loads all 12 cameras.
         propagate_scaling (bool): Whether to propagate scaling to child joints
-        translation_factor (float): Factor to multiply translation by
+        translation_factor (float): Uniform scale applied at load time to all
+            world-frame translations (`root_loc`, `cam_trans_per_view`,
+            `keypoints_3d`, `keypoints_3d_world`, `canonical_to_world_t`).
+            Default 0.1 matches the SMAL mouse mesh's native size to the
+            Unreal data frame, so trainer-side `mesh + trans` (no extra
+            rescaling) projects correctly with `use_ue_scaling=False`.
+            See "Scale Unification" in MULTIVIEW_REPLICANT_INTEGRATION_DESIGN.md.
         load_images (bool): Whether to load image data
         depth_occlusion_check (bool): If True (default), refine per-view
             visibility with the replicAnt depth-buffer self-occlusion test.
@@ -1645,6 +1651,28 @@ def load_SMIL_Unreal_multiview_sample(
             np.zeros(3, dtype=np.float32),
         )
         canonical_cam_id = -1  # sentinel: no canonical frame applied
+
+    # ------------------------------------------------------------------
+    # Scale unification (Phase 1b). Apply `translation_factor` uniformly
+    # to all world-frame translations and 3D coordinates. Default 0.1
+    # makes mesh-native and data-frame units coincide so that downstream
+    # consumers can use `mesh + trans` (no `(mesh - root) * 10 + trans`
+    # hack). Rotations are scale-invariant and untouched. All canonical-
+    # frame relationships are preserved because uniform scaling commutes
+    # with the canonical-frame transform.
+    # See "Scale Unification" in MULTIVIEW_REPLICANT_INTEGRATION_DESIGN.md.
+    # ------------------------------------------------------------------
+    s = float(translation_factor)
+    if s != 1.0:
+        model_loc = (model_loc * s).astype(np.float32)
+        keypoints_3d = (keypoints_3d * s).astype(np.float32)
+        keypoints_3d_world = (keypoints_3d_world * s).astype(np.float32)
+        canonical_to_world = (
+            canonical_to_world[0],
+            (canonical_to_world[1] * s).astype(np.float32),
+        )
+        for v in range(len(camera_indices)):
+            cam_trans_per_view[v] = cam_trans_per_view[v] * s
 
     # Overwrite the earlier raw-frame assignments with (possibly)
     # canonical-frame values. pose_data is left untouched for
