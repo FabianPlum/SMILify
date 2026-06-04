@@ -491,9 +491,13 @@ def compare_frames_test(dataset_path, frame_index, output_dir, per_camera, cam_i
 
 def _compute_posed_smal_joints(x_mv, y_mv, device):
     """Run SMAL forward with the loader's pose params and return (N_joints, 3)
-    in canonical world frame. Mirrors the path in
-    Render_SMAL_Model_from_Unreal_data with apply_UE_transform=True but
-    skips the rendering step.
+    in canonical world frame.
+
+    NOTE: this consumes the multi-view loader's scale-unified output
+    (translation_factor=0.1 applied at load), so the model placement is the
+    plain `(joints - root) + trans` branch — NO `*10` mesh expansion. That
+    differs from Render_SMAL_Model_from_Unreal_data with apply_UE_transform=True,
+    which is still used for the legacy single-view path.
     """
     torch = _TORCH
     SMALFitter = _SMALFitter
@@ -562,9 +566,11 @@ def _compute_posed_smal_joints(x_mv, y_mv, device):
             betas_trans=batch_params.get("betas_trans", None),
             propagate_scaling=getattr(model, "propagate_scaling", None),
         )
-        # Match generate_visualization's apply_UE_transform=True path.
+        # Scale-unified multi-view convention: data was already scaled by
+        # translation_factor=0.1 at load time so mesh-native and trans-frame
+        # units match. Recenter on the root and add trans directly — no *10.
         root_joint = joints[:, 0:1, :]
-        joints = (joints - root_joint) * 10 + batch_params["trans"].unsqueeze(1)
+        joints = (joints - root_joint) + batch_params["trans"].unsqueeze(1)
 
     return joints.squeeze(0).cpu().numpy().astype(np.float32)
 
