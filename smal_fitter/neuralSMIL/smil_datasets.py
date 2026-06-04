@@ -1,9 +1,12 @@
-import torch
+import glob
 import os
 import sys
-import numpy as np
+
+import h5py
 import matplotlib
 matplotlib.use('Agg')  # Use non-GUI backend to prevent tkinter issues in multiprocessing
+import numpy as np
+import torch
 from scipy.spatial.transform import Rotation
 
 # Add the parent directories to the path to import modules
@@ -160,22 +163,70 @@ class UnifiedSMILDataset:
     @staticmethod
     def from_path(data_path: str, **kwargs):
         """
-        Create appropriate dataset instance based on file path.
-        
-        Args:
-            data_path: Path to dataset (directory for JSON format, .h5/.hdf5 file for optimized format)
-            **kwargs: Additional arguments passed to dataset constructor
-            
-        Returns:
-            Dataset instance (OptimizedSMILDataset or replicAntSMILDataset)
+        Create the appropriate dataset instance based on `data_path`.
+
+        Dispatch rules:
+
+        - `.h5` / `.hdf5` — open the file and read `/metadata` attrs:
+            * `is_multiview=True` (replicAnt or SLEAP multi-view schema)
+              → `SLEAPMultiViewDataset`
+            * `dataset_type='sleap'` (single-view SLEAP schema)
+              → `SLEAPDataset`
+            * otherwise (legacy single-view replicAnt HDF5)
+              → `OptimizedSMILDataset`
+
+        - directory:
+            * contains `_BatchData_*.json` AND any `*_CAM*.json`
+              → replicAnt multi-view flat-directory layout. The direct-load
+              `MultiViewreplicAntSMILDataset` (Phase 2) is not implemented;
+              raise pointing the caller at the HDF5 preprocessor.
+            * otherwise → `replicAntSMILDataset` (single-view JSON layout).
         """
         if data_path.endswith('.h5') or data_path.endswith('.hdf5'):
-            # Load optimized HDF5 dataset
-            from optimized_dataset import OptimizedSMILDataset
-            return OptimizedSMILDataset(data_path, **kwargs)
-        else:
-            # Load original JSON dataset
-            return replicAntSMILDataset(data_path, **kwargs)
+            return UnifiedSMILDataset._dispatch_hdf5(data_path, **kwargs)
+        return UnifiedSMILDataset._dispatch_directory(data_path, **kwargs)
+
+    @staticmethod
+    def _dispatch_hdf5(data_path: str, **kwargs):
+        try:
+            with h5py.File(data_path, 'r') as f:
+                if 'metadata' in f:
+                    attrs = f['metadata'].attrs
+                    is_multiview = bool(attrs.get('is_multiview', False))
+                    dataset_type = attrs.get('dataset_type', None)
+                    if isinstance(dataset_type, bytes):
+                        dataset_type = dataset_type.decode('utf-8')
+                else:
+                    is_multiview, dataset_type = False, None
+        except OSError as e:
+            raise ValueError(f"Could not open HDF5 file {data_path}: {e}") from e
+
+        if is_multiview:
+            from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+            return SLEAPMultiViewDataset(data_path, **kwargs)
+
+        if dataset_type == 'sleap':
+            from sleap_data.sleap_dataset import SLEAPDataset
+            return SLEAPDataset(data_path, **kwargs)
+
+        from optimized_dataset import OptimizedSMILDataset
+        return OptimizedSMILDataset(data_path, **kwargs)
+
+    @staticmethod
+    def _dispatch_directory(data_path: str, **kwargs):
+        if os.path.isdir(data_path):
+            batch_files = glob.glob(os.path.join(data_path, "_BatchData_*.json"))
+            if batch_files:
+                cam_files = glob.glob(os.path.join(data_path, "*_CAM*.json"))
+                if cam_files:
+                    raise NotImplementedError(
+                        f"replicAnt multi-view flat-directory layout detected at "
+                        f"{data_path}. The direct-load MultiViewreplicAntSMILDataset "
+                        f"(Phase 2) is not yet implemented. Preprocess to HDF5 via "
+                        f"smal_fitter/replicAnt_data/preprocess_replicant_multiview_dataset.py "
+                        f"and pass the resulting .h5 file instead."
+                    )
+        return replicAntSMILDataset(data_path, **kwargs)
     
     @staticmethod
     def preprocess_dataset(input_dir: str, 
