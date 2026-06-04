@@ -5,7 +5,10 @@ import cv2
 import torch
 import os
 import imageio
+import re
 import sys
+from pathlib import Path
+from typing import List, Tuple, Dict, Optional
 from scipy.spatial.transform import Rotation
 
 sys.path.append(os.path.dirname(sys.path[0]))
@@ -154,6 +157,23 @@ def sample_pca_transforms_from_dirs(dd: dict, scale_weights, trans_weights, bone
 """
 Unreal data parsing functions
 """
+
+
+def _detect_pose_root(pose_data):
+    """Return the name of the hierarchical root joint in a replicAnt pose_data dict.
+
+    Strategy:
+      1. If ``config.ROOT_JOINT`` is a key in pose_data, use it (legacy
+         bug-skeleton datasets generated against the active SMAL model rely
+         on this — preserves backwards compatibility).
+      2. Otherwise fall back to the first key, which by Unreal serialisation
+         convention is the root of the skeleton hierarchy (e.g. ``'Mskel'``
+         for the mouse rig, ``'b_t'`` for the bug rig). This makes the loader
+         independent of which SMAL model happens to be loaded in ``config``.
+    """
+    if config.ROOT_JOINT in pose_data:
+        return config.ROOT_JOINT
+    return next(iter(pose_data))
 
 
 def parse_projection_components(iteration_data_file):
@@ -368,6 +388,7 @@ def get_joint_angles_from_pose_data(pose_data):
 
     joint_angles = []
     joint_names = []
+    root_key = _detect_pose_root(pose_data)
 
     for key in pose_data:
         joint_names.append(key)
@@ -385,7 +406,7 @@ def get_joint_angles_from_pose_data(pose_data):
         rot_eul = rot.as_euler("zyx", degrees=False)
 
         # ignore root bone:
-        if key != config.ROOT_JOINT:
+        if key != root_key:
             theta, vector = eulerangles.euler2angle_axis(
                 z=-rot_eul[0], y=rot_eul[1], x=-rot_eul[2]
             )
@@ -650,16 +671,118 @@ def create_sphere_meshes_at_points(
     return spheres_mesh
 
 
+def refine_visibility_with_depth(
+    visibility,
+    keypoints_2d_normalized,
+    keypoints_3d_world_raw,
+    camera_location_world_raw,
+    depth_image,
+    image_width,
+    image_height,
+    depth_max_cm=1000.0,
+    depth_tolerance_cm=5.0,
+    depth_neighborhood=1,
+):
+    """
+    Refine a per-joint visibility array with a replicAnt depth-buffer
+    self-occlusion check. Mirrors the convention used in the sungaya
+    pipeline so the two stay byte-equivalent.
+
+    Encoding: replicAnt's depth pass packs a Euclidean camera-to-surface
+    distance (in cm) into the RED channel of an RGBA uint8 PNG via a
+    linear map `surface_cm = (R / 255) * depth_max_cm`. A joint is
+    occluded when the keypoint's true distance to the camera exceeds
+    the front-most surface distance (over a small neighborhood) by more
+    than `depth_tolerance_cm`.
+
+    Coordinates here are in raw Unreal world frame (cm, no PyTorch3D
+    x-mirror). The (R/255)*range mapping is preserved, and distances
+    are coordinate-frame agnostic as long as keypoint and camera live
+    in the same frame.
+
+    The refinement is monotone: it can only turn 1.0 -> 0.0, never the
+    other way. Joints already at 0.0 and joints whose 3D ground truth
+    is missing (NaN) are skipped.
+
+    Args:
+        visibility (np.array): Current visibility per joint (1.0 or 0.0). Refined in place AND returned.
+        keypoints_2d_normalized (np.array): (n_joints, 2) — same axis-swapped
+            (norm_x = 2DPos.y / H, norm_y = 2DPos.x / W) convention as the
+            rest of this module. (row_idx, col_idx) = (norm_x * H, norm_y * W).
+        keypoints_3d_world_raw (np.array): (n_joints, 3) — raw Unreal 3DPos
+            in cm. NaN for joints with no ground-truth 3D position.
+        camera_location_world_raw (np.array): (3,) — raw Unreal camera
+            `Location` in cm.
+        depth_image (np.array): (H, W, 4) uint8 RGBA loaded via imageio. Depth
+            is in channel 0. Pass None to skip the refinement (visibility
+            returned unchanged).
+        image_width (int), image_height (int): Reference resolution that
+            `keypoints_2d_normalized` was normalised against.
+        depth_max_cm (float): Encoded range for the depth pass (cm).
+        depth_tolerance_cm (float): Margin added to the surface distance
+            before declaring a keypoint occluded. NB the depth pass is
+            8-bit over `depth_max_cm` so one LSB ≈ depth_max_cm/255 cm
+            (~3.92 cm at the 1000 cm default) — set tolerance to at
+            least one LSB plus the expected interior-joint offset, or
+            interior skeletal joints will get clipped.
+        depth_neighborhood (int): Half-window in pixels for the surface
+            min-depth lookup. `0` samples exactly one pixel; `1` uses 3x3.
+
+    Returns:
+        np.array: Updated visibility array (same object as input).
+    """
+    if depth_image is None:
+        return visibility
+    if depth_image.ndim != 3 or depth_image.shape[2] < 1:
+        return visibility
+    if (
+        depth_image.shape[0] != image_height
+        or depth_image.shape[1] != image_width
+    ):
+        return visibility
+
+    cam_loc = np.asarray(camera_location_world_raw, dtype=np.float64)
+
+    for j in range(len(visibility)):
+        if visibility[j] == 0.0:
+            continue
+        p3 = keypoints_3d_world_raw[j]
+        if not np.isfinite(p3).all():
+            continue
+
+        norm_x, norm_y = keypoints_2d_normalized[j]
+        if not (0.0 <= norm_x <= 1.0 and 0.0 <= norm_y <= 1.0):
+            continue
+        pixel_row = int(np.clip(norm_x * image_height, 0, image_height - 1))
+        pixel_col = int(np.clip(norm_y * image_width, 0, image_width - 1))
+
+        if depth_neighborhood <= 0:
+            r_val = int(depth_image[pixel_row, pixel_col, 0])
+        else:
+            r0 = max(0, pixel_row - depth_neighborhood)
+            r1 = min(image_height, pixel_row + depth_neighborhood + 1)
+            c0 = max(0, pixel_col - depth_neighborhood)
+            c1 = min(image_width, pixel_col + depth_neighborhood + 1)
+            r_val = int(depth_image[r0:r1, c0:c1, 0].min())
+
+        surface_cm = (r_val / 255.0) * depth_max_cm
+        dist_cm = float(np.linalg.norm(p3.astype(np.float64) - cam_loc))
+        if dist_cm > (surface_cm + depth_tolerance_cm):
+            visibility[j] = 0.0
+
+    return visibility
+
+
 def compute_keypoint_visibility(keypoints_2d, mask, image_width, image_height):
     """
     Compute keypoint visibility based on mask and image bounds.
-    
+
     Args:
         keypoints_2d (np.array): Normalized 2D keypoint coordinates [0, 1]
         mask (np.array): Binary mask of the object (None if not available, already dilated when loaded)
         image_width (int): Image width in pixels
         image_height (int): Image height in pixels
-        
+
     Returns:
         np.array: Visibility array (1 for visible, 0 for not visible)
     """
@@ -888,21 +1011,22 @@ def load_SMIL_Unreal_sample(json_file_path,
     y_output["cam_trans"] = T
 
     # get the model location
+    root_key = _detect_pose_root(pose_data)
     model_loc = np.array(
         [
-            -pose_data[config.ROOT_JOINT]["3DPos"]["x"],
-            pose_data[config.ROOT_JOINT]["3DPos"]["y"],
-            pose_data[config.ROOT_JOINT]["3DPos"]["z"],
+            -pose_data[root_key]["3DPos"]["x"],
+            pose_data[root_key]["3DPos"]["y"],
+            pose_data[root_key]["3DPos"]["z"],
         ],
         dtype=np.float32,
     )
 
     rot = Rotation.from_quat(
         [
-            pose_data[config.ROOT_JOINT]["globalRotation"]["x"],
-            pose_data[config.ROOT_JOINT]["globalRotation"]["y"],
-            pose_data[config.ROOT_JOINT]["globalRotation"]["z"],
-            pose_data[config.ROOT_JOINT]["globalRotation"]["w"],
+            pose_data[root_key]["globalRotation"]["x"],
+            pose_data[root_key]["globalRotation"]["y"],
+            pose_data[root_key]["globalRotation"]["z"],
+            pose_data[root_key]["globalRotation"]["w"],
         ],
         scalar_first=False,
     )
@@ -995,10 +1119,10 @@ def load_SMIL_Unreal_sample(json_file_path,
     # Derive model rotation directly from Unreal quaternion and mirror to PyTorch3D
     rot_model_ue = Rotation.from_quat(
         [
-            -pose_data[config.ROOT_JOINT]["globalRotation"]["x"],
-            -pose_data[config.ROOT_JOINT]["globalRotation"]["y"],
-            -pose_data[config.ROOT_JOINT]["globalRotation"]["z"],
-            pose_data[config.ROOT_JOINT]["globalRotation"]["w"],
+            -pose_data[root_key]["globalRotation"]["x"],
+            -pose_data[root_key]["globalRotation"]["y"],
+            -pose_data[root_key]["globalRotation"]["z"],
+            pose_data[root_key]["globalRotation"]["w"],
         ],
         scalar_first=False,
     )
@@ -1053,6 +1177,632 @@ def load_SMIL_Unreal_sample(json_file_path,
 
     if verbose:
         print("\nINFO: Sucessfully loaded data from", json_file_path)
+
+    return x_output, y_output
+
+
+def load_SMIL_Unreal_multiview_sample(
+    data_path: str,
+    frame_index: int,
+    camera_indices: list = None,
+    propagate_scaling: bool = True,
+    translation_factor: float = 0.1,
+    load_images: bool = True,
+    canonical_frame: bool = True,
+    depth_occlusion_check: bool = True,
+    depth_max_cm: float = 1000.0,
+    depth_tolerance_cm: float = 5.0,
+    depth_neighborhood: int = 1,
+    verbose: bool = False
+):
+    """
+    Load a multi-view SMIL sample from replicAnt flat-directory dataset.
+
+    Handles multi-camera replicAnt data where each frame/camera has separate JSON and image files.
+    File naming: {dataset_name}_{frame_idx:05d}_CAM{camera_id}.{ext}
+
+    Args:
+        data_path (str): Root directory of the multi-camera dataset
+        frame_index (int): Frame index to load (0-9999)
+        camera_indices (list, optional): List of camera IDs to load (e.g., [1,2,3]).
+                                        If None, loads all 12 cameras.
+        propagate_scaling (bool): Whether to propagate scaling to child joints
+        translation_factor (float): Uniform scale applied at load time to all
+            world-frame translations (`root_loc`, `cam_trans_per_view`,
+            `keypoints_3d`, `keypoints_3d_world`, `canonical_to_world_t`).
+            Default 0.1 matches the SMAL mouse mesh's native size to the
+            Unreal data frame, so trainer-side `mesh + trans` (no extra
+            rescaling) projects correctly with `use_ue_scaling=False`.
+            See "Scale Unification" in MULTIVIEW_REPLICANT_INTEGRATION_DESIGN.md.
+        load_images (bool): Whether to load image data
+        depth_occlusion_check (bool): If True (default), refine per-view
+            visibility with the replicAnt depth-buffer self-occlusion test.
+            AND-composed with the existing ID-mask check. Falls back
+            silently to id-mask-only visibility for any view whose
+            `_Depth_CAM{id}.png` is absent.
+        depth_max_cm (float): Encoded range of the depth pass in cm.
+            replicAnt defaults to 1000 cm; tune only if the depth pass was
+            re-exported with a different range.
+        depth_tolerance_cm (float): Margin added to the surface distance
+            before declaring a joint occluded. Default of 5 cm is one
+            depth-LSB (~3.92 cm at the 1000 cm range) plus ~1 cm
+            interior-joint slack; bump if interior joints still get
+            clipped.
+        depth_neighborhood (int): Half-window in pixels for the surface
+            min-depth sample. 0 = exact pixel; 1 = 3x3 patch (default,
+            matches sungaya).
+        canonical_frame (bool): If True (default), re-express all camera
+            extrinsics and model pose in the canonical camera's frame
+            (lowest CAM ID -> R=I, t=0). If False, leave everything in
+            raw PyTorch3D-mirrored world frame. See the canonical-frame
+            block below for the transformation, conventions, and the
+            decision to store the FORWARD transform under
+            `canonical_to_world`.
+        verbose (bool): Whether to print verbose output
+
+    Returns:
+        tuple: (x_output, y_output)
+            - x_output (dict): Per-camera input data
+                - image_data: List of image arrays per camera
+                - image_paths: List of image file paths
+                - input_image_mask: List of ID mask arrays per camera
+                - mask_paths: List of mask file paths
+                - num_views: Number of valid cameras loaded
+                - camera_ids: List of camera IDs loaded
+            - y_output (dict): Shared and per-view parameters
+                - Shared data (identical across cameras):
+                  - joint_angles, shape_betas, root_loc, root_rot, etc.
+                  - keypoints_3d: (n_joints, 3) GT 3D in canonical frame
+                    when canonical_frame=True, otherwise world frame.
+                    Mapped to model J_names order; zeros for missing.
+                  - keypoints_3d_world: same shape; always raw
+                    PyTorch3D-mirrored world frame (kept for round-trip
+                    checks and convention-switch flexibility).
+                  - canonical_to_world: tuple (R_0, t_0) — the FORWARD
+                    transform world -> canonical (x_can = x_w @ R_0 + t_0).
+                    Invert at decode time: x_w = (x_can - t_0) @ R_0.T.
+                  - canonical_cam_id: int — CAM ID used as canonical, or
+                    -1 when canonical_frame=False.
+                - Per-camera data:
+                  - keypoints_2d_per_view: List of [n_joints, 2] arrays
+                  - keypoint_visibility_per_view: List of [n_joints] visibility arrays
+                  - view_valid_per_view: List of bool — False when the
+                    camera has empty `subject Data` (animal absent from
+                    this view's render). Keypoints/visibility for these
+                    slots are zero-sentinels; camera params stay valid.
+                  - cam_rot_per_view: List of rotation matrices
+                  - cam_trans_per_view: List of translation vectors
+                  - fx_per_view, fy_per_view, cx_per_view, cy_per_view: Lists of intrinsics
+
+    Raises:
+        ValueError: when no camera in `camera_indices` has valid
+            `subject Data` for the frame (animal absent from every view).
+            Per-camera resilience is built in — a single bad camera
+            just marks that view invalid via `view_valid_per_view[v]`.
+    """
+    x_output = {}
+    y_output = {}
+
+    data_path = Path(data_path)
+
+    # Detect dataset name from _BatchData_*.json files
+    batch_files = list(data_path.glob("_BatchData_*.json"))
+    if not batch_files:
+        raise FileNotFoundError(f"No _BatchData_*.json found in {data_path}")
+
+    batch_data_path = batch_files[0]
+    dataset_name = batch_data_path.stem.replace("_BatchData_", "")
+
+    with open(batch_data_path, "r") as f:
+        batch_data_file = json.load(f)
+
+    # Determine camera indices to load
+    if camera_indices is None:
+        # Auto-detect: look for CAM files for this frame
+        cam_files = list(data_path.glob(f"{dataset_name}_{frame_index:05d}_CAM*.json"))
+        camera_indices = sorted([
+            int(re.search(r'CAM(\d+)', f.name).group(1))
+            for f in cam_files
+        ])
+
+    if not camera_indices:
+        raise FileNotFoundError(
+            f"No camera files found for frame {frame_index:05d} in {data_path}"
+        )
+
+    if verbose:
+        print(f"Loading frame {frame_index:05d} with cameras: {camera_indices}")
+
+    # Pre-load every camera's JSON. They're small (~10 kB) and we need them
+    # twice — once for the per-camera validity probe right below, then again
+    # in the per-view loop for 2D keypoints + camera params. Avoids
+    # re-opening each file.
+    cam_jsons = {}
+    for cam_id in camera_indices:
+        json_path = data_path / f"{dataset_name}_{frame_index:05d}_CAM{cam_id}.json"
+        with open(json_path, "r") as f:
+            cam_jsons[cam_id] = json.load(f)
+
+    # Per-camera validity: a camera is invalid for supervision when its
+    # `subject Data` is empty (renderer dropped the subject from this view
+    # because the camera couldn't see it). Geometry stays valid — the
+    # camera block (R/T/FOV/Location) is always present — so we can still
+    # use this slot for the canonical-frame transform; we just emit zero
+    # 2D keypoints and zero visibility for it.
+    def _has_subject_data(cam_data):
+        sd = cam_data.get("iterationData", {}).get("subject Data", [])
+        if not isinstance(sd, list) or len(sd) == 0:
+            return False
+        try:
+            _ = sd[0]["1"]["keypoints"]
+            return True
+        except (KeyError, TypeError, IndexError):
+            return False
+
+    view_valid_per_view = [bool(_has_subject_data(cam_jsons[cid])) for cid in camera_indices]
+
+    # Shared pose/shape (identical across cameras per dataset spec) can be
+    # read from any camera that has subject Data. Prefer the canonical one
+    # (camera_indices[0]) when valid so the existing semantics carry over;
+    # otherwise fall back to the first valid camera by sorted ID.
+    shared_ref_idx = next((i for i, ok in enumerate(view_valid_per_view) if ok), None)
+    if shared_ref_idx is None:
+        raise ValueError(
+            f"frame {frame_index}: no camera has valid `subject Data` — "
+            f"the animal is absent from all {len(camera_indices)} views"
+        )
+    first_camera_data = cam_jsons[camera_indices[shared_ref_idx]]
+
+    # Extract shared pose and shape data
+    pose_data = first_camera_data["iterationData"]["subject Data"][0]["1"]["keypoints"]
+
+    # Extract shape betas (same across all cameras)
+    try:
+        shape_betas = first_camera_data["iterationData"]["subject Data"][0]["1"]["shape betas"]
+        if isinstance(shape_betas, dict):
+            shape_betas = [v for v in shape_betas.values()]
+    except KeyError:
+        shape_betas = []
+
+    if len(shape_betas) == 0:
+        shape_betas = np.zeros(config.dd["shapedirs"].shape[2])
+    else:
+        shape_betas = np.array(shape_betas)
+
+    y_output["shape_betas"] = shape_betas
+
+    # Extract joint angles from pose data (same across cameras)
+    joint_angles, joint_names = get_joint_angles_from_pose_data(pose_data)
+    np_joint_angles_mapped = map_joint_order(
+        config.dd["J_names"], joint_names, joint_angles
+    )
+    y_output["joint_angles"] = np_joint_angles_mapped
+    y_output["joint_names"] = config.dd["J_names"]
+
+    # Extract scale and translation weights if available
+    try:
+        scale_weights = first_camera_data["iterationData"]["subject Data"][0]["1"]["ScaleWeights"]
+        trans_weights = first_camera_data["iterationData"]["subject Data"][0]["1"]["TranslationWeights"]
+    except KeyError:
+        scale_weights = None
+        trans_weights = None
+
+    y_output["scale_weights"] = scale_weights
+    y_output["trans_weights"] = trans_weights
+    y_output["translation_factor"] = translation_factor
+    y_output["propagate_scaling"] = propagate_scaling
+
+    # Extract shared global rotation and translation from pose data
+    root_key = _detect_pose_root(pose_data)
+    model_loc = np.array(
+        [
+            -pose_data[root_key]["3DPos"]["x"],
+            pose_data[root_key]["3DPos"]["y"],
+            pose_data[root_key]["3DPos"]["z"],
+        ],
+        dtype=np.float32,
+    )
+
+    rot = Rotation.from_quat(
+        [
+            pose_data[root_key]["globalRotation"]["x"],
+            pose_data[root_key]["globalRotation"]["y"],
+            pose_data[root_key]["globalRotation"]["z"],
+            pose_data[root_key]["globalRotation"]["w"],
+        ],
+        scalar_first=False,
+    )
+    rot_eul = rot.as_euler("zyx", degrees=False)
+    theta, vector = eulerangles.euler2angle_axis(
+        z=-rot_eul[0] + np.pi, y=-rot_eul[1], x=rot_eul[2]
+    )
+    global_rotation_np = vector * theta
+
+    y_output["root_loc"] = model_loc
+    y_output["root_rot"] = global_rotation_np
+    y_output["pose_data"] = pose_data  # Keep raw pose data for compatibility
+
+    # Raw-Unreal-frame 3D keypoints (no x-mirror). Needed for the depth
+    # occlusion check, where the camera Location is read from the JSON
+    # un-mirrored and distances must be computed in a consistent frame.
+    # Missing joints stay NaN so the depth helper skips them.
+    keypoints_3d_unreal_raw = np.full(
+        (len(config.dd["J_names"]), 3), np.nan, dtype=np.float32
+    )
+    if depth_occlusion_check:
+        kp3d_raw_by_name = {}
+        for k, kp in pose_data.items():
+            p3 = kp.get("3DPos")
+            if p3 is not None:
+                kp3d_raw_by_name[k] = np.array(
+                    [p3["x"], p3["y"], p3["z"]], dtype=np.float32
+                )
+        for o, j in enumerate(config.dd["J_names"]):
+            if j in kp3d_raw_by_name:
+                keypoints_3d_unreal_raw[o] = kp3d_raw_by_name[j]
+
+    # Per-camera lists
+    image_data = []
+    image_paths = []
+    mask_data = []
+    mask_paths = []
+    depth_paths = []
+
+    keypoints_2d_per_view = []
+    keypoint_visibility_per_view = []
+    keypoint_in_dataset_per_view = []
+    cam_rot_per_view = []
+    cam_trans_per_view = []
+    fx_per_view = []
+    fy_per_view = []
+    cx_per_view = []
+    cy_per_view = []
+    fov_per_view = []
+
+    image_width = batch_data_file["Image Resolution"]["x"]
+    image_height = batch_data_file["Image Resolution"]["y"]
+
+    # Load per-camera data
+    for v_idx, cam_id in enumerate(camera_indices):
+        json_path = data_path / f"{dataset_name}_{frame_index:05d}_CAM{cam_id}.json"
+        cam_data = cam_jsons[cam_id]
+        view_valid = view_valid_per_view[v_idx]
+
+        # Load image. cv2.imread + cvtColor is ~2-3x faster than imageio's
+        # PIL-backed JPEG decode at 512x512; we keep the existing RGB contract.
+        image_path = json_path.with_suffix(".JPG")
+        if load_images and image_path.exists():
+            bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+            if bgr is None:
+                raise RuntimeError(f"cv2.imread failed on {image_path}")
+            img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            image_data.append(img)
+        else:
+            image_data.append(None)
+        image_paths.append(str(image_path))
+
+        # Load ID mask for visibility computation. Note: kept on imageio
+        # because cv2.imread is empirically ~80% SLOWER for this specific
+        # PNG flavour (likely a palette / metadata path through libpng);
+        # JPG and the depth PNG are migrated to cv2 below.
+        mask_path = json_path.with_name(
+            f"{dataset_name}_{frame_index:05d}_ID_CAM{cam_id}.png"
+        )
+        if mask_path.exists():
+            id_mask = imageio.v2.imread(str(mask_path))
+            # Convert to binary mask
+            if len(id_mask.shape) > 2:
+                id_mask = id_mask[:, :, 0]
+            id_mask = cv2.threshold(id_mask, 0, 255, cv2.THRESH_BINARY)[1]
+            mask_data.append(id_mask)
+        else:
+            mask_data.append(None)
+        mask_paths.append(str(mask_path))
+
+        # Load depth pass for the self-occlusion refinement. Optional —
+        # if the file is missing we fall back to id-mask-only visibility
+        # for this view per the design decision.
+        # `refine_visibility_with_depth` reads `depth_image[..., 0]` and
+        # expects R (the depth encoding lives in the red channel — the
+        # PNG's RGB channels are NOT equal). cv2 returns BGR[A], so we
+        # swap to RGB[A] to keep channel-0 == R.
+        depth_path = json_path.with_name(
+            f"{dataset_name}_{frame_index:05d}_Depth_CAM{cam_id}.png"
+        )
+        depth_paths.append(str(depth_path))
+        depth_image = None
+        if depth_occlusion_check and depth_path.exists():
+            depth_image = cv2.imread(str(depth_path), cv2.IMREAD_UNCHANGED)
+            if depth_image is None:
+                raise RuntimeError(f"cv2.imread failed on {depth_path}")
+            if depth_image.ndim == 3:
+                if depth_image.shape[2] == 4:
+                    depth_image = cv2.cvtColor(depth_image, cv2.COLOR_BGRA2RGBA)
+                elif depth_image.shape[2] == 3:
+                    depth_image = cv2.cvtColor(depth_image, cv2.COLOR_BGR2RGB)
+
+        # Extract per-camera 2D keypoints. The shared `pose_data` above was
+        # read from a camera that *does* have subject Data; 2DPos is
+        # per-camera and only meaningful here when the current camera
+        # also has subject Data — when invalid we emit all-zero sentinels
+        # and leave `in_dataset_this_view` as all-False so visibility
+        # short-circuits to zero below.
+        mapped_keypoints_2d = np.zeros((len(config.dd["J_names"]), 2), float)
+        in_dataset_this_view = np.zeros(len(config.dd["J_names"]), dtype=bool)
+        if view_valid:
+            cam_pose = cam_data["iterationData"]["subject Data"][0]["1"]["keypoints"]
+            keypoints_2d = []
+            keypoint_names = []
+            for key in cam_pose.keys():
+                keypoint_names.append(key)
+                # Intentional axis swap (norm_x <- y/H, norm_y <- x/W) — mirrors the
+                # single-view path above. The downstream ID-mask lookup pixel-indexes
+                # against these values with the same swap, so don't "fix" one side
+                # without updating the other.
+                try:
+                    norm_x = cam_pose[key]["2DPos"]["y"] / image_height
+                    norm_y = cam_pose[key]["2DPos"]["x"] / image_width
+                except (KeyError, TypeError):
+                    # Fallback if 2D positions not in this camera's data
+                    norm_x = 0.5
+                    norm_y = 0.5
+                keypoints_2d.append([norm_x, norm_y])
+
+            # Map to SMIL joint order. Track which model J_names actually
+            # have a matching dataset entry this view; model-only joints
+            # have no GT 2D (left at the [0, 0] sentinel) and must NOT be
+            # treated as visible — see the visibility initialisation below.
+            for o, orig_joint in enumerate(config.dd["J_names"]):
+                for m, mapped_joint in enumerate(keypoint_names):
+                    if orig_joint == mapped_joint:
+                        mapped_keypoints_2d[o] = keypoints_2d[m]
+                        in_dataset_this_view[o] = True
+
+        keypoints_2d_per_view.append(mapped_keypoints_2d)
+        keypoint_in_dataset_per_view.append(in_dataset_this_view)
+
+        # Initialise visibility from the in-dataset bitmap so model-only
+        # joints stay invisible regardless of where their [0, 0]
+        # sentinel happens to land on the ID/depth pass. The bounds /
+        # mask / depth steps below can only ever decrease visibility.
+        # When the view is invalid (no subject data), visibility starts
+        # at all zeros and stays there.
+        visibility = in_dataset_this_view.astype(np.float64)
+        if mask_data[-1] is not None:
+            id_mask = mask_data[-1]
+            for i, (norm_x, norm_y) in enumerate(mapped_keypoints_2d):
+                if visibility[i] == 0.0:
+                    continue  # not in dataset — never visible
+                # Check bounds
+                if not (0 <= norm_x <= 1.0 and 0 <= norm_y <= 1.0):
+                    visibility[i] = 0.0
+                    continue
+                # Check ID mask at keypoint location
+                pixel_x = int(np.clip(norm_x * image_height, 0, image_height - 1))
+                pixel_y = int(np.clip(norm_y * image_width, 0, image_width - 1))
+                if id_mask[pixel_x, pixel_y] == 0:
+                    visibility[i] = 0.0
+        else:
+            # Fallback: only check bounds
+            for i, (norm_x, norm_y) in enumerate(mapped_keypoints_2d):
+                if visibility[i] == 0.0:
+                    continue  # not in dataset — never visible
+                if not (0 <= norm_x <= 1.0 and 0 <= norm_y <= 1.0):
+                    visibility[i] = 0.0
+
+        # Depth-buffer self-occlusion refinement (AND with id-mask result).
+        # No-op when depth_image is None (missing file or check disabled).
+        if depth_occlusion_check and depth_image is not None:
+            cam_loc_unreal_raw = np.array(
+                [
+                    cam_data["iterationData"]["camera"]["Location"]["x"],
+                    cam_data["iterationData"]["camera"]["Location"]["y"],
+                    cam_data["iterationData"]["camera"]["Location"]["z"],
+                ],
+                dtype=np.float32,
+            )
+            refine_visibility_with_depth(
+                visibility=visibility,
+                keypoints_2d_normalized=mapped_keypoints_2d,
+                keypoints_3d_world_raw=keypoints_3d_unreal_raw,
+                camera_location_world_raw=cam_loc_unreal_raw,
+                depth_image=depth_image,
+                image_width=image_width,
+                image_height=image_height,
+                depth_max_cm=depth_max_cm,
+                depth_tolerance_cm=depth_tolerance_cm,
+                depth_neighborhood=depth_neighborhood,
+            )
+
+        keypoint_visibility_per_view.append(visibility)
+
+        # Extract per-camera camera parameters
+        cam_rot, cam_trans = parse_projection_components(cam_data)
+        cx, cy, fx, fy = parse_camera_intrinsics(batch_data_file, cam_data)
+        fov = cam_data["iterationData"]["camera"]["FOV"]
+
+        # Mirror rotation matrix for PyTorch3D
+        mirror_matrix = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        mirrored_rot = mirror_matrix @ cam_rot.T @ mirror_matrix.T
+        R = torch.tensor(mirrored_rot, dtype=torch.float32)
+        T = torch.tensor([-cam_trans[0], cam_trans[1], cam_trans[2]], dtype=torch.float32)
+
+        cam_rot_per_view.append(R)
+        cam_trans_per_view.append(T)
+        fx_per_view.append(fx)
+        fy_per_view.append(fy)
+        cx_per_view.append(cx)
+        cy_per_view.append(cy)
+        fov_per_view.append(fov)
+
+        if verbose:
+            print(f"  CAM{cam_id}: fx={fx:.2f}, fy={fy:.2f}, visible_joints={int(np.sum(visibility))}/{len(visibility)}")
+
+    # ------------------------------------------------------------------
+    # 3D ground-truth keypoints in raw world frame (PyTorch3D-mirrored,
+    # same convention as cam_rot_per_view / cam_trans_per_view / model_loc).
+    # Track which J_names actually have a dataset entry — joints not in
+    # `pose_data` (model-only joints) must NOT participate in the canonical-
+    # frame transform; they end up zeroed-out after all conversions to
+    # match the SLEAP convention of (0,0,0) as the "no GT" sentinel.
+    # Downstream consumers (viz, trainer) recognise (0,0,0) as missing.
+    # ------------------------------------------------------------------
+    kp3d_by_name = {}
+    for k, kp in pose_data.items():
+        p3 = kp.get("3DPos")
+        if p3 is not None:
+            kp3d_by_name[k] = np.array(
+                [-p3["x"], p3["y"], p3["z"]], dtype=np.float32
+            )
+    keypoints_3d_world = np.zeros(
+        (len(config.dd["J_names"]), 3), dtype=np.float32
+    )
+    keypoint_3d_in_dataset = np.zeros(len(config.dd["J_names"]), dtype=bool)
+    for o, j in enumerate(config.dd["J_names"]):
+        if j in kp3d_by_name:
+            keypoints_3d_world[o] = kp3d_by_name[j]
+            keypoint_3d_in_dataset[o] = True
+
+    # ------------------------------------------------------------------
+    # Canonical-camera-frame transformation.
+    #
+    # Pick the lowest CAM ID (camera_indices[0] after the sort above) as
+    # the canonical camera. Define a new world frame in which that
+    # camera's extrinsics are identity — i.e. the canonical frame IS
+    # cam-0's view — and re-express everything relative to it.
+    #
+    # Forward transform world -> canonical:
+    #     x_can = x_world @ R_0 + t_0
+    # where (R_0, t_0) are cam-0's row-vector PyTorch3D-mirrored
+    # extrinsics. Derivation (row-vector convention throughout):
+    #     R_v'                  = R_0.T @ R_v
+    #     t_v'                  = t_v - t_0 @ R_v'
+    #     root_loc'             = root_loc @ R_0 + t_0
+    #     R_root_can_col        = R_0.T @ R_root_col   (scipy col-vec form)
+    #     keypoints_3d_can      = keypoints_3d_world @ R_0 + t_0
+    #
+    # Storage choice: y_output emits `canonical_to_world = (R_0, t_0)`
+    # as the FORWARD transform — not its inverse. We picked forward
+    # because (R_0, t_0) IS the artifact computed at the canonical site,
+    # storing it avoids drift from re-deriving, and the canonical
+    # frame's definition stays visible at the storage point. Consumers
+    # that need world-frame coordinates apply the inverse explicitly:
+    #     x_world = (x_canonical - t_0) @ R_0.T
+    # ------------------------------------------------------------------
+    if canonical_frame:
+        canonical_cam_idx = 0  # lowest CAM ID, first in sorted camera_indices
+        R_0 = cam_rot_per_view[canonical_cam_idx].clone()
+        t_0 = cam_trans_per_view[canonical_cam_idx].clone()
+        R_0_np = R_0.numpy()
+        t_0_np = t_0.numpy()
+
+        for v in range(len(camera_indices)):
+            R_v = cam_rot_per_view[v]
+            t_v = cam_trans_per_view[v]
+            R_v_can = R_0.T @ R_v
+            t_v_can = t_v - t_0 @ R_v_can
+            cam_rot_per_view[v] = R_v_can
+            cam_trans_per_view[v] = t_v_can
+
+        model_loc = (model_loc @ R_0_np + t_0_np).astype(np.float32)
+
+        R_root_col = Rotation.from_rotvec(global_rotation_np).as_matrix()
+        R_root_can_col = R_0_np.T @ R_root_col
+        global_rotation_np = (
+            Rotation.from_matrix(R_root_can_col).as_rotvec().astype(np.float32)
+        )
+
+        keypoints_3d = (keypoints_3d_world @ R_0_np + t_0_np).astype(np.float32)
+
+        canonical_to_world = (
+            R_0_np.astype(np.float32),
+            t_0_np.astype(np.float32),
+        )
+        canonical_cam_id = int(camera_indices[canonical_cam_idx])
+    else:
+        keypoints_3d = keypoints_3d_world.copy()
+        canonical_to_world = (
+            np.eye(3, dtype=np.float32),
+            np.zeros(3, dtype=np.float32),
+        )
+        canonical_cam_id = -1  # sentinel: no canonical frame applied
+
+    # ------------------------------------------------------------------
+    # Scale unification (Phase 1b). Apply `translation_factor` uniformly
+    # to all world-frame translations and 3D coordinates. Default 0.1
+    # makes mesh-native and data-frame units coincide so that downstream
+    # consumers can use `mesh + trans` (no `(mesh - root) * 10 + trans`
+    # hack). Rotations are scale-invariant and untouched. All canonical-
+    # frame relationships are preserved because uniform scaling commutes
+    # with the canonical-frame transform.
+    # See "Scale Unification" in MULTIVIEW_REPLICANT_INTEGRATION_DESIGN.md.
+    # ------------------------------------------------------------------
+    s = float(translation_factor)
+    if s != 1.0:
+        model_loc = (model_loc * s).astype(np.float32)
+        keypoints_3d = (keypoints_3d * s).astype(np.float32)
+        keypoints_3d_world = (keypoints_3d_world * s).astype(np.float32)
+        canonical_to_world = (
+            canonical_to_world[0],
+            (canonical_to_world[1] * s).astype(np.float32),
+        )
+        for v in range(len(camera_indices)):
+            cam_trans_per_view[v] = cam_trans_per_view[v] * s
+
+    # ------------------------------------------------------------------
+    # Zero out 3D keypoints for joints with no dataset GT.
+    # Reason: when `canonical_frame=True`, a zero-padded row in
+    # `keypoints_3d_world` becomes `0 @ R_0 + t_0 = t_0` after the
+    # canonical-frame transform, i.e. lands at the canonical camera's
+    # position — far from the mesh cluster and a meaningless 3D target.
+    # Apply the (0,0,0) sentinel AFTER all transformations so downstream
+    # consumers (visualisers, trainers) can detect missing joints with the
+    # standard `~np.all(kp3d == 0, axis=1)` check — the SLEAP convention.
+    # `keypoints_3d_world` is also zeroed for the same joints so the inverse
+    # `(x_can - t_0) @ R_0.T` round-trip still maps missing rows to zero.
+    # ------------------------------------------------------------------
+    if (~keypoint_3d_in_dataset).any():
+        keypoints_3d[~keypoint_3d_in_dataset] = 0.0
+        keypoints_3d_world[~keypoint_3d_in_dataset] = 0.0
+
+    # Overwrite the earlier raw-frame assignments with (possibly)
+    # canonical-frame values. pose_data is left untouched for
+    # backwards compatibility with consumers that re-derive from it.
+    y_output["root_loc"] = model_loc
+    y_output["root_rot"] = global_rotation_np
+    y_output["keypoints_3d"] = keypoints_3d
+    y_output["keypoints_3d_world"] = keypoints_3d_world
+    y_output["canonical_to_world"] = canonical_to_world
+    y_output["canonical_cam_id"] = canonical_cam_id
+
+    # Populate x_output
+    x_output["image_data"] = image_data
+    x_output["image_paths"] = image_paths
+    x_output["input_image_mask"] = mask_data
+    x_output["mask_paths"] = mask_paths
+    x_output["depth_paths"] = depth_paths
+    x_output["num_views"] = len(camera_indices)
+    x_output["camera_ids"] = camera_indices
+
+    # Populate y_output with per-view data
+    y_output["keypoints_2d_per_view"] = keypoints_2d_per_view
+    y_output["keypoint_visibility_per_view"] = keypoint_visibility_per_view
+    y_output["keypoint_in_dataset_per_view"] = keypoint_in_dataset_per_view
+    # Per-view supervision validity (False = animal absent / fully occluded in
+    # this view; keypoints_2d and keypoint_visibility are zero-sentinels for
+    # this slot). Camera params (R/T/K/FOV) remain geometrically valid even
+    # when this is False, so the slot is still usable for cross-view geometry.
+    y_output["view_valid_per_view"] = list(view_valid_per_view)
+    y_output["cam_rot_per_view"] = cam_rot_per_view
+    y_output["cam_trans_per_view"] = cam_trans_per_view
+    y_output["fx_per_view"] = fx_per_view
+    y_output["fy_per_view"] = fy_per_view
+    y_output["cx_per_view"] = cx_per_view
+    y_output["cy_per_view"] = cy_per_view
+    y_output["fov_per_view"] = fov_per_view
+
+    if verbose:
+        print(f"Successfully loaded frame {frame_index:05d} with {len(camera_indices)} cameras")
 
     return x_output, y_output
 

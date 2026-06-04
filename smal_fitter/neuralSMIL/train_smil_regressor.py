@@ -41,15 +41,8 @@ from training_config import TrainingConfig
 from configs import SingleViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
 from memory_optimization import MemoryOptimizer, recommend_training_config, MixedPrecisionTrainer
 
-# Import SLEAP dataset to enable patching of UnifiedSMILDataset
-# Note: This import happens in each worker process due to multiprocessing data loaders
-try:
-    from sleap_data.sleap_dataset import SLEAPDataset, _patch_unified_dataset
-    # Apply the patch to enable SLEAP dataset support (silently to avoid spam from workers)
-    _patch_unified_dataset()
-except ImportError:
-    # SLEAP dataset not available, continue without it
-    pass
+# UnifiedSMILDataset.from_path now dispatches to SLEAPDataset / SLEAPMultiViewDataset
+# directly based on HDF5 /metadata attrs — no monkey-patch required.
 
 
 def set_random_seeds(seed=0):
