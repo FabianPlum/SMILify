@@ -158,6 +158,23 @@ def _process_frame(task: Dict[str, Any]) -> Dict[str, Any]:
             "reason": "loader returned None image for one or more views",
         }
 
+    # Per-view supervision validity from the loader. False slots have empty
+    # `subject Data` (animal absent from this view's render); we keep the
+    # slot (image + camera geometry still valid) but mark view_mask=False so
+    # the trainer skips supervision for it.
+    view_valid_per_view = list(y.get("view_valid_per_view", [True] * num_views))
+    num_valid_views = int(sum(view_valid_per_view))
+    min_views = int(task["min_views_per_sample"])
+    if num_valid_views < min_views:
+        return {
+            "frame_idx": frame_idx,
+            "ok": False,
+            "reason": (
+                f"only {num_valid_views}/{num_views} views have valid subject data "
+                f"(min_views={min_views})"
+            ),
+        }
+
     H, W = int(images[0].shape[0]), int(images[0].shape[1])
 
     jpeg_blobs: List[bytes] = []
@@ -208,6 +225,7 @@ def _process_frame(task: Dict[str, Any]) -> Dict[str, Any]:
         "camera_ids": camera_ids,
         "camera_names": [f"CAM{c}" for c in camera_ids],
         "jpeg_blobs": jpeg_blobs,
+        "view_valid_per_view": view_valid_per_view,
         "keypoints_2d": keypoints_2d,
         "keypoint_visibility": keypoint_visibility,
         "camera_intrinsics": np.stack(K_list, axis=0),
@@ -247,6 +265,7 @@ class replicAntMultiViewPreprocessor:
         compression_level: int = 6,
         frame_skip: int = 1,
         camera_subset: Optional[List[int]] = None,
+        min_views_per_sample: int = 2,
         depth_occlusion_check: bool = True,
         depth_max_cm: float = 1000.0,
         depth_tolerance_cm: float = 5.0,
@@ -259,6 +278,10 @@ class replicAntMultiViewPreprocessor:
             raise ValueError(f"frame_skip must be >= 1, got {frame_skip}")
         if not (1 <= jpeg_quality <= 100):
             raise ValueError(f"jpeg_quality must be in [1, 100], got {jpeg_quality}")
+        if min_views_per_sample < 1:
+            raise ValueError(
+                f"min_views_per_sample must be >= 1, got {min_views_per_sample}"
+            )
 
         self.target_resolution = int(target_resolution)
         self.backbone_name = backbone_name
@@ -268,6 +291,7 @@ class replicAntMultiViewPreprocessor:
         self.compression_level = int(compression_level)
         self.frame_skip = int(frame_skip)
         self.camera_subset = list(camera_subset) if camera_subset is not None else None
+        self.min_views_per_sample = int(min_views_per_sample)
         self.depth_occlusion_check = bool(depth_occlusion_check)
         self.depth_max_cm = float(depth_max_cm)
         self.depth_tolerance_cm = float(depth_tolerance_cm)
@@ -658,6 +682,7 @@ class replicAntMultiViewPreprocessor:
                 "propagate_scaling": self.propagate_scaling,
                 "translation_factor": self.translation_factor,
                 "jpeg_quality": self.jpeg_quality,
+                "min_views_per_sample": self.min_views_per_sample,
                 "depth_occlusion_check": self.depth_occlusion_check,
                 "depth_max_cm": self.depth_max_cm,
                 "depth_tolerance_cm": self.depth_tolerance_cm,
@@ -700,7 +725,16 @@ class replicAntMultiViewPreprocessor:
 
                     i = num_written
                     nv = int(result["num_views"])
+                    view_valid_per_view = list(
+                        result.get("view_valid_per_view", [True] * nv)
+                    )
                     # Per-view image blobs and view_mask.
+                    # The JPG image and camera geometry (K/R/t) are written for
+                    # every slot regardless of subject-data validity — the image
+                    # itself is real, the camera params still describe the rig.
+                    # `view_mask` and `camera_indices` reflect per-view supervision
+                    # validity: invalid views get view_mask=False + camera_indices=-1
+                    # so SLEAPMultiViewDataset drops the slot at __getitem__ time.
                     view_mask_row = np.zeros((max_views,), dtype=bool)
                     cam_idx_row = np.full((max_views,), -1, dtype=np.int32)
                     for v in range(nv):
@@ -713,8 +747,12 @@ class replicAntMultiViewPreprocessor:
                         handles["image_jpeg_datasets"][slot][i] = np.frombuffer(
                             result["jpeg_blobs"][v], dtype=np.uint8
                         )
-                        view_mask_row[slot] = True
-                        cam_idx_row[slot] = slot
+                        if view_valid_per_view[v]:
+                            view_mask_row[slot] = True
+                            cam_idx_row[slot] = slot
+                        # else: leave view_mask_row[slot]=False and
+                        # cam_idx_row[slot]=-1 (the "this slot is not a real
+                        # supervisable view" convention).
 
                     # Fixed-shape per-view fields. Stored in slot order (matches
                     # canonical_camera_order); padded slots stay at zeros.
@@ -751,7 +789,9 @@ class replicAntMultiViewPreprocessor:
 
                     handles["has_3d_data"][i] = True
                     handles["has_gt_betas"][i] = True
-                    handles["num_views"][i] = nv
+                    # `num_views` stores the count of valid (supervisable) views,
+                    # matching the SLEAP convention and the trainer's expectation.
+                    handles["num_views"][i] = int(sum(view_valid_per_view))
                     handles["frame_idx"][i] = result["frame_idx"]
                     handles["canonical_to_world_R"][i] = result["canonical_to_world_R"]
                     handles["canonical_to_world_t"][i] = result["canonical_to_world_t"]
@@ -790,7 +830,7 @@ class replicAntMultiViewPreprocessor:
             meta.attrs["depth_max_cm"] = float(self.depth_max_cm)
             meta.attrs["depth_tolerance_cm"] = float(self.depth_tolerance_cm)
             meta.attrs["depth_neighborhood"] = int(self.depth_neighborhood)
-            meta.attrs["min_views_per_sample"] = int(max_views)  # always all views present
+            meta.attrs["min_views_per_sample"] = int(self.min_views_per_sample)
             meta.attrs["camera_extrinsics_convention"] = "opencv"
             # Skipped-frame ledger.
             meta.attrs["num_skipped_frames"] = len(skipped)
@@ -854,6 +894,11 @@ def main() -> None:
         help='Comma-separated camera IDs (e.g. "1,2,3"). Default: all cameras at frame 0.',
     )
     parser.add_argument("--max_frames", type=int, default=None, help="Cap number of frames (smoke test)")
+    parser.add_argument("--min_views", type=int, default=2,
+                        help="Minimum valid views per sample. Frames with fewer "
+                             "cameras containing valid subject data are discarded; "
+                             "frames with >= this many keep all camera slots but "
+                             "set view_mask=False on the invalid ones. Default: 2.")
     parser.add_argument("--translation_factor", type=float, default=0.1,
                         help="Loader-side uniform world scale (default 0.1 unifies mesh + data units)")
     parser.add_argument("--depth_occlusion_check", dest="depth_occlusion_check",
@@ -887,6 +932,7 @@ def main() -> None:
         chunk_size=args.chunk_size,
         frame_skip=args.frame_skip,
         camera_subset=_parse_camera_subset(args.camera_subset),
+        min_views_per_sample=args.min_views,
         depth_occlusion_check=args.depth_occlusion_check,
         depth_max_cm=args.depth_max_cm,
         depth_tolerance_cm=args.depth_tolerance_cm,
