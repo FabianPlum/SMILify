@@ -78,6 +78,19 @@ makes mesh-native and data-frame units coincide:
 - HDF5 metadata: `world_scale = 1.0`. No downstream rescaling.
 - Multi-view training configs: `use_ue_scaling: false` and the model uses the
   `joints + trans` placement branch (no recenter-and-rescale).
+- **(0,0,0) sentinel for missing 3D GT**: joints in `config.dd["J_names"]`
+  that don't appear in the dataset's `pose_data` keypoints dict (e.g. for the
+  Falkner-conv mouse: `head_top`, `Eye_L/R`, `paw_L_tip`, `paw_R_tip`, `Spine`,
+  `Trunk`, `Foot_L_lower`, `Foot_R_lower`) get zero-padded into
+  `keypoints_3d_world` initially. After the canonical-frame transform a zero
+  row maps to `t_0` and lands at the canonical camera's position — a
+  meaningless 3D target ~10 units from the mesh cluster. The loader therefore
+  **re-zeros these rows AFTER all transforms** (canonical-frame + scale), so
+  both `keypoints_3d` and `keypoints_3d_world` carry `(0,0,0)` for unmapped
+  joints — the SLEAP convention. Downstream consumers detect missing joints
+  via `~np.all(kp3d == 0, axis=1)` (the validation harness and trainer
+  visualisation already use this pattern; epoch viz reports
+  `Plotted joints: 31, Suppressed: 9` on the mouse dataset).
 
 **Single-view convention (UNCHANGED, legacy):**
 - `load_SMIL_Unreal_sample(translation_factor=0.01, …)` returns raw Unreal
@@ -733,8 +746,8 @@ y_data = {
 2. ✅ **Step 2** — Phase 3: `replicAntMultiViewPreprocessor` + `__main__` CLI. (This PR.)
 3. ✅ **Step 3** — Step-0 smoke test (see §Status → "Phase 3 highlights" for numbers):
    - 500-frame HDF5 produced (497 written, 3 skipped as `subject Data == []` edge cases).
-   - Round-trip check (samples 0, 100, 250, 496): byte-equivalent loader ↔ HDF5 on R, T, K, keypoints, parameters; canonical inverse recovers raw world to 1.4e-6.
-   - 5-epoch multi-view training run: train loss 4.34 → 2.54 monotonic ↓; per-view reprojection converges; `trans` head supervises without divergence.
+   - Round-trip check (samples 0, 100, 250, 496): byte-equivalent loader ↔ HDF5 on R, T, K, keypoints, parameters; canonical inverse recovers raw world to 1.4e-6 (excluding (0,0,0) sentinel entries).
+   - 5-epoch multi-view training run (post-sentinel-fix): train loss **2.27 → 0.49** monotonic ↓, best val 0.49; `keypoint_3d` train 8.35 → 1.83 (5.4× drop vs the initial ghost-joint run); per-view reprojection converges; `trans` head supervises without divergence. Visualisation reports `Plotted joints: 31, Suppressed: 9` confirming the (0,0,0) sentinel is respected end-to-end.
 4. ⏳ **Step 4** — Phase 4: extend `UnifiedSMILDataset.from_path()` auto-detection. (Out of this PR.)
 5. ⏳ **Step 5** — Phase 2: add `MultiViewreplicAntSMILDataset` test seam (low priority; production reads HDF5). (Out of this PR.)
 6. ✅ **Step 6** — `multiview_replicant_mice.json` example config landed.
@@ -832,18 +845,22 @@ saw implicit gradient could destabilise training.
 **Empirical result (5-epoch smoke training, 500-frame subset, ViT-large
 backbone frozen, batch=1):**
 
-- Per-view reprojection loss converges to noise floor (kp2d normalised ≈ 0.06)
+- Per-view reprojection loss converges to noise floor (kp2d normalised ≈ 0.05)
   in the first epoch — frame convention is geometrically sound, no per-view
   loss divergence.
-- Direct `trans` supervision **does not destabilise** training. Train loss
-  decreased monotonically 4.34 → 3.01 → 2.95 → 2.73 → 2.54 over 5 epochs.
-- At epoch-3 visualization sample, predicted `trans z ≈ 13.23` vs GT `12.67` —
-  the head learned the right magnitude without any weight tuning, kept the
-  default loss weight (0.001).
+- Direct `trans` supervision **does not destabilise** training. After the
+  (0,0,0)-sentinel fix for missing 3D GT (see "Multi-view convention" above),
+  train loss decreased monotonically 2.27 → 1.00 → 0.84 → 0.59 → 0.49 over
+  5 epochs (5.2× lower than the ghost-joint pre-fix run).
+- `keypoint_3d` train loss dropped 5.4× (8.35 → 1.83) after fixing the
+  ghost-joint sentinel; the 9 unmapped J_names (no replicAnt GT) had been
+  contributing meaningless target positions at the canonical-camera location
+  before the fix.
 - `use_ue_scaling=false` model placement branch (`(joints - root) + trans`,
   no `*10`) verified end-to-end on real data.
 
-**Conclusion**: scale-unified canonical-camera-frame storage + direct `trans`
-supervision is the working configuration. Full 10k-frame preprocess + production
-training run is unblocked.
+**Conclusion**: scale-unified canonical-camera-frame storage + (0,0,0)
+sentinel for missing 3D GT + direct `trans` supervision is the working
+configuration. Full 10k-frame preprocess + production training run is
+unblocked.
 
