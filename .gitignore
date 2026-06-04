@@ -184,3 +184,12 @@ extra_videos/
 exported/
 smpl_webuser/
 download/
+
+# scratch diagnostics (probes, smoke HDF5s, ad-hoc inspectors)
+probe_*.py
+inspect_smoke*.py
+roundtrip_smoke*.py
+SMOKE_*.h5
+SMOKE_*.json
+SMOKE_*/
+*_SMOKE_TEST.json
