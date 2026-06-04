@@ -115,8 +115,17 @@ def _check_sample(
         trans_h5 = f["parameters/trans"][sample_idx].astype(np.float32)
         rot_h5 = f["parameters/global_rot"][sample_idx].astype(np.float32)
         betas_h5 = f["parameters/betas"][sample_idx].astype(np.float32)
+    # Canonical inverse round-trip only applies to joints with real GT.
+    # Joints absent from the dataset land at the SLEAP-style (0,0,0) sentinel
+    # in BOTH keypoints_3d and keypoints_3d_world — exclude them from the
+    # geometric check (the canonical inverse of (0,0,0) is not (0,0,0)).
+    loader_world = np.asarray(y_mv["keypoints_3d_world"], dtype=np.float32)
+    has_gt_3d = ~(np.all(kp3d_ds == 0, axis=1) & np.all(loader_world == 0, axis=1))
     recovered_world = (kp3d_ds - c2w_t) @ c2w_R.T
-    max_world = float(np.max(np.abs(recovered_world - np.asarray(y_mv["keypoints_3d_world"], dtype=np.float32))))
+    if has_gt_3d.any():
+        max_world = float(np.max(np.abs(recovered_world[has_gt_3d] - loader_world[has_gt_3d])))
+    else:
+        max_world = 0.0
 
     max_trans = float(np.max(np.abs(np.asarray(y_mv["root_loc"], dtype=np.float32) - trans_h5)))
     max_rot = float(np.max(np.abs(np.asarray(y_mv["root_rot"], dtype=np.float32) - rot_h5)))
