@@ -74,35 +74,51 @@ def _check_sample(
         canonical_frame=True,
     )
 
+    # The dataset drops view_mask=False slots, so its view count equals the
+    # number of valid loader slots. The loader still emits ALL camera slots
+    # (with `view_valid_per_view[i]=False` for the bad ones); pair the
+    # dataset's views with the loader's *valid* slots in canonical order.
     n_views = int(x_data["num_active_views"])
-    if n_views != int(x_mv["num_views"]):
-        print(f"  FAIL: view-count mismatch (HDF5={n_views} vs loader={x_mv['num_views']})")
+    view_valid = list(y_mv.get("view_valid_per_view", [True] * int(x_mv["num_views"])))
+    valid_loader_idx = [i for i, ok in enumerate(view_valid) if ok]
+    n_valid_loader = len(valid_loader_idx)
+    if n_views != n_valid_loader:
+        print(
+            f"  FAIL: view-count mismatch — HDF5 active={n_views}, "
+            f"loader valid={n_valid_loader}/{x_mv['num_views']} "
+            f"(view_valid={view_valid})"
+        )
         return False
+    if n_views < int(x_mv["num_views"]):
+        print(
+            f"  NOTE: {int(x_mv['num_views']) - n_views} view(s) masked out "
+            f"(view_valid={view_valid})"
+        )
 
     max_R = 0.0
     max_T = 0.0
     max_fov = 0.0
-    for v in range(n_views):
-        R_loader = y_mv["cam_rot_per_view"][v].detach().cpu().numpy().astype(np.float32)
-        T_loader = y_mv["cam_trans_per_view"][v].detach().cpu().numpy().astype(np.float32)
-        R_ds = y_data["cam_rot_per_view"][v]
-        T_ds = y_data["cam_trans_per_view"][v]
+    for v_ds, v_loader in enumerate(valid_loader_idx):
+        R_loader = y_mv["cam_rot_per_view"][v_loader].detach().cpu().numpy().astype(np.float32)
+        T_loader = y_mv["cam_trans_per_view"][v_loader].detach().cpu().numpy().astype(np.float32)
+        R_ds = y_data["cam_rot_per_view"][v_ds]
+        T_ds = y_data["cam_trans_per_view"][v_ds]
         max_R = max(max_R, float(np.max(np.abs(R_loader - R_ds))))
         max_T = max(max_T, float(np.max(np.abs(T_loader - T_ds))))
         max_fov = max(
             max_fov,
-            abs(float(y_mv["fov_per_view"][v]) - float(y_data["cam_fov_per_view"][v, 0])),
+            abs(float(y_mv["fov_per_view"][v_loader]) - float(y_data["cam_fov_per_view"][v_ds, 0])),
         )
 
     max_kp = max_vis = 0.0
-    for v in range(n_views):
+    for v_ds, v_loader in enumerate(valid_loader_idx):
         max_kp = max(
             max_kp,
-            float(np.max(np.abs(y_mv["keypoints_2d_per_view"][v].astype(np.float32) - y_data["keypoints_2d"][v].astype(np.float32)))),
+            float(np.max(np.abs(y_mv["keypoints_2d_per_view"][v_loader].astype(np.float32) - y_data["keypoints_2d"][v_ds].astype(np.float32)))),
         )
         max_vis = max(
             max_vis,
-            float(np.max(np.abs(y_mv["keypoint_visibility_per_view"][v].astype(np.float32) - y_data["keypoint_visibility"][v].astype(np.float32)))),
+            float(np.max(np.abs(y_mv["keypoint_visibility_per_view"][v_loader].astype(np.float32) - y_data["keypoint_visibility"][v_ds].astype(np.float32)))),
         )
 
     kp3d_loader = np.asarray(y_mv["keypoints_3d"], dtype=np.float32)

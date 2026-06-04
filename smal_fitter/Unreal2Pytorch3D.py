@@ -1266,9 +1266,19 @@ def load_SMIL_Unreal_multiview_sample(
                 - Per-camera data:
                   - keypoints_2d_per_view: List of [n_joints, 2] arrays
                   - keypoint_visibility_per_view: List of [n_joints] visibility arrays
+                  - view_valid_per_view: List of bool — False when the
+                    camera has empty `subject Data` (animal absent from
+                    this view's render). Keypoints/visibility for these
+                    slots are zero-sentinels; camera params stay valid.
                   - cam_rot_per_view: List of rotation matrices
                   - cam_trans_per_view: List of translation vectors
                   - fx_per_view, fy_per_view, cx_per_view, cy_per_view: Lists of intrinsics
+
+    Raises:
+        ValueError: when no camera in `camera_indices` has valid
+            `subject Data` for the frame (animal absent from every view).
+            Per-camera resilience is built in — a single bad camera
+            just marks that view invalid via `view_valid_per_view[v]`.
     """
     x_output = {}
     y_output = {}
@@ -1303,10 +1313,45 @@ def load_SMIL_Unreal_multiview_sample(
     if verbose:
         print(f"Loading frame {frame_index:05d} with cameras: {camera_indices}")
 
-    # Load shared data from first camera (pose/shape identical across all cameras)
-    first_camera_json = data_path / f"{dataset_name}_{frame_index:05d}_CAM{camera_indices[0]}.json"
-    with open(first_camera_json, "r") as f:
-        first_camera_data = json.load(f)
+    # Pre-load every camera's JSON. They're small (~10 kB) and we need them
+    # twice — once for the per-camera validity probe right below, then again
+    # in the per-view loop for 2D keypoints + camera params. Avoids
+    # re-opening each file.
+    cam_jsons = {}
+    for cam_id in camera_indices:
+        json_path = data_path / f"{dataset_name}_{frame_index:05d}_CAM{cam_id}.json"
+        with open(json_path, "r") as f:
+            cam_jsons[cam_id] = json.load(f)
+
+    # Per-camera validity: a camera is invalid for supervision when its
+    # `subject Data` is empty (renderer dropped the subject from this view
+    # because the camera couldn't see it). Geometry stays valid — the
+    # camera block (R/T/FOV/Location) is always present — so we can still
+    # use this slot for the canonical-frame transform; we just emit zero
+    # 2D keypoints and zero visibility for it.
+    def _has_subject_data(cam_data):
+        sd = cam_data.get("iterationData", {}).get("subject Data", [])
+        if not isinstance(sd, list) or len(sd) == 0:
+            return False
+        try:
+            _ = sd[0]["1"]["keypoints"]
+            return True
+        except (KeyError, TypeError, IndexError):
+            return False
+
+    view_valid_per_view = [bool(_has_subject_data(cam_jsons[cid])) for cid in camera_indices]
+
+    # Shared pose/shape (identical across cameras per dataset spec) can be
+    # read from any camera that has subject Data. Prefer the canonical one
+    # (camera_indices[0]) when valid so the existing semantics carry over;
+    # otherwise fall back to the first valid camera by sorted ID.
+    shared_ref_idx = next((i for i, ok in enumerate(view_valid_per_view) if ok), None)
+    if shared_ref_idx is None:
+        raise ValueError(
+            f"frame {frame_index}: no camera has valid `subject Data` — "
+            f"the animal is absent from all {len(camera_indices)} views"
+        )
+    first_camera_data = cam_jsons[camera_indices[shared_ref_idx]]
 
     # Extract shared pose and shape data
     pose_data = first_camera_data["iterationData"]["subject Data"][0]["1"]["keypoints"]
@@ -1418,11 +1463,10 @@ def load_SMIL_Unreal_multiview_sample(
     image_height = batch_data_file["Image Resolution"]["y"]
 
     # Load per-camera data
-    for cam_id in camera_indices:
+    for v_idx, cam_id in enumerate(camera_indices):
         json_path = data_path / f"{dataset_name}_{frame_index:05d}_CAM{cam_id}.json"
-
-        with open(json_path, "r") as f:
-            cam_data = json.load(f)
+        cam_data = cam_jsons[cam_id]
+        view_valid = view_valid_per_view[v_idx]
 
         # Load image. cv2.imread + cvtColor is ~2-3x faster than imageio's
         # PIL-backed JPEG decode at 512x512; we keep the existing RGB contract.
@@ -1478,37 +1522,41 @@ def load_SMIL_Unreal_multiview_sample(
                     depth_image = cv2.cvtColor(depth_image, cv2.COLOR_BGR2RGB)
 
         # Extract per-camera 2D keypoints. The shared `pose_data` above was
-        # read from the first camera's JSON; 2DPos is per-camera, so we re-
-        # read from the current camera's own keypoints dict here.
-        cam_pose = cam_data["iterationData"]["subject Data"][0]["1"]["keypoints"]
-        keypoints_2d = []
-        keypoint_names = []
-        for key in cam_pose.keys():
-            keypoint_names.append(key)
-            # Intentional axis swap (norm_x <- y/H, norm_y <- x/W) — mirrors the
-            # single-view path above. The downstream ID-mask lookup pixel-indexes
-            # against these values with the same swap, so don't "fix" one side
-            # without updating the other.
-            try:
-                norm_x = cam_pose[key]["2DPos"]["y"] / image_height
-                norm_y = cam_pose[key]["2DPos"]["x"] / image_width
-            except (KeyError, TypeError):
-                # Fallback if 2D positions not in this camera's data
-                norm_x = 0.5
-                norm_y = 0.5
-            keypoints_2d.append([norm_x, norm_y])
-
-        # Map to SMIL joint order. Track which model J_names actually
-        # have a matching dataset entry this view; model-only joints
-        # have no GT 2D (left at the [0, 0] sentinel) and must NOT be
-        # treated as visible — see the visibility initialisation below.
+        # read from a camera that *does* have subject Data; 2DPos is
+        # per-camera and only meaningful here when the current camera
+        # also has subject Data — when invalid we emit all-zero sentinels
+        # and leave `in_dataset_this_view` as all-False so visibility
+        # short-circuits to zero below.
         mapped_keypoints_2d = np.zeros((len(config.dd["J_names"]), 2), float)
         in_dataset_this_view = np.zeros(len(config.dd["J_names"]), dtype=bool)
-        for o, orig_joint in enumerate(config.dd["J_names"]):
-            for m, mapped_joint in enumerate(keypoint_names):
-                if orig_joint == mapped_joint:
-                    mapped_keypoints_2d[o] = keypoints_2d[m]
-                    in_dataset_this_view[o] = True
+        if view_valid:
+            cam_pose = cam_data["iterationData"]["subject Data"][0]["1"]["keypoints"]
+            keypoints_2d = []
+            keypoint_names = []
+            for key in cam_pose.keys():
+                keypoint_names.append(key)
+                # Intentional axis swap (norm_x <- y/H, norm_y <- x/W) — mirrors the
+                # single-view path above. The downstream ID-mask lookup pixel-indexes
+                # against these values with the same swap, so don't "fix" one side
+                # without updating the other.
+                try:
+                    norm_x = cam_pose[key]["2DPos"]["y"] / image_height
+                    norm_y = cam_pose[key]["2DPos"]["x"] / image_width
+                except (KeyError, TypeError):
+                    # Fallback if 2D positions not in this camera's data
+                    norm_x = 0.5
+                    norm_y = 0.5
+                keypoints_2d.append([norm_x, norm_y])
+
+            # Map to SMIL joint order. Track which model J_names actually
+            # have a matching dataset entry this view; model-only joints
+            # have no GT 2D (left at the [0, 0] sentinel) and must NOT be
+            # treated as visible — see the visibility initialisation below.
+            for o, orig_joint in enumerate(config.dd["J_names"]):
+                for m, mapped_joint in enumerate(keypoint_names):
+                    if orig_joint == mapped_joint:
+                        mapped_keypoints_2d[o] = keypoints_2d[m]
+                        in_dataset_this_view[o] = True
 
         keypoints_2d_per_view.append(mapped_keypoints_2d)
         keypoint_in_dataset_per_view.append(in_dataset_this_view)
@@ -1517,6 +1565,8 @@ def load_SMIL_Unreal_multiview_sample(
         # joints stay invisible regardless of where their [0, 0]
         # sentinel happens to land on the ID/depth pass. The bounds /
         # mask / depth steps below can only ever decrease visibility.
+        # When the view is invalid (no subject data), visibility starts
+        # at all zeros and stays there.
         visibility = in_dataset_this_view.astype(np.float64)
         if mask_data[-1] is not None:
             id_mask = mask_data[-1]
@@ -1738,6 +1788,11 @@ def load_SMIL_Unreal_multiview_sample(
     y_output["keypoints_2d_per_view"] = keypoints_2d_per_view
     y_output["keypoint_visibility_per_view"] = keypoint_visibility_per_view
     y_output["keypoint_in_dataset_per_view"] = keypoint_in_dataset_per_view
+    # Per-view supervision validity (False = animal absent / fully occluded in
+    # this view; keypoints_2d and keypoint_visibility are zero-sentinels for
+    # this slot). Camera params (R/T/K/FOV) remain geometrically valid even
+    # when this is False, so the slot is still usable for cross-view geometry.
+    y_output["view_valid_per_view"] = list(view_valid_per_view)
     y_output["cam_rot_per_view"] = cam_rot_per_view
     y_output["cam_trans_per_view"] = cam_trans_per_view
     y_output["fx_per_view"] = fx_per_view
