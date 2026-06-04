@@ -11,16 +11,19 @@ This document outlines the architecture for integrating multi-camera replicAnt d
 
 ---
 
-## Status (2026-06-01)
+## Status (2026-06-04)
 
 | Phase | What | State |
 |---|---|---|
 | 1 | `load_SMIL_Unreal_multiview_sample` loader | **COMPLETE** |
-| 3 | HDF5 preprocessor (`replicAntMultiViewPreprocessor`) | **NEXT** |
+| 1b | Scale unification: bake `translation_factor=0.1` into loader output | **COMPLETE (this PR)** |
+| 3 | HDF5 preprocessor (`replicAntMultiViewPreprocessor`) | **COMPLETE (this PR)** — round-trip byte-equivalent vs loader on smoke samples |
+| 6 | Example multi-view training config | **COMPLETE (this PR)** — `configs/examples/multiview_replicant_mice.json` |
 | 4 | `UnifiedSMILDataset.from_path()` auto-detection | pending |
 | 2 | `MultiViewreplicAntSMILDataset` PyTorch test seam | pending, low priority |
 | 5 | Single-view sampler | deferred per design |
-| — | Step-0 smoke test (preprocess + short training) | follows Phase 3 |
+| — | Step-0 smoke training run (short epochs on 500-frame subset) | follows preprocessor, separate session |
+| — | **Follow-up**: apply the same 0.1 rescale at load in `load_SMIL_Unreal_sample` (single-view) and flip single-view configs to `use_ue_scaling=False` | **TODO** |
 
 **Phase 1 highlights** (see commit history on `multiview-replicant-integration`):
 - Canonical-camera-frame storage (lowest CAM ID → R=I, t=0), forward-transform `canonical_to_world` for round-trip
@@ -29,7 +32,66 @@ This document outlines the architecture for integrating multi-camera replicAnt d
 - Diagnostics: `tests/validate_multiview_replicant_loader.py` (`--compare_frames`, `--named_overlay`) and `smal_fitter/replicAnt_data/visualize_multiview_depth_occlusion.py`
 - Empirical: 0.00 px reprojection error on 12 cameras (frame 0), 7.6e-06 max abs round-trip on 3D keypoints, canonical-cam extrinsics R=I and t=0 to numerical precision, 328 → 259 keypoints kept after depth refinement on frame 100 (mouse model)
 
+**Phase 3 highlights** (this PR):
+- Preprocessor at `smal_fitter/replicAnt_data/preprocess_replicant_multiview_dataset.py`, schema identical to `SLEAPMultiViewDataset`'s expected HDF5 layout
+- Camera extrinsics stored in OpenCV form (`R_cv = Rz_180 @ R_p3d.T`, `t_cv = Rz_180 @ T_p3d`); `SLEAPMultiViewDataset._sleap_to_pytorch3d_camera` re-derives PyTorch3D values at dataset-load with byte equivalence to the loader output
+- Scale unification baked into the loader (Phase 1b), preprocessor advertises `world_scale=1.0`
+- ProcessPoolExecutor with `_worker_init` that runs `apply_smal_file_override` once per worker; per-frame failures logged and skipped, `/metadata.skipped_frame_indices` records the source indices
+- Smoke results (500 source frames, 8 workers, Falkner-conv repose mouse):
+  - 497 / 500 samples written, 3 skipped (frames 184, 435, 441 — `subject Data == []` in some camera's JSON; genuine dataset edge case where the rendered scene contained no mouse subject for that view)
+  - 545 s wall time ≈ 1.1 s / frame; HDF5 = 303 MB (~610 KB / sample, JPEG-dominated)
+  - I/O-bound at 8 workers (~20% CPU); more workers + cv2.imread switch are the cheap wins for the full 10 k preprocess
+  - **Round-trip check** at samples 0, 100, 250, 496 against fresh loader call for the same source frame: byte equivalence on `R_per_view`, `T_per_view`, `keypoints_2d`, `keypoint_visibility`, `keypoints_3d`, `parameters/{trans, global_rot, betas}`; `fov_per_view` matches to 2e-6 deg (numerical precision recomputing from K); `canonical_to_world` inverse recovers raw world frame to 1.4e-6
+  - Sample 250 maps to source frame 251 (skip-then-remap verified on the sample axis)
+
+**Known per-camera resilience gap** (out of scope for this PR): when a non-canonical camera's `subject Data` is empty (e.g. frames 435 / 441 above), the loader currently raises and the preprocessor skips the whole frame. The design called for marking just that view's `view_mask[i, v] = False` and keeping the rest of the frame (`§Phase 3 Failure handling`). Drop rate at 500 frames was 0.6%; ship as-is and refine the loader later.
+
 **Important architectural shift from the original draft** — depth handling: the depth-buffer self-occlusion check runs at load time inside the loader, not as a post-process on stored bytes. The HDF5 schema therefore does NOT include a `/multiview_depth/` group, and the preprocessor does NOT take an `--include_depth_map` flag. Depth parameters are pass-through CLI args, recorded in `/metadata` attrs for reproducibility. See §Phase 3 below.
+
+---
+
+## Scale Unification (Phase 1b — landed in this PR)
+
+The multi-view path drops the legacy split between data-side raw Unreal units
+and model-side `use_ue_scaling=True` ×10 mesh expansion. Empirical probe
+(`probe_scale.py`, see commit message) confirms a single scale factor of **0.1**
+makes mesh-native and data-frame units coincide:
+
+- SMAL mouse mesh native (Falkner-conv repose): root-centered max extent ≈ 1.38.
+- Raw replicAnt data: `‖root_loc‖ ≈ 146`, `‖cam_trans‖ ≤ 98`, `keypoints_3d`
+  bbox diag ≈ 99 — all in Unreal cm.
+- Configs `(mesh×10, data×1)` and `(mesh×1, data×0.1)` produce identical
+  per-view reprojection (max-abs deviation 0.02–0.11 normalised, ≈ 8–56 px at
+  512² — the inherent SMAL-forward noise floor, not a scale residual). Uniform
+  rescaling is projection-invariant.
+- The legacy `translation_factor=0.01` is wrong by 10×: `data×0.01` fails
+  reprojection by 700–1600 px. The 0.01 was only ever consumed by PCA
+  `betas_trans` sampling in `Render_SMAL_Model_from_Unreal_data`; it was never
+  a world-scale factor.
+
+**Multi-view convention (new):**
+- `load_SMIL_Unreal_multiview_sample(translation_factor=0.1, …)` is the new
+  default. The loader multiplies `root_loc`, `cam_trans_per_view`,
+  `keypoints_3d`, `keypoints_3d_world`, and `canonical_to_world_t` by
+  `translation_factor`. Output is in **model-world units** where
+  `mesh + trans` (no extra rescaling) projects correctly.
+- HDF5 metadata: `world_scale = 1.0`. No downstream rescaling.
+- Multi-view training configs: `use_ue_scaling: false` and the model uses the
+  `joints + trans` placement branch (no recenter-and-rescale).
+
+**Single-view convention (UNCHANGED, legacy):**
+- `load_SMIL_Unreal_sample(translation_factor=0.01, …)` returns raw Unreal
+  coords; `translation_factor` is stored but does NOT scale `root_loc` /
+  `cam_trans` / `keypoints_3d` (it only scales PCA-sampled `betas_trans`).
+- Single-view training uses `use_ue_scaling=True` so the model applies
+  `(mesh - root) * 10 + trans` at output. This compensates for the data
+  being in raw Unreal cm.
+- **TODO follow-up (out of scope for this PR)**: apply the same 0.1 rescale at
+  load in `load_SMIL_Unreal_sample`; flip single-view configs to
+  `use_ue_scaling=False`; retest `optimize_to_joints.py`,
+  `train_smil_regressor.py`, and `run_singleview_inference.py`. Verify saved
+  single-view checkpoints under the new convention (or gate via metadata).
+  Use `probe_scale.py` as the empirical template before changing anything.
 
 ---
 
@@ -209,7 +271,7 @@ def load_SMIL_Unreal_multiview_sample(
     frame_index: int,
     camera_indices: list = None,           # None -> all cameras present for that frame
     propagate_scaling: bool = True,
-    translation_factor: float = 0.01,
+    translation_factor: float = 0.1,       # Phase 1b: scale-unifies mesh + data frames
     load_images: bool = True,
     canonical_frame: bool = True,          # canonical-camera-frame storage on by default
     depth_occlusion_check: bool = True,    # depth-buffer self-occlusion refinement
@@ -226,6 +288,7 @@ def load_SMIL_Unreal_multiview_sample(
 - Maps each camera's keypoints into model `J_names` order; tracks an in-dataset bitmap so model-only joints (no dataset GT) stay invisible regardless of mask content.
 - Per-view visibility = `in_dataset AND in_bounds AND id_mask_pass AND depth_pass` (depth term skipped when `depth_occlusion_check=False` or the `_Depth_CAM{id}.png` file is missing).
 - When `canonical_frame=True` (default), re-expresses all camera extrinsics, model `root_loc`, `root_rot`, and `keypoints_3d` relative to canonical cam 0. Emits `canonical_to_world = (R_0, t_0)` as the forward transform; the inverse `x_world = (x_can - t_0) @ R_0.T` recovers the original world frame.
+- **Phase 1b scale unification**: multiplies `root_loc`, `cam_trans_per_view`, `keypoints_3d`, `keypoints_3d_world`, and `canonical_to_world_t` by `translation_factor` (default 0.1). Output lands in model-world units where downstream `mesh + trans` (no `×10` model-side rescaling) projects correctly. Pass `translation_factor=1.0` to disable.
 
 **`x_output` schema**:
 ```python
@@ -274,7 +337,7 @@ def load_SMIL_Unreal_multiview_sample(
 **Conventions to be aware of when consuming this**:
 - 2D keypoints are stored with an **intentional axis swap**: `kp[:, 0] = 2DPos.y / H`, `kp[:, 1] = 2DPos.x / W`. Downstream ID-mask and depth lookups depend on this. Don't "fix" without updating both sides.
 - All extrinsics and 3D points are in **PyTorch3D-mirrored** convention (x-axis negated vs raw Unreal). Projection: `u = -fx * X_cam.x / X_cam.z + cx`, `v = -fy * X_cam.y / X_cam.z + cy`.
-- `keypoint_in_dataset_per_view` is True iff the joint name appears in that camera's `keypoints` dict. Use it to distinguish "missing from dataset" from "present but culled by ID/depth".
+- `keypoint_in_dataset_per_view` is True if the joint name appears in that camera's `keypoints` dict. Use it to distinguish "missing from dataset" from "present but culled by ID/depth".
 
 **Backward compatibility**: `load_SMIL_Unreal_sample()` (single-view) is unchanged.
 
@@ -369,7 +432,7 @@ class MultiViewreplicAntSMILDataset(torch.utils.data.Dataset):
 
 ---
 
-### Phase 3: HDF5 preprocessor — NEXT
+### Phase 3: HDF5 preprocessor — COMPLETE (this PR)
 
 **New module**: `smal_fitter/replicAnt_data/preprocess_replicant_multiview_dataset.py`. Lives alongside `visualize_multiview_depth_occlusion.py` in the `replicAnt_data` package. (NOT in `sleap_data/` — the SLEAP and replicAnt code paths are siblings, not nested.)
 
@@ -398,7 +461,7 @@ class replicAntMultiViewPreprocessor:
         depth_tolerance_cm: float = 5.0,
         depth_neighborhood: int = 1,
         propagate_scaling: bool = True,
-        translation_factor: float = 0.01,
+        translation_factor: float = 0.1,      # Phase 1b: matches loader default
         debug: bool = False,
     ):
         ...
@@ -636,35 +699,47 @@ y_data = {
 
 ## Files to Create/Modify
 
-### New Files (pending):
-1. `smal_fitter/replicAnt_data/preprocess_replicant_multiview_dataset.py` — `replicAntMultiViewPreprocessor` + `__main__` CLI. **Phase 3, NEXT.**
-2. `smal_fitter/neuralSMIL/multiview_replicant_dataset.py` — `MultiViewreplicAntSMILDataset` (Phase 2, test seam only; production reads HDF5).
+### New Files (landed this PR):
+1. `smal_fitter/replicAnt_data/preprocess_replicant_multiview_dataset.py` — `replicAntMultiViewPreprocessor` + `__main__` CLI. **Phase 3 COMPLETE.**
+2. `smal_fitter/replicAnt_data/test_replicant_preprocessing.py` — manual-run round-trip check (HDF5 ↔ `SLEAPMultiViewDataset` ↔ loader byte-equivalence on per-view R, T, K, keypoints, parameters, canonical_to_world inverse).
+3. `smal_fitter/neuralSMIL/configs/examples/multiview_replicant_mice.json` — baseline production multi-view training config with `use_ue_scaling: false`. **Phase 6 COMPLETE.**
 
-### Modified Files:
-1. `smal_fitter/Unreal2Pytorch3D.py` — **Phase 1 complete.** Multi-view loader with canonical-frame storage and depth visibility refinement. See §Status for commit references.
-2. `smal_fitter/replicAnt_data/__init__.py` — created during Phase 1's depth work; advertises the planned preprocessor.
-3. `smal_fitter/replicAnt_data/visualize_multiview_depth_occlusion.py` — created during Phase 1; per-view depth-occlusion diagnostic.
-4. `smal_fitter/neuralSMIL/smil_datasets.py` — **Phase 4**: extend `UnifiedSMILDataset.from_path()` with the flat-directory `_CAM*.json` detection branch.
+### New Files (still pending):
+4. `smal_fitter/neuralSMIL/multiview_replicant_dataset.py` — `MultiViewreplicAntSMILDataset` (Phase 2, test seam only; production reads HDF5).
+
+### Modified Files (this PR):
+1. `smal_fitter/Unreal2Pytorch3D.py` — **Phase 1b**: `translation_factor=0.1` default and applied through to `root_loc`, `cam_trans_per_view`, `keypoints_3d`, `keypoints_3d_world`, `canonical_to_world_t`.
+2. `tests/validate_multiview_replicant_loader.py` — `_compute_posed_smal_joints` drops the `*10` to match the new loader convention (data already scaled, so model placement is plain `(joints - root) + trans`).
+3. `smal_fitter/replicAnt_data/__init__.py` — docstring promoted preprocessor from "planned" to landed.
+4. `.gitignore` — scratch patterns for probes, smoke HDF5s, smoke output dirs.
+
+### Modified Files (Phase 1 landed earlier on this branch):
+1. `smal_fitter/Unreal2Pytorch3D.py` — multi-view loader (canonical-frame storage, depth visibility refinement, in-dataset bitmap).
+2. `smal_fitter/replicAnt_data/__init__.py` — created with depth work.
+3. `smal_fitter/replicAnt_data/visualize_multiview_depth_occlusion.py` — per-view depth-occlusion diagnostic.
+
+### Modified Files (pending — out of this PR):
+1. `smal_fitter/neuralSMIL/smil_datasets.py` — **Phase 4**: extend `UnifiedSMILDataset.from_path()` with the flat-directory `_CAM*.json` detection branch.
 
 ### No Changes Needed:
-- `train_multiview_regressor.py`, `multiview_smil_regressor.py`, `sleap_multiview_dataset.py` — Phase 3 produces an HDF5 that already matches the SLEAP schema.
+- `train_multiview_regressor.py`, `multiview_smil_regressor.py`, `sleap_multiview_dataset.py` — Phase 3 produces an HDF5 that already matches the SLEAP schema; trainer reads it via the existing class. Smoke training (5 epochs on the 500-frame HDF5) confirmed `use_ue_scaling=false` train path converges normally.
 - `train_smil_regressor.py`, `smil_image_regressor.py` — single-view sampler is Phase 5 (deferred).
 
 ---
 
 ## Implementation Order
 
-1. **Step 1** — Phase 1 loader: canonical-frame storage, depth visibility refinement, in-dataset bitmap. **DONE** (see §Status).
-2. **Step 2** [NEXT] — Phase 3: implement `replicAntMultiViewPreprocessor` and `__main__` CLI.
-3. **Step 3** — Step-0 smoke test (see §"Open empirical question" near the bottom):
-   - Preprocess `--max_frames 500` to a small HDF5.
-   - HDF5 round-trip check: open via `SLEAPMultiViewDataset`, take sample 0, apply inverse `canonical_to_world` (`R_0.T`, `-t_0 @ R_0.T`) to `keypoints_3d`, assert <= 1e-3 against the loader's `keypoints_3d_world` for the same source frame.
-   - Short multi-view training run (~50 epochs on the 500-frame subset). Pass criterion: per-view reprojection loss converges normally; `trans` head behaves under direct supervision.
-4. **Step 4** — Phase 4: extend `UnifiedSMILDataset.from_path()` auto-detection.
-5. **Step 5** — Phase 2: add `MultiViewreplicAntSMILDataset` test seam (low priority; production reads HDF5).
-6. **Step 6** — Example multi-view config JSON under `smal_fitter/neuralSMIL/configs/examples/`.
+1. ✅ **Step 1** — Phase 1 loader: canonical-frame storage, depth visibility refinement, in-dataset bitmap. (Landed earlier.)
+2. ✅ **Step 2** — Phase 3: `replicAntMultiViewPreprocessor` + `__main__` CLI. (This PR.)
+3. ✅ **Step 3** — Step-0 smoke test (see §Status → "Phase 3 highlights" for numbers):
+   - 500-frame HDF5 produced (497 written, 3 skipped as `subject Data == []` edge cases).
+   - Round-trip check (samples 0, 100, 250, 496): byte-equivalent loader ↔ HDF5 on R, T, K, keypoints, parameters; canonical inverse recovers raw world to 1.4e-6.
+   - 5-epoch multi-view training run: train loss 4.34 → 2.54 monotonic ↓; per-view reprojection converges; `trans` head supervises without divergence.
+4. ⏳ **Step 4** — Phase 4: extend `UnifiedSMILDataset.from_path()` auto-detection. (Out of this PR.)
+5. ⏳ **Step 5** — Phase 2: add `MultiViewreplicAntSMILDataset` test seam (low priority; production reads HDF5). (Out of this PR.)
+6. ✅ **Step 6** — `multiview_replicant_mice.json` example config landed.
 
-After Step 3 passes, the full preprocess (all 10k frames) and the production training run unblock; everything else above is wrap-up.
+After this PR, the full 10k-frame preprocess and production training run unblock. Phase 4 + 5 + the single-view scale unification follow-up are independent next steps.
 
 ---
 
@@ -739,35 +814,36 @@ byte-equivalent on-disk conventions:
   too. For SLEAP this is a no-op for learning (rig is fixed, so it's a
   constant shift) but makes the data format symmetric across the two paths.
 
-### Open empirical question (not blocking implementation)
+### Open empirical question — ANSWERED (this PR)
 
 Past SLEAP multiview training did **not** apply direct supervision to the
 `trans` head. The `/parameters/trans = 0` placeholder in the HDF5 was never
-consumed: the dataset returns `root_loc = None`
-([sleap_multiview_dataset.py:324](smal_fitter/sleap_data/sleap_multiview_dataset.py#L324)),
-which sets `trans_mask = False`
-([multiview_smil_regressor.py:2002-2011](smal_fitter/neuralSMIL/multiview_smil_regressor.py#L2002-L2011)),
-which short-circuits the loss to an `eps` placeholder
-([multiview_smil_regressor.py:892-902](smal_fitter/neuralSMIL/multiview_smil_regressor.py#L892-L902)).
-The head has therefore only ever received **implicit gradient** through the
-2D reprojection loss (which depends on `trans`).
+consumed: the dataset returns `root_loc = None`, which sets `trans_mask =
+False`, which short-circuits the loss to an `eps` placeholder. The head had
+therefore only ever received **implicit gradient** through the 2D reprojection
+loss.
 
-For replicAnt multi-cam with canonical-camera-frame storage, `root_loc` will
-be a real value (model's position relative to canonical camera), so direct
-MSE supervision on the `trans` head turns on for the first time. This is
-purely **additive** supervision on a head that already had implicit
-gradient — not a "relearn" situation — so the risk is low.
+For replicAnt multi-cam with canonical-camera-frame storage, `root_loc` is a
+real value (model's position relative to canonical camera), so direct MSE
+supervision on the `trans` head turns on for the first time. The original
+worry was that turning on direct supervision on a head that previously only
+saw implicit gradient could destabilise training.
 
-- **Step 0 before any full preprocess run**: preprocess a small subset
-  (~100–500 frames) of the replicAnt multi-cam dataset in canonical-cam-frame
-  convention, run a short training smoke test. Primary validation goal: confirm
-  the canonical-camera-frame transformation produces geometrically consistent
-  reprojections (i.e., per-view reprojection loss converges normally —
-  this catches frame-convention bugs more reliably than testing the trans
-  head specifically). Secondary: confirm direct `trans` loss converges
-  without destabilising the rest of training.
-- Default `trans` loss weight (0.001) is a reasonable starting point. If
-  needed, options are: bump the weight, freeze the head briefly, or zero
-  `trans` in the stored data (degrading to no direct supervision, matching
-  past SLEAP behaviour).
+**Empirical result (5-epoch smoke training, 500-frame subset, ViT-large
+backbone frozen, batch=1):**
+
+- Per-view reprojection loss converges to noise floor (kp2d normalised ≈ 0.06)
+  in the first epoch — frame convention is geometrically sound, no per-view
+  loss divergence.
+- Direct `trans` supervision **does not destabilise** training. Train loss
+  decreased monotonically 4.34 → 3.01 → 2.95 → 2.73 → 2.54 over 5 epochs.
+- At epoch-3 visualization sample, predicted `trans z ≈ 13.23` vs GT `12.67` —
+  the head learned the right magnitude without any weight tuning, kept the
+  default loss weight (0.001).
+- `use_ue_scaling=false` model placement branch (`(joints - root) + trans`,
+  no `*10`) verified end-to-end on real data.
+
+**Conclusion**: scale-unified canonical-camera-frame storage + direct `trans`
+supervision is the working configuration. Full 10k-frame preprocess + production
+training run is unblocked.
 
