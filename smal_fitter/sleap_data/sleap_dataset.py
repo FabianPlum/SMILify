@@ -354,70 +354,11 @@ class SLEAPDataset(torch.utils.data.Dataset):
         print("="*50)
 
 
-# Add SLEAP dataset support to UnifiedSMILDataset
-def _patch_unified_dataset(verbose: bool = False):
-    """
-    Patch the UnifiedSMILDataset to support SLEAP datasets.
-    This function should be called after importing this module.
-    """
-    if verbose:
-        print("Patching UnifiedSMILDataset to support SLEAP datasets...")
-    try:
-        import smal_fitter.neuralSMIL.smil_datasets as smil_datasets
-    except ImportError:
-        # Fallback for when running from different directory
-        import sys
-        sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'neuralSMIL'))
-        import smil_datasets
-
-    # Check if already patched
-    if hasattr(smil_datasets.UnifiedSMILDataset.from_path, '_sleap_patched'):
-        if verbose:
-            print("UnifiedSMILDataset already patched, skipping...")
-        return
-    
-    # Store original from_path method
-    original_from_path = smil_datasets.UnifiedSMILDataset.from_path
-    
-    @staticmethod
-    def from_path_with_sleap(data_path: str, **kwargs):
-        """
-        Create appropriate dataset instance based on file path.
-        
-        Args:
-            data_path: Path to dataset (directory for JSON format, .h5/.hdf5 file for optimized format)
-            **kwargs: Additional arguments passed to dataset constructor
-            
-        Returns:
-            Dataset instance (OptimizedSMILDataset, replicAntSMILDataset, or SLEAPDataset)
-        """
-        if data_path.endswith('.h5') or data_path.endswith('.hdf5'):
-            # Check if it's a SLEAP dataset by examining metadata
-            try:
-                with h5py.File(data_path, 'r') as f:
-                    if 'metadata' in f and 'dataset_type' in f['metadata'].attrs:
-                        dataset_type = f['metadata'].attrs['dataset_type']
-                        if dataset_type == 'sleap':
-                            return SLEAPDataset(data_path, **kwargs)
-            except Exception as e:
-                pass  # Fall back to original logic
-            
-            # Load optimized HDF5 dataset (original logic)
-            from optimized_dataset import OptimizedSMILDataset
-            return OptimizedSMILDataset(data_path, **kwargs)
-        else:
-            # Load original JSON dataset
-            return smil_datasets.replicAntSMILDataset(data_path, **kwargs)
-    
-    # Replace the method
-    from_path_with_sleap._sleap_patched = True
-    smil_datasets.UnifiedSMILDataset.from_path = from_path_with_sleap
-    if verbose:
-        print("UnifiedSMILDataset.from_path method patched successfully")
-
-
-# Note: Patching is done manually in train_smil_regressor.py
-# _patch_unified_dataset()
+# Note: dispatch from a user-facing path to SLEAPDataset / SLEAPMultiViewDataset /
+# OptimizedSMILDataset / replicAntSMILDataset lives in
+# `smal_fitter/neuralSMIL/smil_datasets.UnifiedSMILDataset.from_path` and is driven
+# by `/metadata` attrs in the HDF5 file. SLEAPDataset is selected when
+# `dataset_type='sleap'` AND `is_multiview` is not set/False.
 
 
 if __name__ == "__main__":
