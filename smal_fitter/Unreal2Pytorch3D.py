@@ -1573,6 +1573,11 @@ def load_SMIL_Unreal_multiview_sample(
     # ------------------------------------------------------------------
     # 3D ground-truth keypoints in raw world frame (PyTorch3D-mirrored,
     # same convention as cam_rot_per_view / cam_trans_per_view / model_loc).
+    # Track which J_names actually have a dataset entry — joints not in
+    # `pose_data` (model-only joints) must NOT participate in the canonical-
+    # frame transform; they end up zeroed-out after all conversions to
+    # match the SLEAP convention of (0,0,0) as the "no GT" sentinel.
+    # Downstream consumers (viz, trainer) recognise (0,0,0) as missing.
     # ------------------------------------------------------------------
     kp3d_by_name = {}
     for k, kp in pose_data.items():
@@ -1584,9 +1589,11 @@ def load_SMIL_Unreal_multiview_sample(
     keypoints_3d_world = np.zeros(
         (len(config.dd["J_names"]), 3), dtype=np.float32
     )
+    keypoint_3d_in_dataset = np.zeros(len(config.dd["J_names"]), dtype=bool)
     for o, j in enumerate(config.dd["J_names"]):
         if j in kp3d_by_name:
             keypoints_3d_world[o] = kp3d_by_name[j]
+            keypoint_3d_in_dataset[o] = True
 
     # ------------------------------------------------------------------
     # Canonical-camera-frame transformation.
@@ -1673,6 +1680,22 @@ def load_SMIL_Unreal_multiview_sample(
         )
         for v in range(len(camera_indices)):
             cam_trans_per_view[v] = cam_trans_per_view[v] * s
+
+    # ------------------------------------------------------------------
+    # Zero out 3D keypoints for joints with no dataset GT.
+    # Reason: when `canonical_frame=True`, a zero-padded row in
+    # `keypoints_3d_world` becomes `0 @ R_0 + t_0 = t_0` after the
+    # canonical-frame transform, i.e. lands at the canonical camera's
+    # position — far from the mesh cluster and a meaningless 3D target.
+    # Apply the (0,0,0) sentinel AFTER all transformations so downstream
+    # consumers (visualisers, trainers) can detect missing joints with the
+    # standard `~np.all(kp3d == 0, axis=1)` check — the SLEAP convention.
+    # `keypoints_3d_world` is also zeroed for the same joints so the inverse
+    # `(x_can - t_0) @ R_0.T` round-trip still maps missing rows to zero.
+    # ------------------------------------------------------------------
+    if (~keypoint_3d_in_dataset).any():
+        keypoints_3d[~keypoint_3d_in_dataset] = 0.0
+        keypoints_3d_world[~keypoint_3d_in_dataset] = 0.0
 
     # Overwrite the earlier raw-frame assignments with (possibly)
     # canonical-frame values. pose_data is left untouched for
