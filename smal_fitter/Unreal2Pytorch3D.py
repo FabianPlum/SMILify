@@ -1424,16 +1424,23 @@ def load_SMIL_Unreal_multiview_sample(
         with open(json_path, "r") as f:
             cam_data = json.load(f)
 
-        # Load image
+        # Load image. cv2.imread + cvtColor is ~2-3x faster than imageio's
+        # PIL-backed JPEG decode at 512x512; we keep the existing RGB contract.
         image_path = json_path.with_suffix(".JPG")
         if load_images and image_path.exists():
-            img = imageio.v2.imread(str(image_path))
+            bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+            if bgr is None:
+                raise RuntimeError(f"cv2.imread failed on {image_path}")
+            img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             image_data.append(img)
         else:
             image_data.append(None)
         image_paths.append(str(image_path))
 
-        # Load ID mask for visibility computation
+        # Load ID mask for visibility computation. Note: kept on imageio
+        # because cv2.imread is empirically ~80% SLOWER for this specific
+        # PNG flavour (likely a palette / metadata path through libpng);
+        # JPG and the depth PNG are migrated to cv2 below.
         mask_path = json_path.with_name(
             f"{dataset_name}_{frame_index:05d}_ID_CAM{cam_id}.png"
         )
@@ -1451,13 +1458,24 @@ def load_SMIL_Unreal_multiview_sample(
         # Load depth pass for the self-occlusion refinement. Optional —
         # if the file is missing we fall back to id-mask-only visibility
         # for this view per the design decision.
+        # `refine_visibility_with_depth` reads `depth_image[..., 0]` and
+        # expects R (the depth encoding lives in the red channel — the
+        # PNG's RGB channels are NOT equal). cv2 returns BGR[A], so we
+        # swap to RGB[A] to keep channel-0 == R.
         depth_path = json_path.with_name(
             f"{dataset_name}_{frame_index:05d}_Depth_CAM{cam_id}.png"
         )
         depth_paths.append(str(depth_path))
         depth_image = None
         if depth_occlusion_check and depth_path.exists():
-            depth_image = imageio.v2.imread(str(depth_path))
+            depth_image = cv2.imread(str(depth_path), cv2.IMREAD_UNCHANGED)
+            if depth_image is None:
+                raise RuntimeError(f"cv2.imread failed on {depth_path}")
+            if depth_image.ndim == 3:
+                if depth_image.shape[2] == 4:
+                    depth_image = cv2.cvtColor(depth_image, cv2.COLOR_BGRA2RGBA)
+                elif depth_image.shape[2] == 3:
+                    depth_image = cv2.cvtColor(depth_image, cv2.COLOR_BGR2RGB)
 
         # Extract per-camera 2D keypoints. The shared `pose_data` above was
         # read from the first camera's JSON; 2DPos is per-camera, so we re-
