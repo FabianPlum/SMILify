@@ -193,3 +193,7 @@ SMOKE_*.h5
 SMOKE_*.json
 SMOKE_*/
 *_SMOKE_TEST.json
+# cross-source merger scratch — smoke outputs from merge_multiview_datasets.py
+# and the SLEAP canonicalization prototype's diagnostic plot.
+merged_*.h5
+sleap_canonicalize_proto*.png
