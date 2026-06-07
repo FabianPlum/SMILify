@@ -129,9 +129,12 @@ class SMALFitter(nn.Module):
                     self.pose_prior = Prior(device)
                 except KeyError:
                     if config.DEBUG:
-                        print("WARNING: model_covs or shapedirs not found in config.dd")
-                    model_covs = np.eye(1)
-                    self.mean_betas = torch.FloatTensor([1.0]).to(device)
+                        print(
+                            "WARNING: shape_cov or shape_mean_betas not found in config.dd; "
+                            "falling back to identity-covariance prior sized to config.N_BETAS"
+                        )
+                    model_covs = np.eye(config.N_BETAS)
+                    self.mean_betas = torch.zeros(config.N_BETAS).to(device)
                     self.pose_prior = Prior(device)
             else:
                 with open(config.SMAL_DATA_FILE, 'rb') as f:
