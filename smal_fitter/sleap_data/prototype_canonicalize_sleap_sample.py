@@ -64,6 +64,7 @@ sys.path.insert(0, str(_THIS_DIR.parent))  # smal_fitter/ on path
 from multiview_common.canonical_frame import (
     canonicalize_sample,
     cam_center_world,
+    kp2d_norm_yx_to_pixel_xy,
     project_world_to_pixel,
 )
 
@@ -167,11 +168,10 @@ def _load_sample(hdf5_path: Path, sample_idx: int):
 # ---------------------------------------------------------------------------
 
 
-def _kp2d_norm_yx_to_pixel_xy(kp2d_norm_yx: np.ndarray, img_W: int, img_H: int) -> np.ndarray:
-    """SLEAP stores 2D keypoints as normalized [y/H, x/W]. Convert to pixel [x, y]."""
-    px = kp2d_norm_yx[:, 1] * float(img_W)
-    py = kp2d_norm_yx[:, 0] * float(img_H)
-    return np.stack([px, py], axis=1)
+# `_kp2d_norm_yx_to_pixel_xy` previously lived here as a local helper. Promoted
+# to `multiview_common.canonical_frame.kp2d_norm_yx_to_pixel_xy` so the merger,
+# viewer, and this prototype share one definition.
+_kp2d_norm_yx_to_pixel_xy = kp2d_norm_yx_to_pixel_xy  # back-compat alias for callers below
 
 
 def per_view_reproj_error(
