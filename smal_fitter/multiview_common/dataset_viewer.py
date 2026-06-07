@@ -40,8 +40,19 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))  # smal_fitter/ on path
 from multiview_common.canonical_frame import (  # noqa: E402
     cam_center_world,
+    kp2d_norm_yx_to_pixel_xy,
     project_world_to_pixel,
 )
+# SMAL rendering is an optional add-on (model + PyTorch3D). Failure to
+# import does NOT block the viewer; we just disable the SMAL features.
+try:
+    from multiview_common.smal_render import SMALRendererWrapper, overlay_silhouette  # noqa: E402
+    _SMAL_AVAILABLE = True
+except Exception as _e:  # pragma: no cover
+    SMALRendererWrapper = None  # type: ignore
+    overlay_silhouette = None  # type: ignore
+    _SMAL_AVAILABLE = False
+    _SMAL_IMPORT_ERR = str(_e)
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +205,170 @@ def _decode_jpeg(blob) -> Optional[np.ndarray]:
 
 
 # ---------------------------------------------------------------------------
+# SMAL forward + silhouette rendering (cached).
+# ---------------------------------------------------------------------------
+
+
+def _auto_detect_smal_pkl(meta: Dict[str, object]) -> Optional[str]:
+    """Return a SMAL pkl path if any preprocessor recorded one in /metadata.
+    Checks several plausible attr names. None of the current preprocessors
+    write this attr — left as forward-compatible hook."""
+    for key in ("smal_file", "smal_model_path", "smal_pkl", "smal_file_path"):
+        v = meta.get(key)
+        if v is None:
+            continue
+        s = v.decode("utf-8") if isinstance(v, bytes) else str(v)
+        if s and Path(s).is_file():
+            return s
+    return None
+
+
+# Repo root inferred from this file's location: smal_fitter/multiview_common/dataset_viewer.py
+_REPO_ROOT_FOR_PKL_SCAN = _HERE.parent.parent
+
+
+@st.cache_data(show_spinner=False)
+def _discover_smal_pkls() -> list:
+    """Scan a few likely locations under the repo for .pkl candidates.
+    Returns relative-path strings sorted for stable presentation. Avoids
+    a recursive walk of the whole tree — too slow on large checkouts."""
+    candidates: list = []
+    scan_dirs = [
+        _REPO_ROOT_FOR_PKL_SCAN / "3D_model_prep",
+        _REPO_ROOT_FOR_PKL_SCAN / "smal_model" / "data",
+        _REPO_ROOT_FOR_PKL_SCAN,   # top-level only, no recursion
+    ]
+    seen = set()
+    for d in scan_dirs:
+        if not d.is_dir():
+            continue
+        # Only direct children to keep this cheap and predictable.
+        for f in sorted(d.glob("*.pkl")):
+            rel = str(f.resolve())
+            if rel in seen:
+                continue
+            seen.add(rel)
+            candidates.append(rel)
+    return candidates
+
+
+def _normalize_path_for_wsl(path_str: str) -> str:
+    """Convert a Windows-style path (e.g. C:\\Users\\Fabian\\foo) to its
+    WSL equivalent (/mnt/c/Users/Fabian/foo) when running inside WSL.
+    No-op on POSIX inputs or when not running in WSL."""
+    if not path_str:
+        return path_str
+    s = path_str.strip().strip('"').strip("'")
+    # Windows drive-letter form: "C:\path\to\file" or "C:/path/to/file".
+    if len(s) >= 3 and s[1] == ":" and s[2] in ("\\", "/"):
+        drive = s[0].lower()
+        tail = s[2:].replace("\\", "/")
+        return f"/mnt/{drive}{tail}"
+    return s.replace("\\", "/")
+
+
+def _sample_has_real_pose(sample: Dict[str, object]) -> bool:
+    """True iff the per-sample SMAL parameters look like real ground truth
+    rather than the zero placeholder SLEAP samples carry."""
+    # We probe the parameters group on demand because the cached sample
+    # dict doesn't include them by default. The caller is responsible for
+    # providing these fields.
+    jr = sample.get("joint_rot")
+    gr = sample.get("global_rot")
+    if jr is None or gr is None:
+        return False
+    return bool(np.any(np.asarray(jr) != 0.0) or np.any(np.asarray(gr) != 0.0))
+
+
+@st.cache_data(show_spinner=False)
+def _read_pose_params(path: str, sample_idx: int) -> Dict[str, np.ndarray]:
+    """Extra per-sample pose params needed for SMAL forward. Cached
+    separately from `_read_sample` so the SMAL path is opt-in."""
+    with h5py.File(path, "r") as f:
+        return {
+            "betas": f["parameters/betas"][sample_idx].astype(np.float32),
+            "global_rot": f["parameters/global_rot"][sample_idx].astype(np.float32),
+            "joint_rot": f["parameters/joint_rot"][sample_idx].astype(np.float32),
+            "trans": f["parameters/trans"][sample_idx].astype(np.float32),
+        }
+
+
+@st.cache_resource(show_spinner="Loading SMAL model…")
+def _get_smal_renderer(smal_pkl: str, render_size: int):
+    """Load the SMAL pkl + PyTorch3D Renderer once per (pkl, render_size).
+    Streamlit reruns the script on every interaction; this cache keeps the
+    expensive model load from re-firing."""
+    if not _SMAL_AVAILABLE:
+        return None
+    return SMALRendererWrapper(
+        smal_file=smal_pkl, render_size=int(render_size), device="cpu",
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _smal_forward_for_sample(path: str, sample_idx: int, smal_pkl: str) -> Optional[Dict[str, np.ndarray]]:
+    """SMAL forward for one sample. Cached by (path, sample_idx, pkl) so the
+    forward only fires when one of those changes."""
+    if not _SMAL_AVAILABLE:
+        return None
+    params = _read_pose_params(path, sample_idx)
+    if not (np.any(params["joint_rot"] != 0) or np.any(params["global_rot"] != 0)):
+        return None
+    renderer = _get_smal_renderer(smal_pkl, render_size=256)
+    if renderer is None:
+        return None
+    try:
+        posed = renderer.forward(
+            betas=params["betas"],
+            global_rot=params["global_rot"],
+            joint_rot=params["joint_rot"],
+            trans=params["trans"],
+            propagate_scaling=False,
+        )
+    except Exception as e:
+        st.warning(f"SMAL forward failed: {type(e).__name__}: {e}")
+        return None
+    return {
+        "vertices_world": posed.vertices_world,
+        "joints_world": posed.joints_world,
+        "faces": posed.faces,
+    }
+
+
+@st.cache_data(show_spinner="Rendering silhouettes…")
+def _render_silhouettes_for_sample(
+    path: str, sample_idx: int, smal_pkl: str, render_size: int,
+) -> Optional[Dict[int, np.ndarray]]:
+    """Per-view silhouette mask in [0, 1], one per valid view.
+    Cached by (path, sample_idx, pkl, render_size) so the click-to-render
+    button only does work the first time."""
+    if not _SMAL_AVAILABLE:
+        return None
+    forward = _smal_forward_for_sample(path, sample_idx, smal_pkl)
+    if forward is None:
+        return None
+    renderer = _get_smal_renderer(smal_pkl, render_size=int(render_size))
+    if renderer is None:
+        return None
+    sample = _read_sample(path, sample_idx)
+    sils: Dict[int, np.ndarray] = {}
+    for v in range(sample["max_views"]):
+        if not sample["view_mask"][v]:
+            continue
+        try:
+            sil = renderer.render_silhouette(
+                verts_world=forward["vertices_world"],
+                faces=forward["faces"],
+                R_cv=sample["R"][v], t_cv=sample["t"][v], K=sample["K"][v],
+                image_size_wh=sample["image_sizes_wh"][v],
+            )
+            sils[v] = sil
+        except Exception as e:
+            st.warning(f"Silhouette render failed on view {v}: {type(e).__name__}: {e}")
+    return sils
+
+
+# ---------------------------------------------------------------------------
 # Per-view overlay rendering.
 # ---------------------------------------------------------------------------
 
@@ -207,6 +382,8 @@ def _draw_overlay(
     image_sizes_wh: Tuple[int, int],  # (W_calib, H_calib) — K is calibrated for this
     show_gt: bool,
     show_reproj: bool,
+    smal_joints_world: Optional[np.ndarray] = None,   # (J, 3) — posed SMAL joints
+    silhouette: Optional[np.ndarray] = None,          # (S, S) [0, 1]
 ) -> np.ndarray:
     """Stretch the JPEG to the calibration frame's aspect, then overlay GT
     and projected-3D keypoints. Visibility codes opacity / fill.
@@ -228,13 +405,14 @@ def _draw_overlay(
 
     has_gt_3d = ~np.all(kp3d == 0, axis=1)
     n_joints = kp2d_norm_yx.shape[0]
+    gt_pixels = kp2d_norm_yx_to_pixel_xy(kp2d_norm_yx, W_calib, H_calib)  # (J, 2) [x, y]
 
     if show_gt:
         for j in range(n_joints):
             if kp_vis[j] <= 0:
                 continue
-            px = int(round(float(kp2d_norm_yx[j, 1]) * W_calib))
-            py = int(round(float(kp2d_norm_yx[j, 0]) * H_calib))
+            px = int(round(float(gt_pixels[j, 0])))
+            py = int(round(float(gt_pixels[j, 1])))
             if not (0 <= px < W_calib and 0 <= py < H_calib):
                 continue
             cv2.circle(canvas, (px, py), max(3, W_calib // 200), (60, 220, 60), 2)
@@ -255,6 +433,31 @@ def _draw_overlay(
             cv2.line(canvas, (px - r, py - r), (px + r, py + r), (230, 60, 60), 2)
             cv2.line(canvas, (px - r, py + r), (px + r, py - r), (230, 60, 60), 2)
 
+    if silhouette is not None and overlay_silhouette is not None:
+        canvas = overlay_silhouette(
+            canvas, silhouette, np.array([W_calib, H_calib]),
+            colour=(255, 130, 30), alpha=0.40,
+        )
+
+    if smal_joints_world is not None:
+        proj_smal = project_world_to_pixel(smal_joints_world, R, t, K)
+        for j in range(len(proj_smal)):
+            xy = proj_smal[j]
+            if np.any(np.isnan(xy)):
+                continue
+            px = int(round(float(xy[0])))
+            py = int(round(float(xy[1])))
+            if not (0 <= px < W_calib and 0 <= py < H_calib):
+                continue
+            r = max(3, W_calib // 220)
+            # Filled orange triangle (cv2 has no triangle marker, draw polygon).
+            pts = np.array([
+                [px, py - r],
+                [px - r, py + r],
+                [px + r, py + r],
+            ], dtype=np.int32)
+            cv2.fillPoly(canvas, [pts], (255, 165, 0))
+
     return canvas
 
 
@@ -269,10 +472,7 @@ def _per_view_reproj_max(sample: Dict[str, object]) -> Dict[int, float]:
         if not view_mask[v]:
             continue
         W, H = int(sample["image_sizes_wh"][v, 0]), int(sample["image_sizes_wh"][v, 1])
-        gt = np.stack([
-            sample["kp2d_norm_yx"][v, :, 1] * W,
-            sample["kp2d_norm_yx"][v, :, 0] * H,
-        ], axis=1)
+        gt = kp2d_norm_yx_to_pixel_xy(sample["kp2d_norm_yx"][v], W, H)
         pr = project_world_to_pixel(kp3d, sample["R"][v], sample["t"][v], sample["K"][v])
         mask = has_gt_3d & (sample["kp_vis"][v] > 0)
         if not mask.any():
@@ -288,7 +488,10 @@ def _per_view_reproj_max(sample: Dict[str, object]) -> Dict[int, float]:
 # ---------------------------------------------------------------------------
 
 
-def _build_3d_figure(sample: Dict[str, object]) -> go.Figure:
+def _build_3d_figure(
+    sample: Dict[str, object],
+    smal_forward: Optional[Dict[str, np.ndarray]] = None,
+) -> go.Figure:
     R = sample["R"]
     t = sample["t"]
     kp3d = sample["kp3d"]
@@ -303,6 +506,24 @@ def _build_3d_figure(sample: Dict[str, object]) -> go.Figure:
             marker=dict(size=4, color="black"),
             name=f"kp3d (n={int(has_gt_3d.sum())})",
         ))
+
+    if smal_forward is not None:
+        verts = smal_forward["vertices_world"]
+        faces = smal_forward["faces"]
+        joints = smal_forward["joints_world"]
+        fig.add_trace(go.Mesh3d(
+            x=verts[:, 0], y=verts[:, 1], z=verts[:, 2],
+            i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
+            color="orange", opacity=0.35, flatshading=True,
+            name="SMAL mesh", showscale=False,
+        ))
+        fig.add_trace(go.Scatter3d(
+            x=joints[:, 0], y=joints[:, 1], z=joints[:, 2],
+            mode="markers",
+            marker=dict(size=4, color="orange", symbol="diamond"),
+            name=f"SMAL joints (n={len(joints)})",
+        ))
+
     cam_xyz, cam_labels = [], []
     for v in range(len(R)):
         if not view_mask[v]:
@@ -368,7 +589,7 @@ def _all_sample_reproj_errors(path: str, max_samples: int) -> Dict[str, np.ndarr
                 if not use.any():
                     continue
                 W, H = int(sz_d[i, v, 0]), int(sz_d[i, v, 1])
-                gt = np.stack([kp2d_d[i, v, :, 1] * W, kp2d_d[i, v, :, 0] * H], axis=1)
+                gt = kp2d_norm_yx_to_pixel_xy(kp2d_d[i, v], W, H)
                 pr = project_world_to_pixel(kp3d, R_d[i, v], t_d[i, v], K_d[i, v])
                 err = float(np.nanmax(np.linalg.norm(pr[use] - gt[use], axis=1)))
                 if err > best:
@@ -410,9 +631,25 @@ def _ui_metadata(meta: Dict[str, object]) -> None:
         st.json(rendered)
 
 
-def _ui_sample(path: str, sample_idx: int, show_2d: bool, show_reproj: bool, show_3d: bool) -> None:
+def _ui_sample(
+    path: str,
+    sample_idx: int,
+    show_2d: bool,
+    show_reproj: bool,
+    show_3d: bool,
+    show_smal_3d: bool,
+    show_smal_2d: bool,
+    smal_pkl: Optional[str],
+    silhouettes: Optional[Dict[int, np.ndarray]],
+) -> None:
     sample = _read_sample(path, sample_idx)
     valid_v = [int(v) for v in np.where(sample["view_mask"])[0]]
+
+    # SMAL forward (cached). Returns None when SMAL is unavailable, the
+    # sample has only placeholder joint angles, or the forward errored.
+    smal_forward: Optional[Dict[str, np.ndarray]] = None
+    if smal_pkl and (show_smal_3d or show_smal_2d or silhouettes is not None):
+        smal_forward = _smal_forward_for_sample(path, sample_idx, smal_pkl)
 
     st.subheader(f"Sample {sample['sample_idx']}")
     info_cols = st.columns(4)
@@ -445,6 +682,14 @@ def _ui_sample(path: str, sample_idx: int, show_2d: bool, show_reproj: bool, sho
                 if img is None:
                     st.warning(f"view {v}: image missing")
                     continue
+                smal_joints_for_view = (
+                    smal_forward["joints_world"]
+                    if (smal_forward is not None and show_smal_2d)
+                    else None
+                )
+                sil_for_view = (
+                    silhouettes.get(v) if silhouettes is not None else None
+                )
                 drawn = _draw_overlay(
                     img,
                     sample["kp2d_norm_yx"][v],
@@ -456,6 +701,8 @@ def _ui_sample(path: str, sample_idx: int, show_2d: bool, show_reproj: bool, sho
                     sample["image_sizes_wh"][v],
                     show_gt=show_2d,
                     show_reproj=show_reproj,
+                    smal_joints_world=smal_joints_for_view,
+                    silhouette=sil_for_view,
                 )
                 err_str = ""
                 if v in per_view_err and not np.isnan(per_view_err[v]):
@@ -467,8 +714,11 @@ def _ui_sample(path: str, sample_idx: int, show_2d: bool, show_reproj: bool, sho
                 )
 
     if show_3d:
-        st.markdown("**3D scene** — black ● = kp3d, red ◆ = camera centres (drag to rotate)")
-        fig = _build_3d_figure(sample)
+        legend = "black ● = kp3d, red ◆ = camera centres"
+        if smal_forward is not None and show_smal_3d:
+            legend += ", orange surface = SMAL mesh, orange ◆ = SMAL joints"
+        st.markdown(f"**3D scene** — {legend} (drag to rotate)")
+        fig = _build_3d_figure(sample, smal_forward if show_smal_3d else None)
         st.plotly_chart(fig, width="stretch")
 
     with st.expander("Per-view camera parameters", expanded=False):
@@ -651,15 +901,115 @@ def main() -> None:
 
         st.divider()
         st.header("Display")
-        show_2d = st.checkbox("Show 2D keypoints", value=True)
-        show_reproj = st.checkbox("Show reprojection overlay", value=True)
+        show_2d = st.checkbox("Show 2D keypoints (green ○)", value=True)
+        show_reproj = st.checkbox("Show kp3d reprojection (red ✕)", value=True)
         show_3d = st.checkbox("Show 3D viewer", value=True)
+
+        st.divider()
+        st.header("SMAL forward model")
+        if not _SMAL_AVAILABLE:
+            st.caption(f"SMAL render unavailable: {_SMAL_IMPORT_ERR}")
+            smal_pkl: Optional[str] = None
+            show_smal_2d = show_smal_3d = False
+        else:
+            discovered = _discover_smal_pkls()
+            CUSTOM = "🗂  custom path…"
+            NONE = "— (disable SMAL features)"
+
+            # Build the dropdown's options.
+            #  - "(none)" disables everything (default for SLEAP-only files)
+            #  - Each discovered .pkl as a relative-to-repo string
+            #  - "custom path…" reveals a text input below
+            choices = [NONE]
+            choices.extend(discovered)
+            choices.append(CUSTOM)
+
+            # Default selection: previous session value -> auto-detect -> none.
+            previously = st.session_state.get("smal_pkl")
+            auto = _auto_detect_smal_pkl(meta)
+            default_pkl = previously or auto
+            default_idx = 0
+            if default_pkl in discovered:
+                default_idx = discovered.index(default_pkl) + 1   # +1 for the NONE sentinel
+            elif default_pkl:
+                default_idx = len(choices) - 1   # "custom path…"
+
+            picked = st.selectbox(
+                "SMAL pkl",
+                options=choices,
+                index=default_idx,
+                format_func=lambda p: (
+                    p if p in (NONE, CUSTOM)
+                    else str(Path(p).relative_to(_REPO_ROOT_FOR_PKL_SCAN))
+                    if Path(p).is_relative_to(_REPO_ROOT_FOR_PKL_SCAN)
+                    else p
+                ),
+                help="Picks from .pkl files discovered under 3D_model_prep/, "
+                     "smal_model/data/, and the repo root. Choose '🗂 custom path…' "
+                     "to enter an absolute path.",
+            )
+
+            if picked == NONE:
+                smal_pkl = None
+            elif picked == CUSTOM:
+                raw_input = st.text_input(
+                    "Custom pkl path",
+                    value=default_pkl if (default_pkl and default_pkl not in discovered) else "",
+                    help="Accepts WSL paths (/mnt/c/...) or Windows paths "
+                         "(C:\\Users\\...); the latter are auto-converted.",
+                )
+                norm = _normalize_path_for_wsl(raw_input) if raw_input else ""
+                if norm and Path(norm).is_file():
+                    smal_pkl = norm
+                    if norm != raw_input:
+                        st.caption(f"Normalised to `{norm}`")
+                elif norm:
+                    st.warning(f"Not found: `{norm}`")
+                    smal_pkl = None
+                else:
+                    smal_pkl = None
+            else:
+                smal_pkl = picked
+
+            if smal_pkl:
+                st.session_state["smal_pkl"] = smal_pkl
+
+            show_smal_3d = st.checkbox(
+                "Add SMAL mesh + joints to 3D viewer",
+                value=True if smal_pkl else False,
+                disabled=smal_pkl is None,
+            )
+            show_smal_2d = st.checkbox(
+                "Overlay SMAL joints on per-view images (orange ▲)",
+                value=True if smal_pkl else False,
+                disabled=smal_pkl is None,
+            )
 
     tab_sample, tab_stats = st.tabs(["Sample inspector", "Dataset stats"])
     with tab_sample:
         _ui_metadata(meta)
         st.divider()
-        _ui_sample(str(path), int(sample_idx), show_2d, show_reproj, show_3d)
+        # Silhouette render is button-gated per sample (PyTorch3D rasterise is
+        # the expensive op in this whole viewer; never auto-fire).
+        silhouettes: Optional[Dict[int, np.ndarray]] = None
+        sil_cache_key = f"sil:{path}:{int(sample_idx)}"
+        if smal_pkl and st.button(
+            "🎨 Render SMAL silhouette overlay for this sample",
+            help="Rasterises the posed mesh through each stored camera and "
+                 "alpha-blends onto the input images. Takes a few seconds.",
+            disabled=not smal_pkl,
+        ):
+            st.session_state[sil_cache_key] = True
+        if smal_pkl and st.session_state.get(sil_cache_key):
+            silhouettes = _render_silhouettes_for_sample(
+                str(path), int(sample_idx), smal_pkl, render_size=256,
+            )
+        _ui_sample(
+            str(path), int(sample_idx),
+            show_2d=show_2d, show_reproj=show_reproj, show_3d=show_3d,
+            show_smal_3d=show_smal_3d, show_smal_2d=show_smal_2d,
+            smal_pkl=smal_pkl, silhouettes=silhouettes,
+        )
     with tab_stats:
         _ui_stats(str(path), summary)
 
