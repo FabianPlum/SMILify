@@ -12,6 +12,7 @@ import bpy
 import numpy as np
 import pickle
 import os
+import base64
 from scipy.spatial import KDTree
 from mathutils import Vector
 from sklearn.decomposition import PCA
@@ -1827,30 +1828,61 @@ class SMPL_PT_Panel(bpy.types.Panel):
         )
 
 
+# Key under which the full SMPL/SMIL data dict is embedded on the mesh object as
+# base64-encoded pickle bytes. Using a string custom property means the data
+# round-trips with the .blend file — unlike the legacy system tempdir cache,
+# which is wiped on reboot and never travels with the project.
+SMPL_DATA_PROP = "smpl_data_b64"
+
+
+def _encode_smpl_data(data):
+    """Serialize a SMPL/SMIL data dict for storage in a Blender string property."""
+    return base64.b64encode(
+        pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
+    ).decode("ascii")
+
+
+def _decode_smpl_data(encoded):
+    """Inverse of _encode_smpl_data. Raises on corruption — caller decides recovery."""
+    return pickle.loads(base64.b64decode(encoded.encode("ascii")))
+
+
 def store_smpl_data(context, data, obj=None):
-    """Store SMPL data in a temporary file and save the path"""
+    """Embed the SMPL/SMIL data dict on the mesh object so it survives .blend reopen.
+
+    The legacy implementation wrote to a system temp file and only kept the path
+    on the object, which silently lost entangled morph PCA, shape PCA stats and
+    other metadata after a reboot or when sharing the project. The embedded
+    custom property travels with the .blend and is the authoritative source.
+    """
     if obj is None:
         obj = context.active_object
 
-    if obj:
-        # Create a temporary file to store the data
-        temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, f"smpl_data_{obj.name}.pkl")
+    if not obj:
+        return
 
-        # Save the data to the temporary file
-        with open(temp_path, "wb") as f:
-            pickle.dump(data, f)
-
-        # Store only the path in the object's custom properties
-        obj["smpl_data_path"] = temp_path
+    try:
+        obj[SMPL_DATA_PROP] = _encode_smpl_data(data)
         obj["has_smpl_data"] = True
         context.scene.smpl_tool.has_smpl_data = True
+    except Exception as e:
+        print(f"Failed to embed SMPL data on {obj.name!r}: {e}")
 
 
 def get_smpl_data(context):
-    """Retrieve SMPL data from the temporary file"""
+    """Retrieve SMPL data, preferring the embedded copy over the legacy temp file."""
     obj = context.active_object
-    if obj and "smpl_data_path" in obj:
+    if obj is None:
+        return None
+
+    if SMPL_DATA_PROP in obj:
+        try:
+            return _decode_smpl_data(obj[SMPL_DATA_PROP])
+        except Exception as e:
+            print(f"Failed to decode embedded SMPL data on {obj.name!r}: {e}")
+
+    # Legacy fallback: old projects only stored a temp-file path.
+    if "smpl_data_path" in obj:
         temp_path = obj["smpl_data_path"]
         if os.path.exists(temp_path):
             with open(temp_path, "rb") as f:
@@ -2515,13 +2547,24 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                                 "No .npz file provided, loading shapekeys from pkl shapedirs.",
                             )
                             cov, mean_betas = create_shapekeys_from_pkl_shapedirs(data, obj)
-                            
+
                             if cov is None or mean_betas is None:
                                 self.report(
                                     {"WARNING"},
                                     "Failed to load shapekeys from pkl shapedirs.",
                                 )
                                 return {"FINISHED"}
+
+                            # create_shapekeys_from_pkl_shapedirs returns trivial
+                            # identity defaults — only useful when the pkl has no
+                            # real PCA stats. If the pkl already carries learned
+                            # shape_cov/shape_mean_betas, keep those.
+                            existing_cov = data.get("shape_cov")
+                            existing_mean = data.get("shape_mean_betas")
+                            if isinstance(existing_cov, np.ndarray) and existing_cov.size > 0:
+                                cov = existing_cov
+                            if isinstance(existing_mean, np.ndarray) and existing_mean.size > 0:
+                                mean_betas = existing_mean
                         else:
                             self.report(
                                 {"INFO"},
