@@ -1,7 +1,7 @@
 bl_info = {
     "name": "SMIL Model Importer",
     "author": "Fabian Plum",
-    "version": (1, 2, 0),
+    "version": (1, 3, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Tool Shelf",
     "description": "Import, configure, and export SMPL / SMIL models",
@@ -12,6 +12,7 @@ import bpy
 import numpy as np
 import pickle
 import os
+import base64
 from scipy.spatial import KDTree
 from mathutils import Vector
 from sklearn.decomposition import PCA
@@ -760,7 +761,7 @@ def apply_pose_correctives(obj, posedirs, base_vertices):
     print("Applied pose-dependent corrective shape keys")
 
 
-def create_mesh_from_pkl(data):
+def create_mesh_from_pkl(data, base_name="SMPL"):
     # read in the .pkl file with mesh data stored similar to obj files
     # (tris triplets and faces with vertex indices)
     if "v_template" not in data or "f" not in data:
@@ -770,11 +771,11 @@ def create_mesh_from_pkl(data):
     verts = data["v_template"]
     faces = data["f"]
 
-    mesh = bpy.data.meshes.new(name="SMPL_Mesh")
+    mesh = bpy.data.meshes.new(name=f"{base_name}_Mesh")
     mesh.from_pydata(verts, [], faces)
     mesh.update()
 
-    obj = bpy.data.objects.new(name="SMPL_Object", object_data=mesh)
+    obj = bpy.data.objects.new(name=base_name, object_data=mesh)
     bpy.context.collection.objects.link(obj)
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
@@ -782,13 +783,17 @@ def create_mesh_from_pkl(data):
     return obj
 
 
-def create_armature_and_weights(data, obj):
+def create_armature_and_weights(data, obj, base_name="SMPL"):
     """
     Create an armature based on the joint locations and assign weights to the mesh vertices.
 
     Args:
     - data (dict): Dictionary containing the contents of the .pkl file.
     - obj (bpy.types.Object): The newly created mesh object.
+    - base_name (str): Base name used for armature data and object (defaults to "SMPL").
+
+    Returns:
+    - bpy.types.Object: The created armature object, or None on failure.
     """
     if "J" not in data or "weights" not in data or "kintree_table" not in data:
         print("No 'J', 'weights', or 'kintree_table' key found in the .pkl file.")
@@ -806,7 +811,8 @@ def create_armature_and_weights(data, obj):
     # Create armature
     bpy.ops.object.add(type="ARMATURE", enter_editmode=True)
     armature = bpy.context.object
-    armature.name = "SMPL_Armature"
+    armature.name = f"{base_name}_Armature"
+    armature.data.name = f"{base_name}_Armature"
     armature.show_in_front = True
 
     # Add bones based on hierarchy
@@ -842,6 +848,8 @@ def create_armature_and_weights(data, obj):
                 if vertex_group is None:
                     vertex_group = obj.vertex_groups.new(name=bone_name)
                 vertex_group.add([i], weight, "ADD")
+
+    return armature
 
 
 def create_shapekeys(data, obj):
@@ -1403,9 +1411,9 @@ def apply_updated_joint_positions(obj, pkl_data):
     )
 
     # Update the armature with the new joint positions
-    armature = bpy.data.objects.get("SMPL_Armature")
+    armature = obj.find_armature()
     if not armature:
-        print("SMPL_Armature not found.")
+        print("No armature found for the selected mesh.")
         return
 
     bpy.context.view_layer.objects.active = armature
@@ -1664,11 +1672,9 @@ def export_smpl_model(obj, export_path, pkl_data=None):
     )[1]
     print(pkl_data["sym_verts"].shape)
 
-    armature_obj = next(
-        (obj for obj in bpy.data.objects if obj.type == "ARMATURE"), None
-    )
+    armature_obj = obj.find_armature()
     if not armature_obj:
-        print("No armature object found.")
+        print("No armature object found for the selected mesh.")
         return
 
     print("Found armature object:", armature_obj.name)
@@ -1822,30 +1828,61 @@ class SMPL_PT_Panel(bpy.types.Panel):
         )
 
 
+# Key under which the full SMPL/SMIL data dict is embedded on the mesh object as
+# base64-encoded pickle bytes. Using a string custom property means the data
+# round-trips with the .blend file — unlike the legacy system tempdir cache,
+# which is wiped on reboot and never travels with the project.
+SMPL_DATA_PROP = "smpl_data_b64"
+
+
+def _encode_smpl_data(data):
+    """Serialize a SMPL/SMIL data dict for storage in a Blender string property."""
+    return base64.b64encode(
+        pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
+    ).decode("ascii")
+
+
+def _decode_smpl_data(encoded):
+    """Inverse of _encode_smpl_data. Raises on corruption — caller decides recovery."""
+    return pickle.loads(base64.b64decode(encoded.encode("ascii")))
+
+
 def store_smpl_data(context, data, obj=None):
-    """Store SMPL data in a temporary file and save the path"""
+    """Embed the SMPL/SMIL data dict on the mesh object so it survives .blend reopen.
+
+    The legacy implementation wrote to a system temp file and only kept the path
+    on the object, which silently lost entangled morph PCA, shape PCA stats and
+    other metadata after a reboot or when sharing the project. The embedded
+    custom property travels with the .blend and is the authoritative source.
+    """
     if obj is None:
         obj = context.active_object
 
-    if obj:
-        # Create a temporary file to store the data
-        temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, f"smpl_data_{obj.name}.pkl")
+    if not obj:
+        return
 
-        # Save the data to the temporary file
-        with open(temp_path, "wb") as f:
-            pickle.dump(data, f)
-
-        # Store only the path in the object's custom properties
-        obj["smpl_data_path"] = temp_path
+    try:
+        obj[SMPL_DATA_PROP] = _encode_smpl_data(data)
         obj["has_smpl_data"] = True
         context.scene.smpl_tool.has_smpl_data = True
+    except Exception as e:
+        print(f"Failed to embed SMPL data on {obj.name!r}: {e}")
 
 
 def get_smpl_data(context):
-    """Retrieve SMPL data from the temporary file"""
+    """Retrieve SMPL data, preferring the embedded copy over the legacy temp file."""
     obj = context.active_object
-    if obj and "smpl_data_path" in obj:
+    if obj is None:
+        return None
+
+    if SMPL_DATA_PROP in obj:
+        try:
+            return _decode_smpl_data(obj[SMPL_DATA_PROP])
+        except Exception as e:
+            print(f"Failed to decode embedded SMPL data on {obj.name!r}: {e}")
+
+    # Legacy fallback: old projects only stored a temp-file path.
+    if "smpl_data_path" in obj:
         temp_path = obj["smpl_data_path"]
         if os.path.exists(temp_path):
             with open(temp_path, "rb") as f:
@@ -1882,13 +1919,13 @@ def get_joint_distances_from_positions(joint_positions, joint_names):
 
 def export_joint_distances(context, filepath):
     """Export joint distances to a CSV file, including distances for each shape key."""
-    armature = next((obj for obj in bpy.data.objects if obj.type == "ARMATURE"), None)
-    if not armature:
-        return False, "No armature found"
-
     mesh_obj = context.active_object
     if not mesh_obj or mesh_obj.type != "MESH":
         return False, "No mesh object selected"
+
+    armature = mesh_obj.find_armature()
+    if not armature:
+        return False, "No armature found for the selected mesh"
 
     # Get joint names from armature
     joint_names = [bone.name for bone in armature.data.bones]
@@ -2138,9 +2175,7 @@ def export_mesh_measurements(context, filepath):
                 reference_joint_pair = [joint1, joint2]
 
         # Verify reference joints exist in the armature
-        armature = next(
-            (obj for obj in bpy.data.objects if obj.type == "ARMATURE"), None
-        )
+        armature = obj.find_armature()
         if armature and len(reference_joint_pair) == 2:
             joint_names = [bone.name for bone in armature.data.bones]
             for joint in reference_joint_pair:
@@ -2459,21 +2494,22 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
 
         try:
             pkl_filepath = bpy.path.abspath(smpl_tool.pkl_filepath)
+            base_name = os.path.splitext(os.path.basename(pkl_filepath))[0] or "SMPL"
             data = load_pkl_file(pkl_filepath)
             if data:
-                obj = create_mesh_from_pkl(data)
+                obj = create_mesh_from_pkl(data, base_name=base_name)
                 if obj:
                     obj["SMIL_TYPE"] = "SMIL_model_from_direct_npz_import"
-                    
+
                     # Check if the loaded pkl has static_joint_locs set
                     if data.get("static_joint_locs", False):
                         obj["static_joint_locs"] = True
                         print("Loaded model with static joint locations")
-                    
+
                     # Store SMPL data in the object
                     store_smpl_data(context, data, obj=obj)
 
-                    create_armature_and_weights(data, obj)
+                    create_armature_and_weights(data, obj, base_name=base_name)
                     
                     # Check if npz file is provided and exists
                     npz_filepath = bpy.path.abspath(smpl_tool.npz_filepath) if smpl_tool.npz_filepath else None
@@ -2511,13 +2547,24 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                                 "No .npz file provided, loading shapekeys from pkl shapedirs.",
                             )
                             cov, mean_betas = create_shapekeys_from_pkl_shapedirs(data, obj)
-                            
+
                             if cov is None or mean_betas is None:
                                 self.report(
                                     {"WARNING"},
                                     "Failed to load shapekeys from pkl shapedirs.",
                                 )
                                 return {"FINISHED"}
+
+                            # create_shapekeys_from_pkl_shapedirs returns trivial
+                            # identity defaults — only useful when the pkl has no
+                            # real PCA stats. If the pkl already carries learned
+                            # shape_cov/shape_mean_betas, keep those.
+                            existing_cov = data.get("shape_cov")
+                            existing_mean = data.get("shape_mean_betas")
+                            if isinstance(existing_cov, np.ndarray) and existing_cov.size > 0:
+                                cov = existing_cov
+                            if isinstance(existing_mean, np.ndarray) and existing_mean.size > 0:
+                                mean_betas = existing_mean
                         else:
                             self.report(
                                 {"INFO"},
@@ -2593,12 +2640,13 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
         try:
             # 2. Load base pkl file to create the new model on
             pkl_filepath = bpy.path.abspath(smpl_tool.pkl_filepath)
+            base_name = os.path.splitext(os.path.basename(pkl_filepath))[0] or "SMPL"
             data = load_pkl_file(pkl_filepath)
             if not data:
                 self.report({"ERROR"}, "Failed to load base .pkl file.")
                 return {"CANCELLED"}
 
-            obj = create_mesh_from_pkl(data)
+            obj = create_mesh_from_pkl(data, base_name=base_name)
             if not obj:
                 self.report({"ERROR"}, "Failed to create mesh from .pkl file.")
                 return {"CANCELLED"}
@@ -2647,7 +2695,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
             
             store_smpl_data(context, data, obj=obj)
 
-            create_armature_and_weights(data, obj)
+            create_armature_and_weights(data, obj, base_name=base_name)
 
             # Overwrite the base mesh geometry with the mean shape of the unposed meshes.
             # This is crucial for the shapekeys to be based on the correct average shape.
@@ -2923,23 +2971,17 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     "J_names": joint_names,
                     "J_regressor": J_reg,
                 }
-                obj = create_mesh_from_pkl(mesh_data)
+                label_base_name = f"SMIL_{labels[i]}"
+                obj = create_mesh_from_pkl(mesh_data, base_name=str(labels[i]))
                 if obj is None:
                     self.report({"WARNING"}, f"Failed to create mesh for {labels[i]}")
                     continue
-                obj.name = str(labels[i])
                 obj["SMIL_TYPE"] = "unposed_registered_mesh"
                 # Rig the mesh
-                create_armature_and_weights(mesh_data, obj)
-                # Find the armature just created (should be the active object and of type 'ARMATURE')
-                armature = bpy.context.active_object if bpy.context.active_object and bpy.context.active_object.type == 'ARMATURE' else None
+                armature = create_armature_and_weights(mesh_data, obj, base_name=label_base_name)
                 if armature is None:
-                    # Try to find the most recently created armature
-                    armatures = [a for a in bpy.data.objects if a.type == 'ARMATURE']
-                    armature = armatures[-1] if armatures else None
+                    armature = obj.find_armature()
                 if armature is not None:
-                    # Name the armature with SMIL_ prefix
-                    armature.name = f"SMIL_{labels[i]}"
                     # --- Control Hierarchy Setup ---
                     # Main parent for all controls of this mesh
                     snap_controls_parent_name = f"Snap_Controls_{armature.name}"
