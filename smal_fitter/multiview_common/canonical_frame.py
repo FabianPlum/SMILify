@@ -194,6 +194,22 @@ def cam_center_world(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     return -np.asarray(R, dtype=np.float64).T @ np.asarray(t, dtype=np.float64)
 
 
+def kp2d_norm_yx_to_pixel_xy(kp2d_norm_yx: np.ndarray, img_W: int, img_H: int) -> np.ndarray:
+    """Convert SLEAP/replicAnt-stored 2D keypoints from normalized `[y/H, x/W]`
+    to pixel `[x, y]` coordinates.
+
+    Both preprocessor paths store 2D keypoints with the intentional axis
+    swap `(kp[:, 0] = y/H, kp[:, 1] = x/W)` — see
+    `smal_fitter/Unreal2Pytorch3D.py` and the SLEAP `map_keypoints_to_smal_model`.
+    This helper inverts the swap for projection / overlay drawing /
+    comparison against `project_world_to_pixel` output.
+    """
+    kp = np.asarray(kp2d_norm_yx, dtype=np.float64)
+    px = kp[..., 1] * float(img_W)
+    py = kp[..., 0] * float(img_H)
+    return np.stack([px, py], axis=-1)
+
+
 # Rz_180: 180-degree rotation about the world Z-axis. The replicAnt-side
 # multi-view preprocessor (see smal_fitter/replicAnt_data/preprocess_…)
 # applies this when converting its loader's PyTorch3D-row-vector canonical
