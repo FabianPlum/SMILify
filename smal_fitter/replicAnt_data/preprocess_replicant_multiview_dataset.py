@@ -509,6 +509,14 @@ class replicAntMultiViewPreprocessor:
             chunks=(ck_n,),
             **comp,
         )
+        has_gt_pose = aux_g.create_dataset(
+            "has_ground_truth_pose",
+            shape=(num_alloc,),
+            maxshape=(None,),
+            dtype=bool,
+            chunks=(ck_n,),
+            **comp,
+        )
         num_views_ds = aux_g.create_dataset(
             "num_views",
             shape=(num_alloc,),
@@ -581,6 +589,7 @@ class replicAntMultiViewPreprocessor:
             "trans": trans,
             "has_3d_data": has_3d_data,
             "has_gt_betas": has_gt_betas,
+            "has_ground_truth_pose": has_gt_pose,
             "num_views": num_views_ds,
             "frame_idx": frame_idx_ds,
             "canonical_to_world_R": canonical_to_world_R_ds,
@@ -611,6 +620,7 @@ class replicAntMultiViewPreprocessor:
             "trans",
             "has_3d_data",
             "has_gt_betas",
+            "has_ground_truth_pose",
             "num_views",
             "frame_idx",
             "canonical_to_world_R",
@@ -789,6 +799,8 @@ class replicAntMultiViewPreprocessor:
 
                     handles["has_3d_data"][i] = True
                     handles["has_gt_betas"][i] = True
+                    # replicAnt supplies full body pose (global_rot/joint_rot/trans).
+                    handles["has_ground_truth_pose"][i] = True
                     # `num_views` stores the count of valid (supervisable) views,
                     # matching the SLEAP convention and the trainer's expectation.
                     handles["num_views"][i] = int(sum(view_valid_per_view))
