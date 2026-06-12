@@ -17,7 +17,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from smil_image_regressor import SMILImageRegressor, safe_to_tensor, rotation_6d_to_axis_angle
+from smil_image_regressor import SMILImageRegressor, safe_to_tensor, rotation_6d_to_axis_angle, axis_angle_to_rotation_6d
 import config
 from training_config import TrainingConfig
 from pytorch3d.renderer import FoVPerspectiveCameras
@@ -1969,6 +1969,10 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 global_rot_mask.append(False)
         targets['global_rot'] = torch.stack(global_rots)
         targets['global_rot_mask'] = torch.tensor(global_rot_mask, device=self.device)
+        # GT rotations arrive as axis-angle; match the model's rotation
+        # representation so the rotation loss compares like-with-like.
+        if self.rotation_representation == '6d':
+            targets['global_rot'] = axis_angle_to_rotation_6d(targets['global_rot'])
         
         # Joint rotations
         joint_rots = []
@@ -1983,6 +1987,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 joint_rot_mask.append(False)
         targets['joint_rot'] = torch.stack(joint_rots)
         targets['joint_rot_mask'] = torch.tensor(joint_rot_mask, device=self.device)
+        if self.rotation_representation == '6d':
+            # (B, N_POSE, 3) axis-angle -> (B, N_POSE, 6)
+            targets['joint_rot'] = axis_angle_to_rotation_6d(targets['joint_rot'])
         
         # Betas
         betas = []
@@ -2334,15 +2341,12 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         
         if self.rotation_representation == '6d':
             from pytorch3d.transforms import rotation_6d_to_matrix
-            # Reshape for conversion if needed
-            orig_shape = pred.shape
-            if len(orig_shape) > 2:
-                pred_flat = pred.reshape(-1, 6)
-                target_flat = target.reshape(-1, 6)
-            else:
-                pred_flat = pred
-                target_flat = target
-            
+            # Flatten any leading/joint dims to (-1, 6). Callers may pass a
+            # single rotation (B, 6) or many flattened joints (B, N*6); both
+            # reduce to a stack of 6D rotations for matrix conversion.
+            pred_flat = pred.reshape(-1, 6)
+            target_flat = target.reshape(-1, 6)
+
             pred_matrices = rotation_6d_to_matrix(pred_flat)
             target_matrices = rotation_6d_to_matrix(target_flat)
             loss = torch.norm(pred_matrices - target_matrices, p='fro', dim=(-2, -1)).mean()
