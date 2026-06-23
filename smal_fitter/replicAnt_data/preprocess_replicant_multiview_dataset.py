@@ -163,6 +163,25 @@ def _process_frame(task: Dict[str, Any]) -> Dict[str, Any]:
     # slot (image + camera geometry still valid) but mark view_mask=False so
     # the trainer skips supervision for it.
     view_valid_per_view = list(y.get("view_valid_per_view", [True] * num_views))
+
+    # Visible-keypoint quality gate. A camera can have the subject in its
+    # render (`view_valid=True`) yet contribute almost no usable 2D
+    # supervision when the animal is heavily self-occluded or clipped at the
+    # frame edge. Count post-occlusion visible keypoints per view (the loader's
+    # visibility already AND-s in_dataset/in_bounds/id_mask/depth and zeros
+    # model-only joints) and demote any view below `min_visible_keypoints` to
+    # invalid — it gets view_mask=False + camera_indices=-1 downstream, exactly
+    # like a subject-absent view. Disabled when min_visible_keypoints <= 0.
+    min_visible_kp = int(task.get("min_visible_keypoints", 0))
+    visible_counts = [
+        int(np.asarray(vis).sum()) for vis in y["keypoint_visibility_per_view"]
+    ]
+    if min_visible_kp > 0:
+        view_valid_per_view = [
+            bool(valid and visible_counts[v] >= min_visible_kp)
+            for v, valid in enumerate(view_valid_per_view)
+        ]
+
     num_valid_views = int(sum(view_valid_per_view))
     min_views = int(task["min_views_per_sample"])
     if num_valid_views < min_views:
@@ -170,8 +189,9 @@ def _process_frame(task: Dict[str, Any]) -> Dict[str, Any]:
             "frame_idx": frame_idx,
             "ok": False,
             "reason": (
-                f"only {num_valid_views}/{num_views} views have valid subject data "
-                f"(min_views={min_views})"
+                f"only {num_valid_views}/{num_views} views pass quality gate "
+                f"(min_views={min_views}, min_visible_keypoints={min_visible_kp}, "
+                f"per_view_visible={visible_counts})"
             ),
         }
 
@@ -266,6 +286,7 @@ class replicAntMultiViewPreprocessor:
         frame_skip: int = 1,
         camera_subset: Optional[List[int]] = None,
         min_views_per_sample: int = 2,
+        min_visible_keypoints: int = 0,
         depth_occlusion_check: bool = True,
         depth_max_cm: float = 1000.0,
         depth_tolerance_cm: float = 5.0,
@@ -282,6 +303,10 @@ class replicAntMultiViewPreprocessor:
             raise ValueError(
                 f"min_views_per_sample must be >= 1, got {min_views_per_sample}"
             )
+        if min_visible_keypoints < 0:
+            raise ValueError(
+                f"min_visible_keypoints must be >= 0, got {min_visible_keypoints}"
+            )
 
         self.target_resolution = int(target_resolution)
         self.backbone_name = backbone_name
@@ -292,6 +317,7 @@ class replicAntMultiViewPreprocessor:
         self.frame_skip = int(frame_skip)
         self.camera_subset = list(camera_subset) if camera_subset is not None else None
         self.min_views_per_sample = int(min_views_per_sample)
+        self.min_visible_keypoints = int(min_visible_keypoints)
         self.depth_occlusion_check = bool(depth_occlusion_check)
         self.depth_max_cm = float(depth_max_cm)
         self.depth_tolerance_cm = float(depth_tolerance_cm)
@@ -680,6 +706,9 @@ class replicAntMultiViewPreprocessor:
             print(f"  n_joints={n_joints}, n_pose={n_pose}, n_betas={n_betas}")
             print(f"  translation_factor:      {self.translation_factor}")
             print(f"  depth_occlusion_check:   {self.depth_occlusion_check}")
+            print(f"  min_views_per_sample:    {self.min_views_per_sample}")
+            print(f"  min_visible_keypoints:   {self.min_visible_keypoints} "
+                  f"({'disabled' if self.min_visible_keypoints <= 0 else 'per-view gate'})")
             print(f"  jpeg_quality:            {self.jpeg_quality}")
             print(f"  num_workers:             {num_workers}")
             print()
@@ -693,6 +722,7 @@ class replicAntMultiViewPreprocessor:
                 "translation_factor": self.translation_factor,
                 "jpeg_quality": self.jpeg_quality,
                 "min_views_per_sample": self.min_views_per_sample,
+                "min_visible_keypoints": self.min_visible_keypoints,
                 "depth_occlusion_check": self.depth_occlusion_check,
                 "depth_max_cm": self.depth_max_cm,
                 "depth_tolerance_cm": self.depth_tolerance_cm,
@@ -843,6 +873,7 @@ class replicAntMultiViewPreprocessor:
             meta.attrs["depth_tolerance_cm"] = float(self.depth_tolerance_cm)
             meta.attrs["depth_neighborhood"] = int(self.depth_neighborhood)
             meta.attrs["min_views_per_sample"] = int(self.min_views_per_sample)
+            meta.attrs["min_visible_keypoints"] = int(self.min_visible_keypoints)
             meta.attrs["camera_extrinsics_convention"] = "opencv"
             # Skipped-frame ledger.
             meta.attrs["num_skipped_frames"] = len(skipped)
@@ -911,6 +942,13 @@ def main() -> None:
                              "cameras containing valid subject data are discarded; "
                              "frames with >= this many keep all camera slots but "
                              "set view_mask=False on the invalid ones. Default: 2.")
+    parser.add_argument("--min_visible_keypoints", type=int, default=0,
+                        help="Per-view visible-keypoint quality gate. A view whose "
+                             "post-occlusion visible-keypoint count is below this "
+                             "threshold is demoted to invalid (view_mask=False, "
+                             "camera_indices=-1), exactly like a subject-absent view; "
+                             "the sample is then skipped if fewer than --min_views good "
+                             "views remain. 0 disables the gate (default).")
     parser.add_argument("--translation_factor", type=float, default=0.1,
                         help="Loader-side uniform world scale (default 0.1 unifies mesh + data units)")
     parser.add_argument("--depth_occlusion_check", dest="depth_occlusion_check",
@@ -945,6 +983,7 @@ def main() -> None:
         frame_skip=args.frame_skip,
         camera_subset=_parse_camera_subset(args.camera_subset),
         min_views_per_sample=args.min_views,
+        min_visible_keypoints=args.min_visible_keypoints,
         depth_occlusion_check=args.depth_occlusion_check,
         depth_max_cm=args.depth_max_cm,
         depth_tolerance_cm=args.depth_tolerance_cm,
