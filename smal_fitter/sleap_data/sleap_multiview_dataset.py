@@ -144,6 +144,23 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             canonical_order_json = metadata.attrs.get('canonical_camera_order', '[]')
             self.canonical_camera_order = json.loads(canonical_order_json)
 
+            # Ground-truth pose availability (global_rot / joint_rot / trans).
+            # replicAnt synthetic datasets supply these; SLEAP datasets do not.
+            # Datasets may be mixed, so availability is resolved per-sample at
+            # load time (see `_pose_available`).
+            self.has_pose_parameters = (
+                'parameters' in f
+                and 'joint_rot' in f['parameters']
+                and 'global_rot' in f['parameters']
+                and 'trans' in f['parameters']
+            )
+            # Preferred per-sample signal when present (written by the
+            # preprocessors). Older HDF5 files lack it and fall back to a
+            # zero-placeholder heuristic in `_pose_available`.
+            self.has_pose_flag = (
+                'auxiliary' in f and 'has_ground_truth_pose' in f['auxiliary']
+            )
+
     @staticmethod
     def _sleap_to_pytorch3d_camera(R_cv: np.ndarray, t_cv: np.ndarray, K: np.ndarray, image_size_wh: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float, float]:
         """
@@ -195,6 +212,50 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         """Ensure HDF5 file is open in current process."""
         if self._file is None:
             self._file = h5py.File(self.hdf5_path, 'r')
+
+    def _pose_available(self, idx: int, global_rot: np.ndarray,
+                        joint_rot: np.ndarray, trans: np.ndarray) -> bool:
+        """Decide whether sample `idx` carries ground-truth body pose.
+
+        Prefers an explicit per-sample `auxiliary/has_ground_truth_pose` flag
+        when the HDF5 file provides one. For older files without the flag we
+        fall back to a placeholder heuristic: SLEAP preprocessing writes exact
+        zeros for `global_rot`/`joint_rot`/`trans`, whereas replicAnt writes
+        real values, so a sample with any non-zero pose parameter is treated as
+        supervised. This keeps mixed datasets working without re-preprocessing.
+        """
+        if self.has_pose_flag:
+            return bool(self._file['auxiliary/has_ground_truth_pose'][idx])
+        return bool(
+            np.any(global_rot != 0.0)
+            or np.any(joint_rot != 0.0)
+            or np.any(trans != 0.0)
+        )
+
+    def _load_pose_targets(self, idx: int):
+        """Load ground-truth (root_rot, joint_angles, root_loc) for sample `idx`.
+
+        Returns `(None, None, None)` when no pose ground truth is available so
+        the loss masks the corresponding terms out. `joint_angles` is returned
+        with the root joint at index 0 (shape `(n_joints, 3)`); downstream code
+        drops the root. `root_loc` is scaled into SMILify world units to match
+        `keypoints_3d` / camera translations.
+        """
+        if not self.has_pose_parameters:
+            return None, None, None
+
+        f = self._file
+        global_rot = f['parameters/global_rot'][idx]   # (3,)
+        joint_rot = f['parameters/joint_rot'][idx]     # (n_joints, 3), root at index 0
+        trans = f['parameters/trans'][idx]             # (3,)
+
+        if not self._pose_available(idx, global_rot, joint_rot, trans):
+            return None, None, None
+
+        root_rot = global_rot.astype(np.float32)
+        joint_angles = joint_rot.astype(np.float32)
+        root_loc = (trans.astype(np.float32) * float(self.world_scale))
+        return root_rot, joint_angles, root_loc
     
     def __len__(self) -> int:
         """Return the number of samples in the dataset."""
@@ -280,7 +341,13 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         
         # Create view valid mask (all True for selected views)
         view_valid = np.ones(num_views, dtype=bool)
-        
+
+        # Load ground-truth body pose if this sample provides it (replicAnt
+        # synthetic data does; SLEAP data does not). Mixed datasets resolve
+        # per-sample.
+        root_rot, joint_angles, root_loc = self._load_pose_targets(idx)
+        has_pose = joint_angles is not None
+
         # Prepare x_data (input data)
         x_data = {
             'images': images,  # List of (H, W, C) arrays in [0, 1]
@@ -293,10 +360,10 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             'is_multiview': True,
             'is_sleap_dataset': True,
             'available_labels': {
-                'global_rot': False,
-                'joint_rot': False,
+                'global_rot': has_pose,
+                'joint_rot': has_pose,
                 'betas': bool(has_ground_truth_betas),
-                'trans': False,
+                'trans': has_pose,
                 'fov': self.has_camera_parameters,
                 'cam_rot': self.has_camera_parameters,
                 'cam_trans': self.has_camera_parameters,
@@ -307,21 +374,21 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                 'silhouette': False,
             },
         }
-        
+
         # Prepare y_data (target data)
         y_data = {
             # Per-view keypoint data
             'keypoints_2d': keypoints_2d,  # (num_views, n_joints, 2)
             'keypoint_visibility': keypoint_visibility,  # (num_views, n_joints)
             'view_valid': view_valid,  # (num_views,)
-            
+
             # Shared body parameters
             'shape_betas': betas if has_ground_truth_betas else None,
-            
-            # Placeholders (no ground truth for SLEAP)
-            'root_rot': None,
-            'joint_angles': None,
-            'root_loc': None,
+
+            # Body pose ground truth (None for SLEAP, populated for replicAnt)
+            'root_rot': root_rot,
+            'joint_angles': joint_angles,
+            'root_loc': root_loc,
             'cam_fov': None,
             'cam_rot': None,
             'cam_trans': None,
@@ -481,7 +548,11 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         session_name = f['auxiliary/session_name'][idx].decode('utf-8')
         frame_idx = f['auxiliary/frame_idx'][idx]
         has_ground_truth_betas = f['auxiliary/has_ground_truth_betas'][idx]
-        
+
+        # Load ground-truth body pose if this sample provides it.
+        root_rot, joint_angles, root_loc = self._load_pose_targets(idx)
+        has_pose = joint_angles is not None
+
         # Prepare x_data (single-view format compatible with existing pipeline)
         x_data = {
             'input_image': f"{session_name}/frame_{frame_idx:04d}",
@@ -492,10 +563,10 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             'is_sleap_dataset': True,
             'is_multiview': False,
             'available_labels': {
-                'global_rot': False,
-                'joint_rot': False,
+                'global_rot': has_pose,
+                'joint_rot': has_pose,
                 'betas': bool(has_ground_truth_betas),
-                'trans': False,
+                'trans': has_pose,
                 'fov': self.has_camera_parameters,
                 'cam_rot': self.has_camera_parameters,
                 'cam_trans': self.has_camera_parameters,
@@ -506,15 +577,15 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                 'silhouette': False,
             },
         }
-        
+
         # Prepare y_data (single-view format)
         y_data = {
             'keypoints_2d': keypoints_2d,
             'keypoint_visibility': keypoint_visibility,
             'shape_betas': betas if has_ground_truth_betas else None,
-            'root_rot': None,
-            'joint_angles': None,
-            'root_loc': None,
+            'root_rot': root_rot,
+            'joint_angles': joint_angles,
+            'root_loc': root_loc,
             'cam_fov': None,
             'cam_rot': None,
             'cam_trans': None,

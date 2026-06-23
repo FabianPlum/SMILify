@@ -197,3 +197,29 @@ SMOKE_*/
 # and the SLEAP canonicalization prototype's diagnostic plot.
 merged_*.h5
 sleap_canonicalize_proto*.png
+
+# ============================================================
+# Generated data, model weights, and run outputs (none tracked)
+# ============================================================
+# Datasets, triangulation/reprojection outputs, SLEAP exports.
+# No .h5 is version-controlled; all are regenerable pipeline data.
+*.h5
+# Model weights / checkpoints (e.g. best_model.pth, *_final_model.pth).
+*.pth
+# Archives.
+*.zip
+
+# Multi-view training run outputs — these patterns match at any depth,
+# so both top-level dirs and per-model-run subdirs are covered
+# (e.g. ViT_Large_*/multiview_checkpoints/).
+multiview_checkpoints*/
+multiview_plots*/
+multiview_singleview_renders*/
+multiview_visualizations*/
+
+# Scratch parametric-model exports from Blender prep. The tracked .pkl
+# models carry no _TEST suffix, so they are unaffected.
+3D_model_prep/*_TEST*.pkl
+
+# Claude Code: project CLAUDE.md is tracked; machine-local settings are not.
+.claude/settings.local.json
