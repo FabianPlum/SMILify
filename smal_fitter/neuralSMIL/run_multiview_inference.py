@@ -447,7 +447,8 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
                               view_idx: int = 0,
                               disable_scaling: bool = False,
                               disable_translation: bool = False,
-                              predicted_params: Optional[dict] = None) -> Optional[np.ndarray]:
+                              predicted_params: Optional[dict] = None,
+                              render_resolution: Optional[int] = None) -> Optional[np.ndarray]:
     """
     Render single-view mesh visualization matching training visualization exactly.
 
@@ -463,6 +464,10 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
         disable_scaling: If True, skip applying log_beta_scales (testing/debugging)
         disable_translation: If True, skip applying betas_trans (testing/debugging)
         predicted_params: Pre-computed predicted parameters. If None, runs forward pass internally.
+        render_resolution: If set, render the mesh + composite the footage at this square
+            pixel resolution instead of the model's native ``renderer.image_size`` (224).
+            Footage is interpolated up via PIL bilinear when this exceeds the native footage
+            resolution (512). Does not affect model inference.
     """
     images = x_data.get("images", [])
     num_views = len(images)
@@ -479,7 +484,7 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
     cam_rot_per_view = predicted_params.get("cam_rot_per_view", None)
     cam_trans_per_view = predicted_params.get("cam_trans_per_view", None)
 
-    target_size = int(getattr(model.renderer, "image_size", 224))
+    target_size = int(render_resolution) if render_resolution else int(getattr(model.renderer, "image_size", 224))
 
     original_image = images[view_idx]
     from PIL import Image
@@ -835,6 +840,7 @@ def run_render_phase(
     disable_translation: bool = False,
     view_indices: Optional[List[int]] = None,
     total_view_slots: Optional[int] = None,
+    render_resolution: Optional[int] = None,
 ) -> Tuple[List[np.ndarray], Dict[int, List[np.ndarray]], List[int], Dict[int, List[int]]]:
     """Render visualizations for the assigned indices using pre-computed smoothed params.
 
@@ -881,6 +887,7 @@ def run_render_phase(
                     disable_scaling=disable_scaling,
                     disable_translation=disable_translation,
                     predicted_params=params,
+                    render_resolution=render_resolution,
                 )
                 if sv_frame is not None:
                     sv_frame = _pad_or_resize(sv_frame, singleview_size)
@@ -1199,10 +1206,34 @@ def main_inference(
     if world_size > 1:
         sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=False)
 
+    # Optional higher-resolution single-view visualization. When set, the single-view
+    # mesh collage is rendered (and footage interpolated up) at this square resolution.
+    # The multi-view grid is left at the native renderer resolution on purpose.
+    render_resolution = getattr(args, "render_resolution", None)
+    if render_resolution is not None:
+        if render_resolution <= 0:
+            raise ValueError(
+                f"--render_resolution must be a positive integer, got {render_resolution}"
+            )
+        if rank == 0:
+            native_footage = 512  # decoded JPEG crops stored in the HDF5 are 512x512
+            if render_resolution < native_footage:
+                print(f"WARNING: --render_resolution={render_resolution} is below the native "
+                      f"footage resolution ({native_footage}); rendering below native footage "
+                      f"wastes available detail.")
+            if render_resolution > 4096:
+                print(f"WARNING: --render_resolution={render_resolution} is very large; "
+                      f"render time and single-view file size grow ~quadratically and "
+                      f"memory use may be high.")
+            print(f"Single-view render resolution: {render_resolution} "
+                  f"(native renderer image_size={int(model.renderer.image_size)})")
+
     # Calculate frame dimensions — derive from the model's renderer resolution.
     # Layout (single-row vs wrapped 6-per-row block layout for >12 views) is
     # decided once from model.max_views so every frame in the output video has
     # identical dimensions, even when individual samples have fewer views.
+    # NOTE: the multi-view grid intentionally stays at the native renderer
+    # resolution; only the single-view collage honors --render_resolution.
     img_size = int(model.renderer.image_size)
     mv_layout = compute_multiview_grid_layout(model_max_views, img_size)
     grid_width = mv_layout['grid_width']
@@ -1211,12 +1242,16 @@ def main_inference(
         print(f"Multiview grid layout: {mv_layout['num_blocks']} block(s) × "
               f"{mv_layout['cols']} col(s) → {grid_width}×{grid_height}")
 
-    # Determine singleview frame size (use first sample to get actual size)
-    singleview_size = (img_size, img_size)  # Default, overridden below by test render
+    # Determine singleview frame size (use first sample to get actual size).
+    # Fallback default reflects the effective single-view resolution so a failed
+    # test render still yields sane dimensions.
+    sv_img_size = render_resolution if render_resolution else img_size
+    singleview_size = (sv_img_size, sv_img_size)  # Default, overridden below by test render
     if len(dataset) > 0:
         try:
             test_frame = render_singleview_collage(
-                model, dataset[0][0], dataset[0][1], device, view_idx=0
+                model, dataset[0][0], dataset[0][1], device, view_idx=0,
+                render_resolution=render_resolution,
             )
             if test_frame is not None:
                 singleview_size = (test_frame.shape[1], test_frame.shape[0])
@@ -1342,6 +1377,7 @@ def main_inference(
             disable_translation=args.disable_translation,
             view_indices=view_indices,
             total_view_slots=model_max_views,
+            render_resolution=render_resolution,
         )
         del smoothed_params
 
@@ -1482,6 +1518,13 @@ def main():
                         help="Optional output path stem for SMIL animation export. "
                              "Writes <stem>.npz + <stem>.json with raw (pre-smoothing) parameters "
                              "and per-view cameras. Gathered to rank 0 in multi-GPU runs.")
+    parser.add_argument("--render_resolution", type=int, default=None,
+                        help="Square pixel resolution for the single-view mesh visualization. "
+                             "The mesh is rendered and the background footage interpolated up to "
+                             "match (native footage is 512). Default: None = renderer's native "
+                             "image_size (224). Does NOT affect model inference / backbone input, "
+                             "and does NOT change the multi-view grid. Note: render time and "
+                             "single-view file size scale ~quadratically with this value.")
     args = parser.parse_args()
     
     # Get master port from args or environment variable
