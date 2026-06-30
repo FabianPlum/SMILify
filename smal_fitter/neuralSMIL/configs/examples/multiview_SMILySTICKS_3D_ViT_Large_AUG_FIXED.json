@@ -70,8 +70,7 @@
       "triangulation_consistency": 0.0,
       "ief_intermediate": 0.1
     },
-    "curriculum_stages": {
-      "20": {
+    "curriculum_stages": {"20": {
         "keypoint_3d": 0.5,
         "joint_angle_regularization": 0.0001
       },
@@ -167,10 +166,10 @@
   },
 
   "output": {
-    "checkpoint_dir": "getting_started_checkpoints",
-    "plots_dir": "getting_started_plots",
-    "visualizations_dir": "getting_started_visualizations",
-    "singleview_visualizations_dir": "getting_started_singleview_renders",
+    "checkpoint_dir": "multiview_checkpoints_ViT_L_stick_AUG_FIXED",
+    "plots_dir": "multiview_checkpoints_ViT_L_stick_plots_AUG_FIXED",
+    "visualizations_dir": "multiview_visualizations_ViT_L_stick_AUG_FIXED",
+    "singleview_visualizations_dir": "multiview_singleview_renders_ViT_L_stick_AUG_FIXED",
     "save_checkpoint_every": 5,
     "generate_visualizations_every": 5,
     "plot_history_every": 5,
