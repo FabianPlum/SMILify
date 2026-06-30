@@ -5,7 +5,7 @@
 ## Environment
 
 - Ubuntu 24.04 as well as Windows 11, Python via conda (miniconda3 installed via scoop)
-- Conda env: `pytorch3d` (Python 3.10, PyTorch 2.3.1, CUDA 11.8)
+- Conda env: `pytorch3d` (Python 3.10, CUDA 11.8). Verified torch versions differ by OS: Linux = PyTorch 2.1.1 / pytorch3d 0.7.7; Windows 11 dev = PyTorch 2.3.1. See `environment.yml`.
 - Conda executable: `C:/Users/Fabian/scoop/apps/miniconda3/current/Scripts/conda.exe`
 - Cannot run conda/python directly from bash shell - shell hook setup is needed
 - GitHub CLI (`gh`) is installed
@@ -45,7 +45,7 @@ Key globals from `config.py` used throughout: `N_BETAS`, `N_POSE`, `CANONICAL_MO
 
 ## How to Build / Test
 
-- Install deps: `pip install -r requirements.txt`
+- Install deps: `conda env create -f environment.yml && conda activate pytorch3d` (there is no requirements.txt; the conda env is authoritative)
 - Run all tests: `pytest`
 - Run fast tests only: `pytest -m "not slow"`
 
