@@ -4,17 +4,19 @@
 #   conda env create -f environment.yml
 #   conda activate pytorch3d
 #
-# VERIFIED on Linux (Ubuntu 24.04) on 2026-06-30: this is the exact stack the models
-# are trained and run with on the Linux box (PyTorch 2.1.1 / pytorch-cuda 11.8 / pytorch3d 0.7.7).
+# RECOMMENDED stack (CUDA 11.8): Python 3.10 / PyTorch 2.3.1 / PyTorch3D 0.7.8.
+# Confirmed working on Windows 11 (dev) and the run.ai Linux cluster. PyTorch3D ships a
+# `cu118_pyt231` build, so `conda install -c pytorch3d pytorch3d` resolves cleanly against
+# torch 2.3.1 on Linux — no manual build needed.
 #
-# WINDOWS 11 development uses PyTorch 2.3.1 with the same CUDA 11.8. PyTorch3D has no
-# prebuilt Windows conda package for every combo, so on Windows follow the manual conda
-# steps in the README ("Installation") and bump `pytorch=2.1.1` -> `pytorch=2.3.1`
-# (let conda resolve a matching torchvision / pytorch3d).
+# A local Linux box also runs an older PyTorch 2.1.1 / PyTorch3D 0.7.7 stack and works
+# equally well; to reproduce that instead, set pytorch=2.1.1, torchvision=0.16.1,
+# pytorch3d=0.7.7 below.
 #
-# The dependency split below mirrors the verified env exactly (some packages are pip-only
-# upstream). Optional tooling (dataset viewer, AntScan scraper, SDF tests, legacy quadruped
-# pose-prior visualization) is listed at the bottom, commented out — install only if needed.
+# Only the core deep-learning stack is pinned (PyTorch3D must match the torch/CUDA build);
+# the scientific/IO packages float to whatever recent build conda resolves. Optional tooling
+# (dataset viewer, AntScan scraper, SDF tests, legacy quadruped pose-prior viz) is listed
+# commented-out at the bottom — install only if needed.
 
 name: pytorch3d
 
@@ -24,35 +26,34 @@ channels:
   - conda-forge
 
 dependencies:
-  # --- core deep-learning stack (CUDA 11.8) ---
+  # --- core deep-learning stack (CUDA 11.8) — pinned ---
   - python=3.10
-  - pytorch=2.1.1
+  - pytorch=2.3.1
   - pytorch-cuda=11.8
-  - torchvision=0.16.1
-  - pytorch3d=0.7.7        # pulls fvcore / iopath automatically
+  - torchvision=0.18.1
+  - pytorch3d=0.7.8        # cu118_pyt231 build; pulls fvcore / iopath automatically
 
-  # --- scientific / IO stack ---
-  - scipy=1.14.0
-  - h5py=3.14.0
-  - pandas=2.3.3
-  - pillow=12.0.0
-  - imageio=2.34.2
-  - scikit-image=0.24.0
-  - trimesh=4.4.3
-  - tqdm=4.66.4
-  - psutil=6.0.0
-  - pyyaml=6.0.1
+  # --- scientific / IO stack (versions float) ---
+  - scipy
+  - h5py
+  - pandas
+  - pillow
+  - imageio
+  - scikit-image
+  - trimesh
+  - tqdm
+  - psutil
+  - pyyaml
 
   - pip
   - pip:
-    # installed via pip in the verified env (mirrored here for an exact reproduction)
-    - numpy==1.25.2
-    - matplotlib==3.9.1
-    - timm==1.0.20
-    - opencv-python==4.10.0.84
-    - nibabel==5.2.1
-    - pycocotools==2.0.8
-    - toml==0.10.2
+    - numpy
+    - matplotlib
+    - timm
+    - opencv-python
+    - nibabel
+    - pycocotools
+    - toml
 
 # --- optional extras (uncomment what you need) ------------------------------
 #   Interactive multi-view dataset viewer (smal_fitter/multiview_common/dataset_viewer.py):
