@@ -69,18 +69,26 @@ The `MultiViewSMILImageRegressor` adds:
 
 ### Dataset Management
 - `smil_datasets.py`: Unified dataset interface for JSON and HDF5 formats
-- `sleap_data/`: SLEAP multi-view HDF5 dataset loader and collation
-- `dataset_preprocessing.py`: HDF5 dataset preprocessing CLI
+- `../sleap_data/`: SLEAP multi-view toolchain — one level up in `smal_fitter/` (**not** inside this module). Contains `sleap_multiview_dataset.py` (the `SLEAPMultiViewDataset` loader + `multiview_collate_fn`) and the preprocessing scripts (`preprocess_sleap_multiview_dataset.py`, `generate_reprojections.py`, `refine_camera_params.py`)
+- `dataset_preprocessing.py`: HDF5 preprocessing CLI for **replicAnt single-view** datasets (via `Unreal2Pytorch3D`)
 - `optimized_dataset.py`: High-performance HDF5 dataset loader
 
-### Testing and Validation
+### Inference, Testing and Validation
 - `test_smil_regressor_ground_truth.py`: Ground truth validation and 3D keypoint alignment
+- `run_singleview_inference.py`: Single-view inference on a trained checkpoint (folder of images or video input)
 - `run_multiview_inference.py`: Multi-view inference on a trained checkpoint
-- `benchmark_model.py`: Benchmarking script for multi-view models
+- `benchmark_model.py`: Benchmarking script for single-view **and** multi-view models (auto-detects the mode from the checkpoint)
 
 ## Quick Start
 
+> Run these from `smal_fitter/neuralSMIL/` so the `configs/examples/...` paths resolve. The
+> dataset / `smal_file` paths *inside* a JSON config are resolved relative to your working
+> directory — use paths that exist from where you launch, or absolute paths. (Module imports
+> work from any directory: the scripts add `smal_fitter/` to `sys.path` via `__file__`.)
+
 ### 1. Dataset Preprocessing (Recommended)
+
+`dataset_preprocessing.py` preprocesses **replicAnt single-view** datasets into the optimized HDF5 format:
 
 ```bash
 # Basic preprocessing
@@ -91,6 +99,11 @@ python dataset_preprocessing.py input_dataset/ output.h5 \
     --smal-file "3D_model_prep/SMILy_Mouse.pkl"
 ```
 
+> **Multi-view (SLEAP) datasets use a different toolchain.** Build a multi-view HDF5 with the
+> SLEAP scripts in `../sleap_data/` (run from `smal_fitter/`): `preprocess_sleap_multiview_dataset.py`,
+> then `generate_reprojections.py` / `refine_camera_params.py` as needed. See the root README
+> "Dataset preprocessing" section.
+
 ### 2. Single-View Training
 
 ```bash
@@ -100,11 +113,11 @@ python train_smil_regressor.py --config configs/examples/singleview_baseline.jso
 # CLI overrides on top of JSON config
 python train_smil_regressor.py \
     --config configs/examples/singleview_baseline.json \
-    --batch-size 4 \
-    --num-epochs 500
+    --batch_size 4 \
+    --num_epochs 500
 
 # Legacy (no config file — uses training_config.py defaults)
-python train_smil_regressor.py --data_path optimized_dataset.h5 --batch-size 8
+python train_smil_regressor.py --data_path optimized_dataset.h5 --batch_size 8
 ```
 
 ### 3. Multi-View Training
@@ -126,21 +139,36 @@ torchrun --nproc_per_node=4 train_multiview_regressor.py \
 # before running — torchrun or the SLURM launcher sets these automatically
 ```
 
-### 4. Multi-View Inference
+### 4. Inference
+
+**Multi-view** — `--dataset` is **required**; `--checkpoint` defaults to auto-detect from `multiview_checkpoints/`:
 
 ```bash
-python run_multiview_inference.py --checkpoint multiview_checkpoints/best_model.pth
+python run_multiview_inference.py \
+    --dataset path/to/sleap_dataset.h5 \
+    --checkpoint multiview_checkpoints/best_model.pth
+
+# Useful flags: --view_indices 0,4,11  --smoothing_window 5  --render_resolution 512
+#               --max_frames 100  --export_animation path/to/clip   (writes <clip>.npz / .json)
+```
+
+**Single-view** — folder of images (`--input_folder`) or a video (`--input_video`):
+
+```bash
+python run_singleview_inference.py \
+    --checkpoint checkpoints/best_model.pth \
+    --input_folder path/to/images/ \
+    --output_folder inference_out/
 ```
 
 ### 5. Ground Truth Testing
 
 ```bash
-python test_smil_regressor_ground_truth.py --test-3d-keypoints
+# The 3D-keypoint test runs by default; pass --no-3d-keypoint-test to skip it
+python test_smil_regressor_ground_truth.py
 
 # With custom SMAL model
-python test_smil_regressor_ground_truth.py \
-    --smal-file "3D_model_prep/SMILy_Mouse.pkl" \
-    --test-3d-keypoints
+python test_smil_regressor_ground_truth.py --smal-file "3D_model_prep/SMILy_Mouse.pkl"
 ```
 
 ## Configuration System
@@ -231,15 +259,13 @@ Curriculum epoch keys are strings in JSON and automatically converted to integer
 
 ### SMAL Model Override
 
-To use a non-default SMAL/SMIL model file, specify `"smal_model"` in your JSON config or pass `--smal-file` on the CLI:
+For **training**, the SMAL/SMIL model file is set only via the JSON config — the training scripts have **no `--smal-file` flag**:
 
-```bash
-python train_multiview_regressor.py \
-    --config configs/examples/multiview_sticks.json \
-    --smal-file "3D_model_prep/SMILy_Mouse.pkl"
+```json
+"smal_model": { "smal_file": "3D_model_prep/SMILy_Mouse.pkl", "shape_family": null }
 ```
 
-This reloads `config.py` globals (`dd`, `N_POSE`, `N_BETAS`) to match the specified model before any dataset or network construction.
+A CLI override exists only on the non-training entrypoints (note the inconsistent flag spelling across scripts): `run_multiview_inference.py` (`--smal_file`), `dataset_preprocessing.py` (`--smal-file`), and `test_smil_regressor_ground_truth.py` (`--smal-file`). Either path reloads `config.py` globals (`dd`, `N_POSE`, `N_BETAS`) to match the specified model before any dataset or network construction.
 
 ## Distributed Training
 
@@ -310,7 +336,7 @@ checkpoint = torch.load('best_model.pth')
 #   shape_family, smal_file
 ```
 
-`run_multiview_inference.py` and `run_inference.py` prefer `checkpoint['config']` and fall back to `training_config.py` defaults for older checkpoints.
+`run_multiview_inference.py` and `run_singleview_inference.py` prefer `checkpoint['config']` and fall back to `training_config.py` defaults for older checkpoints.
 
 ## Known Architectural Issues and Status
 
@@ -335,4 +361,4 @@ checkpoint = torch.load('best_model.pth')
 ### Training & Visualization
 - `tqdm`, `matplotlib`, `Pillow`, `scikit-learn`, `imageio`
 
-Install: `pip install -r requirements.txt`
+Install via the repo conda environment: `conda env create -f environment.yml && conda activate pytorch3d` (see the root README "Installation"). There is no `requirements.txt`.
