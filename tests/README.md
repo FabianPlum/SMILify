@@ -11,7 +11,7 @@ animation export.
 conda activate pytorch3d
 ```
 
-- **Run pytest from the repository root** so the `tests/` and `data/` relative paths resolve.
+- **Run pytest from the repository root, scoped to `tests/`** (`pytest tests/`) so the `data/` relative paths resolve and pytest does not pick up the stray, currently-broken `smal_fitter/sleap_data/test_sleap_preprocessing.py`.
 - The **slow** training test (`test_neural_smil_training_pipeline`) shells out to
   `train_smil_regressor.py` on the `test_textured` dataset, which must exist at
   `data/replicAnt_trials/replicAnt-x-SMIL-TEX/` (20 images + SMIL annotations).
@@ -21,21 +21,32 @@ conda activate pytorch3d
 
 ## Running tests
 
+> **⚠️ Known issue — test-harness import paths are being repaired (not yet fixed).**
+> The suite does **not** collect cleanly under a plain `pytest` run yet:
+> `tests/test_animation_export.py` and `tests/test_triangulation_consistency.py` fail to import
+> because `smal_fitter` is not a proper Python package (no `__init__.py`) and the test modules
+> rely on conflicting `sys.path` hacks. There is currently **no single invocation that runs the
+> whole suite green** — putting `smal_fitter/` on the path fixes the triangulation tests but
+> breaks the `fitter_3d` subprocess test via a `utils` module-name collision. A fix
+> (a `tests/conftest.py` + `testpaths = tests` in `pytest.ini`) is planned. Until then, use the
+> commands below.
+
 The only registered marker is `slow` (see `pytest.ini`); `test_neural_smil_training_pipeline`
 is the single test carrying it.
 
 ```bash
-# Everything (INCLUDES the slow training test)
-pytest -v
+# Fast tests, tolerating the known collection errors — ~70 pass today
+pytest tests/ -m "not slow" --continue-on-collection-errors
 
-# Fast tests only (skips the one slow test) — recommended for quick iteration / CI
-pytest -v -m "not slow"
+# The modules that currently pass cleanly on their own
+pytest tests/test_config_system.py tests/test_augmentation.py \
+       tests/test_curriculum_sync.py tests/test_pipeline.py -m "not slow"
 
-# Only the slow test
-pytest -v -m "slow"
+# The triangulation tests pass ONLY with smal_fitter on the path
+# (this very requirement is what breaks test_fitter_3d_optimise — hence the planned fix)
+PYTHONPATH=smal_fitter pytest tests/test_triangulation_consistency.py
 
-# A single module / function
-pytest tests/test_config_system.py -v
+# A single test function
 pytest tests/test_pipeline.py::test_neural_smil_config_validation -v -s
 ```
 
@@ -68,5 +79,6 @@ Two files in this directory are **not** pytest modules (no `test_*` functions) a
 
 ## CI
 
-Run `pytest -m "not slow"` for fast feedback on every change, and `pytest -m "slow"`
-on scheduled builds (or before a release) to exercise the full training subprocess.
+Once the import-path issue above is resolved, `pytest tests/ -m "not slow"` is the fast-feedback
+signal on every change, and `pytest tests/ -m "slow"` exercises the full training subprocess on
+scheduled builds (or before a release).
