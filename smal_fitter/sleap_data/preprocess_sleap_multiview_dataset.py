@@ -393,7 +393,12 @@ class SLEAPMultiViewPreprocessor:
             reproj_file = None
             if self.use_reprojections:
                 session_path_obj = Path(session_path)
-                reproj_candidates = list(session_path_obj.glob('reprojections*.h5'))
+                # reprojections.h5 may live in the session root OR in the per-video
+                # subdir (session_dirs layout), mirroring where points3d.h5 is found.
+                # Prefer the root, then fall back to one level of subdirs. The
+                # ``reprojections*`` prefix intentionally excludes ALT_*/backup copies.
+                reproj_candidates = (sorted(session_path_obj.glob('reprojections*.h5'))
+                                     or sorted(session_path_obj.glob('*/reprojections*.h5')))
                 if reproj_candidates:
                     reproj_path = reproj_candidates[0]
                     try:
