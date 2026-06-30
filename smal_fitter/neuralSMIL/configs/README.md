@@ -4,7 +4,7 @@ This package provides a single, type-safe configuration system for both **single
 
 ## Precedence (highest to lowest)
 
-1. **CLI arguments** (e.g. `--batch-size 4`, `--config my.json`)
+1. **CLI arguments** (e.g. `--batch_size 4`, `--config my.json`)
 2. **JSON config file** (when using `--config path/to/config.json`)
 3. **Mode-specific defaults** (`SingleViewConfig` / `MultiViewConfig`)
 4. **Base defaults** (`BaseTrainingConfig` in `base_config.py`)
@@ -21,7 +21,7 @@ python train_smil_regressor.py --config configs/examples/singleview_baseline.jso
 ### Multi-view training with a JSON config
 
 ```bash
-python train_multiview_regressor.py --config configs/examples/multiview_6cam.json
+python train_multiview_regressor.py --config configs/examples/multiview_baseline.json
 ```
 
 ### Multi-GPU training
@@ -33,7 +33,7 @@ python train_multiview_regressor.py --config configs/examples/multiview_mouse_UN
 ### Override from CLI
 
 ```bash
-python train_smil_regressor.py --config configs/examples/singleview_baseline.json --batch-size 8 --dataset my_data.h5
+python train_smil_regressor.py --config configs/examples/singleview_baseline.json --batch_size 8 --dataset my_data.h5
 ```
 
 ### Without a config file (legacy behavior)
@@ -81,6 +81,8 @@ If you omit `--config`, the scripts fall back to the previous behavior (e.g. `Tr
 | `input_resolution` | int or null | `null` | Input image size. `null` = auto-detect from backbone (224 for ViT, 512 for ResNet/UNet). |
 | `use_unity_prior` | bool | `false` | Use legacy Unity quadruped body prior. |
 | `rgb_only` | bool | `false` | Use only RGB channels (ignore alpha/mask channel if present). |
+| `backbone_unfreeze_epoch` | int or null | `null` | When set, the backbone is frozen at init and unfrozen at this epoch (overrides `freeze_backbone`). |
+| `backbone_lr_multiplier` | float | `0.1` | After unfreeze, backbone LR = curriculum LR × this multiplier. |
 
 #### Transformer decoder options (used when `head_type = "transformer_decoder"`)
 
@@ -174,6 +176,8 @@ Example:
 | `triangulation_consistency` | Cross-view triangulation consistency (multi-view). **Disabled by default — see note below.** | 0.0 |
 | `ief_intermediate` | Intermediate IEF iteration loss | 0.0 |
 
+> **Which terms are in the default `base_weights`?** The default includes the camera/parameter and regularization terms above (e.g. `joint_rot`, `cam_rot`, `silhouette`, `limb_trans_regularization`). It does **not** include `keypoint_2d`, `keypoint_3d`, `triangulation_consistency`, or `ief_intermediate` — these are opt-in and take effect only once you set a positive weight (every real training config sets the keypoint weights). The "typical range" column shows representative values, not defaults.
+
 > **Why `triangulation_consistency` is disabled.**
 > This loss triangulates GT 2D keypoints with the predicted cameras (DLT) and compares the result to the network's own predicted 3D joints (detached). Gradients flow only into the camera heads.
 >
@@ -210,6 +214,26 @@ Curriculum stages example:
 | `use_gt_camera_init` | bool | `true` | Use ground-truth camera parameters as initialization base and predict deltas (multi-view). |
 | `use_mixed_precision` | bool | `false` | Enable FP16 mixed precision training via `torch.cuda.amp`. Roughly halves activation memory and speeds up Tensor Core operations. Weight updates remain FP32 for numerical stability. |
 | `backbone_chunk_size` | int or null | `null` | Maximum number of images processed through the backbone in a single forward pass. `null` = process all views at once. Set to a smaller value (e.g. `6`) to reduce peak VRAM when using many views with high-resolution inputs. Mathematically equivalent to unchunked — only affects memory, not results. |
+| `gradient_accumulation_steps` | int | `1` | Accumulate gradients over N mini-batches before an optimizer step (effective batch size ×N without extra VRAM). Also a CLI flag: `--gradient_accumulation_steps`. |
+
+### `augmentation` — Training-time image augmentation
+
+Present in every example config. Only photometric augmentations are safe by default; geometric/scale jitter changes the camera intrinsics (`K`) and is off to avoid multi-view inconsistency.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Master switch for augmentation. |
+| `geometric_enabled` | bool | `false` | Scale jitter that updates `K`; off by default (multi-view inconsistency risk). |
+| `color_jitter_brightness` | float | `0.2` | Brightness jitter strength. |
+| `color_jitter_contrast` | float | `0.2` | Contrast jitter strength. |
+| `color_jitter_saturation` | float | `0.15` | Saturation jitter strength. |
+| `gaussian_noise_std` | float | `0.015` | Std of additive Gaussian noise. |
+| `gaussian_blur_prob` | float | `0.3` | Probability of applying Gaussian blur. |
+| `gaussian_blur_kernel_range` | (int, int) | `(3, 7)` | Kernel-size range for blur. |
+| `random_erasing_prob` | float | `0.2` | Probability of random erasing. |
+| `random_erasing_scale_range` | (float, float) | `(0.02, 0.1)` | Erased-area fraction range. |
+| `crop_jitter_fraction` | float | `0.0` | **Disabled** — incompatible with `FoVPerspectiveCameras`. |
+| `scale_jitter_range` | (float, float) | `(0.9, 1.1)` | Scale-jitter range (only when `geometric_enabled`). |
 
 ### `scale_trans_beta` — Per-limb scale/translation handling
 
@@ -265,6 +289,8 @@ Each dataset entry:
 | `weight` | float | `1.0` | Sampling weight relative to other datasets. |
 | `enabled` | bool | `true` | Whether this dataset is active. |
 | `available_labels` | dict | *(all true)* | Which label types are available (e.g. `"keypoint_3d": false` if no 3D annotations). |
+
+> No shipped config in `examples/` currently exercises `multi_dataset`; use the field reference above as the template.
 
 ### `output` — Checkpoints and visualization
 
@@ -322,10 +348,13 @@ JSON does not allow integer keys. Use **string** keys for epoch-based dicts; the
 |------|------|-------------|
 | `singleview_baseline.json` | singleview | Full single-view config with ViT backbone, transformer decoder, and loss/LR curriculum. |
 | `multiview_baseline.json` | multiview | Multi-view config with cross-attention and multi-view output directories. |
-| `multiview_sticks.json` | multiview | Stick insect with UNet EfficientNet-B3 backbone, 512px. |
+| `multiview_sticks.json` | multiview | Stick insect with UNet EfficientNet-B3 backbone (dataset is 512px). |
 | `multiview_sticks_UNET.json` | multiview | Stick insect UNet variant. |
 | `multiview_sticks_UNET_continue.json` | multiview | Continuation training from a checkpoint. |
-| `multiview_mouse_UNET_long.json` | multiview | 18-camera mouse with UNet EfficientNet-B3, mixed precision, and backbone chunking for VRAM optimization. |
+| `multiview_sticks_UNET_optimal.json` | multiview | Tuned stick-insect config, UNet EfficientNet-B5 backbone (mixed precision on). |
+| `multiview_mouse_UNET_long.json` | multiview | 18-camera mouse with UNet EfficientNet-B3 and backbone chunking for VRAM (mixed precision is **off** in this file). |
+| `multiview_replicant_mice.json` | multiview | Mouse config (ViT-Large) on replicAnt-generated multi-view data. |
+| `multiview_SMILymice_3D_COMBINED_ViT_Large.json` | multiview | Combined SMILy mouse 3D dataset with a ViT-Large backbone. |
 
 ## Using the examples
 
@@ -350,6 +379,7 @@ Copy an example to your project and edit; keep the `mode` field and the structur
 | `load_from_json(path)` | Load raw dict from JSON (with epoch key conversion). |
 | `save_config_json(config, path)` | Serialize a config dataclass to JSON. |
 | `validate_json_mode(path)` | Check that the JSON has a valid `mode` field. |
+| `apply_smal_file_override(smal_file, shape_family=None)` | Reload `config.dd` / `N_POSE` / `N_BETAS` to match an overridden SMAL/SMIL model file. |
 | `SingleViewConfig` | Default config for single-view training. |
 | `MultiViewConfig` | Default config for multi-view training (adds cross-attention and multi-view output paths). |
 | `BaseTrainingConfig` | Shared base; use mode-specific classes in practice. |
