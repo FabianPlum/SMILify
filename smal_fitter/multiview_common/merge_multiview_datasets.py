@@ -132,6 +132,23 @@ def _infer_per_input_world_scale(hf: h5py.File) -> float:
     return 1.0
 
 
+def _median_subject_extent(hf: h5py.File, world_scale: float, sample_size: int = 400) -> float:
+    """Median bbox diagonal of valid keypoints_3d (in reader units = stored
+    units x world_scale), used to co-scale heterogeneous sources to one
+    physical scale. Returns nan if no valid 3D keypoints are present."""
+    n = int(hf["metadata"].attrs["num_samples"])
+    if "multiview_keypoints" not in hf or "keypoints_3d" not in hf["multiview_keypoints"]:
+        return float("nan")
+    idx = np.linspace(0, n - 1, min(n, sample_size)).astype(int)
+    kp3d = hf["multiview_keypoints/keypoints_3d"][idx].astype(np.float64) * float(world_scale)
+    extents = []
+    for kp in kp3d:
+        ok = np.isfinite(kp).all(axis=1) & (np.abs(kp).sum(axis=1) > 1e-9)
+        if ok.sum() >= 2:
+            extents.append(float(np.linalg.norm(kp[ok].max(0) - kp[ok].min(0))))
+    return float(np.median(extents)) if extents else float("nan")
+
+
 def _peek_jpeg_hw(hf: h5py.File) -> Tuple[int, int]:
     """Decode sample 0 view 0's JPEG to learn its actual on-disk H, W. We
     need this because SLEAP's `image_sizes` records the calibration frame,
@@ -552,6 +569,54 @@ def _copy_one_sample(
 # ---------------------------------------------------------------------------
 
 
+def _apply_match_scale(infos: List["InputInfo"], input_paths: List[Path],
+                       reference: Optional[Path], verbose: bool) -> Optional[float]:
+    """Fold a per-input scale-match factor into each input's `world_scale`
+    so all sources land at one common physical scale (median subject extent).
+
+    `world_scale` is applied uniformly to t / kp3d / trans / canonical_to_world_t
+    at copy time, and uniform world scaling is projection-invariant, so this
+    only changes the magnitude of the 3D-space targets — never the images,
+    2D keypoints, intrinsics, or FOV. The reference defines the target extent:
+    if None, the first input is used (so the reference source is left at its
+    inferred world_scale and the others are co-scaled to it).
+
+    Returns the target extent (reader units), or None if it could not be
+    measured (e.g. no 3D keypoints anywhere)."""
+    # Reader-unit subject extent of each input at its current world_scale.
+    extents = []
+    for info, path in zip(infos, input_paths):
+        with h5py.File(path, "r") as hf:
+            extents.append(_median_subject_extent(hf, info.world_scale))
+
+    if reference is not None:
+        ref_resolved = Path(reference).resolve()
+        match = [i for i, p in enumerate(input_paths) if p.resolve() == ref_resolved]
+        if match:
+            target = extents[match[0]]
+        else:
+            with h5py.File(reference, "r") as hf:
+                target = _median_subject_extent(hf, _infer_per_input_world_scale(hf))
+    else:
+        target = extents[0]
+
+    if not np.isfinite(target) or target <= 0:
+        if verbose:
+            print("match_scale: could not measure a reference subject extent; skipping.")
+        return None
+
+    for info, ext in zip(infos, extents):
+        if np.isfinite(ext) and ext > 0:
+            factor = target / ext
+            info.world_scale = float(info.world_scale * factor)
+            if verbose:
+                print(f"  match_scale: {info.path.name} extent {ext:.4f} -> {target:.4f} "
+                      f"(x{factor:.4f}); combined world_scale={info.world_scale:g}")
+        elif verbose:
+            print(f"  match_scale: {info.path.name} has no 3D keypoints; world_scale unchanged.")
+    return float(target)
+
+
 def merge(
     input_paths: List[Path],
     output_path: Path,
@@ -563,6 +628,8 @@ def merge(
     backbone_name: str = "vit_large_patch16_224",
     min_views_per_sample: int = 2,
     max_samples_per_input: Optional[int] = None,
+    match_scale: bool = False,
+    match_scale_reference: Optional[Path] = None,
     verbose: bool = True,
 ) -> Dict[str, int]:
     infos = validate_inputs(input_paths)
@@ -573,6 +640,18 @@ def merge(
     if max_samples_per_input is not None:
         for info in infos:
             info.num_samples = min(info.num_samples, int(max_samples_per_input))
+
+    # Co-scale heterogeneous sources to one physical scale (subject extent)
+    # before the copy loop, so the merged trans / mesh-scale / 3D targets do
+    # not span source-dependent magnitudes. Folded into per-input world_scale.
+    match_target_extent = None
+    if match_scale or match_scale_reference is not None:
+        if verbose:
+            print("Co-scaling inputs to a common physical scale:")
+        match_target_extent = _apply_match_scale(
+            infos, input_paths, match_scale_reference, verbose)
+        if verbose:
+            print()
 
     n_joints = infos[0].n_joints
     n_pose = infos[0].n_pose
@@ -633,6 +712,11 @@ def merge(
         md.attrs["world_scale"] = 1.0
         md.attrs["min_views_per_sample"] = int(min_views_per_sample)
         md.attrs["camera_extrinsics_convention"] = "opencv"
+        if match_target_extent is not None:
+            md.attrs["match_scale_target_extent"] = float(match_target_extent)
+            md.attrs["match_scale_reference"] = (
+                str(Path(match_scale_reference).resolve())
+                if match_scale_reference is not None else str(input_paths[0].resolve()))
         # Per-slot canonical-camera-order is meaningless cross-source; the reader
         # has a default fallback so this is mostly cosmetic.
         md.attrs["canonical_camera_order"] = json.dumps(
@@ -676,6 +760,15 @@ def main() -> None:
     p.add_argument("--min_views_per_sample", type=int, default=2)
     p.add_argument("--max_samples_per_input", type=int, default=None,
                    help="Cap each input to its first N samples (smoke testing only).")
+    p.add_argument("--match_scale", action="store_true",
+                   help="Co-scale all inputs to one physical scale (median subject "
+                        "extent) before merging, so trans/mesh-scale/3D targets do not "
+                        "span source-dependent magnitudes. Reference is the first input "
+                        "unless --match_scale_reference is given. Projection-invariant.")
+    p.add_argument("--match_scale_reference", type=str, default=None,
+                   help="HDF5 whose subject scale defines the common target (e.g. the "
+                        "real dataset). Implies --match_scale. May be one of --inputs or "
+                        "an external file.")
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args()
 
@@ -693,6 +786,9 @@ def main() -> None:
         backbone_name=str(args.backbone_name),
         min_views_per_sample=int(args.min_views_per_sample),
         max_samples_per_input=args.max_samples_per_input,
+        match_scale=bool(args.match_scale or args.match_scale_reference is not None),
+        match_scale_reference=Path(args.match_scale_reference).resolve()
+            if args.match_scale_reference else None,
         verbose=not args.quiet,
     )
 
