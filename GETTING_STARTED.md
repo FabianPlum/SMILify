@@ -44,11 +44,11 @@ Two files (Google Drive), saved into the **repo root**:
 ```text
 # ⬇️  Example dataset — preprocessed multi-view stick-insect HDF5
 #     from:    <GDRIVE_DATASET_LINK>            <!-- TODO: fill in -->
-#     save as: SMILySTICK_centred_reprojected_FIXED.h5
+#     save as: SMILySTICKS_centred_reprojected_FIXED.h5
 
 # ⬇️  Example checkpoint — a fully trained multi-view stick model (ViT-Large backbone)
 #     from:    <GDRIVE_CHECKPOINT_LINK>         <!-- TODO: fill in -->
-#     save as: SMILySTICK_ViT_model.pth
+#     save as: SMILySTICKS_ViT_model.pth
 ```
 
 The SMIL stick model — [`3D_model_prep/SMILy_STICK.pkl`](3D_model_prep/SMILy_STICK.pkl) — is already in the repo, so there's nothing else to download.
@@ -63,13 +63,13 @@ The example model is a **ViT-Large** multi-view stick model. Run from the repo r
 
 ```bash
 python smal_fitter/neuralSMIL/benchmark_model.py \
-    --checkpoint SMILySTICK_ViT_model.pth \
-    --dataset_path SMILySTICK_centred_reprojected_FIXED.h5 \
+    --checkpoint SMILySTICKS_ViT_model.pth \
+    --dataset_path SMILySTICKS_centred_reprojected_FIXED.h5 \
     --smal-file 3D_model_prep/SMILy_STICK.pkl
 ```
 
 This evaluates the model on the dataset's held-out **test split** and writes a folder
-`benchmark_multiview_SMILySTICK_ViT_model_on_SMILySTICK_centred_reprojected_FIXED/` containing:
+`benchmark_multiview_SMILySTICKS_ViT_model_on_SMILySTICKS_centred_reprojected_FIXED/` containing:
 
 | File | What |
 |---|---|
@@ -92,12 +92,12 @@ On the console you'll see **PCK@5px** (2D accuracy) and — because this dataset
 
 ## 4. Train a model from scratch
 
-The bundled [`getting_started.json`](smal_fitter/neuralSMIL/configs/examples/getting_started.json) config is set up for exactly this: multi-view with a **ViT-Large** backbone (the same architecture as the example checkpoint), pointed at the stick model, and — crucially — `"resume_checkpoint": null` so it genuinely starts fresh.
+The bundled [`getting_started.json`](smal_fitter/neuralSMIL/configs/examples/getting_started.json) config is set up for exactly this: multi-view with a **ViT-Large** backbone (the same architecture as the example checkpoint), pointed at the stick model, and — crucially — `"resume_checkpoint": null` so it genuinely starts fresh. It mirrors the production recipe in [`multiview_SMILySTICKS_3D_ViT_Large_AUG_FIXED.json`](smal_fitter/neuralSMIL/configs/examples/multiview_SMILySTICKS_3D_ViT_Large_AUG_FIXED.json), with resume cleared and isolated output dirs.
 
 ```bash
 python smal_fitter/neuralSMIL/train_multiview_regressor.py \
     --config smal_fitter/neuralSMIL/configs/examples/getting_started.json \
-    --dataset_path SMILySTICK_centred_reprojected_FIXED.h5
+    --dataset_path SMILySTICKS_centred_reprojected_FIXED.h5
 ```
 
 What happens:
@@ -133,5 +133,5 @@ What happens:
 | Bare `pytest` shows import errors | Known and tracked — two modules fail to collect. Use `pytest tests/ -m "not slow" --continue-on-collection-errors`, or the single smoke test in Step 1. See [tests/README.md](tests/README.md). |
 | Benchmark exits with a SMAL-file error | Pass `--smal-file 3D_model_prep/SMILy_STICK.pkl` — older checkpoints don't embed the model path. |
 | `unrecognized arguments` on a flag | Flag spelling differs by script: benchmark uses `--dataset_path` / `--smal-file`; multi-view inference uses `--dataset` / `--smal_file`. |
-| "Dataset path does not exist" when training | Pass `--dataset_path` to your `.h5`, or save the download as `SMILySTICK_centred_reprojected_FIXED.h5` at the repo root. |
+| "Dataset path does not exist" when training | Pass `--dataset_path` to your `.h5`, or save the download as `SMILySTICKS_centred_reprojected_FIXED.h5` at the repo root. |
 | Training resumes instead of starting fresh | A config's `training.resume_checkpoint` is set — use `getting_started.json`, or set it to `null`. |

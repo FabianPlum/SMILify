@@ -25,6 +25,7 @@ The loader uses `mode` to choose the config class and to validate the file.
 | `multiview_mouse_UNET_long.json` | multiview | 18-camera mouse with UNet EfficientNet-B3 and backbone chunking for VRAM (mixed precision is **off** in this file). |
 | `multiview_replicant_mice.json` | multiview | Mouse config (ViT-Large) on replicAnt-generated multi-view data. |
 | `multiview_SMILymice_3D_COMBINED_ViT_Large.json` | multiview | Combined SMILy mouse 3D dataset with a ViT-Large backbone. |
+| `multiview_SMILySTICKS_3D_ViT_Large_AUG_FIXED.json` | multiview | The production recipe that trained the Getting Started example stick model (ViT-Large, augmentation on). `getting_started.json` is this config with `resume_checkpoint` cleared and isolated output dirs. |
 
 ## Using the examples
 
