@@ -46,7 +46,7 @@ New parametric models are authored in Blender via the SMIL addon — see *Adding
 
 
 ## Installation
-The conda environment is defined in [environment.yml](environment.yml). The **verified Linux** stack is Python 3.10 / PyTorch 2.1.1 / pytorch-cuda 11.8 / PyTorch3D 0.7.7; **Windows 11** development uses PyTorch 2.3.1 (same CUDA 11.8).
+The conda environment is defined in [environment.yml](environment.yml). The recommended stack is Python 3.10 / **PyTorch 2.3.1** / pytorch-cuda 11.8 / **PyTorch3D 0.7.8** — confirmed on Windows 11 and the run.ai Linux cluster (PyTorch3D ships a `cu118_pyt231` build, so it installs cleanly against torch 2.3.1 on Linux). An older PyTorch 2.1.1 / PyTorch3D 0.7.7 stack also works if you prefer it.
 
 1. **Clone with submodules.** The sample data for the legacy quadruped path (BADJA / StanfordExtra / SMALST) come in as git submodules:
    ```bash
@@ -67,6 +67,8 @@ The conda environment is defined in [environment.yml](environment.yml). The **ve
    ```
    (See [tests/README.md](tests/README.md) — a couple of modules currently error on import while the test harness is being repaired.)
 
+> On an HPC cluster you can instead run [`hpc_files/install.sh`](hpc_files/install.sh), which performs the same conda setup end-to-end (supports `--skip-tests` and a configurable `ENV_NAME`).
+
 <details>
 <summary><b>Manual / Windows setup</b> (alternative to <code>environment.yml</code>)</summary>
 
@@ -75,8 +77,8 @@ PyTorch3D has no reliable prebuilt Windows conda package — on Windows I'd reco
 ```bash
 conda create -n pytorch3d python=3.10
 conda activate pytorch3d
-# torch: 2.1.1 (Linux, verified) or 2.3.1 (Windows dev)
-conda install pytorch=2.1.1 torchvision pytorch-cuda=11.8 -c pytorch -c nvidia
+# recommended: torch 2.3.1 (Linux + Windows); 2.1.1 also works
+conda install pytorch=2.3.1 torchvision pytorch-cuda=11.8 -c pytorch -c nvidia
 conda install -c conda-forge -c fvcore iopath ninja imageio scikit-image
 conda install pytorch3d -c pytorch3d          # Linux; on Windows build pytorch3d from source
 pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psutil pandas toml pycocotools

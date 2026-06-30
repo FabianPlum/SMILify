@@ -5,7 +5,7 @@
 ## Environment
 
 - Ubuntu 24.04 as well as Windows 11, Python via conda (miniconda3 installed via scoop)
-- Conda env: `pytorch3d` (Python 3.10, CUDA 11.8). Verified torch versions differ by OS: Linux = PyTorch 2.1.1 / pytorch3d 0.7.7; Windows 11 dev = PyTorch 2.3.1. See `environment.yml`.
+- Conda env: `pytorch3d` (Python 3.10, CUDA 11.8). Recommended: PyTorch 2.3.1 / pytorch3d 0.7.8 (Windows dev + run.ai Linux cluster; pytorch3d has a `cu118_pyt231` build). A local Linux box also runs 2.1.1 / 0.7.7. See `environment.yml`.
 - Conda executable: `C:/Users/Fabian/scoop/apps/miniconda3/current/Scripts/conda.exe`
 - Cannot run conda/python directly from bash shell - shell hook setup is needed
 - GitHub CLI (`gh`) is installed
