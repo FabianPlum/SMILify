@@ -2,6 +2,8 @@
 
 # Triangulation Consistency Loss
 
+> ⚠️ **HISTORICAL** — the triangulation consistency loss is **disabled by default**. The per-epoch curriculum table below is illustrative; no shipped config enables it (the weight stays at 0.0). For the current status see the `triangulation_consistency` note in [configs/README.md](../../configs/README.md).
+
 ## Motivation
 
 In the multi-view regressor, each view has its own **camera head** that independently predicts FOV, rotation, and translation. While the 2D keypoint reprojection loss (`keypoint_2d`) and optional direct camera supervision (`cam_rot`, `cam_trans`, `fov`) provide per-view camera learning signals, neither explicitly enforces that the cameras from different views are **geometrically consistent with each other**.

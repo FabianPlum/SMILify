@@ -1,5 +1,7 @@
 # Multi-Camera replicAnt Dataset Integration Design
 
+> ⚠️ **HISTORICAL DESIGN DOC** — records the design of the multi-camera replicAnt integration at the time of writing; it may not match the current code. For current usage see the [root README](../../README.md) and [smal_fitter/neuralSMIL/README.md](../../smal_fitter/neuralSMIL/README.md).
+
 ## Overview
 
 This document outlines the architecture for integrating multi-camera replicAnt datasets into SMILify's training pipeline while maintaining backward compatibility with existing single-view replicAnt dataset handling.
@@ -610,7 +612,7 @@ top of `SLEAPMultiViewDataset.return_single_view`.
 ### Single-View Training Compatibility
 
 The future single-view sampler must emit the return contract produced today by
-`load_SMIL_Unreal_sample()` in [Unreal2Pytorch3D.py:694](smal_fitter/Unreal2Pytorch3D.py#L694):
+`load_SMIL_Unreal_sample()` in [Unreal2Pytorch3D.py:694](../../smal_fitter/Unreal2Pytorch3D.py#L815):
 
 ```python
 x_output = {
@@ -647,7 +649,7 @@ y_output = {
 ### Multi-View Training Compatibility
 
 Output must match the dict returned by `SLEAPMultiViewDataset.__getitem__`
-(verified at [sleap_multiview_dataset.py:257](smal_fitter/sleap_data/sleap_multiview_dataset.py#L257)):
+(verified at [sleap_multiview_dataset.py:257](../../smal_fitter/sleap_data/sleap_multiview_dataset.py#L264)):
 
 ```python
 y_data = {
