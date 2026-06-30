@@ -52,3 +52,28 @@
 ## Discovered while fixing (append below as we go)
 
 <!-- ID — title — status — file:line — note -->
+
+### C8 — Test suite does not run clean under any single pytest invocation ✅
+- **Found:** while verifying tests/README (P0 #3) by *actually running* `pytest`.
+- **Empirical state (env `pytorch3d`, 2026-06-30):**
+  - `pytest tests/ -m "not slow"` → **70 passed**, but `test_triangulation_consistency.py` (12) errors and `test_animation_export.py` (5) errors on collection.
+  - `PYTHONPATH=smal_fitter pytest tests/ -m "not slow"` → triangulation passes (76 total), **but `test_fitter_3d_optimise` then FAILS** (see C10).
+  - bare `pytest` from repo root also collects `smal_fitter/sleap_data/test_sleap_preprocessing.py` (see C12), which errors.
+- **Root cause:** no `tests/conftest.py` and no `testpaths` in `pytest.ini`, so each test module relies on its own ad-hoc `sys.path` hacks, which conflict.
+- **Fix (proposed):** add a `conftest.py` that puts the right dirs on `sys.path` once, add `testpaths = tests` to `pytest.ini`, and resolve C9/C10/C11/C12 so `pytest tests/` just works.
+
+### C9 — `smal_fitter` is ambiguous (dir vs module); no `smal_fitter/__init__.py` ✅
+- **Symptom:** `from smal_fitter import SMALFitter` ([smal_fitter/neuralSMIL/smil_image_regressor.py:24](smal_fitter/neuralSMIL/smil_image_regressor.py#L24)) only resolves when `smal_fitter/` is on `sys.path` (so `smal_fitter` → `smal_fitter.py`). Under pytest, repo root is on the path first, so `smal_fitter` resolves to the **directory** (namespace package) and the import fails: `cannot import name 'SMALFitter' from 'smal_fitter'`.
+- **Fix:** decide whether `smal_fitter` is a package (add `__init__.py`, make imports `from smal_fitter.smal_fitter import SMALFitter`) or keep it a sys.path dir — and make it consistent. Affects all of neuralSMIL.
+
+### C10 — `utils` module name collision (`smal_fitter/utils.py` vs `fitter_3d/utils.py`) ✅
+- **Symptom:** with `smal_fitter/` on `PYTHONPATH`, `from utils import perspective_proj_withz` ([smal_fitter/p3d_renderer.py:17](smal_fitter/p3d_renderer.py#L17)) resolves to `fitter_3d/utils.py` (wrong module, no such symbol) → `test_fitter_3d_optimise` fails. Without it, the triangulation tests fail instead.
+- **Fix:** disambiguate the two `utils` modules (package-qualified imports, or rename one).
+
+### C11 — `tests/test_animation_export.py` uses an import style that can't work ✅
+- **Symptom:** `from smal_fitter.neuralSMIL.animation_export import ...` requires `smal_fitter` (and `neuralSMIL`) to be importable **packages**; they have no `__init__.py`, so this errors (`'smal_fitter' is not a package`) under every invocation tried. Inconsistent with the rest of the suite (which imports via `sys.path`).
+- **Fix:** rewrite the import to match the suite's convention (depends on C9 decision).
+
+### C12 — stray test file collected from repo root ✅
+- **Symptom:** `smal_fitter/sleap_data/test_sleap_preprocessing.py` is picked up by bare `pytest` (no `testpaths`) and errors: `from preprocess_sleap_dataset import ...` (cwd-relative).
+- **Fix:** add `testpaths = tests` to `pytest.ini` (and/or move/repair this file).
