@@ -43,7 +43,7 @@ Two files (Google Drive), saved into the **repo root**:
 
 ```text
 # ⬇️  Example dataset — preprocessed multi-view stick-insect HDF5
-#     from:    <GDRIVE_DATASET_LINK>            <!-- TODO: fill in -->
+#     from:    https://drive.google.com/file/d/1wlVPe1ZwGmFkS9KhLODpIzvfi3DsqgQL/view?usp=drive_link
 #     save as: SMILySTICKS_centred_reprojected_FIXED.h5
 
 # ⬇️  Example checkpoint — a fully trained multi-view stick model (ViT-Large backbone)
