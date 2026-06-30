@@ -7,6 +7,8 @@ quadruped model.
 
 For now, I'll focus on insects, hence **SMIL**.
 
+> **New here?** Start with the **[Getting Started guide](GETTING_STARTED.md)** — a step-by-step walkthrough from a fresh clone to (1) installing SMILify, (2) benchmarking a model on an example dataset, and (3) training your own from scratch. The sections below are the full reference.
+
 ## Neural Inference Examples
 
 Multi-view 3D reconstruction using neural inference:
