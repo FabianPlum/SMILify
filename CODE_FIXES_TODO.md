@@ -43,7 +43,7 @@
 - **Decision needed:** rename/redefine schemes to match contents, or accept and document. (Low priority — mostly a clarity wart.)
 
 ### C7 — `--export_animation` silently treats any string as a path 🔍
-- **Source:** docs/animation_export_plan.md audit (minor UX).
+- **Source:** docs/design/animation_export_plan.md audit (minor UX).
 - **Symptom:** `--export_animation` is `type=str` and used as an output path; `--export_animation True` creates `True.npz`/`True.json` instead of erroring. Easy footgun.
 - **Decision needed:** validate/normalize, or leave as-is and only document (likely just doc).
 

@@ -2,6 +2,8 @@
 
 # SMILify Configuration System Refactor Plan
 
+> ⚠️ **HISTORICAL** — implementation-history record of the config-system refactor. The live, authoritative config reference is [configs/README.md](../../configs/README.md).
+
 ## Executive Summary
 
 This document outlines a comprehensive refactor to consolidate and clarify the SMILify configuration system. Currently, configuration is scattered across 4+ files with unclear precedence rules. The new system provides:
