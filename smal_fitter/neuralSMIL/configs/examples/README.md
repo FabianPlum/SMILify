@@ -15,6 +15,7 @@ The loader uses `mode` to choose the config class and to validate the file.
 
 | File | Mode | Description |
 |------|------|-------------|
+| `getting_started.json` | multiview | **Start here** — the config used by the repo-root Getting Started guide: multi-view stick insect, `resume_checkpoint: null` so it trains from scratch cleanly. |
 | `singleview_baseline.json` | singleview | Full single-view config with ViT backbone, transformer decoder, and loss/LR curriculum. |
 | `multiview_baseline.json` | multiview | Multi-view config with cross-attention and multi-view output directories. |
 | `multiview_sticks.json` | multiview | Stick insect with UNet EfficientNet-B3 backbone (the dataset `STICKS_full_512_3D.h5` is 512px — resolution comes from the dataset, not a config key). |
