@@ -1,6 +1,8 @@
 # SMPL Beta Calculator - Linear Regressors Documentation
 
-This document provides comprehensive documentation of the linear regression models used in `SMPLBetaCalculator.cs`, adapted from [Virtual Caliper - BodyCreator](https://virtualcaliper.is.tue.mpg.de/) to compute SMPL body shape parameters (betas) from anthropometric measurements.
+This document describes the linear regression models in [smpl_beta_calculator.py](smpl_beta_calculator.py) — a standalone Python port of the Unity/C# *Virtual Caliper – BodyCreator* implementation ([MPI](https://virtualcaliper.is.tue.mpg.de/)) — which compute SMPL body shape parameters (betas) from anthropometric measurements.
+
+> **Note:** this is a self-contained utility that computes **human** SMPL betas. It is **not currently wired into the SMILify mouse/insect pipeline** — nothing else in the repo imports it. The coefficient tables below match the regressor matrices hard-coded in the Python module.
 
 ## Overview
 
@@ -338,42 +340,48 @@ weight = volume × b + a
 
 ---
 
-## Usage (in the original C# implementation)
+## Usage
 
-### Public Interface
+### Public interface ([smpl_beta_calculator.py](smpl_beta_calculator.py))
 
-```csharp
-// Main calculation function
-public bool calculateBetas(float[] measurements, SMPL.Gender gender)
+```python
+from smpl_beta_calculator import SMPLBetaCalculator, Gender
 
-// Retrieve computed betas
-public float[] getBetas()
+calc = SMPLBetaCalculator()
 
-// Calculate weight from volume (inverse operation)
-public float calculateWeight(float volume, SMPL.Gender gender)
+# Main calculation — returns a numpy array of 10 betas. The regressor is selected
+# automatically from the number of measurements (2, 4, 5, or 6).
+calc.calculate_betas(measurements, gender)     # -> np.ndarray, shape (10,)
+
+# Inverse: estimate weight (kg) from body volume
+calc.calculate_weight(volume, gender)          # -> float
+
+# The (a, b) volume->weight constants for a gender
+calc.get_volume_constants(gender)              # -> (a, b)
 ```
 
-### Measurement Array Format
+`gender` is either the `Gender` enum (`Gender.FEMALE = 0`, `Gender.MALE = 1`) or the string `'female'` / `'male'`. There is **no** `initialize()` / `getBetas()` step — `calculate_betas` returns the betas directly.
 
-| Length | Measurements Required |
+### Measurement array format
+
+| Length | Measurements required |
 |--------|----------------------|
-| 2 | [height, weight] |
-| 4 | [height, weight, armspan, inseam] |
-| 5 | [height, weight, armspan, inseam, inseamWidth] |
-| 6 | [height, weight, armspan, inseam, inseamWidth, wristToShoulder] |
+| 2 | `[height, weight]` |
+| 4 | `[height, weight, armspan, inseam]` |
+| 5 | `[height, weight, armspan, inseam, inseam_width]` |
+| 6 | `[height, weight, armspan, inseam, inseam_width, wrist_to_shoulder]` |
 
-### Example Usage
+### Example
 
-```csharp
-SMPLBetaCalculator calculator = GetComponent<SMPLBetaCalculator>();
-calculator.initialize();
+```python
+from smpl_beta_calculator import SMPLBetaCalculator
 
-// Using 4-parameter regressor
-float[] measurements = new float[] { 1.75f, 70.0f, 1.80f, 0.85f };
-calculator.calculateBetas(measurements, SMPL.Gender.MALE);
-
-float[] betas = calculator.getBetas(); // Returns 10 beta values
+calc = SMPLBetaCalculator()
+betas = calc.calculate_betas([1.75, 70.0, 1.80, 0.85], gender='male')  # 4-feature regressor
+print(betas)   # numpy array of 10 beta values
 ```
+
+Run the module directly for a worked demo: `python custom_processing/smpl_beta_calculator.py` (executes `demo()`).
 
 ---
 
@@ -443,10 +451,14 @@ vRoot = 0.07598^(1/3) = 0.4234...
 
 ---
 
-## File Dependencies
+## Dependencies
 
-- **Matrix Library:** `Assets/ThirdParty/Matrix/Matrix.cs` (LightweightMatrixCSharp)
-- **SMPL Core:** `Assets/MPI/SMPL/SMPL.cs` (Gender enum definition)
+The Python module depends only on:
+
+- **`numpy`** — matrix math (`np.array`, `@`); the regressor coefficient matrices are hard-coded in the module.
+- **stdlib** `enum` (the `Gender` enum) and `typing` (`List`, `Union`).
+
+*(The original Unity/C# version depended on `Assets/ThirdParty/Matrix/Matrix.cs` and `Assets/MPI/SMPL/SMPL.cs`; those do not exist in this repo.)*
 
 ---
 
