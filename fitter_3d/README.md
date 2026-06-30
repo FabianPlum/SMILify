@@ -22,23 +22,36 @@ Two options to run an optimisation:
 
 - Single stage. Pass args into optimise.py to start a single scheme of optimisation, for example:
 
-`python fitter_3d/optimise.py --mesh_dir example_meshes --scheme default --lr 1e-3 --nits 100`
+`python fitter_3d/optimise.py --mesh_dir fitter_3d/ATTA_BOI --scheme default --lr 1e-3 --nits 100`
+
+(`--mesh_dir` defaults to `fitter_3d/ATTA_BOI`, the bundled example mesh, so it can be omitted for a first run.)
 
 - For a more complicated (eg multi-stage) and fine tuned optimisation, add a custom .yaml file. See example_cfg.yaml for how it must be organised. This can then be called in optimise.py using:
 
-`python fitter_3d/optimise.py --mesh_dir example_meshes --yaml_src fitter_3d/example_cfg.yaml`
+`python fitter_3d/optimise.py --mesh_dir fitter_3d/ATTA_BOI --yaml_src fitter_3d/example_cfg.yaml`
 
-Note: Any args provided in example_cfg.yaml will overwrite args provided at the command line.
+Note: only the top-level `args:` block in the YAML (e.g. `results_dir`, `shape_family_id`) overrides the matching command-line flags. The per-stage settings (`scheme`, `nits`, `lr`, `loss_weights`) are taken entirely from the YAML's `stages:` list — when a YAML is supplied, the CLI `--scheme`/`--lr`/`--nits` are ignored.
 
 ## Schemes
 
-Five optimisation schemes (defined in trainer.py/SMALParamGroup):
+The `--scheme` choices are the keys of `SMALParamGroup.param_map` in [trainer.py](trainer.py) — **ten** schemes, each selecting which parameters are optimised:
 
-- `init` - Global rotation, global translation
-- `default` - Global rotation, global translation, shape parameters, joint rotations
-- `shape` - `default` without joint rotations
-- `pose` - `default` without shape parameters
-- `deform` - Vertex deformations only
+| Scheme | Optimised parameters |
+|---|---|
+| `init` | `global_rot`, `trans` |
+| `init_rot_lock` | `trans`, `log_beta_scales` |
+| `init_rot_lock_trans` | `trans`, `betas_trans` |
+| `init_rot_lock_trans_scale` | `trans`, `betas_trans`, `log_beta_scales` |
+| `default` | `global_rot`, `joint_rot`, `trans`, `betas`, `log_beta_scales` |
+| `default_with_betas_trans` | `default` + `betas_trans` |
+| `shape` | `global_rot`, `trans`, `betas`, `log_beta_scales`, `betas_trans` — i.e. `default` minus `joint_rot`, **plus** `betas_trans` |
+| `pose` | `global_rot`, `trans`, `joint_rot`, `betas`, `log_beta_scales`, `betas_trans` — i.e. `default` **plus** `betas_trans` (note: still **includes** the shape params) |
+| `deform` | `deform_verts` (per-vertex deformations only) |
+| `all` | everything above + `deform_verts` |
+
+## Output
+
+Results are written to `--results_dir` (default `fit3d_results/`) as per-stage `.npz` files (`<stage>.npz`, plus per-batch `<stage>_batch_<i>.npz`). Use [read_out_fitter_stages.py](read_out_fitter_stages.py) to load and inspect them. SDF-based registration is available via `--use_sdf` / `--sdf_dir`.
 
 
 
