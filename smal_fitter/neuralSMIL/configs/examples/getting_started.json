@@ -13,7 +13,7 @@
   },
 
   "dataset": {
-    "data_path": "sticks_getting_started.h5",
+    "data_path": "SMILySTICK_centred_reprojected_FIXED.h5",
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
@@ -21,20 +21,20 @@
   },
 
   "model": {
-    "backbone_name": "unet_efficientnet_b3",
+    "backbone_name": "vit_large_patch16_224",
     "freeze_backbone": false,
     "backbone_unfreeze_epoch": null,
     "backbone_lr_multiplier": 0.1,
-    "hidden_dim": 1024,
+    "hidden_dim": 512,
     "head_type": "transformer_decoder",
     "use_unity_prior": false,
     "rgb_only": false,
-    "transformer_depth": 4,
+    "transformer_depth": 6,
     "transformer_heads": 8,
     "transformer_dim_head": 64,
     "transformer_mlp_dim": 1024,
     "transformer_dropout": 0.1,
-    "transformer_ief_iters": 1,
+    "transformer_ief_iters": 3,
     "transformer_trans_scale_factor": 1
   },
 
@@ -71,7 +71,7 @@
       "limb_scale_regularization": 0.01,
       "limb_trans_regularization": 1,
       "triangulation_consistency": 0.0,
-      "ief_intermediate": 0.0
+      "ief_intermediate": 0.1
     },
     "curriculum_stages": {
       "1": {
@@ -183,7 +183,7 @@
     "reset_ief_token_embedding": false,
     "use_gt_camera_init": true,
     "use_mixed_precision": false,
-    "backbone_chunk_size": 6,
+    "backbone_chunk_size": 16,
     "gradient_accumulation_steps": 1
   }
 }
