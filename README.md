@@ -373,12 +373,12 @@ The disentangled components are exported as part of the `.pkl` model file and ar
 ____________________________________
 ## Code refactor TODOs 
 - [X] Move all legcay funcitonality and documentation to it's own sub-directory to clean up the repo and make its purpose more apparent.
-- [ ] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules.
-- [ ] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable.
-- [ ] At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
+- [ ] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules. ([#51](https://github.com/FabianPlum/SMILify/issues/51))
+- [ ] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable. ([#52](https://github.com/FabianPlum/SMILify/issues/52))
+- [ ] At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file. ([#53](https://github.com/FabianPlum/SMILify/issues/53))
 - [X] Get rid of the numpy/chumpy dependency mess.
 - [X] Allow importing legacy SMAL models with chumpy variables WITHOUT requiring chumpy to be installed through custom unpickler.
-- [ ] Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.
+- [ ] Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable. ([#54](https://github.com/FabianPlum/SMILify/issues/54))
 - [X] The code is poorly tested. That needs to be fixed. Write integration tests for main functionality.
 
 ## Functionality / broader project TODOs
