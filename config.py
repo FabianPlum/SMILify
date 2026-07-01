@@ -11,6 +11,8 @@ BADJA_PATH = "data/BADJA"
 STANFORD_EXTRA_PATH = "data/StanfordExtra"
 REPLICANT_PATH = "data/replicAnt_trials/SMIL_COCO"
 OUTPUT_DIR = "checkpoints/{0}".format(time.strftime("%Y%m%d-%H%M%S"))
+# Basename of a completed fit under checkpoints/; used by smal_fitter/generate_video.py (or pass --checkpoint_name).
+CHECKPOINT_NAME = None
 
 CROP_SIZE = 512  # image resolution for output
 VIS_FREQUENCY = 50  # every how many iterations the model plots are to be generated
