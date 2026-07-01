@@ -22,6 +22,7 @@ name: pytorch3d
 
 channels:
   - pytorch
+  - nvidia
   - pytorch3d
   - conda-forge
 
@@ -44,6 +45,7 @@ dependencies:
   - tqdm
   - psutil
   - pyyaml
+  - pytest
 
   - pip
   - pip:
