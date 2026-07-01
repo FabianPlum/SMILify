@@ -283,6 +283,69 @@ def align_to_pytorch3d_reader_convention(
     return R_out, t_out, kp3d_out
 
 
+def recanonicalize_single_view(
+    R_cv: np.ndarray,
+    t_cv: np.ndarray,
+    kp3d: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Re-express a single chosen camera as the world origin (camera-at-origin).
+
+    This is the single-view specialisation of the multi-view canonical-frame
+    convention: instead of anchoring on the lowest-index view of a whole rig,
+    it anchors on THE ONE view being sampled, so that view's camera becomes the
+    PyTorch3D identity camera at the reader and the animal is expressed in that
+    camera's frame. It is the "stop at camera-at-origin" step used by the
+    single-view-from-multiview sampler (it deliberately does NOT fold on to the
+    legacy model-at-origin reparameterisation).
+
+    Composition (reuses `canonicalize_sample` + `align_to_pytorch3d_reader_convention`):
+
+        1. canonicalize on this view    -> OpenCV cam (I, 0), kp3d in view frame
+        2. Rz_180 world-frame alignment -> OpenCV cam (Rz_180, 0), kp3d in the
+           PyTorch3D-reader frame
+
+    Feeding the returned `(R_cv_out, t_cv_out) = (Rz_180, 0)` through
+    `SLEAPMultiViewDataset._sleap_to_pytorch3d_camera` yields exactly the
+    PyTorch3D identity camera `(R = I, T = 0)`, and `kp3d_view` lands in the
+    same world frame the trainer's mesh (`verts + trans`) lives in.
+
+    The transform is rigid, so per-view reprojection of `kp3d_view` through the
+    returned camera is byte-equivalent to the original `(K, R_cv, t_cv)`
+    reprojection of `kp3d` (guarded by
+    `tests/test_singleview_from_multiview.py`). The `(0, 0, 0)` sentinel for
+    joints without GT 3D is preserved exactly.
+
+    Args:
+        R_cv: `(3, 3)` world->camera rotation (OpenCV column-vector) for the
+            selected view.
+        t_cv: `(3,)` world->camera translation for the selected view. Apply
+            `world_scale` before calling so `kp3d` and `t_cv` share units.
+        kp3d: `(J, 3)` shared 3D keypoints in the stored world frame
+            (`world_scale` applied). All-zero rows are treated as sentinels and
+            left untransformed.
+
+    Returns:
+        `(kp3d_view, R_cv_out, t_cv_out, R_0, t_0)`:
+
+        - `kp3d_view`: `(J, 3)` keypoints in the aligned view frame
+        - `R_cv_out`, `t_cv_out`: the aligned OpenCV camera (`Rz_180`, `0`) for
+          this view; pass to `_sleap_to_pytorch3d_camera` to obtain `(I, 0)`
+        - `R_0`, `t_0`: the selected view's original extrinsics — the forward
+          `world -> view` transform. Combine with `RZ_180` to move the model's
+          root pose into the view frame:
+          `M = RZ_180 @ R_0`, `b = RZ_180 @ t_0`;
+          `root_loc_view = M @ root_loc + b`, `R_global_view = M @ R_global`.
+    """
+    R1 = np.asarray(R_cv, dtype=np.float64).reshape(1, 3, 3)
+    t1 = np.asarray(t_cv, dtype=np.float64).reshape(1, 3)
+    view_mask = np.array([True])
+
+    R_c, t_c, kp3d_c, R_0, t_0, _ = canonicalize_sample(R1, t1, kp3d, view_mask)
+    R_a, t_a, kp3d_a = align_to_pytorch3d_reader_convention(R_c, t_c, kp3d_c, view_mask)
+
+    return kp3d_a, R_a[0], t_a[0], R_0, t_0
+
+
 def infer_world_scale(t: np.ndarray, view_mask: np.ndarray, threshold: float = 50.0) -> float:
     """Mirror the `SLEAPMultiViewDataset` reader's world-scale heuristic.
 
