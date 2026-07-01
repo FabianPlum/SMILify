@@ -33,9 +33,7 @@ socket.getaddrinfo = _getaddrinfo_ipv4_only
 
 import argparse
 import os
-import sys
 import re
-import tempfile
 import pickle
 import shutil
 from pathlib import Path

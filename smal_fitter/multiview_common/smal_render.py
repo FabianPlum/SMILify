@@ -32,9 +32,7 @@ fine for the viewer (one dataset at a time) but be aware.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional, Tuple
 
 import numpy as np

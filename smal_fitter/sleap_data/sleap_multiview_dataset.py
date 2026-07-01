@@ -5,18 +5,18 @@ This module provides a PyTorch dataset class for loading preprocessed multi-view
 that is compatible with the multi-view SMILify training pipeline.
 """
 
-import os
 import torch
 import h5py
 import numpy as np
 import cv2
 import json
 from typing import Dict, List, Tuple, Optional, Any
-from pathlib import Path
-import sys
 
 
-import config
+# `config` is imported for its side effect only — importing config loads the SMAL
+# model and builds global state (see config.py); it is not referenced in this file.
+# Keep this import; do not let F401 remove it.
+import config  # noqa: F401
 
 
 class SLEAPMultiViewDataset(torch.utils.data.Dataset):

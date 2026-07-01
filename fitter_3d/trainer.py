@@ -12,7 +12,7 @@ from pytorch3d.structures import Meshes
 from tqdm import tqdm
 import torch
 import matplotlib.pyplot as plt
-from fitter_3d.utils import plot_pointclouds, plot_meshes, SDF_distance, sample_points_from_meshes_and_SDF, try_mkdir
+from fitter_3d.utils import plot_meshes, SDF_distance, sample_points_from_meshes_and_SDF, try_mkdir
 import numpy as np
 import os
 import config

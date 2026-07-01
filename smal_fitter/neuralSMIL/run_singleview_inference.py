@@ -24,10 +24,7 @@ Features:
 """
 
 import os
-import sys
 import argparse
-import glob
-import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Set
 import h5py
@@ -35,7 +32,6 @@ import json
 import pickle as pkl
 
 import torch
-import torch.nn as nn
 import numpy as np
 import cv2
 import imageio
@@ -45,13 +41,11 @@ from tqdm import tqdm
 import matplotlib
 
 matplotlib.use("Agg")
-from matplotlib import pyplot as plt
 
 
 from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
 from smal_fitter.fitter import SMALFitter
-from smal_fitter.Unreal2Pytorch3D import return_placeholder_data
 import config
 from smal_fitter.neuralSMIL.animation_export import AnimationRecorder, build_recorder_from_config
 from sleap_data_loader import SLEAPDataLoader

@@ -3,11 +3,7 @@ import torch
 from multiprocessing import Pool, cpu_count, set_start_method
 from typing import Union, Tuple
 from pytorch3d.ops.knn import knn_points
-from pytorch3d.ops.sample_points_from_meshes import _rand_barycentric_coords
-from pytorch3d.ops.mesh_face_areas_normals import mesh_face_areas_normals
 
-from pytorch3d.ops.packed_to_padded import packed_to_padded
-from pytorch3d.renderer.mesh.rasterizer import Fragments as MeshFragments
 
 import numpy as np
 import matplotlib
@@ -21,7 +17,10 @@ from pytorch3d.structures import Meshes
 
 from matplotlib.tri import Triangulation
 
-import config
+# `config` is imported for its side effect only — importing config loads the SMAL
+# model and builds global state (see config.py); it is not referenced in this file.
+# Keep this import; do not let F401 remove it.
+import config  # noqa: F401
 
 # Set the multiprocessing start method to "spawn"
 set_start_method("spawn", force=True)

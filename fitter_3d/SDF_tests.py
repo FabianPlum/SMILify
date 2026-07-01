@@ -4,10 +4,8 @@ from pytorch3d.io import load_obj
 from pytorch3d.structures import Meshes
 import matplotlib.pyplot as plt
 import os
-import sys
 from tqdm import tqdm
 from scipy.spatial import cKDTree
-from mpl_toolkits.mplot3d import Axes3D
 import time
 import psutil
 import GPUtil

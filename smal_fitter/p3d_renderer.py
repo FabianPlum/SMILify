@@ -1,16 +1,11 @@
 # Data structures and functions for rendering
 import torch
-import torch.nn.functional as F
-from scipy.io import loadmat
 import numpy as np
 import config
-import cv2
 
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import (
-    OpenGLPerspectiveCameras,
     look_at_view_transform,
-    look_at_rotation,
     RasterizationSettings,
     MeshRenderer,
     MeshRasterizer,
@@ -18,12 +13,9 @@ from pytorch3d.renderer import (
     PointLights,
     HardPhongShader,
     SoftSilhouetteShader,
-    Materials,
     Textures,
     FoVPerspectiveCameras,
 )
-from pytorch3d.io import load_objs_as_meshes
-from smal_fitter.utils import perspective_proj_withz
 
 
 class Renderer(torch.nn.Module):

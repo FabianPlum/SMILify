@@ -16,12 +16,10 @@ This test ensures that:
 """
 
 import torch
-import torch.nn as nn
 import numpy as np
 import os
 import sys
 import cv2
-import matplotlib.pyplot as plt
 from typing import Dict, Any
 
 
@@ -32,8 +30,6 @@ from smal_fitter.neuralSMIL.smil_image_regressor import (
     rotation_6d_to_axis_angle,
 )
 from smal_fitter.neuralSMIL.smil_datasets import replicAntSMILDataset
-from smal_fitter.fitter import SMALFitter
-from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_sample
 import config
 from smal_fitter.neuralSMIL.configs import apply_smal_file_override
 
@@ -493,7 +489,6 @@ def visualize_3d_keypoint_alignment(
         tolerance: Tolerance for color coding (red = above tolerance, green = within tolerance)
     """
     import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
 
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)

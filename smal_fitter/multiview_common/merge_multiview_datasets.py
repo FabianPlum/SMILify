@@ -75,8 +75,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -89,7 +87,6 @@ from tqdm import tqdm
 # Shared geometry helpers (see canonical_frame.py for the conventions doc).
 _THIS_DIR = Path(__file__).resolve().parent
 from smal_fitter.multiview_common.canonical_frame import (  # noqa: E402
-    RZ_180,
     align_to_pytorch3d_reader_convention,
     canonicalize_sample,
     infer_world_scale,

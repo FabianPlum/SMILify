@@ -16,16 +16,15 @@ import h5py
 import numpy as np
 import cv2
 import json
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Any, Optional
 from tqdm import tqdm
 import argparse
 from pathlib import Path
-import psutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 
-from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_sample, compute_keypoint_visibility
+from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_sample
 import config
 from smal_fitter.neuralSMIL.configs import apply_smal_file_override
 

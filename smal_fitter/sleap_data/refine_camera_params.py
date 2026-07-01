@@ -20,19 +20,14 @@ Usage:
 """
 
 import os
-import sys
 import argparse
 import copy
-import time
-from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, Tuple, Optional
 
-import h5py
 import numpy as np
 import cv2
 import toml
 from scipy.optimize import least_squares
-from tqdm import tqdm
 
 # Reuse functions from triangulation script
 from smal_fitter.sleap_data.triangulate_3d_points import (

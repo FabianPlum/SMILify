@@ -8,11 +8,10 @@ and iterative error feedback capabilities.
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 import config
-from pytorch3d.transforms import rotation_6d_to_matrix, matrix_to_rotation_6d
+from pytorch3d.transforms import rotation_6d_to_matrix
 
 
 class CrossAttention(nn.Module):

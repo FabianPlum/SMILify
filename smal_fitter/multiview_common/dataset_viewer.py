@@ -22,11 +22,10 @@ SMAL mesh rendering land in follow-up phases.
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import cv2
 import h5py

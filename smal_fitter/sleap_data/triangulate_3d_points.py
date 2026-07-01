@@ -16,11 +16,9 @@ Example:
 """
 
 import os
-import sys
 import argparse
 import time
 import glob
-import json
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 

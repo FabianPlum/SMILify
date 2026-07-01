@@ -17,11 +17,9 @@ from scipy.spatial import KDTree
 from mathutils import Vector
 from sklearn.decomposition import PCA
 from sklearn.covariance import EmpiricalCovariance
-import matplotlib.pyplot as plt
 import tempfile
 import csv
 import bmesh
-import time
 
 
 # TODO if you are very bored, implement package installation with subprocesses

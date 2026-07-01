@@ -5,17 +5,17 @@ This module provides a PyTorch dataset class for loading preprocessed SLEAP data
 that is compatible with the UnifiedSMILDataset interface.
 """
 
-import os
 import torch
 import h5py
 import numpy as np
 import cv2
-from typing import Dict, List, Tuple, Optional, Any
-from pathlib import Path
-import sys
+from typing import Dict, Tuple, Any
 
 
-import config
+# `config` is imported for its side effect only — importing config loads the SMAL
+# model and builds global state (see config.py); it is not referenced in this file.
+# Keep this import; do not let F401 remove it.
+import config  # noqa: F401
 
 
 class SLEAPDataset(torch.utils.data.Dataset):

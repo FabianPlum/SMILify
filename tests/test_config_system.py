@@ -9,7 +9,6 @@ overwrite of config.py (SMAL_FILE, SHAPE_FAMILY) via apply_smal_file_override.
 
 import json
 import os
-import sys
 import tempfile
 
 import pytest
@@ -17,7 +16,6 @@ import pytest
 _neural_smil = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "smal_fitter", "neuralSMIL"))
 
 from smal_fitter.neuralSMIL.configs import (
-    BaseTrainingConfig,
     SingleViewConfig,
     MultiViewConfig,
     MultiViewOutputConfig,

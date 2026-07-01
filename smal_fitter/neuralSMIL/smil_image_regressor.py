@@ -9,20 +9,17 @@ for parameter regression.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.models as models
 import numpy as np
 import cv2
 from typing import Dict, Tuple, Optional
 from scipy.spatial.transform import Rotation
 
 # Import from parent modules
-import sys
-import os
 
 from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
-from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory, BackboneInterface
+from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
 from smal_fitter.neuralSMIL.transformer_decoder import build_smil_transformer_decoder_head
 
 # Import rotation utilities from PyTorch3D

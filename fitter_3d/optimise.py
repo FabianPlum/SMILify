@@ -3,7 +3,6 @@ import argparse
 import yaml
 import os
 import warnings
-import sys
 import numpy as np
 from math import ceil
 import gc

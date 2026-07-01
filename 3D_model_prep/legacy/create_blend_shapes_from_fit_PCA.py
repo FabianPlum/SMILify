@@ -51,7 +51,6 @@ npz_filepath = "/home/fabi/dev/SMILify/fit3d_results_ref/Stage_3_deform_fine.npz
 
 try:
     from sklearn.decomposition import PCA
-    import matplotlib.pyplot as plt
 except:
     print("nWARNING: Module sklearn not found!" + "Un-comment pip install at the top of the script!\n")
     blendshapes_from_PCA = False

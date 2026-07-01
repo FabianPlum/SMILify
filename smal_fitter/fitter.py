@@ -1,8 +1,6 @@
 from smal_fitter.draw_smal_joints import SMALJointDrawer
 
-import matplotlib.pyplot as plt
 import numpy as np
-import cv2
 import pickle as pkl
 import os
 from scipy.spatial.transform import Rotation as R

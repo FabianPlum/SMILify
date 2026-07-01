@@ -7,8 +7,6 @@ Supports JSON config files with automatic curriculum key conversion.
 
 from typing import Dict, Any, Optional, Union
 import json
-import os
-import copy
 from pathlib import Path
 from dataclasses import asdict, fields, is_dataclass
 

@@ -1,4 +1,3 @@
-import sys
 
 
 import numpy as np
@@ -11,10 +10,7 @@ import os
 import json
 from pathlib import Path
 
-from csv import DictReader
-from PIL import Image, ImageFilter
 from pycocotools.mask import decode as decode_RLE
-from copy import copy
 from skimage.draw import polygon
 
 import config

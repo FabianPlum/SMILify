@@ -13,7 +13,6 @@ Or load from a JSON config file:
 This file continues to work for existing code that imports TrainingConfig directly.
 """
 
-import os
 from typing import Dict, Any, Optional, Tuple, List
 
 

@@ -20,7 +20,6 @@ import matplotlib
 matplotlib.use("Agg")
 
 import argparse
-import json
 import os
 import sys
 

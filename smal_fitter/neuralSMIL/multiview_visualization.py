@@ -13,7 +13,6 @@ from typing import Optional
 import numpy as np
 import torch
 
-from smal_fitter.neuralSMIL.smil_image_regressor import rotation_6d_to_axis_angle
 
 
 def run_forward_multiview_single_sample(model, x_data: dict, y_data: dict, device: str) -> Optional[dict]:
