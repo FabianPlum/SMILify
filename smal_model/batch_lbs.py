@@ -102,7 +102,7 @@ def batch_global_rigid_transformation(
     if rotate_base:
         print("Flipping the SMPL coordinate frame!!!!")
         rot_x = torch.Tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
-        rot_x = torch.reshape(torch.repeat(rot_x, [N, 1]), [N, 3, 3])
+        rot_x = torch.reshape(torch.repeat(rot_x, [N, 1]), [N, 3, 3])  # noqa: F821  (tracked in #61)
         root_rotation = torch.matmul(Rs[:, 0, :, :], rot_x)
     else:
         root_rotation = Rs[:, 0, :, :]

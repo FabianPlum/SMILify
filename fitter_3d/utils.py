@@ -323,7 +323,7 @@ def animator(ax):
 def save_animation(fig, func, n_frames, fmt="gif", fps=15, title="output", callback=True, **kwargs):
     """Save matplotlib animation."""
 
-    arap_utils.save_animation(fig, func, n_frames, fmt=fmt, fps=fps, title=title, callback=callback, **kwargs)
+    arap_utils.save_animation(fig, func, n_frames, fmt=fmt, fps=fps, title=title, callback=callback, **kwargs)  # noqa: F821  (tracked in #63)
 
 
 def load_meshes(mesh_dir=None, mesh_files=None, sorting=lambda arr: arr, n_meshes=None, frame_step=1, device="cuda:0"):

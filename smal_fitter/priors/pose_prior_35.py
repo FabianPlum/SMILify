@@ -478,7 +478,7 @@ if __name__ == "__main__":
     # path_toy = join(data_dir, 'smpl_align_results_all_mix_from_56.pkl')
     # path_toy = join(data_dir, 'smpl_align_results_all_0073nm_im.pkl')
 
-    seq_paths = [seq_path_walking, path_toy]
+    seq_paths = [seq_path_walking, path_toy]  # noqa: F821  (tracked in #64)
     # seq_paths = [seq_path_toys]
     data_save_dir = join(data_dir, "pose_prior")
 
@@ -494,7 +494,7 @@ if __name__ == "__main__":
                 prefix += ["walking"]
         elif seq == seq_path_silvia:
             prefix += ["silvia"]
-        elif seq == path_toy:
+        elif seq == path_toy:  # noqa: F821  (tracked in #64)
             prefix += ["toy"]
 
     prefix = "_".join(prefix)
@@ -571,7 +571,7 @@ if __name__ == "__main__":
                 poses = model31_to_33(poses)
             if is35parts:
                 poses = model31_to_35(poses)
-        elif seq_path == path_toy:
+        elif seq_path == path_toy:  # noqa: F821  (tracked in #64)
             with open(seq_path) as f:
                 data = pkl.load(f)
             poses = data["P"]

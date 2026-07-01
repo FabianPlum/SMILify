@@ -314,7 +314,7 @@ class SLEAP3DDataLoader:
                                 if "Camera" in calib_name:
                                     calib_num = int(calib_name.replace("Camera", ""))
                                 if "cam" in dir_name.lower():
-                                    nums = re.findall(r"\d+", dir_name)
+                                    nums = re.findall(r"\d+", dir_name)  # noqa: F823  (tracked in #62)
                                     if nums:
                                         dir_num = int(nums[0])
                                 if calib_num is not None and dir_num is not None and calib_num == dir_num:
