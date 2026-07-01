@@ -68,7 +68,8 @@ The example model is a **ViT-Large** multi-view stick model. Run from the repo r
 python smal_fitter/neuralSMIL/benchmark_model.py \
     --checkpoint SMILySTICKS_ViT_model.pth \
     --dataset_path SMILySTICKS_centred_reprojected_FIXED.h5 \
-    --smal-file 3D_model_prep/SMILy_STICK.pkl
+    --smal-file 3D_model_prep/SMILy_STICK.pkl \
+    --orig_width 1530 --orig_height 1530
 ```
 
 This evaluates the model on the dataset's held-out **test split** and writes a folder
@@ -88,6 +89,7 @@ On the console you'll see **PCK@5px** (2D accuracy) and — because this dataset
 > - Watch the flag spelling: `--dataset_path` (underscore) but `--smal-file` (hyphen).
 > - Always pass `--smal-file` — some checkpoints don't embed the model path and the run will abort without it.
 > - Add `--max_batches 2` for a fast first-run sanity check.
+> - **Pass `--orig_width` / `--orig_height` = the dataset's original capture resolution** so PCK is scored in original-image pixels (both are required together, or the run errors). The stick-insect dataset is **1530 px square** → `--orig_width 1530 --orig_height 1530`.
 >
 > Full reference: [Benchmarking](README.md#benchmarking).
 

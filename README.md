@@ -299,8 +299,11 @@ The model type is **auto-detected** from the checkpoint — no flag needed:
 python smal_fitter/neuralSMIL/benchmark_model.py \
     --checkpoint multiview_checkpoints/best_model.pth \
     --dataset_path output_dataset.h5 \
-    --smal-file 3D_model_prep/SMILy_STICK.pkl
+    --smal-file 3D_model_prep/SMILy_STICK.pkl \
+    --orig_width 1530 --orig_height 1530
 ```
+
+> **Set `--orig_width` / `--orig_height` to the dataset's original capture resolution** (both required together) so PCK@Npx is scored in original-image pixels rather than the preprocessed size. E.g. the stick-insect dataset is 1530 px square → `--orig_width 1530 --orig_height 1530`; use your own dataset's resolution otherwise.
 
 **Metrics reported:**
 
@@ -330,7 +333,7 @@ python smal_fitter/neuralSMIL/benchmark_model.py \
 | `--dataset_path` | _(required)_ | Path to preprocessed `.h5` dataset |
 | `--smal-file` | _(checkpoint)_ | SMIL/SMAL model `.pkl` (required if not stored in checkpoint) |
 | `--device` | auto | Force device, e.g. `cuda:0` or `cpu` |
-| `--orig_width` / `--orig_height` | _(dataset)_ | Override image size used for pixel-space PCK scaling |
+| `--orig_width` / `--orig_height` | _(dataset)_ | Original capture resolution for pixel-space PCK scaling; **pass both** (e.g. `1530` / `1530` for the stick dataset). |
 
 ## Adding new parametric models
 
