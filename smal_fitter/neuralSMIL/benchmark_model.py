@@ -16,6 +16,7 @@ Outputs:
 
 # Set matplotlib backend BEFORE any other imports
 import matplotlib
+
 matplotlib.use("Agg")
 
 import argparse
@@ -28,6 +29,7 @@ import sys
 # config.py imports no torch, so importing it here is safe. setdefault lets an explicit
 # external CUDA_VISIBLE_DEVICES (e.g. for a specific/multi GPU with --device) still win.
 import config
+
 os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", config.GPU_IDS)
 
@@ -82,6 +84,7 @@ def _format_value(val) -> str:
 def _collect_hdf5_inventory(hdf5_path: str) -> List[str]:
     lines = []
     with h5py.File(hdf5_path, "r") as f:
+
         def _visit(name, obj):
             if isinstance(obj, h5py.Dataset):
                 lines.append(f"DATASET: {name} | shape={obj.shape} | dtype={obj.dtype}")
@@ -90,6 +93,7 @@ def _collect_hdf5_inventory(hdf5_path: str) -> List[str]:
                 if obj.attrs:
                     for k, v in obj.attrs.items():
                         lines.append(f"  ATTR {name}.{k}: {_format_value(v)}")
+
         f.visititems(_visit)
     return lines
 
@@ -151,7 +155,9 @@ def _log_keypoint_rescaling_info(
         )
 
 
-def _collect_aspect_ratio_tensor(y_data_batch: List[Dict], view_idx: int, device: torch.device) -> Optional[torch.Tensor]:
+def _collect_aspect_ratio_tensor(
+    y_data_batch: List[Dict], view_idx: int, device: torch.device
+) -> Optional[torch.Tensor]:
     aspects = []
     has_any = False
     for yd in y_data_batch:
@@ -322,13 +328,25 @@ def _plot_3d_keypoints_by_percentile(
                 continue
             # GT points (circles)
             ax.scatter(
-                gt[mask, 0], gt[mask, 1], gt[mask, 2],
-                color=bin_colors[b], s=30, marker="o", label=f"{bin_labels[b]} GT", alpha=0.9
+                gt[mask, 0],
+                gt[mask, 1],
+                gt[mask, 2],
+                color=bin_colors[b],
+                s=30,
+                marker="o",
+                label=f"{bin_labels[b]} GT",
+                alpha=0.9,
             )
             # Pred points (crosses)
             ax.scatter(
-                pred[mask, 0], pred[mask, 1], pred[mask, 2],
-                color=bin_colors[b], s=45, marker="x", label=f"{bin_labels[b]} Pred", alpha=0.9
+                pred[mask, 0],
+                pred[mask, 1],
+                pred[mask, 2],
+                color=bin_colors[b],
+                s=45,
+                marker="x",
+                label=f"{bin_labels[b]} Pred",
+                alpha=0.9,
             )
             # Connect GT -> Pred
             for i in np.where(mask)[0]:
@@ -361,6 +379,7 @@ def _plot_3d_keypoints_by_percentile(
 # Single-view helpers
 # ---------------------------------------------------------------------------
 
+
 def _create_singleview_model(
     checkpoint: dict,
     device: torch.device,
@@ -380,10 +399,9 @@ def _create_singleview_model(
 
     if ckpt_config:
         model_config = {**fallback_model, **ckpt_config.get("model_config", {})}
-        rotation_representation = (
-            (ckpt_config.get("training_params") or {}).get("rotation_representation")
-            or fallback_params.get("rotation_representation", "6d")
-        )
+        rotation_representation = (ckpt_config.get("training_params") or {}).get(
+            "rotation_representation"
+        ) or fallback_params.get("rotation_representation", "6d")
         scale_trans_mode = ckpt_config.get("scale_trans_mode") or TrainingConfig.get_scale_trans_mode()
         shape_family = ckpt_config.get("shape_family", config.SHAPE_FAMILY)
     else:
@@ -410,6 +428,7 @@ def _create_singleview_model(
 
     backbone_name = model_config["backbone_name"]
     from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
+
     input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
     log_fn("Singleview model config:")
@@ -447,11 +466,19 @@ def _create_singleview_model(
     # Load weights (filter out SMAL optimization params, same as inference script)
     state_dict = checkpoint["model_state_dict"]
     smal_optimization_params = [
-        "global_rotation", "joint_rotations", "trans", "log_beta_scales",
-        "betas_trans", "betas", "fov", "target_joints", "target_visibility",
+        "global_rotation",
+        "joint_rotations",
+        "trans",
+        "log_beta_scales",
+        "betas_trans",
+        "betas",
+        "fov",
+        "target_joints",
+        "target_visibility",
     ]
     nn_state_dict = {
-        k: v for k, v in state_dict.items()
+        k: v
+        for k, v in state_dict.items()
         if not any(k == p or k.startswith(p + ".") for p in smal_optimization_params)
     }
     missing, unexpected = model.load_state_dict(nn_state_dict, strict=False)
@@ -470,13 +497,14 @@ def _create_singleview_model(
         "shape_family": shape_family,
         "backbone_name": backbone_name,
         "input_resolution": input_resolution,
-        "batch_size": ckpt_config.get("training_params", {}).get("batch_size",
-                      fallback_params.get("batch_size", 4)),
-        "seed": ckpt_config.get("training_params", {}).get("seed",
-                fallback_params.get("seed", 0)),
-        "train_ratio": training_config_fallback.get("split_config", {}).get("train_size",
-                       1.0 - training_config_fallback.get("split_config", {}).get("val_size", 0.1)
-                             - training_config_fallback.get("split_config", {}).get("test_size", 0.1)),
+        "batch_size": ckpt_config.get("training_params", {}).get("batch_size", fallback_params.get("batch_size", 4)),
+        "seed": ckpt_config.get("training_params", {}).get("seed", fallback_params.get("seed", 0)),
+        "train_ratio": training_config_fallback.get("split_config", {}).get(
+            "train_size",
+            1.0
+            - training_config_fallback.get("split_config", {}).get("val_size", 0.1)
+            - training_config_fallback.get("split_config", {}).get("test_size", 0.1),
+        ),
         "val_ratio": training_config_fallback.get("split_config", {}).get("val_size", 0.1),
     }
     return model, resolved
@@ -509,7 +537,10 @@ def _compute_pck_errors_singleview(
 
     # Render predicted 2D joints (normalised [0, 1] in [y, x] order)
     rendered_joints, _, _ = model._compute_rendered_outputs(
-        predicted_params, compute_joints=True, compute_silhouette=False, compute_joints_3d=False,
+        predicted_params,
+        compute_joints=True,
+        compute_silhouette=False,
+        compute_joints_3d=False,
     )
     if rendered_joints is None:
         return [], []
@@ -575,7 +606,8 @@ def _run_singleview_benchmark(
 ):
     """Full benchmark loop for a single-view checkpoint."""
     model, sv_config = _create_singleview_model(
-        checkpoint, device,
+        checkpoint,
+        device,
         smal_file_override=args.smal_file,
         shape_family_override=args.shape_family,
         log_fn=log_fn,
@@ -614,7 +646,8 @@ def _run_singleview_benchmark(
     test_size = total_size - train_size - val_size
 
     train_set, val_set, test_set = torch.utils.data.random_split(
-        dataset, [train_size, val_size, test_size],
+        dataset,
+        [train_size, val_size, test_size],
         generator=torch.Generator().manual_seed(sv_config["seed"]),
     )
     log_fn("\nDataset split sizes:")
@@ -650,7 +683,9 @@ def _run_singleview_benchmark(
             if args.max_batches is not None and batch_idx >= args.max_batches:
                 break
             batch_native, batch_input = _compute_pck_errors_singleview(
-                model, x_data_batch, y_data_batch,
+                model,
+                x_data_batch,
+                y_data_batch,
                 default_resolution=target_resolution,
                 override_size=override_size,
                 input_resolution=input_resolution,
@@ -667,18 +702,27 @@ def _run_singleview_benchmark(
     _log_pck_block(log_fn, input_label, inp)
 
     # Separate plot per resolution (single curve each) + per-resolution histograms
-    _save_pck_plot(native["pck_values"], output_dir,
-                   filename="pck_curve_native.png",
-                   title=f"PCK vs Pixel Threshold ({native_label})")
-    _save_pck_plot(inp["pck_values"], output_dir,
-                   filename="pck_curve_input.png",
-                   title=f"PCK vs Pixel Threshold ({input_label})")
-    _save_error_histogram(native["errors_px"], output_dir,
-                          filename="error_histogram_native.png",
-                          title=f"2D Keypoint Error Histogram ({native_label})")
-    _save_error_histogram(inp["errors_px"], output_dir,
-                          filename="error_histogram_input.png",
-                          title=f"2D Keypoint Error Histogram ({input_label})")
+    _save_pck_plot(
+        native["pck_values"],
+        output_dir,
+        filename="pck_curve_native.png",
+        title=f"PCK vs Pixel Threshold ({native_label})",
+    )
+    _save_pck_plot(
+        inp["pck_values"], output_dir, filename="pck_curve_input.png", title=f"PCK vs Pixel Threshold ({input_label})"
+    )
+    _save_error_histogram(
+        native["errors_px"],
+        output_dir,
+        filename="error_histogram_native.png",
+        title=f"2D Keypoint Error Histogram ({native_label})",
+    )
+    _save_error_histogram(
+        inp["errors_px"],
+        output_dir,
+        filename="error_histogram_input.png",
+        title=f"2D Keypoint Error Histogram ({input_label})",
+    )
 
     # Save raw errors
     np.save(os.path.join(output_dir, "errors_2d_px_native.npy"), native["errors_px"])
@@ -695,10 +739,7 @@ def _log_keypoint_rescaling_info_sv(log_fn, target_resolution: int, override_siz
     if override_size is not None:
         log_fn(f"2D keypoint scaling: using override size {override_size[1]}x{override_size[0]}")
     else:
-        log_fn(
-            f"2D keypoint scaling: using target_resolution "
-            f"{target_resolution}x{target_resolution}"
-        )
+        log_fn(f"2D keypoint scaling: using target_resolution {target_resolution}x{target_resolution}")
 
 
 # ---------------------------------------------------------------------------
@@ -788,6 +829,7 @@ def _save_error_histogram(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Benchmark SMIL Model (auto-detects single-view vs multi-view)",
@@ -801,14 +843,23 @@ def main():
     parser.add_argument("--max_batches", type=int, default=None, help="Limit number of test batches")
     parser.add_argument("--orig_width", type=int, default=None, help="Override original image width (pixels)")
     parser.add_argument("--orig_height", type=int, default=None, help="Override original image height (pixels)")
-    parser.add_argument("--smal-file", type=str, default=None,
-                       help="Path to SMAL/SMIL model pickle. Overrides checkpoint value. "
-                            "Required if checkpoint does not contain smal_file.")
-    parser.add_argument("--shape-family", type=int, default=None,
-                       help="Shape family index (overrides checkpoint value)")
+    parser.add_argument(
+        "--smal-file",
+        type=str,
+        default=None,
+        help="Path to SMAL/SMIL model pickle. Overrides checkpoint value. "
+        "Required if checkpoint does not contain smal_file.",
+    )
+    parser.add_argument(
+        "--shape-family", type=int, default=None, help="Shape family index (overrides checkpoint value)"
+    )
     # Multi-view only options
-    parser.add_argument("--num_views_to_use", type=int, default=None, help="Override num views per sample (multi-view only)")
-    parser.add_argument("--no_random_view_sampling", action="store_true", help="Disable random view sampling (multi-view only)")
+    parser.add_argument(
+        "--num_views_to_use", type=int, default=None, help="Override num views per sample (multi-view only)"
+    )
+    parser.add_argument(
+        "--no_random_view_sampling", action="store_true", help="Disable random view sampling (multi-view only)"
+    )
     args = parser.parse_args()
 
     # Device setup
@@ -824,12 +875,11 @@ def main():
     # Output directory (includes model type for clarity)
     ckpt_stem = _safe_stem(args.checkpoint)
     dataset_stem = _safe_stem(args.dataset_path)
-    output_dir = os.path.join(
-        os.getcwd(), f"benchmark_{model_type}_{ckpt_stem}_on_{dataset_stem}"
-    )
+    output_dir = os.path.join(os.getcwd(), f"benchmark_{model_type}_{ckpt_stem}_on_{dataset_stem}")
     os.makedirs(output_dir, exist_ok=True)
 
     log_lines = []
+
     def log(msg: str):
         print(msg)
         log_lines.append(str(msg))
@@ -937,21 +987,23 @@ def _run_multiview_benchmark(
     log_fn("\nInferring model architecture from checkpoint...")
     state_dict = checkpoint.get("model_state_dict", checkpoint)
 
-    if 'view_embeddings.weight' in state_dict:
-        max_views = state_dict['view_embeddings.weight'].shape[0]
+    if "view_embeddings.weight" in state_dict:
+        max_views = state_dict["view_embeddings.weight"].shape[0]
         log_fn(f"Inferred max_views={max_views} from checkpoint view_embeddings.weight shape")
     else:
         max_views = config_from_ckpt.get("max_views", dataset_max_views)
         log_fn(f"Using max_views={max_views} from checkpoint config or dataset")
 
     # Infer hidden_dim from state_dict to avoid architecture mismatch when config is stale
-    if 'transformer_head.pos_embedding' in state_dict:
-        inferred_hidden_dim = state_dict['transformer_head.pos_embedding'].shape[-1]
+    if "transformer_head.pos_embedding" in state_dict:
+        inferred_hidden_dim = state_dict["transformer_head.pos_embedding"].shape[-1]
         config_hidden_dim = config_from_ckpt.get("hidden_dim", 1024)
         if inferred_hidden_dim != config_hidden_dim:
-            log_fn(f"WARNING: config hidden_dim={config_hidden_dim} does not match checkpoint "
-                   f"transformer_head.pos_embedding dim={inferred_hidden_dim}. "
-                   f"Using inferred value.")
+            log_fn(
+                f"WARNING: config hidden_dim={config_hidden_dim} does not match checkpoint "
+                f"transformer_head.pos_embedding dim={inferred_hidden_dim}. "
+                f"Using inferred value."
+            )
         config_from_ckpt["hidden_dim"] = inferred_hidden_dim
         # Also update transformer_config so the transformer head is built with the correct dim
         if "transformer_config" not in config_from_ckpt or not isinstance(config_from_ckpt["transformer_config"], dict):
@@ -964,11 +1016,13 @@ def _run_multiview_benchmark(
         canonical_camera_order = dataset_canonical_camera_order
         if len(canonical_camera_order) != max_views:
             canonical_camera_order = [f"Camera{i}" for i in range(max_views)]
-            log_fn(f"Created placeholder canonical camera order (indices 0-{max_views-1})")
+            log_fn(f"Created placeholder canonical camera order (indices 0-{max_views - 1})")
     else:
         log_fn(f"Loaded canonical camera order from checkpoint: {canonical_camera_order}")
 
-    log_fn(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
+    log_fn(
+        f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras"
+    )
     if max_views > dataset_max_views:
         log_fn(f"Note: Model supports {max_views} views, dataset has up to {dataset_max_views} views")
         log_fn("      Model will handle samples with fewer views via view_mask")
@@ -990,8 +1044,7 @@ def _run_multiview_benchmark(
     test_size = total_size - train_size - val_size
 
     train_set, val_set, test_set = torch.utils.data.random_split(
-        dataset, [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(config_from_ckpt["seed"])
+        dataset, [train_size, val_size, test_size], generator=torch.Generator().manual_seed(config_from_ckpt["seed"])
     )
 
     log_fn("\nDataset split sizes:")
@@ -1005,12 +1058,13 @@ def _run_multiview_benchmark(
         shuffle=False,
         num_workers=config_from_ckpt.get("num_workers", 4),
         pin_memory=config_from_ckpt.get("pin_memory", True),
-        collate_fn=multiview_collate_fn
+        collate_fn=multiview_collate_fn,
     )
 
     # Create model (mirror training script)
     backbone_name = config_from_ckpt["backbone_name"]
     from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
+
     input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
     log_fn(f"\nUsing input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
 
@@ -1052,7 +1106,7 @@ def _run_multiview_benchmark(
         allow_mesh_scaling=allow_mesh_scaling,
         mesh_scale_init=mesh_scale_init,
         use_gt_camera_init=use_gt_camera_init,
-        transformer_config=config_from_ckpt.get("transformer_config", {})
+        transformer_config=config_from_ckpt.get("transformer_config", {}),
     )
     model = model.to(device)
 
@@ -1071,9 +1125,7 @@ def _run_multiview_benchmark(
             if args.max_batches is not None and batch_idx >= args.max_batches:
                 break
 
-            predicted_params, _, _ = model.predict_from_multiview_batch(
-                x_data_batch, y_data_batch
-            )
+            predicted_params, _, _ = model.predict_from_multiview_batch(x_data_batch, y_data_batch)
             pred_joints_np = model._predict_canonical_joints_3d(predicted_params).detach().cpu().numpy()
 
             batch_native, batch_input = _compute_pck_errors(
@@ -1123,11 +1175,13 @@ def _run_multiview_benchmark(
                     dist = np.linalg.norm(diff, axis=1)
                     scale = 1.0 / float(dataset.world_scale) if float(dataset.world_scale) != 0.0 else 1.0
                     dist_mm = dist * scale
-                    samples_3d_for_plot.append({
-                        "gt": gt_slice[valid_joint_mask],
-                        "pred": pred_slice[valid_joint_mask],
-                        "errors_mm": dist_mm,
-                    })
+                    samples_3d_for_plot.append(
+                        {
+                            "gt": gt_slice[valid_joint_mask],
+                            "pred": pred_slice[valid_joint_mask],
+                            "errors_mm": dist_mm,
+                        }
+                    )
 
     # Compute PCK metrics at both resolutions
     native = _summarize_pck(all_errors_native)
@@ -1168,18 +1222,27 @@ def _run_multiview_benchmark(
         )
 
     # Separate plot per resolution (single curve each) + per-resolution histograms
-    _save_pck_plot(native["pck_values"], output_dir,
-                   filename="pck_curve_native.png",
-                   title=f"PCK vs Pixel Threshold ({native_label})")
-    _save_pck_plot(inp["pck_values"], output_dir,
-                   filename="pck_curve_input.png",
-                   title=f"PCK vs Pixel Threshold ({input_label})")
-    _save_error_histogram(native["errors_px"], output_dir,
-                          filename="error_histogram_native.png",
-                          title=f"2D Keypoint Error Histogram ({native_label})")
-    _save_error_histogram(inp["errors_px"], output_dir,
-                          filename="error_histogram_input.png",
-                          title=f"2D Keypoint Error Histogram ({input_label})")
+    _save_pck_plot(
+        native["pck_values"],
+        output_dir,
+        filename="pck_curve_native.png",
+        title=f"PCK vs Pixel Threshold ({native_label})",
+    )
+    _save_pck_plot(
+        inp["pck_values"], output_dir, filename="pck_curve_input.png", title=f"PCK vs Pixel Threshold ({input_label})"
+    )
+    _save_error_histogram(
+        native["errors_px"],
+        output_dir,
+        filename="error_histogram_native.png",
+        title=f"2D Keypoint Error Histogram ({native_label})",
+    )
+    _save_error_histogram(
+        inp["errors_px"],
+        output_dir,
+        filename="error_histogram_input.png",
+        title=f"2D Keypoint Error Histogram ({input_label})",
+    )
 
     # MPJPE histogram (multi-view only)
     mpjpe_hist_path = os.path.join(output_dir, "mpjpe_histogram.png")
@@ -1206,7 +1269,9 @@ def _run_multiview_benchmark(
     log_fn("  Error histograms: error_histogram_native.png, error_histogram_input.png")
     log_fn(f"  MPJPE histogram: {mpjpe_hist_path}")
     if errors_mm.size > 0 and samples_3d_for_plot:
-        log_fn(f"  3D percentile plots: {os.path.join(output_dir, 'sample_00_3d_keypoints_percentiles.png')} (and next 4)")
+        log_fn(
+            f"  3D percentile plots: {os.path.join(output_dir, 'sample_00_3d_keypoints_percentiles.png')} (and next 4)"
+        )
 
 
 if __name__ == "__main__":

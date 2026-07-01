@@ -1,8 +1,10 @@
 import os as _os, sys as _sys
+
 if __name__ == "__main__":
     # Set CUDA_VISIBLE_DEVICES BEFORE torch is imported below: torch >= 2.3 raises an
     # INTERNAL ASSERT if it changes after CUDA init. Guarded so importers are unaffected.
     import config as _config
+
     _os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     _os.environ["CUDA_VISIBLE_DEVICES"] = _config.GPU_IDS
 
@@ -43,6 +45,7 @@ from pytorch3d.renderer import (
 """
 General / Helper functions
 """
+
 
 def _reorder_dirs_array(dirs: np.ndarray, bones_len: int, what: str = "input array") -> np.ndarray:
     """
@@ -101,19 +104,19 @@ def sample_pca_transforms_from_dirs(dd: dict, scale_weights, trans_weights, bone
     if dd is None:
         raise ValueError("dd must be provided and contain PCA dirs")
 
-    if 'scaledirs' not in dd:
+    if "scaledirs" not in dd:
         raise KeyError("scaledirs not found in dd")
-    if 'transdirs' not in dd:
+    if "transdirs" not in dd:
         raise KeyError("transdirs not found in dd")
 
-    scaledirs_raw = dd['scaledirs']
-    transdirs_raw = dd['transdirs']
+    scaledirs_raw = dd["scaledirs"]
+    transdirs_raw = dd["transdirs"]
 
     # Prepare bone names first so we know expected joint axis size
     if bone_names is None:
-        if 'J_names' not in dd:
+        if "J_names" not in dd:
             raise KeyError("J_names not found in dd and bone_names not provided")
-        bone_names = dd['J_names']
+        bone_names = dd["J_names"]
     bones_len = len(bone_names)
 
     # Convert to numpy if needed (in case of lists)
@@ -121,8 +124,8 @@ def sample_pca_transforms_from_dirs(dd: dict, scale_weights, trans_weights, bone
     transdirs_raw = np.asarray(transdirs_raw)
 
     # reorder scaledirs and transdirs to match the expected shape (J, 3, C)
-    scaledirs = _reorder_dirs_array(scaledirs_raw, bones_len=bones_len, what='scaledirs')
-    transdirs = _reorder_dirs_array(transdirs_raw, bones_len=bones_len, what='transdirs')
+    scaledirs = _reorder_dirs_array(scaledirs_raw, bones_len=bones_len, what="scaledirs")
+    transdirs = _reorder_dirs_array(transdirs_raw, bones_len=bones_len, what="transdirs")
 
     num_joints_s, _, num_pcs_s = scaledirs.shape
     num_joints_t, _, num_pcs_t = transdirs.shape
@@ -139,9 +142,7 @@ def sample_pca_transforms_from_dirs(dd: dict, scale_weights, trans_weights, bone
 
     # Check component counts
     if scale_weights.shape[0] != num_pcs_s:
-        raise ValueError(
-            f"scale_weights length ({scale_weights.shape[0]}) must equal num scale PCs ({num_pcs_s})"
-        )
+        raise ValueError(f"scale_weights length ({scale_weights.shape[0]}) must equal num scale PCs ({num_pcs_s})")
     if trans_weights.shape[0] != num_pcs_t:
         raise ValueError(
             f"trans_weights length ({trans_weights.shape[0]}) must equal num translation PCs ({num_pcs_t})"
@@ -160,6 +161,7 @@ def sample_pca_transforms_from_dirs(dd: dict, scale_weights, trans_weights, bone
     scale_sum = 1.0 + scale_sum
 
     return translation_sum.astype(np.float32), scale_sum.astype(np.float32)
+
 
 """
 Unreal data parsing functions
@@ -186,12 +188,12 @@ def _detect_pose_root(pose_data):
 def parse_projection_components(iteration_data_file):
     """
     Parse Unreal Engine view projection matrix into rotation and translation components.
-    
+
     Args:
         iteration_data_file (dict): JSON data containing Unreal Engine iteration data.
                                    Must have structure: {"iterationData": {"camera": {"View Matrix": {...}}}}
                                    where View Matrix contains wPlane, xPlane, yPlane, zPlane components.
-    
+
     Returns:
         tuple: (cam_rot, cam_trans)
             - cam_rot (np.ndarray): 3x3 rotation matrix extracted from view matrix
@@ -204,9 +206,7 @@ def parse_projection_components(iteration_data_file):
     y = input_matrix["yPlane"]
     z = input_matrix["zPlane"]
     # now, assign the respective transposed values to the rotation...
-    cam_rot = np.array(
-        [[x["x"], y["x"], z["x"]], [x["y"], y["y"], z["y"]], [x["z"], y["z"], z["z"]]]
-    )
+    cam_rot = np.array([[x["x"], y["x"], z["x"]], [x["y"], y["y"], z["y"]], [x["z"], y["z"], z["z"]]])
     # and the translation
     cam_trans = np.array([w["x"], w["y"], w["z"]])
     # There. Tried to do it differently, had a break down, now it works.
@@ -217,23 +217,23 @@ def parse_projection_components(iteration_data_file):
 def parse_camera_intrinsics(batch_data_file, iteration_data_file):
     """
     Parse camera intrinsic parameters from Unreal Engine data files.
-    
+
     Calculates camera intrinsic parameters (principal point and focal length) from
     image resolution and field of view data. Uses the standard pinhole camera model.
-    
+
     Args:
         batch_data_file (dict): JSON data containing batch information including image resolution.
                                Must have structure: {"Image Resolution": {"x": int, "y": int}}
         iteration_data_file (dict): JSON data containing iteration-specific camera data.
                                    Must have structure: {"iterationData": {"camera": {"FOV": float}}}
-    
+
     Returns:
         tuple: (cx, cy, fx, fy)
             - cx (float): Principal point x-coordinate (image center x)
-            - cy (float): Principal point y-coordinate (image center y) 
+            - cy (float): Principal point y-coordinate (image center y)
             - fx (float): Focal length in x-direction (pixels)
             - fy (float): Focal length in y-direction (pixels)
-    
+
     Note:
         Assumes square pixels (fx = fy). The principal point is assumed to be at
         the center of the image (cx = width/2, cy = height/2).
@@ -255,13 +255,15 @@ def parse_camera_intrinsics(batch_data_file, iteration_data_file):
     return cx, cy, fx, fy
 
 
-def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, keypoints_2d=None, keypoint_visibility=None, silhouette=None):
+def return_placeholder_data(
+    input_image=None, num_joints=55, pose_data=None, keypoints_2d=None, keypoint_visibility=None, silhouette=None
+):
     """
     Create placeholder data for SMALFitter initialization from Unreal Engine pose data.
-    
+
     Prepares input data in the format expected by SMALFitter class. Can load an actual
     image or create placeholder tensors. Supports both raw pose_data and preprocessed keypoints.
-    
+
     Args:
         input_image (str, optional): Path to input image file. If None, creates placeholder
                                     tensors with default size (512, 512). Default is None.
@@ -269,11 +271,11 @@ def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, key
         pose_data (dict, optional): Dictionary containing 2D joint positions from Unreal data.
                                    Expected format: {joint_name: {"2DPos": {"x": float, "y": float}}}
                                    If None and keypoints_2d is None, creates zero tensors.
-        keypoints_2d (np.ndarray, optional): Preprocessed normalized 2D keypoint coordinates 
+        keypoints_2d (np.ndarray, optional): Preprocessed normalized 2D keypoint coordinates
                                             of shape (num_joints, 2) with values in [0, 1].
         keypoint_visibility (np.ndarray, optional): Visibility array of shape (num_joints,).
         silhouette (np.ndarray, optional): Silhouette array of shape (H, W).
-    
+
     Returns:
         tuple: ((rgb, sil, joints, visibility), filenames)
             - rgb (torch.Tensor): RGB image tensor of shape (1, 3, H, W) with values in [0, 1]
@@ -281,11 +283,11 @@ def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, key
             - joints (torch.Tensor): Joint positions tensor of shape (1, num_joints, 2) in pixel coordinates
             - visibility (torch.Tensor): Joint visibility tensor of shape (1, num_joints)
             - filenames (list): List containing the input image filename or ["PLACEHOLDER"]
-    
+
     Note:
         Prioritizes keypoints_2d/keypoint_visibility over pose_data if both are provided.
         Converts normalized coordinates to pixel coordinates based on loaded image size.
-    
+
     """
     image_size = (512, 512)
     # pass a placeholder to the SMALFitter class as we are not actually going to provide any normal input data
@@ -316,21 +318,16 @@ def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, key
         # keypoints_2d from load_SMIL_Unreal_sample is already in [y_norm, x_norm] format
         # which matches what draw_joints expects [y, x], so just scale to pixels
         pixel_coords = keypoints_2d.copy()
-        pixel_coords[:, 0] = pixel_coords[:, 0] * image_size[0]  # y coordinates  
+        pixel_coords[:, 0] = pixel_coords[:, 0] * image_size[0]  # y coordinates
         pixel_coords[:, 1] = pixel_coords[:, 1] * image_size[1]  # x coordinates
-        
+
         joints = torch.tensor(pixel_coords.reshape(1, num_joints, 2), dtype=torch.float32)
         visibility = torch.tensor(keypoint_visibility.reshape(1, num_joints), dtype=torch.float32)
     elif pose_data is not None:
         # NOTE: This does not actually display the ground truth points directly.
         # Setting the visibility of the joints to 1 simply means, that the joints of the posed model are displayed.
-        display_points_2D = [
-            [pose_data[key]["2DPos"]["y"], pose_data[key]["2DPos"]["x"]]
-            for key in pose_data.keys()
-        ]
-        joints = torch.tensor(
-            np.array(display_points_2D).reshape(1, num_joints, 2), dtype=torch.float32
-        )
+        display_points_2D = [[pose_data[key]["2DPos"]["y"], pose_data[key]["2DPos"]["x"]] for key in pose_data.keys()]
+        joints = torch.tensor(np.array(display_points_2D).reshape(1, num_joints, 2), dtype=torch.float32)
         visibility = torch.ones((1, num_joints))
     else:
         joints = torch.zeros((1, num_joints, 2))
@@ -342,17 +339,17 @@ def return_placeholder_data(input_image=None, num_joints=55, pose_data=None, key
 def map_joint_order(joint_names_smil, joint_names_input, joints):
     """
     Map joint data to SMIL joint order regardless of input joint ordering.
-    
+
     Args:
         joint_names_smil (list): List of joint names in the order expected by SMIL model.
         joint_names_input (list): List of joint names from the input data (Unreal Engine).
         joints (np.ndarray): Array of shape (N, 3) containing joint positions/angles
                             corresponding to joint_names_input order.
-    
+
     Returns:
         np.ndarray: Array of shape (len(joint_names_smil), 3) with joint data reordered
                    to match SMIL joint name order. Unmatched joints are filled with zeros.
-    
+
     Note:
         The root bone is expected to be the first entry in joint_names_smil.
         Joints that don't have a matching name in the input data will be set to zero.
@@ -367,25 +364,26 @@ def map_joint_order(joint_names_smil, joint_names_input, joints):
 
     return new_joint_locs
 
+
 def get_joint_angles_from_pose_data(pose_data):
     """
     Extract joint rotation angles from Unreal Engine pose data in quaternion format.
-    
+
     Converts quaternion rotations from Unreal Engine pose data to angle-axis representation
     suitable for SMIL model. Handles the root bone specially by setting its rotation
     to zero since global rotation is handled separately.
-    
+
     Args:
         pose_data (dict): Dictionary containing joint pose data from Unreal Engine.
-                          Expected format: {joint_name: {"quaternion": {"x": float, "y": float, 
+                          Expected format: {joint_name: {"quaternion": {"x": float, "y": float,
                                                                         "z": float, "w": float}}}
                           where quaternions are in scalar-last format (x, y, z, w).
-    
+
     Returns:
         np.ndarray: Array of shape (N, 3) containing angle-axis rotation vectors for each joint.
                     Each row represents [rx, ry, rz] where the rotation is around the axis
                     defined by the normalized vector with magnitude equal to the rotation angle.
-    
+
     Note:
         - Uses scipy.spatial.transform.Rotation for quaternion to euler conversion
         - Converts to ZYX euler angles then to angle-axis representation
@@ -414,9 +412,7 @@ def get_joint_angles_from_pose_data(pose_data):
 
         # ignore root bone:
         if key != root_key:
-            theta, vector = eulerangles.euler2angle_axis(
-                z=-rot_eul[0], y=rot_eul[1], x=-rot_eul[2]
-            )
+            theta, vector = eulerangles.euler2angle_axis(z=-rot_eul[0], y=rot_eul[1], x=-rot_eul[2])
         else:
             # no rotation for root bone, that's handled in the global rotation
             theta, vector = eulerangles.euler2angle_axis(z=0, y=0, x=0)
@@ -498,9 +494,7 @@ def plot_3D_points(pose_data, input_image):
     plt.show()
 
 
-def plot_3D_projected_points(
-    pose_data, input_image, cam_rot, cam_trans, fx, fy, cx, cy
-):
+def plot_3D_projected_points(pose_data, input_image, cam_rot, cam_trans, fx, fy, cx, cy):
     """
     Plots the 3D points and their projected 2D points on the image
     """
@@ -525,10 +519,7 @@ def plot_3D_projected_points(
         ]
         for key in pose_data.keys()
     ]
-    display_points_2D = [
-        [pose_data[key]["2DPos"]["x"], pose_data[key]["2DPos"]["y"]]
-        for key in pose_data.keys()
-    ]
+    display_points_2D = [[pose_data[key]["2DPos"]["x"], pose_data[key]["2DPos"]["y"]] for key in pose_data.keys()]
 
     for i, x in enumerate(display_points_3D):
         X = np.reshape(np.array(x), (3, -1))
@@ -536,15 +527,11 @@ def plot_3D_projected_points(
         # given the above data, it should be possible to project the 3D points into the corresponding image,
         # so they land in the correct position on the image
         P = C @ np.hstack([R, T])  # projection matrix
-        X_hom = np.vstack(
-            [X, np.ones(X.shape[1])]
-        )  # 3D points in homogenous coordinates
+        X_hom = np.vstack([X, np.ones(X.shape[1])])  # 3D points in homogenous coordinates
 
         X_hom = P @ X_hom  # project the 3D points
 
-        X_2d = (
-            X_hom[:2, :] / X_hom[2, :]
-        )  # convert them back to 2D pixel space by dividing by the z coordinate
+        X_2d = X_hom[:2, :] / X_hom[2, :]  # convert them back to 2D pixel space by dividing by the z coordinate
 
         gt_x_2d = display_points_2D[i][0]
         gt_y_2d = display_points_2D[i][1]
@@ -566,9 +553,7 @@ def plot_3D_projected_points(
     plt.show()
 
 
-def create_sphere_meshes_at_points(
-    points, radius=0.05, device="cpu", color=None, use_rainbow=True, mirror_x=True
-):
+def create_sphere_meshes_at_points(points, radius=0.05, device="cpu", color=None, use_rainbow=True, mirror_x=True):
     """
     Creates a PyTorch3D mesh of a sphere for each 3D point.
 
@@ -742,10 +727,7 @@ def refine_visibility_with_depth(
         return visibility
     if depth_image.ndim != 3 or depth_image.shape[2] < 1:
         return visibility
-    if (
-        depth_image.shape[0] != image_height
-        or depth_image.shape[1] != image_width
-    ):
+    if depth_image.shape[0] != image_height or depth_image.shape[1] != image_width:
         return visibility
 
     cam_loc = np.asarray(camera_location_world_raw, dtype=np.float64)
@@ -795,17 +777,17 @@ def compute_keypoint_visibility(keypoints_2d, mask, image_width, image_height):
     """
     num_keypoints = len(keypoints_2d)
     visibility = np.ones(num_keypoints)
-    
+
     # Convert normalized coordinates to pixel coordinates
     pixel_coords = keypoints_2d.copy()
     pixel_coords[:, 0] *= image_height  # x coordinate
-    pixel_coords[:, 1] *= image_width   # y coordinate
-    
+    pixel_coords[:, 1] *= image_width  # y coordinate
+
     # Check if keypoints are outside image bounds
     for i, (x, y) in enumerate(pixel_coords):
         if x < 0 or x >= image_height or y < 0 or y >= image_width:
             visibility[i] = 0
-    
+
     # If mask is available, check visibility within mask
     if mask is not None:
         # Mask is already dilated when loaded, so use it directly
@@ -815,16 +797,13 @@ def compute_keypoint_visibility(keypoints_2d, mask, image_width, image_height):
                 if 0 <= x_int < image_height and 0 <= y_int < image_width:
                     if mask[x_int, y_int] == 0:
                         visibility[i] = 0
-    
+
     return visibility
 
 
-def load_SMIL_Unreal_sample(json_file_path, 
-                        plot_tests=False, 
-                        propagate_scaling=True, 
-                        translation_factor=0.01,
-                        load_image=True,
-                        verbose=False):
+def load_SMIL_Unreal_sample(
+    json_file_path, plot_tests=False, propagate_scaling=True, translation_factor=0.01, load_image=True, verbose=False
+):
     """
     Load a SMIL sample from replicAnt generated SMIL data and return the loaded image and SMIL data
 
@@ -886,7 +865,7 @@ def load_SMIL_Unreal_sample(json_file_path,
 
     x_output["input_image"] = input_image
     x_output["input_image_data"] = input_image_data
-    
+
     # load the input image mask
     try:
         input_image_mask = imageio.v2.imread(input_image.replace(".JPG", "_ID.png"))
@@ -895,11 +874,11 @@ def load_SMIL_Unreal_sample(json_file_path,
         # Extract single channel if multi-channel
         if len(input_image_mask.shape) > 2:
             input_image_mask = input_image_mask[:, :, 0]
-        
+
         # Dilate the mask to improve quality (Unreal generated masks are very thin)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         input_image_mask = cv2.dilate(input_image_mask, kernel, iterations=2)
-        
+
         x_output["input_image_mask"] = input_image_mask
     except FileNotFoundError:
         input_image_mask = None
@@ -916,16 +895,14 @@ def load_SMIL_Unreal_sample(json_file_path,
     pose_data = data["iterationData"]["subject Data"][0]["1"]["keypoints"]
     y_output["pose_data"] = pose_data
 
-    # get camera data into correct format: 
+    # get camera data into correct format:
     # extrinsics: rotation and translation
     cam_rot, cam_trans = parse_projection_components(data)
     y_output["cam_rot_orig"] = cam_rot
     y_output["cam_trans_orig"] = cam_trans
 
     # intrinsics: image centre, focal length, and field of view
-    cx, cy, fx, fy = parse_camera_intrinsics(
-        batch_data_file=batch_data_file, iteration_data_file=data
-    )
+    cx, cy, fx, fy = parse_camera_intrinsics(batch_data_file=batch_data_file, iteration_data_file=data)
 
     cam_fov = [data["iterationData"]["camera"]["FOV"]]
 
@@ -972,16 +949,15 @@ def load_SMIL_Unreal_sample(json_file_path,
     except KeyError:
         shape_betas = []
 
-
     joint_angles, joint_names = get_joint_angles_from_pose_data(pose_data)
 
     # map joints, in case the order differs. The root bone is expected to be the first entry
-    np_joint_angles_mapped = map_joint_order(
-        config.dd["J_names"], joint_names, joint_angles
-    )
+    np_joint_angles_mapped = map_joint_order(config.dd["J_names"], joint_names, joint_angles)
 
     y_output["joint_angles"] = np_joint_angles_mapped
-    y_output["joint_names"] = config.dd["J_names"] # should be identical to joint_names from the loaded data but just to be safe
+    y_output["joint_names"] = config.dd[
+        "J_names"
+    ]  # should be identical to joint_names from the loaded data but just to be safe
 
     # Convert shape betas to a NumPy array
     if len(shape_betas) == 0:
@@ -1044,9 +1020,7 @@ def load_SMIL_Unreal_sample(json_file_path,
     # Y is PITCH
     # X is ROLL
 
-    theta, vector = eulerangles.euler2angle_axis(
-        z=-rot_eul[0] + np.pi, y=-rot_eul[1], x=rot_eul[2]
-    )
+    theta, vector = eulerangles.euler2angle_axis(z=-rot_eul[0] + np.pi, y=-rot_eul[1], x=rot_eul[2])
 
     global_rotation_np = vector * theta
 
@@ -1056,11 +1030,11 @@ def load_SMIL_Unreal_sample(json_file_path,
     # Extract 2D keypoint coordinates for training
     keypoints_2d = []
     keypoint_names = []
-    
+
     # Get image dimensions for normalization
     image_width = batch_data_file["Image Resolution"]["x"]
     image_height = batch_data_file["Image Resolution"]["y"]
-    
+
     for key in pose_data.keys():
         keypoint_names.append(key)
         # Note: y and x are swapped to account for coordinate system differences
@@ -1068,14 +1042,14 @@ def load_SMIL_Unreal_sample(json_file_path,
         norm_x = pose_data[key]["2DPos"]["y"] / image_height
         norm_y = pose_data[key]["2DPos"]["x"] / image_width
         keypoints_2d.append([norm_x, norm_y])
-    
+
     # Map keypoints to SMIL joint order (create a 2D-specific mapping)
     mapped_keypoints_2d = np.zeros((len(config.dd["J_names"]), 2), float)
     for o, orig_joint in enumerate(config.dd["J_names"]):
         for m, mapped_joint in enumerate(keypoint_names):
             if orig_joint == mapped_joint:
                 mapped_keypoints_2d[o] = keypoints_2d[m]  # Assign normalized 2D coordinates
-    
+
     y_output["keypoints_2d"] = mapped_keypoints_2d  # Normalized 2D coordinates [0, 1]
 
     # Compute keypoint visibility based on mask and image bounds
@@ -1083,10 +1057,7 @@ def load_SMIL_Unreal_sample(json_file_path,
     if load_image and x_output["input_image_mask"] is not None:
         # Compute visibility using the loaded mask and image dimensions
         y_output["keypoint_visibility"] = compute_keypoint_visibility(
-            mapped_keypoints_2d, 
-            x_output["input_image_mask"], 
-            image_width, 
-            image_height
+            mapped_keypoints_2d, x_output["input_image_mask"], image_width, image_height
         )
     else:
         # Fallback: only check image bounds, treat all joints as visible if within bounds
@@ -1105,17 +1076,17 @@ def load_SMIL_Unreal_sample(json_file_path,
         keypoint_names_3d.append(key)
         # Apply Unreal to PyTorch3D coordinate transformation (mirror x-axis)
         x_ue = pose_data[key]["3DPos"]["x"]
-        y_ue = pose_data[key]["3DPos"]["y"] 
+        y_ue = pose_data[key]["3DPos"]["y"]
         z_ue = pose_data[key]["3DPos"]["z"]
         keypoints_3d.append([-x_ue, y_ue, z_ue])  # Mirror x-axis for Unreal to PyTorch3D
-    
+
     # Map 3D keypoints to SMIL joint order
     mapped_keypoints_3d = np.zeros((len(config.dd["J_names"]), 3), float)
     for o, orig_joint in enumerate(config.dd["J_names"]):
         for m, mapped_joint in enumerate(keypoint_names_3d):
             if orig_joint == mapped_joint:
                 mapped_keypoints_3d[o] = keypoints_3d[m]
-    
+
     y_output["keypoints_3d_original"] = mapped_keypoints_3d.copy()  # Store original for debugging
 
     # --- Re-parameterize scene: place model at origin with zero rotation ---
@@ -1138,8 +1109,16 @@ def load_SMIL_Unreal_sample(json_file_path,
 
     t_model_p3d = y_output["root_loc"].astype(np.float32)
 
-    R_cam_p3d = y_output["cam_rot"].cpu().numpy() if isinstance(y_output["cam_rot"], torch.Tensor) else np.array(y_output["cam_rot"], dtype=np.float32)
-    T_cam_p3d = y_output["cam_trans"].cpu().numpy() if isinstance(y_output["cam_trans"], torch.Tensor) else np.array(y_output["cam_trans"], dtype=np.float32)
+    R_cam_p3d = (
+        y_output["cam_rot"].cpu().numpy()
+        if isinstance(y_output["cam_rot"], torch.Tensor)
+        else np.array(y_output["cam_rot"], dtype=np.float32)
+    )
+    T_cam_p3d = (
+        y_output["cam_trans"].cpu().numpy()
+        if isinstance(y_output["cam_trans"], torch.Tensor)
+        else np.array(y_output["cam_trans"], dtype=np.float32)
+    )
 
     # Compose camera relative to the (now-origin) model using PyTorch3D row-vector convention
     R_cam_new = R_model_p3d @ R_cam_p3d
@@ -1149,9 +1128,7 @@ def load_SMIL_Unreal_sample(json_file_path,
     yaw_offset = np.pi
     cos_y = np.cos(yaw_offset).astype(np.float32)
     sin_y = np.sin(yaw_offset).astype(np.float32)
-    Rz = np.array([[cos_y, -sin_y, 0.0], 
-                   [sin_y, cos_y, 0.0], 
-                   [0.0, 0.0, 1.0]], dtype=np.float32)
+    Rz = np.array([[cos_y, -sin_y, 0.0], [sin_y, cos_y, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
     R_cam_new = Rz @ R_cam_new
 
     # Update outputs: camera now encodes the relative transform; model at origin with zero rotation
@@ -1159,16 +1136,16 @@ def load_SMIL_Unreal_sample(json_file_path,
     y_output["cam_trans"] = torch.tensor(T_cam_new, dtype=torch.float32)
     y_output["root_loc"] = np.zeros_like(t_model_p3d, dtype=np.float32)
     y_output["root_rot"] = np.zeros(3, dtype=np.float32)
-    
+
     # Transform 3D keypoints to match the model transformation
-    # Apply the inverse transformation to move keypoints from world coordinates 
+    # Apply the inverse transformation to move keypoints from world coordinates
     # to model-centered coordinates (same transformation applied to the model)
     # X_model_centered = (X_world - t_model) @ R_model^T @ Rz^T
     # where Rz is the -180° yaw correction
-    
+
     # First, apply the inverse yaw correction (transpose of Rz)
     Rz_inv = Rz.T
-    
+
     # Transform keypoints: translate by -t_model, then rotate by inverse of R_model, then apply inverse yaw correction
     keypoints_3d_transformed = []
     for kp_3d in mapped_keypoints_3d:
@@ -1176,10 +1153,10 @@ def load_SMIL_Unreal_sample(json_file_path,
         kp_translated = kp_3d - t_model_p3d
         # Apply inverse model rotation (R_model^T)
         kp_rotated = kp_translated @ R_model_p3d.T
-        # Apply inverse yaw correction  
+        # Apply inverse yaw correction
         kp_final = kp_rotated @ Rz_inv
         keypoints_3d_transformed.append(kp_final)
-    
+
     y_output["keypoints_3d"] = np.array(keypoints_3d_transformed, dtype=np.float32)
 
     if verbose:
@@ -1200,7 +1177,7 @@ def load_SMIL_Unreal_multiview_sample(
     depth_max_cm: float = 1000.0,
     depth_tolerance_cm: float = 5.0,
     depth_neighborhood: int = 1,
-    verbose: bool = False
+    verbose: bool = False,
 ):
     """
     Load a multi-view SMIL sample from replicAnt flat-directory dataset.
@@ -1307,15 +1284,10 @@ def load_SMIL_Unreal_multiview_sample(
     if camera_indices is None:
         # Auto-detect: look for CAM files for this frame
         cam_files = list(data_path.glob(f"{dataset_name}_{frame_index:05d}_CAM*.json"))
-        camera_indices = sorted([
-            int(re.search(r'CAM(\d+)', f.name).group(1))
-            for f in cam_files
-        ])
+        camera_indices = sorted([int(re.search(r"CAM(\d+)", f.name).group(1)) for f in cam_files])
 
     if not camera_indices:
-        raise FileNotFoundError(
-            f"No camera files found for frame {frame_index:05d} in {data_path}"
-        )
+        raise FileNotFoundError(f"No camera files found for frame {frame_index:05d} in {data_path}")
 
     if verbose:
         print(f"Loading frame {frame_index:05d} with cameras: {camera_indices}")
@@ -1380,9 +1352,7 @@ def load_SMIL_Unreal_multiview_sample(
 
     # Extract joint angles from pose data (same across cameras)
     joint_angles, joint_names = get_joint_angles_from_pose_data(pose_data)
-    np_joint_angles_mapped = map_joint_order(
-        config.dd["J_names"], joint_names, joint_angles
-    )
+    np_joint_angles_mapped = map_joint_order(config.dd["J_names"], joint_names, joint_angles)
     y_output["joint_angles"] = np_joint_angles_mapped
     y_output["joint_names"] = config.dd["J_names"]
 
@@ -1420,9 +1390,7 @@ def load_SMIL_Unreal_multiview_sample(
         scalar_first=False,
     )
     rot_eul = rot.as_euler("zyx", degrees=False)
-    theta, vector = eulerangles.euler2angle_axis(
-        z=-rot_eul[0] + np.pi, y=-rot_eul[1], x=rot_eul[2]
-    )
+    theta, vector = eulerangles.euler2angle_axis(z=-rot_eul[0] + np.pi, y=-rot_eul[1], x=rot_eul[2])
     global_rotation_np = vector * theta
 
     y_output["root_loc"] = model_loc
@@ -1433,17 +1401,13 @@ def load_SMIL_Unreal_multiview_sample(
     # occlusion check, where the camera Location is read from the JSON
     # un-mirrored and distances must be computed in a consistent frame.
     # Missing joints stay NaN so the depth helper skips them.
-    keypoints_3d_unreal_raw = np.full(
-        (len(config.dd["J_names"]), 3), np.nan, dtype=np.float32
-    )
+    keypoints_3d_unreal_raw = np.full((len(config.dd["J_names"]), 3), np.nan, dtype=np.float32)
     if depth_occlusion_check:
         kp3d_raw_by_name = {}
         for k, kp in pose_data.items():
             p3 = kp.get("3DPos")
             if p3 is not None:
-                kp3d_raw_by_name[k] = np.array(
-                    [p3["x"], p3["y"], p3["z"]], dtype=np.float32
-                )
+                kp3d_raw_by_name[k] = np.array([p3["x"], p3["y"], p3["z"]], dtype=np.float32)
         for o, j in enumerate(config.dd["J_names"]):
             if j in kp3d_raw_by_name:
                 keypoints_3d_unreal_raw[o] = kp3d_raw_by_name[j]
@@ -1492,9 +1456,7 @@ def load_SMIL_Unreal_multiview_sample(
         # because cv2.imread is empirically ~80% SLOWER for this specific
         # PNG flavour (likely a palette / metadata path through libpng);
         # JPG and the depth PNG are migrated to cv2 below.
-        mask_path = json_path.with_name(
-            f"{dataset_name}_{frame_index:05d}_ID_CAM{cam_id}.png"
-        )
+        mask_path = json_path.with_name(f"{dataset_name}_{frame_index:05d}_ID_CAM{cam_id}.png")
         if mask_path.exists():
             id_mask = imageio.v2.imread(str(mask_path))
             # Convert to binary mask
@@ -1513,9 +1475,7 @@ def load_SMIL_Unreal_multiview_sample(
         # expects R (the depth encoding lives in the red channel — the
         # PNG's RGB channels are NOT equal). cv2 returns BGR[A], so we
         # swap to RGB[A] to keep channel-0 == R.
-        depth_path = json_path.with_name(
-            f"{dataset_name}_{frame_index:05d}_Depth_CAM{cam_id}.png"
-        )
+        depth_path = json_path.with_name(f"{dataset_name}_{frame_index:05d}_Depth_CAM{cam_id}.png")
         depth_paths.append(str(depth_path))
         depth_image = None
         if depth_occlusion_check and depth_path.exists():
@@ -1643,7 +1603,9 @@ def load_SMIL_Unreal_multiview_sample(
         fov_per_view.append(fov)
 
         if verbose:
-            print(f"  CAM{cam_id}: fx={fx:.2f}, fy={fy:.2f}, visible_joints={int(np.sum(visibility))}/{len(visibility)}")
+            print(
+                f"  CAM{cam_id}: fx={fx:.2f}, fy={fy:.2f}, visible_joints={int(np.sum(visibility))}/{len(visibility)}"
+            )
 
     # ------------------------------------------------------------------
     # 3D ground-truth keypoints in raw world frame (PyTorch3D-mirrored,
@@ -1658,12 +1620,8 @@ def load_SMIL_Unreal_multiview_sample(
     for k, kp in pose_data.items():
         p3 = kp.get("3DPos")
         if p3 is not None:
-            kp3d_by_name[k] = np.array(
-                [-p3["x"], p3["y"], p3["z"]], dtype=np.float32
-            )
-    keypoints_3d_world = np.zeros(
-        (len(config.dd["J_names"]), 3), dtype=np.float32
-    )
+            kp3d_by_name[k] = np.array([-p3["x"], p3["y"], p3["z"]], dtype=np.float32)
+    keypoints_3d_world = np.zeros((len(config.dd["J_names"]), 3), dtype=np.float32)
     keypoint_3d_in_dataset = np.zeros(len(config.dd["J_names"]), dtype=bool)
     for o, j in enumerate(config.dd["J_names"]):
         if j in kp3d_by_name:
@@ -1715,9 +1673,7 @@ def load_SMIL_Unreal_multiview_sample(
 
         R_root_col = Rotation.from_rotvec(global_rotation_np).as_matrix()
         R_root_can_col = R_0_np.T @ R_root_col
-        global_rotation_np = (
-            Rotation.from_matrix(R_root_can_col).as_rotvec().astype(np.float32)
-        )
+        global_rotation_np = Rotation.from_matrix(R_root_can_col).as_rotvec().astype(np.float32)
 
         keypoints_3d = (keypoints_3d_world @ R_0_np + t_0_np).astype(np.float32)
 
@@ -1814,23 +1770,23 @@ def load_SMIL_Unreal_multiview_sample(
     return x_output, y_output
 
 
-def Render_SMAL_Model_from_Unreal_data(x,y,device,verbose=False):
+def Render_SMAL_Model_from_Unreal_data(x, y, device, verbose=False):
     """
     Render a SMAL model from Unreal data
-    
+
     Args:
         x (dict): Dictionary containing the input data
         y (dict): Dictionary containing the output data
-    
+
     """
 
     # Use processed normalized coordinates instead of raw pose_data for better accuracy
     data_json, filenames = return_placeholder_data(
-        input_image=x["input_image"], 
-        num_joints=len(y["joint_angles"]), 
+        input_image=x["input_image"],
+        num_joints=len(y["joint_angles"]),
         keypoints_2d=y["keypoints_2d"],
         keypoint_visibility=y["keypoint_visibility"],
-        silhouette=x["input_image_mask"]
+        silhouette=x["input_image_mask"],
     )
 
     # Some code from the original SMALFitter to set up the model
@@ -1844,9 +1800,7 @@ def Render_SMAL_Model_from_Unreal_data(x,y,device,verbose=False):
     if not use_unity_prior and not config.ALLOW_LIMB_SCALING:
         config.ALLOW_LIMB_SCALING = False
 
-    model = SMALFitter(
-        device, data_json, config.WINDOW_SIZE, config.SHAPE_FAMILY, use_unity_prior
-    )
+    model = SMALFitter(device, data_json, config.WINDOW_SIZE, config.SHAPE_FAMILY, use_unity_prior)
 
     # model parameters
     model.betas = torch.nn.Parameter(torch.Tensor(y["shape_betas"]).to(device))
@@ -1874,20 +1828,18 @@ def Render_SMAL_Model_from_Unreal_data(x,y,device,verbose=False):
 
         # Scale remains log-space; add batch dimension
         model.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.log(scale_out))[None, ...].float().to(device))
-        model.betas_trans = torch.nn.Parameter(torch.from_numpy(translation_out * y["translation_factor"])[None, ...].float().to(device))
+        model.betas_trans = torch.nn.Parameter(
+            torch.from_numpy(translation_out * y["translation_factor"])[None, ...].float().to(device)
+        )
         model.propagate_scaling = y["propagate_scaling"]
-
 
     else:
         print("No scaling or translation components found in model data")
 
     # set model joint rotations
     model.joint_rotations = torch.nn.Parameter(
-        torch.Tensor(y["joint_angles"][1:])
-        .reshape((1, y["joint_angles"][1:].shape[0], 3))
-        .to(device)
+        torch.Tensor(y["joint_angles"][1:]).reshape((1, y["joint_angles"][1:].shape[0], 3)).to(device)
     )
-
 
     """
     STEP 4 - Set up pytorch3d scene with the SMIL model
@@ -1905,14 +1857,10 @@ def Render_SMAL_Model_from_Unreal_data(x,y,device,verbose=False):
     model.renderer.cameras.R = torch.nn.Parameter(torch.Tensor(R).to(device))
     model.renderer.cameras.T = torch.nn.Parameter(torch.Tensor(T).to(device))
 
-
-    global_rotation = torch.nn.Parameter(
-        torch.from_numpy(y["root_rot"]).float().to(device).unsqueeze(0)
-    )
+    global_rotation = torch.nn.Parameter(torch.from_numpy(y["root_rot"]).float().to(device).unsqueeze(0))
 
     model.global_rotation = global_rotation
     model.trans = torch.nn.Parameter(torch.Tensor(np.array([y["root_loc"]])).to(device))
-
 
     """
     STEP 5 - RENDER POSED MESH
@@ -1925,10 +1873,7 @@ def Render_SMAL_Model_from_Unreal_data(x,y,device,verbose=False):
     model.generate_visualization(image_exporter, apply_UE_transform=True)
 
 
-
-
-def plot_loaded_data_tests(x,y,device):
-
+def plot_loaded_data_tests(x, y, device):
 
     # plot 3D points
     plot_3D_points(pose_data=y["pose_data"], input_image=x["input_image"])
@@ -1945,7 +1890,6 @@ def plot_loaded_data_tests(x,y,device):
         cy=y["cy"],
     )
 
-
     # Create sphere meshes for keypoints - no need to mirror here as the function will do it
     keypoints_3d = np.array(
         [
@@ -1959,7 +1903,13 @@ def plot_loaded_data_tests(x,y,device):
     )
 
     cameras = FoVPerspectiveCameras(
-        device=device, R=y["cam_rot"].unsqueeze(0), T=y["cam_trans"].unsqueeze(0), fov=y["cam_fov"], degrees=True, znear=0.01, zfar=5000
+        device=device,
+        R=y["cam_rot"].unsqueeze(0),
+        T=y["cam_trans"].unsqueeze(0),
+        fov=y["cam_fov"],
+        degrees=True,
+        znear=0.01,
+        zfar=5000,
     )
 
     # Define the settings for rasterization and shading. Here we set the output image to be of size
@@ -1987,9 +1937,7 @@ def plot_loaded_data_tests(x,y,device):
     )
 
     # Change specular color and change material shininess
-    materials = Materials(
-        device=device, specular_color=[[1.0, 1.0, 1.0]], shininess=10.0
-    )
+    materials = Materials(device=device, specular_color=[[1.0, 1.0, 1.0]], shininess=10.0)
 
     # visualize keypoints with mirroring enabled
     sphere_meshes = create_sphere_meshes_at_points(
@@ -2000,9 +1948,7 @@ def plot_loaded_data_tests(x,y,device):
     # combined_meshes = join_meshes_as_scene([mesh, sphere_meshes])
 
     # render the spheres
-    sphere_images = renderer(
-        sphere_meshes, lights=lights, materials=materials, cameras=cameras
-    )
+    sphere_images = renderer(sphere_meshes, lights=lights, materials=materials, cameras=cameras)
 
     plt.figure(figsize=(10, 10))
 
@@ -2037,20 +1983,15 @@ if __name__ == "__main__":
     # set the device to use (first available GPU by default)
     # CUDA_VISIBLE_DEVICES is set at the top of this file (guarded __main__ block), before torch.
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    
+
     # Read the JSON file
-    json_file_path = (
-        "/media/fabi/Data/Mausb/Mausb_03.json"
-    )
+    json_file_path = "/media/fabi/Data/Mausb/Mausb_03.json"
 
     # Load the SMIL data
-    x,y = load_SMIL_Unreal_sample(json_file_path, 
-                                  plot_tests=False, 
-                                  propagate_scaling=True, 
-                                  translation_factor=0.01)
+    x, y = load_SMIL_Unreal_sample(json_file_path, plot_tests=False, propagate_scaling=True, translation_factor=0.01)
 
     # Verify things plot correctly
-    #plot_loaded_data_tests(x,y,device)
+    # plot_loaded_data_tests(x,y,device)
 
     # Render the SMAL model based on the loaded data
-    Render_SMAL_Model_from_Unreal_data(x,y,device)
+    Render_SMAL_Model_from_Unreal_data(x, y, device)

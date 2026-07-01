@@ -18,18 +18,15 @@ def batch_skew(vec, batch_size=None, opts=None):
     col_inds = torch.LongTensor([1, 2, 3, 5, 6, 7])
     indices = torch.reshape(torch.reshape(torch.arange(0, batch_size) * 9, [-1, 1]) + col_inds, [-1, 1])
     updates = torch.reshape(
-            torch.stack(
-                [
-                    -vec[:, 2], vec[:, 1], vec[:, 2], -vec[:, 0], -vec[:, 1],
-                    vec[:, 0]
-                ],
-                dim=1), [-1])
+        torch.stack([-vec[:, 2], vec[:, 1], vec[:, 2], -vec[:, 0], -vec[:, 1], vec[:, 0]], dim=1), [-1]
+    )
     out_shape = [batch_size * 9]
     res = torch.Tensor(np.zeros(out_shape[0])).to(device=vec.device)
     res[np.array(indices.flatten())] = updates
     res = torch.reshape(res, [batch_size, 3, 3])
 
     return res
+
 
 def batch_rodrigues(theta, opts=None):
     """
@@ -44,13 +41,14 @@ def batch_rodrigues(theta, opts=None):
     cos = torch.cos(angle)
     sin = torch.sin(angle)
 
-    outer = torch.matmul(r, r.transpose(1,2))
+    outer = torch.matmul(r, r.transpose(1, 2))
 
     eyes = torch.eye(3).unsqueeze(0).repeat([batch_size, 1, 1]).to(device=theta.device)
     H = batch_skew(r, batch_size=batch_size, opts=opts)
-    R = cos * eyes + (1 - cos) * outer + sin * H 
+    R = cos * eyes + (1 - cos) * outer + sin * H
 
     return R
+
 
 def batch_lrotmin(theta):
     """
@@ -66,19 +64,25 @@ def batch_lrotmin(theta):
       diff_vec : `Tensor`: N x 207 rotation matrix of 23=(K-1) joints with identity subtracted.,
     """
     # Ignore global rotation
-    theta = theta[:,3:]
+    theta = theta[:, 3:]
 
-    Rs = batch_rodrigues(torch.reshape(theta, [-1,3]))
+    Rs = batch_rodrigues(torch.reshape(theta, [-1, 3]))
     lrotmin = torch.reshape(Rs - torch.eye(3), [-1, 207])
 
     return lrotmin
 
-def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
-                                    betas_logscale=None,
-                                    betas_trans=None,
-                                    propagate_scaling=False,
-                                    opts=None,
-                                    num_joints=35):
+
+def batch_global_rigid_transformation(
+    Rs,
+    Js,
+    parent,
+    rotate_base=False,
+    betas_logscale=None,
+    betas_trans=None,
+    propagate_scaling=False,
+    opts=None,
+    num_joints=35,
+):
     """
     Computes absolute joint locations given pose and scaling.
 
@@ -90,13 +94,13 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
       betas_logtrans: N x J x 3 tensor of log translation factors for each joint axis
       propagate_scaling: bool, whether to propagate scaling factors to child joints
       propagate_translation: bool, whether to propagate translation factors to child joints
-      
+
     Returns
       new_J : `Tensor`: N x J x 3 location of absolute joints
       A     : `Tensor`: N x J 4 x 4 relative joint transformations for LBS.
     """
     if rotate_base:
-        print('Flipping the SMPL coordinate frame!!!!')
+        print("Flipping the SMPL coordinate frame!!!!")
         rot_x = torch.Tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
         rot_x = torch.reshape(torch.repeat(rot_x, [N, 1]), [N, 3, 3])
         root_rotation = torch.matmul(Rs[:, 0, :, :], rot_x)
@@ -128,10 +132,10 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
     def make_A(R, t):
         """Creates a 4x4 transformation matrix from R and t"""
         # Rs is N x 3 x 3, ts is N x 3 x 1
-        R_homo = torch.nn.functional.pad(R, (0,0,0,1,0,0))
+        R_homo = torch.nn.functional.pad(R, (0, 0, 0, 1, 0, 0))
         t_homo = torch.cat([t, torch.ones([N, 1, 1]).to(Rs.device)], 1)
         return torch.cat([R_homo, t_homo], 2)
-    
+
     # Optional per-joint translation offsets. If provided, add to the joint offsets j_here.
     # Shape expected: N x J x 3
     translation_offsets = None
@@ -160,13 +164,13 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
 
         rot = Rs[:, i]
         s = scale_factors_3x3[:, i]
-        
+
         # Apply scaling transformation: S_parent^-1 * R * S_current
         rot_new = s_par_inv @ rot @ s
 
         # Create transformation matrix
         A_here = make_A(rot_new, j_here)
-        
+
         # Multiply with parent transform
         res_here = torch.matmul(results[parent[i]], A_here)
         results.append(res_here)
@@ -183,7 +187,7 @@ def batch_global_rigid_transformation(Rs, Js, parent, rotate_base=False,
     # ---
     Js_w0 = torch.cat([Js_orig, torch.zeros([N, num_joints, 1, 1]).to(Rs.device)], 2)
     init_bone = torch.matmul(results, Js_w0)
-    init_bone = torch.nn.functional.pad(init_bone, (3,0,0,0,0,0,0,0))
+    init_bone = torch.nn.functional.pad(init_bone, (3, 0, 0, 0, 0, 0, 0, 0))
     A = results - init_bone
 
     return new_J, A

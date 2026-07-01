@@ -19,6 +19,7 @@ from .multiview_config import MultiViewConfig
 
 class ConfigurationError(Exception):
     """Raised when configuration is invalid or incompatible."""
+
     pass
 
 
@@ -72,29 +73,24 @@ def load_from_json(path: str) -> Dict[str, Any]:
     with open(path) as f:
         config_dict = json.load(f)
 
-    if 'mode' not in config_dict:
+    if "mode" not in config_dict:
         raise ConfigurationError(
-            f"JSON config file '{path}' missing required 'mode' field. "
-            "Must be 'singleview' or 'multiview'."
+            f"JSON config file '{path}' missing required 'mode' field. Must be 'singleview' or 'multiview'."
         )
 
-    mode = config_dict['mode']
-    if mode not in ('singleview', 'multiview'):
-        raise ConfigurationError(
-            f"Invalid mode '{mode}' in '{path}'. Must be 'singleview' or 'multiview'."
-        )
+    mode = config_dict["mode"]
+    if mode not in ("singleview", "multiview"):
+        raise ConfigurationError(f"Invalid mode '{mode}' in '{path}'. Must be 'singleview' or 'multiview'.")
 
     # Convert curriculum string keys to integers
-    if 'optimizer' in config_dict and isinstance(config_dict['optimizer'], dict):
-        if 'lr_schedule' in config_dict['optimizer']:
-            config_dict['optimizer']['lr_schedule'] = _parse_epoch_keys(
-                config_dict['optimizer']['lr_schedule']
-            )
+    if "optimizer" in config_dict and isinstance(config_dict["optimizer"], dict):
+        if "lr_schedule" in config_dict["optimizer"]:
+            config_dict["optimizer"]["lr_schedule"] = _parse_epoch_keys(config_dict["optimizer"]["lr_schedule"])
 
-    if 'loss_curriculum' in config_dict and isinstance(config_dict['loss_curriculum'], dict):
-        if 'curriculum_stages' in config_dict['loss_curriculum']:
-            config_dict['loss_curriculum']['curriculum_stages'] = _parse_epoch_keys(
-                config_dict['loss_curriculum']['curriculum_stages']
+    if "loss_curriculum" in config_dict and isinstance(config_dict["loss_curriculum"], dict):
+        if "curriculum_stages" in config_dict["loss_curriculum"]:
+            config_dict["loss_curriculum"]["curriculum_stages"] = _parse_epoch_keys(
+                config_dict["loss_curriculum"]["curriculum_stages"]
             )
 
     return config_dict
@@ -156,7 +152,7 @@ def load_config(
     # Load JSON config if provided
     if config_file:
         json_config = load_from_json(config_file)
-        mode = json_config['mode']
+        mode = json_config["mode"]
 
         if expected_mode and mode != expected_mode:
             raise ConfigurationError(
@@ -165,24 +161,23 @@ def load_config(
             )
 
     # Instantiate mode-specific config with defaults
-    if mode == 'singleview':
+    if mode == "singleview":
         config = SingleViewConfig()
-    elif mode == 'multiview':
+    elif mode == "multiview":
         config = MultiViewConfig()
     else:
         raise ConfigurationError(
-            "Cannot determine mode. Provide --config with a 'mode' field "
-            "or ensure expected_mode is set."
+            "Cannot determine mode. Provide --config with a 'mode' field or ensure expected_mode is set."
         )
 
     # Merge JSON overrides
     if json_config:
-        clean = {k: v for k, v in json_config.items() if k != 'mode'}
+        clean = {k: v for k, v in json_config.items() if k != "mode"}
         _deep_merge_into_dataclass(config, clean)
 
     # Merge CLI overrides (highest priority)
     if cli_overrides:
-        clean = {k: v for k, v in cli_overrides.items() if v is not None and k != 'config'}
+        clean = {k: v for k, v in cli_overrides.items() if v is not None and k != "config"}
         _deep_merge_into_dataclass(config, clean)
 
     config.validate()
@@ -203,23 +198,21 @@ def save_config_json(config: BaseTrainingConfig, path: str):
 
     # Add mode field
     if isinstance(config, MultiViewConfig):
-        config_dict['mode'] = 'multiview'
+        config_dict["mode"] = "multiview"
     else:
-        config_dict['mode'] = 'singleview'
+        config_dict["mode"] = "singleview"
 
     # Convert int keys to strings for JSON compatibility
-    if 'optimizer' in config_dict and 'lr_schedule' in config_dict['optimizer']:
-        config_dict['optimizer']['lr_schedule'] = _convert_epoch_keys_to_str(
-            config_dict['optimizer']['lr_schedule']
-        )
+    if "optimizer" in config_dict and "lr_schedule" in config_dict["optimizer"]:
+        config_dict["optimizer"]["lr_schedule"] = _convert_epoch_keys_to_str(config_dict["optimizer"]["lr_schedule"])
 
-    if 'loss_curriculum' in config_dict and 'curriculum_stages' in config_dict['loss_curriculum']:
-        config_dict['loss_curriculum']['curriculum_stages'] = _convert_epoch_keys_to_str(
-            config_dict['loss_curriculum']['curriculum_stages']
+    if "loss_curriculum" in config_dict and "curriculum_stages" in config_dict["loss_curriculum"]:
+        config_dict["loss_curriculum"]["curriculum_stages"] = _convert_epoch_keys_to_str(
+            config_dict["loss_curriculum"]["curriculum_stages"]
         )
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         json.dump(config_dict, f, indent=2)
 
 
@@ -235,7 +228,7 @@ def validate_json_mode(json_path: str, expected_mode: str):
         ConfigurationError: If modes don't match
     """
     config_dict = load_from_json(json_path)
-    actual_mode = config_dict['mode']
+    actual_mode = config_dict["mode"]
     if actual_mode != expected_mode:
         raise ConfigurationError(
             f"JSON config is for '{actual_mode}' training, but you're running "
@@ -267,17 +260,15 @@ def apply_smal_file_override(smal_file: str, shape_family: Optional[int] = None)
     config.SMAL_FILE = smal_file
     config.ignore_hardcoded_body = True
 
-    with open(smal_file, 'rb') as f:
+    with open(smal_file, "rb") as f:
         u = pkl._Unpickler(f)
-        u.encoding = 'latin1'
+        u.encoding = "latin1"
         dd = u.load()
 
     config.dd = dd
     config.joint_names = dd["J_names"]
     config.N_POSE = len(config.joint_names) - 1
-    config.ROOT_JOINT = dd["J_names"][
-        np.where(dd["kintree_table"][0] == -1)[0][0]
-    ]
+    config.ROOT_JOINT = dd["J_names"][np.where(dd["kintree_table"][0] == -1)[0][0]]
     config.STATIC_JOINT_LOCATIONS = bool(dd.get("static_joint_locs", False))
     config.CANONICAL_MODEL_JOINTS = list(range(len(config.joint_names)))
 
@@ -290,5 +281,4 @@ def apply_smal_file_override(smal_file: str, shape_family: Optional[int] = None)
         config.SHAPE_FAMILY = int(shape_family)
 
     print(f"[config] SMAL_FILE overridden to: {config.SMAL_FILE}")
-    print(f"[config] N_POSE={config.N_POSE}, N_BETAS={config.N_BETAS}, "
-          f"joints={len(config.joint_names)}")
+    print(f"[config] N_POSE={config.N_POSE}, N_BETAS={config.N_BETAS}, joints={len(config.joint_names)}")

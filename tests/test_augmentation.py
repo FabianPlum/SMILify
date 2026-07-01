@@ -33,12 +33,12 @@ VIZ_DIR = os.path.join(os.path.dirname(__file__), "test_output", "augmentation")
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _ensure_viz_dir():
     os.makedirs(VIZ_DIR, exist_ok=True)
 
 
-def _project_3d_to_2d(K: np.ndarray, R: np.ndarray, t: np.ndarray,
-                       points_3d: np.ndarray) -> np.ndarray:
+def _project_3d_to_2d(K: np.ndarray, R: np.ndarray, t: np.ndarray, points_3d: np.ndarray) -> np.ndarray:
     """Project world-space 3D points to 2D pixel coordinates [x, y].
 
     Args:
@@ -55,9 +55,9 @@ def _project_3d_to_2d(K: np.ndarray, R: np.ndarray, t: np.ndarray,
     return proj[:, :2] / proj[:, 2:3]
 
 
-def _project_3d_to_normalized(K: np.ndarray, R: np.ndarray, t: np.ndarray,
-                               points_3d: np.ndarray,
-                               target_resolution: int) -> np.ndarray:
+def _project_3d_to_normalized(
+    K: np.ndarray, R: np.ndarray, t: np.ndarray, points_3d: np.ndarray, target_resolution: int
+) -> np.ndarray:
     """Project world-space 3D points to normalized [0, 1] coordinates [y, x].
 
     Matches the coordinate convention used by the training pipeline:
@@ -111,20 +111,26 @@ def _make_synthetic_sample(image_size: int = 256, n_joints: int = 10, seed: int 
     fx = fy = image_size * 1.2
     cx = w / 2.0
     cy = h / 2.0
-    K = np.array([
-        [fx, 0, cx],
-        [0, fy, cy],
-        [0, 0, 1],
-    ], dtype=np.float32)
+    K = np.array(
+        [
+            [fx, 0, cx],
+            [0, fy, cy],
+            [0, 0, 1],
+        ],
+        dtype=np.float32,
+    )
 
     # Camera extrinsics: camera looks down -Z axis, 5 units back
     angle = 0.3
     c, s = math.cos(angle), math.sin(angle)
-    R = np.array([
-        [c, 0, s],
-        [0, 1, 0],
-        [-s, 0, c],
-    ], dtype=np.float32)
+    R = np.array(
+        [
+            [c, 0, s],
+            [0, 1, 0],
+            [-s, 0, c],
+        ],
+        dtype=np.float32,
+    )
     t = np.array([0.0, 0.0, 5.0], dtype=np.float32)
 
     # 3D points in front of the camera (within the image)
@@ -140,8 +146,7 @@ def _make_synthetic_sample(image_size: int = 256, n_joints: int = 10, seed: int 
     return img, K, R, t, points_3d, kp_norm_yx, visibility
 
 
-def _save_augmentation_viz(images, keypoints_pixel_xy_list, labels, filepath,
-                           marker_styles=None):
+def _save_augmentation_viz(images, keypoints_pixel_xy_list, labels, filepath, marker_styles=None):
     """Save side-by-side image panels with keypoint overlays.
 
     Args:
@@ -153,7 +158,8 @@ def _save_augmentation_viz(images, keypoints_pixel_xy_list, labels, filepath,
     """
     try:
         import matplotlib
-        matplotlib.use('Agg')
+
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
         pytest.skip("matplotlib not installed, skipping visualization")
@@ -164,19 +170,18 @@ def _save_augmentation_viz(images, keypoints_pixel_xy_list, labels, filepath,
         axes = [axes]
 
     if marker_styles is None:
-        marker_styles = [{'c': 'lime', 's': 30, 'marker': 'o'}] * n
+        marker_styles = [{"c": "lime", "s": 30, "marker": "o"}] * n
 
-    for ax, img, kps, label, style in zip(axes, images, keypoints_pixel_xy_list,
-                                           labels, marker_styles):
+    for ax, img, kps, label, style in zip(axes, images, keypoints_pixel_xy_list, labels, marker_styles):
         ax.imshow(np.clip(img, 0, 1))
         if kps is not None and len(kps) > 0:
             ax.scatter(kps[:, 0], kps[:, 1], **style, zorder=5)
         ax.set_title(label)
-        ax.axis('off')
+        ax.axis("off")
 
     fig.tight_layout()
     out_path = os.path.join(VIZ_DIR, filepath)
-    fig.savefig(out_path, dpi=120, bbox_inches='tight')
+    fig.savefig(out_path, dpi=120, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved: {out_path}")
 
@@ -185,6 +190,7 @@ def _save_augmentation_viz(images, keypoints_pixel_xy_list, labels, filepath,
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestPhotometricAugmentation:
     """Photometric augmentations must not alter geometry."""
 
@@ -192,6 +198,7 @@ class TestPhotometricAugmentation:
     def setup_dataset(self):
         """Create a minimal dataset-like object with augmentation methods."""
         from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+
         self.ds = object.__new__(SLEAPMultiViewDataset)
         self.ds.augment = True
         self.ds.aug_color_jitter_brightness = 0.2
@@ -242,43 +249,55 @@ class TestPhotometricAugmentation:
         kp_px = _norm_yx_to_pixel_xy(kp2d, image_size)
 
         aug_types = {
-            "brightness": {"aug_color_jitter_brightness": 0.3,
-                           "aug_color_jitter_contrast": 0,
-                           "aug_color_jitter_saturation": 0,
-                           "aug_gaussian_noise_std": 0,
-                           "aug_gaussian_blur_prob": 0,
-                           "aug_random_erasing_prob": 0},
-            "contrast": {"aug_color_jitter_brightness": 0,
-                         "aug_color_jitter_contrast": 0.3,
-                         "aug_color_jitter_saturation": 0,
-                         "aug_gaussian_noise_std": 0,
-                         "aug_gaussian_blur_prob": 0,
-                         "aug_random_erasing_prob": 0},
-            "saturation": {"aug_color_jitter_brightness": 0,
-                           "aug_color_jitter_contrast": 0,
-                           "aug_color_jitter_saturation": 0.3,
-                           "aug_gaussian_noise_std": 0,
-                           "aug_gaussian_blur_prob": 0,
-                           "aug_random_erasing_prob": 0},
-            "noise": {"aug_color_jitter_brightness": 0,
-                      "aug_color_jitter_contrast": 0,
-                      "aug_color_jitter_saturation": 0,
-                      "aug_gaussian_noise_std": 0.05,
-                      "aug_gaussian_blur_prob": 0,
-                      "aug_random_erasing_prob": 0},
-            "blur": {"aug_color_jitter_brightness": 0,
-                     "aug_color_jitter_contrast": 0,
-                     "aug_color_jitter_saturation": 0,
-                     "aug_gaussian_noise_std": 0,
-                     "aug_gaussian_blur_prob": 1.0,
-                     "aug_random_erasing_prob": 0},
-            "erasing": {"aug_color_jitter_brightness": 0,
-                        "aug_color_jitter_contrast": 0,
-                        "aug_color_jitter_saturation": 0,
-                        "aug_gaussian_noise_std": 0,
-                        "aug_gaussian_blur_prob": 0,
-                        "aug_random_erasing_prob": 1.0,
-                        "aug_random_erasing_scale_range": (0.05, 0.15)},
+            "brightness": {
+                "aug_color_jitter_brightness": 0.3,
+                "aug_color_jitter_contrast": 0,
+                "aug_color_jitter_saturation": 0,
+                "aug_gaussian_noise_std": 0,
+                "aug_gaussian_blur_prob": 0,
+                "aug_random_erasing_prob": 0,
+            },
+            "contrast": {
+                "aug_color_jitter_brightness": 0,
+                "aug_color_jitter_contrast": 0.3,
+                "aug_color_jitter_saturation": 0,
+                "aug_gaussian_noise_std": 0,
+                "aug_gaussian_blur_prob": 0,
+                "aug_random_erasing_prob": 0,
+            },
+            "saturation": {
+                "aug_color_jitter_brightness": 0,
+                "aug_color_jitter_contrast": 0,
+                "aug_color_jitter_saturation": 0.3,
+                "aug_gaussian_noise_std": 0,
+                "aug_gaussian_blur_prob": 0,
+                "aug_random_erasing_prob": 0,
+            },
+            "noise": {
+                "aug_color_jitter_brightness": 0,
+                "aug_color_jitter_contrast": 0,
+                "aug_color_jitter_saturation": 0,
+                "aug_gaussian_noise_std": 0.05,
+                "aug_gaussian_blur_prob": 0,
+                "aug_random_erasing_prob": 0,
+            },
+            "blur": {
+                "aug_color_jitter_brightness": 0,
+                "aug_color_jitter_contrast": 0,
+                "aug_color_jitter_saturation": 0,
+                "aug_gaussian_noise_std": 0,
+                "aug_gaussian_blur_prob": 1.0,
+                "aug_random_erasing_prob": 0,
+            },
+            "erasing": {
+                "aug_color_jitter_brightness": 0,
+                "aug_color_jitter_contrast": 0,
+                "aug_color_jitter_saturation": 0,
+                "aug_gaussian_noise_std": 0,
+                "aug_gaussian_blur_prob": 0,
+                "aug_random_erasing_prob": 1.0,
+                "aug_random_erasing_scale_range": (0.05, 0.15),
+            },
         }
 
         for name, params in aug_types.items():
@@ -305,6 +324,7 @@ class TestGeometricAugmentation:
     @pytest.fixture(autouse=True)
     def setup_dataset(self):
         from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+
         self.ds = object.__new__(SLEAPMultiViewDataset)
         self.ds.augment = True
         self.ds.aug_crop_jitter_fraction = 0.0
@@ -329,8 +349,10 @@ class TestGeometricAugmentation:
         if visible.sum() > 0:
             # Tolerance: 0.5px / image_size in normalized units
             np.testing.assert_allclose(
-                reproj[visible], kp2d_aug[visible], atol=0.5 / image_size,
-                err_msg="Reprojected 3D with updated K must match augmented 2D keypoints"
+                reproj[visible],
+                kp2d_aug[visible],
+                atol=0.5 / image_size,
+                err_msg="Reprojected 3D with updated K must match augmented 2D keypoints",
             )
 
         # Visualization: convert to pixel [x,y] for display
@@ -341,14 +363,12 @@ class TestGeometricAugmentation:
         _save_augmentation_viz(
             [img, img_aug, img_aug],
             [kp_orig_px, kp_aug_px, reproj_px],
-            ["Original + orig kps",
-             "Augmented + transformed kps",
-             "Augmented + reprojected from 3D"],
+            ["Original + orig kps", "Augmented + transformed kps", "Augmented + reprojected from 3D"],
             "geometric_reprojection_consistency.png",
             marker_styles=[
-                {'c': 'lime', 's': 30, 'marker': 'o'},
-                {'c': 'lime', 's': 30, 'marker': 'o'},
-                {'c': 'red', 's': 50, 'marker': 'x', 'linewidths': 2},
+                {"c": "lime", "s": 30, "marker": "o"},
+                {"c": "lime", "s": 30, "marker": "o"},
+                {"c": "red", "s": 50, "marker": "x", "linewidths": 2},
             ],
         )
 
@@ -376,9 +396,11 @@ class TestGeometricAugmentation:
             f"Max reprojection error across 100 seeds: {max_errors.max():.6f} "
             f"normalized ({max_errors.max() * image_size:.4f} px)"
         )
-        print(f"  Geometric consistency over 100 seeds: "
-              f"max={max_errors.max():.6f} norm ({max_errors.max() * image_size:.4f} px), "
-              f"mean={max_errors.mean():.6f} norm")
+        print(
+            f"  Geometric consistency over 100 seeds: "
+            f"max={max_errors.max():.6f} norm ({max_errors.max() * image_size:.4f} px), "
+            f"mean={max_errors.mean():.6f} norm"
+        )
 
     def test_extrinsics_unchanged(self):
         """Geometric augmentation must not modify R or t."""
@@ -387,9 +409,7 @@ class TestGeometricAugmentation:
         t_orig = t.copy()
 
         np.random.seed(42)
-        self.ds._apply_geometric_augmentation(
-            img.copy(), K.copy(), kp2d.copy(), vis.copy()
-        )
+        self.ds._apply_geometric_augmentation(img.copy(), K.copy(), kp2d.copy(), vis.copy())
 
         np.testing.assert_array_equal(R, R_orig)
         np.testing.assert_array_equal(t, t_orig)
@@ -402,10 +422,10 @@ class TestGeometricAugmentation:
 
         # Force some keypoints near edges in normalized [y, x] coords
         kp2d_edge = kp2d.copy()
-        kp2d_edge[0] = [0.5, 0.008]   # near left edge (x ~ 2px)
-        kp2d_edge[1] = [0.5, 0.992]   # near right edge (x ~ 254px)
-        kp2d_edge[2] = [0.008, 0.5]   # near top edge (y ~ 2px)
-        kp2d_edge[3] = [0.992, 0.5]   # near bottom edge (y ~ 254px)
+        kp2d_edge[0] = [0.5, 0.008]  # near left edge (x ~ 2px)
+        kp2d_edge[1] = [0.5, 0.992]  # near right edge (x ~ 254px)
+        kp2d_edge[2] = [0.008, 0.5]  # near top edge (y ~ 2px)
+        kp2d_edge[3] = [0.992, 0.5]  # near bottom edge (y ~ 254px)
 
         # Use aggressive scale jitter — zoom in pushes edge keypoints out of frame
         self.ds.aug_crop_jitter_fraction = 0.0
@@ -423,8 +443,7 @@ class TestGeometricAugmentation:
                 if not vis_aug[j]:
                     ny, nx = kp_aug[j]
                     assert ny < 0 or ny > 1.0 or nx < 0 or nx > 1.0, (
-                        f"Keypoint {j} was masked but is within [0,1]: "
-                        f"(norm_y={ny:.4f}, norm_x={nx:.4f})"
+                        f"Keypoint {j} was masked but is within [0,1]: (norm_y={ny:.4f}, norm_x={nx:.4f})"
                     )
 
         # At least some should be masked with aggressive jitter near edges
@@ -438,28 +457,33 @@ class TestGeometricAugmentation:
         )
         try:
             import matplotlib
-            matplotlib.use('Agg')
+
+            matplotlib.use("Agg")
             import matplotlib.pyplot as plt
 
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
             kp_edge_px = _norm_yx_to_pixel_xy(kp2d_edge, image_size)
             ax1.imshow(np.clip(img, 0, 1))
-            ax1.scatter(kp_edge_px[:, 0], kp_edge_px[:, 1], c='lime', s=40)
+            ax1.scatter(kp_edge_px[:, 0], kp_edge_px[:, 1], c="lime", s=40)
             ax1.set_title("Original (edge keypoints)")
-            ax1.axis('off')
+            ax1.axis("off")
 
             kp_aug_px = _norm_yx_to_pixel_xy(kp_aug, image_size)
             ax2.imshow(np.clip(img, 0, 1))
             for j in range(len(kp_aug_px)):
-                ax2.scatter(kp_aug_px[j, 0], kp_aug_px[j, 1],
-                            c='lime' if vis_aug[j] else 'red', s=40,
-                            marker='o' if vis_aug[j] else 'x')
+                ax2.scatter(
+                    kp_aug_px[j, 0],
+                    kp_aug_px[j, 1],
+                    c="lime" if vis_aug[j] else "red",
+                    s=40,
+                    marker="o" if vis_aug[j] else "x",
+                )
             ax2.set_title("After aug (green=visible, red=masked)")
-            ax2.axis('off')
+            ax2.axis("off")
 
             fig.tight_layout()
             out_path = os.path.join(VIZ_DIR, "geometric_edge_masking.png")
-            fig.savefig(out_path, dpi=120, bbox_inches='tight')
+            fig.savefig(out_path, dpi=120, bbox_inches="tight")
             plt.close(fig)
             print(f"  Saved: {out_path}")
         except ImportError:
@@ -472,6 +496,7 @@ class TestMultiViewConsistency:
     @pytest.fixture(autouse=True)
     def setup_dataset(self):
         from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+
         self.ds = object.__new__(SLEAPMultiViewDataset)
         self.ds.augment = True
         self.ds.aug_color_jitter_brightness = 0.2
@@ -510,8 +535,7 @@ class TestMultiViewConsistency:
             t = np.array([0.0, 0.0, 5.0], dtype=np.float32)
 
             fx = fy = image_size * (1.0 + 0.2 * vi / n_views)
-            K = np.array([[fx, 0, image_size/2], [0, fy, image_size/2], [0, 0, 1]],
-                         dtype=np.float32)
+            K = np.array([[fx, 0, image_size / 2], [0, fy, image_size / 2], [0, 0, 1]], dtype=np.float32)
 
             # Project to normalized [y, x]
             kp2d = _project_3d_to_normalized(K, R, t, pts3d, image_size)
@@ -535,8 +559,7 @@ class TestMultiViewConsistency:
             vis = np.ones(n_joints, dtype=bool)
 
             img_a, K_a, kp_a, vis_a = self.ds._apply_geometric_augmentation(
-                images[vi].copy(), K_list[vi].copy(),
-                kp2d_list[vi].copy(), vis.copy()
+                images[vi].copy(), K_list[vi].copy(), kp2d_list[vi].copy(), vis.copy()
             )
             img_a = self.ds._apply_photometric_augmentation(img_a)
 
@@ -547,21 +570,21 @@ class TestMultiViewConsistency:
 
         # Verify reprojection consistency per view
         for vi in range(n_views):
-            reproj = _project_3d_to_normalized(
-                K_aug_list[vi], R_list[vi], t_list[vi], pts3d, image_size
-            )
+            reproj = _project_3d_to_normalized(K_aug_list[vi], R_list[vi], t_list[vi], pts3d, image_size)
             visible = vis_aug_list[vi].astype(bool)
             if visible.sum() > 0:
                 np.testing.assert_allclose(
-                    reproj[visible], kp2d_aug_list[vi][visible],
+                    reproj[visible],
+                    kp2d_aug_list[vi][visible],
                     atol=0.5 / image_size,
-                    err_msg=f"View {vi}: reprojection mismatch after augmentation"
+                    err_msg=f"View {vi}: reprojection mismatch after augmentation",
                 )
 
         # Visualization: grid of all views
         try:
             import matplotlib
-            matplotlib.use('Agg')
+
+            matplotlib.use("Agg")
             import matplotlib.pyplot as plt
 
             cols = min(3, n_views)
@@ -576,28 +599,24 @@ class TestMultiViewConsistency:
                 vis = vis_aug_list[vi]
                 # Convert normalized [y,x] to pixel [x,y] for matplotlib
                 kp_px = _norm_yx_to_pixel_xy(kp2d_aug_list[vi], image_size)
-                ax.scatter(kp_px[vis, 0], kp_px[vis, 1], c='lime', s=30,
-                           marker='o', label='aug 2D kps')
+                ax.scatter(kp_px[vis, 0], kp_px[vis, 1], c="lime", s=30, marker="o", label="aug 2D kps")
 
-                reproj = _project_3d_to_normalized(
-                    K_aug_list[vi], R_list[vi], t_list[vi], pts3d, image_size
-                )
+                reproj = _project_3d_to_normalized(K_aug_list[vi], R_list[vi], t_list[vi], pts3d, image_size)
                 rp_px = _norm_yx_to_pixel_xy(reproj, image_size)
-                ax.scatter(rp_px[vis, 0], rp_px[vis, 1], c='red', s=60,
-                           marker='x', linewidths=2, label='reproj 3D->2D')
+                ax.scatter(rp_px[vis, 0], rp_px[vis, 1], c="red", s=60, marker="x", linewidths=2, label="reproj 3D->2D")
 
                 ax.set_title(f"View {vi}")
-                ax.axis('off')
+                ax.axis("off")
                 if vi == 0:
                     ax.legend(fontsize=8)
 
             for vi in range(n_views, len(axes_flat)):
-                axes_flat[vi].axis('off')
+                axes_flat[vi].axis("off")
 
             fig.suptitle("Multiview: green=aug kps, red=independent reprojection (should overlap)")
             fig.tight_layout()
             out_path = os.path.join(VIZ_DIR, "multiview_reprojection_grid.png")
-            fig.savefig(out_path, dpi=120, bbox_inches='tight')
+            fig.savefig(out_path, dpi=120, bbox_inches="tight")
             plt.close(fig)
             print(f"  Saved: {out_path}")
         except ImportError:
@@ -610,6 +629,7 @@ class TestAugmentationToggle:
     @pytest.fixture(autouse=True)
     def setup_dataset(self):
         from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+
         self.ds = object.__new__(SLEAPMultiViewDataset)
         self.ds.aug_color_jitter_brightness = 0.3
         self.ds.aug_color_jitter_contrast = 0.3
@@ -632,8 +652,7 @@ class TestAugmentationToggle:
         self.ds.augment = True
         np.random.seed(42)
         img_aug = self.ds._apply_photometric_augmentation(img.copy())
-        assert not np.allclose(img_aug, img_copy, atol=1e-6), \
-            "Augmentation should change the image"
+        assert not np.allclose(img_aug, img_copy, atol=1e-6), "Augmentation should change the image"
 
     def test_deterministic_without_augmentation(self):
         """Multiple calls with same input and augment=False should give identical results."""
@@ -667,25 +686,25 @@ def _get_real_sample_data(ds, sample_idx=0, seed=42):
     np.random.seed(seed)
     x_data, y_data = ds[sample_idx]
 
-    if y_data.get('keypoints_3d') is None or y_data.get('camera_intrinsics') is None:
+    if y_data.get("keypoints_3d") is None or y_data.get("camera_intrinsics") is None:
         return None
 
     target_res = ds.target_resolution
     ws = ds.world_scale
 
     return {
-        'x_data': x_data,
-        'y_data': y_data,
-        'target_res': target_res,
-        'pts3d_raw': y_data['keypoints_3d'] / ws,
-        'K': y_data['camera_intrinsics'],
-        'R': y_data['camera_extrinsics_R'],
-        't_raw': y_data['camera_extrinsics_t'] / ws,
-        'kp2d': y_data['keypoints_2d'],         # normalized [y, x]
-        'vis': y_data['keypoint_visibility'],
-        'images': x_data['images'],
-        'num_views': len(x_data['images']),
-        'camera_names': x_data.get('camera_names', [f'cam_{i}' for i in range(len(x_data['images']))]),
+        "x_data": x_data,
+        "y_data": y_data,
+        "target_res": target_res,
+        "pts3d_raw": y_data["keypoints_3d"] / ws,
+        "K": y_data["camera_intrinsics"],
+        "R": y_data["camera_extrinsics_R"],
+        "t_raw": y_data["camera_extrinsics_t"] / ws,
+        "kp2d": y_data["keypoints_2d"],  # normalized [y, x]
+        "vis": y_data["keypoint_visibility"],
+        "images": x_data["images"],
+        "num_views": len(x_data["images"]),
+        "camera_names": x_data.get("camera_names", [f"cam_{i}" for i in range(len(x_data["images"]))]),
     }
 
 
@@ -704,20 +723,21 @@ class TestRealDatasetAugmentation:
     @pytest.fixture(autouse=True)
     def setup(self):
         from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+
         self.ds = SLEAPMultiViewDataset(
             hdf5_path=REAL_H5_PATH,
             augment=True,
             augmentation_config={
-                'color_jitter_brightness': 0.2,
-                'color_jitter_contrast': 0.2,
-                'color_jitter_saturation': 0.15,
-                'gaussian_noise_std': 0.015,
-                'gaussian_blur_prob': 0.3,
-                'gaussian_blur_kernel_range': (3, 7),
-                'random_erasing_prob': 0.2,
-                'random_erasing_scale_range': (0.02, 0.1),
-                'crop_jitter_fraction': 0.0,
-                'scale_jitter_range': (0.9, 1.1),
+                "color_jitter_brightness": 0.2,
+                "color_jitter_contrast": 0.2,
+                "color_jitter_saturation": 0.15,
+                "gaussian_noise_std": 0.015,
+                "gaussian_blur_prob": 0.3,
+                "gaussian_blur_kernel_range": (3, 7),
+                "random_erasing_prob": 0.2,
+                "random_erasing_scale_range": (0.02, 0.1),
+                "crop_jitter_fraction": 0.0,
+                "scale_jitter_range": (0.9, 1.1),
             },
         )
         self.ds_no_aug = SLEAPMultiViewDataset(
@@ -740,29 +760,30 @@ class TestRealDatasetAugmentation:
 
         try:
             import matplotlib
-            matplotlib.use('Agg')
+
+            matplotlib.use("Agg")
             import matplotlib.pyplot as plt
+
             has_mpl = True
         except ImportError:
             has_mpl = False
 
         max_errors = []
-        for vi in range(d['num_views']):
-            reproj = _project_3d_to_normalized(
-                d['K'][vi], d['R'][vi], d['t_raw'][vi],
-                d['pts3d_raw'], d['target_res']
-            )
-            visible = d['vis'][vi].astype(bool)
+        for vi in range(d["num_views"]):
+            reproj = _project_3d_to_normalized(d["K"][vi], d["R"][vi], d["t_raw"][vi], d["pts3d_raw"], d["target_res"])
+            visible = d["vis"][vi].astype(bool)
             if visible.sum() == 0:
                 continue
-            err = np.abs(reproj[visible] - d['kp2d'][vi][visible])
+            err = np.abs(reproj[visible] - d["kp2d"][vi][visible])
             max_err = err.max()
             max_errors.append(max_err)
 
         max_errors = np.array(max_errors)
-        print(f"  Baseline reprojection errors (normalized): "
-              f"max={max_errors.max():.6f} ({max_errors.max() * d['target_res']:.1f} px), "
-              f"mean={max_errors.mean():.6f}")
+        print(
+            f"  Baseline reprojection errors (normalized): "
+            f"max={max_errors.max():.6f} ({max_errors.max() * d['target_res']:.1f} px), "
+            f"mean={max_errors.mean():.6f}"
+        )
 
         # The inherent triangulation/detection error should be bounded.
         # 0.1 normalized = ~50px at 512 — generous but catches gross errors.
@@ -773,41 +794,39 @@ class TestRealDatasetAugmentation:
 
         # Visualization: no-aug grid with keypoints + reprojection overlay
         if has_mpl:
-            cols = min(3, d['num_views'])
-            rows = math.ceil(d['num_views'] / cols)
+            cols = min(3, d["num_views"])
+            rows = math.ceil(d["num_views"] / cols)
             fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 6 * rows))
-            axes_flat = np.array(axes).flatten() if d['num_views'] > 1 else [axes]
+            axes_flat = np.array(axes).flatten() if d["num_views"] > 1 else [axes]
 
-            for vi in range(d['num_views']):
+            for vi in range(d["num_views"]):
                 ax = axes_flat[vi]
-                ax.imshow(np.clip(d['images'][vi], 0, 1))
+                ax.imshow(np.clip(d["images"][vi], 0, 1))
 
-                v = d['vis'][vi].astype(bool)
-                kp_px = _norm_yx_to_pixel_xy(d['kp2d'][vi], d['target_res'])
-                ax.scatter(kp_px[v, 0], kp_px[v, 1], c='lime', s=15,
-                           marker='o', alpha=0.8, label='stored 2D kps')
+                v = d["vis"][vi].astype(bool)
+                kp_px = _norm_yx_to_pixel_xy(d["kp2d"][vi], d["target_res"])
+                ax.scatter(kp_px[v, 0], kp_px[v, 1], c="lime", s=15, marker="o", alpha=0.8, label="stored 2D kps")
 
                 reproj = _project_3d_to_normalized(
-                    d['K'][vi], d['R'][vi], d['t_raw'][vi],
-                    d['pts3d_raw'], d['target_res']
+                    d["K"][vi], d["R"][vi], d["t_raw"][vi], d["pts3d_raw"], d["target_res"]
                 )
-                rp_px = _norm_yx_to_pixel_xy(reproj, d['target_res'])
-                ax.scatter(rp_px[v, 0], rp_px[v, 1], c='red', s=30,
-                           marker='x', linewidths=1.5, alpha=0.8, label='reproj 3D')
+                rp_px = _norm_yx_to_pixel_xy(reproj, d["target_res"])
+                ax.scatter(
+                    rp_px[v, 0], rp_px[v, 1], c="red", s=30, marker="x", linewidths=1.5, alpha=0.8, label="reproj 3D"
+                )
 
                 ax.set_title(f"View {vi} ({d['camera_names'][vi]})")
-                ax.axis('off')
+                ax.axis("off")
                 if vi == 0:
                     ax.legend(fontsize=8)
 
-            for vi in range(d['num_views'], len(axes_flat)):
-                axes_flat[vi].axis('off')
+            for vi in range(d["num_views"], len(axes_flat)):
+                axes_flat[vi].axis("off")
 
-            fig.suptitle("Baseline (no augmentation): green=stored kps, red=reproj from 3D",
-                         fontsize=11)
+            fig.suptitle("Baseline (no augmentation): green=stored kps, red=reproj from 3D", fontsize=11)
             fig.tight_layout()
             out_path = os.path.join(VIZ_DIR, "real_baseline_reprojection.png")
-            fig.savefig(out_path, dpi=120, bbox_inches='tight')
+            fig.savefig(out_path, dpi=120, bbox_inches="tight")
             plt.close(fig)
             print(f"  Saved: {out_path}")
 
@@ -824,22 +843,21 @@ class TestRealDatasetAugmentation:
             pytest.skip("Missing 3D/camera data")
 
         max_errors = []
-        for vi in range(d['num_views']):
-            reproj = _project_3d_to_normalized(
-                d['K'][vi], d['R'][vi], d['t_raw'][vi],
-                d['pts3d_raw'], d['target_res']
-            )
-            visible = d['vis'][vi].astype(bool)
+        for vi in range(d["num_views"]):
+            reproj = _project_3d_to_normalized(d["K"][vi], d["R"][vi], d["t_raw"][vi], d["pts3d_raw"], d["target_res"])
+            visible = d["vis"][vi].astype(bool)
             if visible.sum() == 0:
                 continue
-            err = np.abs(reproj[visible] - d['kp2d'][vi][visible])
+            err = np.abs(reproj[visible] - d["kp2d"][vi][visible])
             max_err = err.max()
             max_errors.append(max_err)
 
         max_errors = np.array(max_errors)
-        print(f"  Augmented reprojection errors (normalized): "
-              f"max={max_errors.max():.6f} ({max_errors.max() * d['target_res']:.1f} px), "
-              f"mean={max_errors.mean():.6f}")
+        print(
+            f"  Augmented reprojection errors (normalized): "
+            f"max={max_errors.max():.6f} ({max_errors.max() * d['target_res']:.1f} px), "
+            f"mean={max_errors.mean():.6f}"
+        )
 
         # Same tolerance as baseline — augmentation should not increase error
         assert max_errors.max() < 0.1, (
@@ -850,44 +868,43 @@ class TestRealDatasetAugmentation:
         # Visualization: augmented grid with keypoints + reprojection overlay
         try:
             import matplotlib
-            matplotlib.use('Agg')
+
+            matplotlib.use("Agg")
             import matplotlib.pyplot as plt
 
-            cols = min(3, d['num_views'])
-            rows = math.ceil(d['num_views'] / cols)
+            cols = min(3, d["num_views"])
+            rows = math.ceil(d["num_views"] / cols)
             fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 6 * rows))
-            axes_flat = np.array(axes).flatten() if d['num_views'] > 1 else [axes]
+            axes_flat = np.array(axes).flatten() if d["num_views"] > 1 else [axes]
 
-            for vi in range(d['num_views']):
+            for vi in range(d["num_views"]):
                 ax = axes_flat[vi]
-                ax.imshow(np.clip(d['images'][vi], 0, 1))
+                ax.imshow(np.clip(d["images"][vi], 0, 1))
 
-                v = d['vis'][vi].astype(bool)
-                kp_px = _norm_yx_to_pixel_xy(d['kp2d'][vi], d['target_res'])
-                ax.scatter(kp_px[v, 0], kp_px[v, 1], c='lime', s=15,
-                           marker='o', alpha=0.8, label='aug 2D kps')
+                v = d["vis"][vi].astype(bool)
+                kp_px = _norm_yx_to_pixel_xy(d["kp2d"][vi], d["target_res"])
+                ax.scatter(kp_px[v, 0], kp_px[v, 1], c="lime", s=15, marker="o", alpha=0.8, label="aug 2D kps")
 
                 reproj = _project_3d_to_normalized(
-                    d['K'][vi], d['R'][vi], d['t_raw'][vi],
-                    d['pts3d_raw'], d['target_res']
+                    d["K"][vi], d["R"][vi], d["t_raw"][vi], d["pts3d_raw"], d["target_res"]
                 )
-                rp_px = _norm_yx_to_pixel_xy(reproj, d['target_res'])
-                ax.scatter(rp_px[v, 0], rp_px[v, 1], c='red', s=30,
-                           marker='x', linewidths=1.5, alpha=0.8, label='reproj 3D')
+                rp_px = _norm_yx_to_pixel_xy(reproj, d["target_res"])
+                ax.scatter(
+                    rp_px[v, 0], rp_px[v, 1], c="red", s=30, marker="x", linewidths=1.5, alpha=0.8, label="reproj 3D"
+                )
 
                 ax.set_title(f"View {vi} ({d['camera_names'][vi]})")
-                ax.axis('off')
+                ax.axis("off")
                 if vi == 0:
                     ax.legend(fontsize=8)
 
-            for vi in range(d['num_views'], len(axes_flat)):
-                axes_flat[vi].axis('off')
+            for vi in range(d["num_views"], len(axes_flat)):
+                axes_flat[vi].axis("off")
 
-            fig.suptitle("After augmentation: green=aug kps, red=reproj from 3D",
-                         fontsize=11)
+            fig.suptitle("After augmentation: green=aug kps, red=reproj from 3D", fontsize=11)
             fig.tight_layout()
             out_path = os.path.join(VIZ_DIR, "real_augmented_reprojection.png")
-            fig.savefig(out_path, dpi=120, bbox_inches='tight')
+            fig.savefig(out_path, dpi=120, bbox_inches="tight")
             plt.close(fig)
             print(f"  Saved: {out_path}")
         except ImportError:
@@ -906,7 +923,8 @@ class TestRealDatasetAugmentation:
 
         try:
             import matplotlib
-            matplotlib.use('Agg')
+
+            matplotlib.use("Agg")
             import matplotlib.pyplot as plt
         except ImportError:
             pytest.skip("matplotlib not installed")
@@ -915,10 +933,10 @@ class TestRealDatasetAugmentation:
 
         # Pick the first view with visible keypoints
         view_idx = 0
-        img_orig = d['images'][view_idx].copy()
-        kp_norm = d['kp2d'][view_idx]
-        v = d['vis'][view_idx].astype(bool)
-        target_res = d['target_res']
+        img_orig = d["images"][view_idx].copy()
+        kp_norm = d["kp2d"][view_idx]
+        v = d["vis"][view_idx].astype(bool)
+        target_res = d["target_res"]
         kp_px = _norm_yx_to_pixel_xy(kp_norm, target_res)
 
         # Create a bare dataset object for augmentation methods
@@ -926,44 +944,56 @@ class TestRealDatasetAugmentation:
         ds_bare.augment = True
 
         aug_types = {
-            "brightness": {"aug_color_jitter_brightness": 0.3,
-                           "aug_color_jitter_contrast": 0,
-                           "aug_color_jitter_saturation": 0,
-                           "aug_gaussian_noise_std": 0,
-                           "aug_gaussian_blur_prob": 0,
-                           "aug_random_erasing_prob": 0},
-            "contrast": {"aug_color_jitter_brightness": 0,
-                         "aug_color_jitter_contrast": 0.3,
-                         "aug_color_jitter_saturation": 0,
-                         "aug_gaussian_noise_std": 0,
-                         "aug_gaussian_blur_prob": 0,
-                         "aug_random_erasing_prob": 0},
-            "saturation": {"aug_color_jitter_brightness": 0,
-                           "aug_color_jitter_contrast": 0,
-                           "aug_color_jitter_saturation": 0.3,
-                           "aug_gaussian_noise_std": 0,
-                           "aug_gaussian_blur_prob": 0,
-                           "aug_random_erasing_prob": 0},
-            "noise": {"aug_color_jitter_brightness": 0,
-                      "aug_color_jitter_contrast": 0,
-                      "aug_color_jitter_saturation": 0,
-                      "aug_gaussian_noise_std": 0.03,
-                      "aug_gaussian_blur_prob": 0,
-                      "aug_random_erasing_prob": 0},
-            "blur": {"aug_color_jitter_brightness": 0,
-                     "aug_color_jitter_contrast": 0,
-                     "aug_color_jitter_saturation": 0,
-                     "aug_gaussian_noise_std": 0,
-                     "aug_gaussian_blur_prob": 1.0,
-                     "aug_gaussian_blur_kernel_range": (5, 5),
-                     "aug_random_erasing_prob": 0},
-            "erasing": {"aug_color_jitter_brightness": 0,
-                        "aug_color_jitter_contrast": 0,
-                        "aug_color_jitter_saturation": 0,
-                        "aug_gaussian_noise_std": 0,
-                        "aug_gaussian_blur_prob": 0,
-                        "aug_random_erasing_prob": 1.0,
-                        "aug_random_erasing_scale_range": (0.05, 0.15)},
+            "brightness": {
+                "aug_color_jitter_brightness": 0.3,
+                "aug_color_jitter_contrast": 0,
+                "aug_color_jitter_saturation": 0,
+                "aug_gaussian_noise_std": 0,
+                "aug_gaussian_blur_prob": 0,
+                "aug_random_erasing_prob": 0,
+            },
+            "contrast": {
+                "aug_color_jitter_brightness": 0,
+                "aug_color_jitter_contrast": 0.3,
+                "aug_color_jitter_saturation": 0,
+                "aug_gaussian_noise_std": 0,
+                "aug_gaussian_blur_prob": 0,
+                "aug_random_erasing_prob": 0,
+            },
+            "saturation": {
+                "aug_color_jitter_brightness": 0,
+                "aug_color_jitter_contrast": 0,
+                "aug_color_jitter_saturation": 0.3,
+                "aug_gaussian_noise_std": 0,
+                "aug_gaussian_blur_prob": 0,
+                "aug_random_erasing_prob": 0,
+            },
+            "noise": {
+                "aug_color_jitter_brightness": 0,
+                "aug_color_jitter_contrast": 0,
+                "aug_color_jitter_saturation": 0,
+                "aug_gaussian_noise_std": 0.03,
+                "aug_gaussian_blur_prob": 0,
+                "aug_random_erasing_prob": 0,
+            },
+            "blur": {
+                "aug_color_jitter_brightness": 0,
+                "aug_color_jitter_contrast": 0,
+                "aug_color_jitter_saturation": 0,
+                "aug_gaussian_noise_std": 0,
+                "aug_gaussian_blur_prob": 1.0,
+                "aug_gaussian_blur_kernel_range": (5, 5),
+                "aug_random_erasing_prob": 0,
+            },
+            "erasing": {
+                "aug_color_jitter_brightness": 0,
+                "aug_color_jitter_contrast": 0,
+                "aug_color_jitter_saturation": 0,
+                "aug_gaussian_noise_std": 0,
+                "aug_gaussian_blur_prob": 0,
+                "aug_random_erasing_prob": 1.0,
+                "aug_random_erasing_scale_range": (0.05, 0.15),
+            },
         }
 
         n_aug = len(aug_types)
@@ -972,9 +1002,9 @@ class TestRealDatasetAugmentation:
 
         # Panel 0: original
         axes_flat[0].imshow(np.clip(img_orig, 0, 1))
-        axes_flat[0].scatter(kp_px[v, 0], kp_px[v, 1], c='lime', s=20, marker='o')
+        axes_flat[0].scatter(kp_px[v, 0], kp_px[v, 1], c="lime", s=20, marker="o")
         axes_flat[0].set_title("Original")
-        axes_flat[0].axis('off')
+        axes_flat[0].axis("off")
 
         for i, (name, params) in enumerate(aug_types.items()):
             for k, val in params.items():
@@ -985,18 +1015,18 @@ class TestRealDatasetAugmentation:
 
             ax = axes_flat[i + 1]
             ax.imshow(np.clip(img_aug, 0, 1))
-            ax.scatter(kp_px[v, 0], kp_px[v, 1], c='lime', s=20, marker='o')
+            ax.scatter(kp_px[v, 0], kp_px[v, 1], c="lime", s=20, marker="o")
             ax.set_title(name)
-            ax.axis('off')
+            ax.axis("off")
 
         # Hide unused axes
         for j in range(n_aug + 1, len(axes_flat)):
-            axes_flat[j].axis('off')
+            axes_flat[j].axis("off")
 
         fig.suptitle(f"Real data photometric augmentations (View {view_idx})", fontsize=12)
         fig.tight_layout()
         out_path = os.path.join(VIZ_DIR, "real_photometric_augmentations.png")
-        fig.savefig(out_path, dpi=150, bbox_inches='tight')
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"  Saved: {out_path}")
 
@@ -1014,7 +1044,8 @@ class TestRealDatasetAugmentation:
 
         try:
             import matplotlib
-            matplotlib.use('Agg')
+
+            matplotlib.use("Agg")
             import matplotlib.pyplot as plt
         except ImportError:
             pytest.skip("matplotlib not installed")
@@ -1026,69 +1057,63 @@ class TestRealDatasetAugmentation:
         ds_bare.aug_crop_jitter_fraction = 0.0
         ds_bare.aug_scale_jitter_range = (0.9, 1.1)
 
-        target_res = d_noaug['target_res']
-        n_views = min(d_noaug['num_views'], 6)
+        target_res = d_noaug["target_res"]
+        n_views = min(d_noaug["num_views"], 6)
 
         fig, axes = plt.subplots(n_views, 3, figsize=(18, 6 * n_views))
         if n_views == 1:
             axes = axes[np.newaxis, :]
 
         for vi in range(n_views):
-            img = d_noaug['images'][vi].copy()
-            K_v = d_noaug['K'][vi].copy()
-            kp = d_noaug['kp2d'][vi].copy()
-            v = d_noaug['vis'][vi].copy()
+            img = d_noaug["images"][vi].copy()
+            K_v = d_noaug["K"][vi].copy()
+            kp = d_noaug["kp2d"][vi].copy()
+            v = d_noaug["vis"][vi].copy()
 
             np.random.seed(100 + vi)
-            img_aug, K_aug, kp_aug, vis_aug = ds_bare._apply_geometric_augmentation(
-                img, K_v, kp, v
-            )
+            img_aug, K_aug, kp_aug, vis_aug = ds_bare._apply_geometric_augmentation(img, K_v, kp, v)
 
             # Independent reprojection with updated K
             reproj = _project_3d_to_normalized(
-                K_aug, d_noaug['R'][vi], d_noaug['t_raw'][vi],
-                d_noaug['pts3d_raw'], target_res
+                K_aug, d_noaug["R"][vi], d_noaug["t_raw"][vi], d_noaug["pts3d_raw"], target_res
             )
 
             v_mask = vis_aug.astype(bool)
-            v_orig = d_noaug['vis'][vi].astype(bool)
+            v_orig = d_noaug["vis"][vi].astype(bool)
 
             # Panel 1: original
             ax = axes[vi, 0]
-            ax.imshow(np.clip(d_noaug['images'][vi], 0, 1))
-            kp_orig_px = _norm_yx_to_pixel_xy(d_noaug['kp2d'][vi], target_res)
-            ax.scatter(kp_orig_px[v_orig, 0], kp_orig_px[v_orig, 1],
-                       c='lime', s=20, marker='o')
+            ax.imshow(np.clip(d_noaug["images"][vi], 0, 1))
+            kp_orig_px = _norm_yx_to_pixel_xy(d_noaug["kp2d"][vi], target_res)
+            ax.scatter(kp_orig_px[v_orig, 0], kp_orig_px[v_orig, 1], c="lime", s=20, marker="o")
             ax.set_title(f"View {vi} original")
-            ax.axis('off')
+            ax.axis("off")
 
             # Panel 2: augmented + transformed kps
             ax = axes[vi, 1]
             ax.imshow(np.clip(img_aug, 0, 1))
             kp_aug_px = _norm_yx_to_pixel_xy(kp_aug, target_res)
-            ax.scatter(kp_aug_px[v_mask, 0], kp_aug_px[v_mask, 1],
-                       c='lime', s=20, marker='o', label='aug kps')
+            ax.scatter(kp_aug_px[v_mask, 0], kp_aug_px[v_mask, 1], c="lime", s=20, marker="o", label="aug kps")
             ax.set_title("Aug + transformed kps")
-            ax.axis('off')
+            ax.axis("off")
 
             # Panel 3: augmented + reprojected kps (should match panel 2)
             ax = axes[vi, 2]
             ax.imshow(np.clip(img_aug, 0, 1))
             rp_px = _norm_yx_to_pixel_xy(reproj, target_res)
-            ax.scatter(rp_px[v_mask, 0], rp_px[v_mask, 1],
-                       c='red', s=40, marker='x', linewidths=1.5, label='reproj 3D')
-            ax.scatter(kp_aug_px[v_mask, 0], kp_aug_px[v_mask, 1],
-                       c='lime', s=15, marker='o', alpha=0.7, label='aug kps')
+            ax.scatter(rp_px[v_mask, 0], rp_px[v_mask, 1], c="red", s=40, marker="x", linewidths=1.5, label="reproj 3D")
+            ax.scatter(
+                kp_aug_px[v_mask, 0], kp_aug_px[v_mask, 1], c="lime", s=15, marker="o", alpha=0.7, label="aug kps"
+            )
             ax.set_title("Aug + reproj overlay")
-            ax.axis('off')
+            ax.axis("off")
             if vi == 0:
                 ax.legend(fontsize=7)
 
-        fig.suptitle("Geometric augmentation: cols = [original, aug+kps, aug+reproj overlay]",
-                     fontsize=12)
+        fig.suptitle("Geometric augmentation: cols = [original, aug+kps, aug+reproj overlay]", fontsize=12)
         fig.tight_layout()
         out_path = os.path.join(VIZ_DIR, "real_geometric_augmentation.png")
-        fig.savefig(out_path, dpi=120, bbox_inches='tight')
+        fig.savefig(out_path, dpi=120, bbox_inches="tight")
         plt.close(fig)
         print(f"  Saved: {out_path}")
 
@@ -1106,45 +1131,43 @@ class TestRealDatasetAugmentation:
 
         try:
             import matplotlib
-            matplotlib.use('Agg')
+
+            matplotlib.use("Agg")
             import matplotlib.pyplot as plt
         except ImportError:
             pytest.skip("matplotlib not installed")
 
-        target_res = d_noaug['target_res']
-        n_views = min(d_noaug['num_views'], 6)
+        target_res = d_noaug["target_res"]
+        n_views = min(d_noaug["num_views"], 6)
 
         fig, axes = plt.subplots(n_views, 2, figsize=(12, 6 * n_views))
         if n_views == 1:
             axes = axes[np.newaxis, :]
 
         for vi in range(n_views):
-            v_orig = d_noaug['vis'][vi].astype(bool)
-            v_aug = d_aug['vis'][vi].astype(bool)
+            v_orig = d_noaug["vis"][vi].astype(bool)
+            v_aug = d_aug["vis"][vi].astype(bool)
 
             # Original
             ax = axes[vi, 0]
-            ax.imshow(np.clip(d_noaug['images'][vi], 0, 1))
-            kp_px = _norm_yx_to_pixel_xy(d_noaug['kp2d'][vi], target_res)
-            ax.scatter(kp_px[v_orig, 0], kp_px[v_orig, 1],
-                       c='lime', s=20, marker='o')
+            ax.imshow(np.clip(d_noaug["images"][vi], 0, 1))
+            kp_px = _norm_yx_to_pixel_xy(d_noaug["kp2d"][vi], target_res)
+            ax.scatter(kp_px[v_orig, 0], kp_px[v_orig, 1], c="lime", s=20, marker="o")
             ax.set_title(f"View {vi} ({d_noaug['camera_names'][vi]}) — original")
-            ax.axis('off')
+            ax.axis("off")
 
             # Augmented
             ax = axes[vi, 1]
-            ax.imshow(np.clip(d_aug['images'][vi], 0, 1))
-            kp_aug_px = _norm_yx_to_pixel_xy(d_aug['kp2d'][vi], target_res)
-            ax.scatter(kp_aug_px[v_aug, 0], kp_aug_px[v_aug, 1],
-                       c='lime', s=20, marker='o')
+            ax.imshow(np.clip(d_aug["images"][vi], 0, 1))
+            kp_aug_px = _norm_yx_to_pixel_xy(d_aug["kp2d"][vi], target_res)
+            ax.scatter(kp_aug_px[v_aug, 0], kp_aug_px[v_aug, 1], c="lime", s=20, marker="o")
             ax.set_title(f"View {vi} — augmented")
-            ax.axis('off')
+            ax.axis("off")
 
-        fig.suptitle("Full augmentation pipeline: original vs augmented per view",
-                     fontsize=12)
+        fig.suptitle("Full augmentation pipeline: original vs augmented per view", fontsize=12)
         fig.tight_layout()
         out_path = os.path.join(VIZ_DIR, "real_combined_augmentation.png")
-        fig.savefig(out_path, dpi=120, bbox_inches='tight')
+        fig.savefig(out_path, dpi=120, bbox_inches="tight")
         plt.close(fig)
         print(f"  Saved: {out_path}")
 
@@ -1161,7 +1184,8 @@ class TestRealDatasetAugmentation:
         x_noaug, _ = self.ds_no_aug[0]
 
         # Photometric augmentation should change pixel values
-        aug_imgs = np.stack(x_aug['images'])
-        noaug_imgs = np.stack(x_noaug['images'])
-        assert not np.allclose(aug_imgs, noaug_imgs, atol=1e-6), \
+        aug_imgs = np.stack(x_aug["images"])
+        noaug_imgs = np.stack(x_noaug["images"])
+        assert not np.allclose(aug_imgs, noaug_imgs, atol=1e-6), (
             "Augmented and non-augmented images should differ (photometric aug)"
+        )

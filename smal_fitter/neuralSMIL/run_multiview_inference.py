@@ -15,7 +15,9 @@ multi-view HDF5 dataset and writes two videos in the current working directory:
 # This prevents "Address family not supported by protocol" (errno: 97) errors
 # on HPC systems that don't have full IPv6 support
 import socket
+
 _original_getaddrinfo = socket.getaddrinfo
+
 
 def _getaddrinfo_ipv4_only(*args, **kwargs):
     """Force getaddrinfo to return only IPv4 results."""
@@ -24,6 +26,7 @@ def _getaddrinfo_ipv4_only(*args, **kwargs):
     ipv4_responses = [r for r in responses if r[0] == socket.AF_INET]
     # If we have IPv4 results, use them; otherwise fall back to original
     return ipv4_responses if ipv4_responses else responses
+
 
 socket.getaddrinfo = _getaddrinfo_ipv4_only
 # ===== End IPv4 forcing =====
@@ -102,11 +105,7 @@ class PredictionSmoother:
                 num_views = len(params[key])
                 smoothed_list = []
                 for v in range(num_views):
-                    tensors = [
-                        buf[key][v]
-                        for buf in self._buffer
-                        if key in buf and v < len(buf[key])
-                    ]
+                    tensors = [buf[key][v] for buf in self._buffer if key in buf and v < len(buf[key])]
                     if tensors:
                         smoothed_list.append(torch.stack(tensors).mean(dim=0))
                     else:
@@ -147,10 +146,9 @@ def _params_to_device(params: Dict[str, Any], device: str) -> Dict[str, Any]:
     return out
 
 
-def run_forward_multiview(model: MultiViewSMILImageRegressor,
-                          x_data: dict,
-                          y_data: dict,
-                          device: str) -> Optional[dict]:
+def run_forward_multiview(
+    model: MultiViewSMILImageRegressor, x_data: dict, y_data: dict, device: str
+) -> Optional[dict]:
     """Run a single forward pass and return predicted_params (or None if no views)."""
     images = x_data.get("images", [])
     num_views = len(images)
@@ -186,20 +184,20 @@ def run_forward_multiview(model: MultiViewSMILImageRegressor,
 def is_torchrun_launched():
     """
     Check if the script was launched via torchrun/torch.distributed.launch.
-    
+
     When launched via torchrun, environment variables RANK, LOCAL_RANK, and WORLD_SIZE
     are set automatically.
-    
+
     Returns:
         bool: True if launched via torchrun, False otherwise
     """
-    return all(var in os.environ for var in ['RANK', 'LOCAL_RANK', 'WORLD_SIZE'])
+    return all(var in os.environ for var in ["RANK", "LOCAL_RANK", "WORLD_SIZE"])
 
 
-def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int = None):
+def setup_ddp(rank: int, world_size: int, port: str = "12345", local_rank: int = None):
     """
     Initialize DDP environment with robust IPv4-only TCP store.
-    
+
     Args:
         rank: Current process rank (global rank across all nodes)
         world_size: Total number of processes
@@ -207,11 +205,11 @@ def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int =
         local_rank: Local rank within the node (for GPU assignment). If None, uses rank.
     """
     # Get master address and port from environment
-    master_addr = os.environ.get('MASTER_ADDR', 'localhost')
-    master_port = int(os.environ.get('MASTER_PORT', port or '12345'))
-    
+    master_addr = os.environ.get("MASTER_ADDR", "localhost")
+    master_port = int(os.environ.get("MASTER_PORT", port or "12345"))
+
     # Validate that master_addr is an IPv4 address (not a hostname)
-    ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+    ipv4_pattern = r"^(\d{1,3}\.){3}\d{1,3}$"
     if not re.match(ipv4_pattern, master_addr):
         print(f"WARNING: MASTER_ADDR '{master_addr}' is not an IPv4 address!")
         print("  Attempting to resolve to IPv4...")
@@ -225,28 +223,30 @@ def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int =
                 print(f"  ERROR: Could not resolve {master_addr} to IPv4!")
         except Exception as e:
             print(f"  ERROR resolving hostname: {e}")
-    
+
     # Use local_rank for GPU assignment (important for multi-node setups)
     # Do this BEFORE init_process_group so NCCL binds to the correct GPU
     gpu_rank = local_rank if local_rank is not None else rank
-    
+
     # Debug: show available CUDA devices
     if rank == 0:
         print(f"CUDA devices available: {torch.cuda.device_count()}")
         print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
-    
+
     torch.cuda.set_device(gpu_rank)
-    
+
     # Initialize process group if not already initialized
     if not dist.is_initialized():
-        print(f"[Rank {rank}] Initializing distributed: WORLD_SIZE={world_size}, "
-              f"LOCAL_RANK/GPU={gpu_rank}, MASTER={master_addr}:{master_port}")
-        
+        print(
+            f"[Rank {rank}] Initializing distributed: WORLD_SIZE={world_size}, "
+            f"LOCAL_RANK/GPU={gpu_rank}, MASTER={master_addr}:{master_port}"
+        )
+
         try:
             # Create explicit TCPStore with IPv4 address to avoid IPv6 issues
             # This bypasses the default hostname resolution that can return IPv6
-            is_master = (rank == 0)
-            
+            is_master = rank == 0
+
             # Create TCP store with explicit timeout
             store = dist.TCPStore(
                 host_name=master_addr,
@@ -254,44 +254,36 @@ def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int =
                 world_size=world_size,
                 is_master=is_master,
                 timeout=timedelta(seconds=1800),
-                use_libuv=False  # Disable libuv to avoid potential IPv6 issues
+                use_libuv=False,  # Disable libuv to avoid potential IPv6 issues
             )
-            
+
             # Initialize process group with explicit store (bypasses env:// which can use IPv6)
             dist.init_process_group(
-                backend="nccl",
-                store=store,
-                rank=rank,
-                world_size=world_size,
-                timeout=timedelta(seconds=1800)
+                backend="nccl", store=store, rank=rank, world_size=world_size, timeout=timedelta(seconds=1800)
             )
             print(f"[Rank {rank}] Successfully initialized NCCL process group")
-            
+
         except Exception as e:
             print(f"Error initializing process group with NCCL + TCPStore: {e}")
             print(f"  MASTER_ADDR: {master_addr}")
             print(f"  MASTER_PORT: {master_port}")
             print(f"  RANK: {rank}, WORLD_SIZE: {world_size}")
             print(f"  LOCAL_RANK: {local_rank}, GPU_RANK: {gpu_rank}")
-            
+
             # Try gloo backend as fallback with explicit store
             print("Attempting fallback to gloo backend with TCPStore...")
             try:
-                is_master = (rank == 0)
+                is_master = rank == 0
                 store = dist.TCPStore(
                     host_name=master_addr,
                     port=master_port + 1,  # Use different port for gloo
                     world_size=world_size,
                     is_master=is_master,
                     timeout=timedelta(seconds=1800),
-                    use_libuv=False
+                    use_libuv=False,
                 )
                 dist.init_process_group(
-                    backend="gloo",
-                    store=store,
-                    rank=rank,
-                    world_size=world_size,
-                    timeout=timedelta(seconds=1800)
+                    backend="gloo", store=store, rank=rank, world_size=world_size, timeout=timedelta(seconds=1800)
                 )
                 print(f"[Rank {rank}] Successfully initialized with gloo backend!")
             except Exception as e2:
@@ -313,24 +305,23 @@ def _find_default_checkpoint() -> Path:
     return Path(DEFAULT_CHECKPOINTS[0])
 
 
-def load_multiview_model_from_checkpoint(checkpoint_path: Path,
-                                          device: str,
-                                          max_views: int = None,
-                                          canonical_camera_order: List[str] = None) -> MultiViewSMILImageRegressor:
+def load_multiview_model_from_checkpoint(
+    checkpoint_path: Path, device: str, max_views: int = None, canonical_camera_order: List[str] = None
+) -> MultiViewSMILImageRegressor:
     """
     Load a trained MultiViewSMILImageRegressor model from checkpoint.
-    
+
     CRITICAL: max_views and canonical_camera_order are inferred from the checkpoint,
     not from the dataset. The model architecture (view_embeddings, camera_heads) is
     determined by max_views used during training. The model can still handle samples
     with fewer views than max_views through the view_mask mechanism.
-    
+
     Args:
         checkpoint_path: Path to checkpoint file
         device: PyTorch device
         max_views: Optional max_views (if None, inferred from checkpoint)
         canonical_camera_order: Optional canonical camera order (if None, loaded from checkpoint)
-    
+
     Returns:
         MultiViewSMILImageRegressor model
     """
@@ -340,7 +331,7 @@ def load_multiview_model_from_checkpoint(checkpoint_path: Path,
     print(f"Loading checkpoint: {checkpoint_path}")
     checkpoint = torch.load(str(checkpoint_path), map_location=device)
     ckpt_config = checkpoint.get("config", {})
-    
+
     # Get state dict for inferring model structure
     state_dict = checkpoint.get("model_state_dict", checkpoint)
 
@@ -364,28 +355,31 @@ def load_multiview_model_from_checkpoint(checkpoint_path: Path,
     # CRITICAL: Infer max_views from checkpoint state dict to ensure model architecture matches
     # The view_embeddings.weight shape determines the number of camera positions
     if max_views is None:
-        if 'view_embeddings.weight' in state_dict:
-            max_views = state_dict['view_embeddings.weight'].shape[0]
+        if "view_embeddings.weight" in state_dict:
+            max_views = state_dict["view_embeddings.weight"].shape[0]
             print(f"Inferred max_views={max_views} from checkpoint view_embeddings.weight shape")
         else:
             # Fall back to config or default
             max_views = ckpt_config.get("max_views", 4)
             print(f"Using max_views={max_views} from checkpoint config or default")
-    
+
     # Get canonical_camera_order from checkpoint if not provided
     if canonical_camera_order is None:
         canonical_camera_order = ckpt_config.get("canonical_camera_order", None)
         if canonical_camera_order is None:
             # Create placeholder list - indices are what matter, not names
             canonical_camera_order = [f"Camera{i}" for i in range(max_views)]
-            print(f"Created placeholder canonical camera order (indices 0-{max_views-1})")
+            print(f"Created placeholder canonical camera order (indices 0-{max_views - 1})")
         else:
             print(f"Loaded canonical camera order from checkpoint: {canonical_camera_order}")
-    
-    print(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
+
+    print(
+        f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras"
+    )
     print("Note: Model can handle samples with fewer views than max_views via view_mask")
 
     from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
+
     input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
     model = create_multiview_regressor(
@@ -411,17 +405,27 @@ def load_multiview_model_from_checkpoint(checkpoint_path: Path,
         mesh_scale_init=mesh_scale_init,
         use_gt_camera_init=use_gt_camera_init,
     ).to(device)
-    
+
     if use_gt_camera_init:
-        print("  Note: Model trained with GT camera initialization - will use GT camera params as base for delta predictions")
+        print(
+            "  Note: Model trained with GT camera initialization - will use GT camera params as base for delta predictions"
+        )
 
     state_dict = checkpoint.get("model_state_dict", checkpoint)
     smal_optimization_params = [
-        "global_rotation", "joint_rotations", "trans", "log_beta_scales",
-        "betas_trans", "betas", "fov", "target_joints", "target_visibility"
+        "global_rotation",
+        "joint_rotations",
+        "trans",
+        "log_beta_scales",
+        "betas_trans",
+        "betas",
+        "fov",
+        "target_joints",
+        "target_visibility",
     ]
     nn_state_dict = {
-        k: v for k, v in state_dict.items()
+        k: v
+        for k, v in state_dict.items()
         if not any(k == param or k.startswith(param + ".") for param in smal_optimization_params)
     }
     model.load_state_dict(nn_state_dict, strict=False)
@@ -437,15 +441,17 @@ class _InMemoryImageExporter:
         self.image = collage_np
 
 
-def render_singleview_collage(model: MultiViewSMILImageRegressor,
-                              x_data: dict,
-                              y_data: dict,
-                              device: str,
-                              view_idx: int = 0,
-                              disable_scaling: bool = False,
-                              disable_translation: bool = False,
-                              predicted_params: Optional[dict] = None,
-                              render_resolution: Optional[int] = None) -> Optional[np.ndarray]:
+def render_singleview_collage(
+    model: MultiViewSMILImageRegressor,
+    x_data: dict,
+    y_data: dict,
+    device: str,
+    view_idx: int = 0,
+    disable_scaling: bool = False,
+    disable_translation: bool = False,
+    predicted_params: Optional[dict] = None,
+    render_resolution: Optional[int] = None,
+) -> Optional[np.ndarray]:
     """
     Render single-view mesh visualization matching training visualization exactly.
 
@@ -485,6 +491,7 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
 
     original_image = images[view_idx]
     from PIL import Image
+
     pil_img = Image.fromarray((original_image * 255).astype(np.uint8))
     pil_img = pil_img.resize((target_size, target_size), Image.BILINEAR)
     resized_image = np.array(pil_img).astype(np.float32) / 255.0
@@ -528,7 +535,7 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
         use_unity_prior=False,
         rgb_only=rgb_only,
     )
-    
+
     # CRITICAL: Match propagate_scaling to the training model's setting.
     # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
     # so visualization must also use propagate_scaling=True for consistent geometry.
@@ -580,12 +587,13 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
         elif model.scale_trans_mode == "separate":
             # 'separate' mode: check if using PCA or per-joint values
             from smal_fitter.neuralSMIL.training_config import TrainingConfig
+
             scale_trans_config = TrainingConfig.get_scale_trans_config()
-            use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
-            
+            use_pca_transformation = scale_trans_config.get("separate", {}).get("use_pca_transformation", True)
+
             scales = predicted_params["log_beta_scales"][0:1].detach()
             trans = predicted_params["betas_trans"][0:1].detach()
-            
+
             if use_pca_transformation:
                 # PCA weights - convert to per-joint values for SMALFitter
                 # This matches training exactly: scales is (1, N_BETAS), result is (1, n_joints, 3)
@@ -597,7 +605,7 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
                     scales = None
                     trans = None
             # else: Already per-joint values (batch_size, n_joints, 3) - use directly
-            
+
             # Apply scales and translations independently based on disable flags
             if not disable_scaling and scales is not None:
                 temp_fitter.log_beta_scales.data = scales.to(device)
@@ -627,9 +635,7 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
         except Exception:
             aspect = None
 
-        temp_fitter.renderer.set_camera_parameters(
-            R=cam_rot, T=cam_trans, fov=view_fov, aspect_ratio=aspect
-        )
+        temp_fitter.renderer.set_camera_parameters(R=cam_rot, T=cam_trans, fov=view_fov, aspect_ratio=aspect)
 
     exporter = _InMemoryImageExporter()
     vis_mesh_scale = None
@@ -705,16 +711,20 @@ def _compute_subclip_ranges(
 
     if max_frames is None:
         if rank == 0:
-            print(f"WARNING: --generate_num_subclips={num_subclips} requires --max_frames; "
-                  f"falling back to a single full-dataset clip.")
+            print(
+                f"WARNING: --generate_num_subclips={num_subclips} requires --max_frames; "
+                f"falling back to a single full-dataset clip."
+            )
         return [(0, dataset_size)]
 
     slot_size = dataset_size // num_subclips
     if slot_size < max_frames:
         if rank == 0:
-            print(f"WARNING: dataset has {dataset_size} frames; {num_subclips} subclips of "
-                  f"{max_frames} frames each don't fit (only {slot_size} frames per slot). "
-                  f"Falling back to a single full-dataset clip.")
+            print(
+                f"WARNING: dataset has {dataset_size} frames; {num_subclips} subclips of "
+                f"{max_frames} frames each don't fit (only {slot_size} frames per slot). "
+                f"Falling back to a single full-dataset clip."
+            )
         return [(0, dataset_size)]
 
     ranges: List[Tuple[int, int]] = []
@@ -786,8 +796,7 @@ def _export_animation(
         recorder.record(params)
 
     written = recorder.write()
-    print(f"Animation export written: {written['npz']} + {written['json']} "
-          f"({recorder.num_frames()} frames)")
+    print(f"Animation export written: {written['npz']} + {written['json']} ({recorder.num_frames()} frames)")
 
 
 def run_inference_phase(
@@ -864,7 +873,10 @@ def run_render_phase(
             params = _params_to_device(smoothed_params[global_idx], device)
 
             mv_frame = create_multiview_visualization(
-                model, x_data, y_data, device,
+                model,
+                x_data,
+                y_data,
+                device,
                 disable_scaling=disable_scaling,
                 disable_translation=disable_translation,
                 predicted_params=params,
@@ -879,7 +891,10 @@ def run_render_phase(
                 if view_idx >= num_available_views:
                     continue
                 sv_frame = render_singleview_collage(
-                    model, x_data, y_data, device,
+                    model,
+                    x_data,
+                    y_data,
+                    device,
                     view_idx=view_idx,
                     disable_scaling=disable_scaling,
                     disable_translation=disable_translation,
@@ -888,9 +903,7 @@ def run_render_phase(
                 )
                 if sv_frame is not None:
                     sv_frame = _pad_or_resize(sv_frame, singleview_size)
-                    singleview_frames_per_view[view_idx].append(
-                        cv2.cvtColor(sv_frame, cv2.COLOR_RGB2BGR)
-                    )
+                    singleview_frames_per_view[view_idx].append(cv2.cvtColor(sv_frame, cv2.COLOR_RGB2BGR))
                     sv_frame_indices_per_view[view_idx].append(global_idx)
 
         except Exception as e:
@@ -942,9 +955,9 @@ def write_frames_to_temp_storage(
 ) -> Path:
     """
     Write frames to temporary storage on disk to avoid memory issues with all_gather.
-    
+
     Each rank writes its frames to individual image files and a manifest pickle file.
-    
+
     Args:
         multiview_frames: List of multiview grid frames
         singleview_frames_per_view: Dict mapping view_idx -> list of singleview frames
@@ -952,21 +965,21 @@ def write_frames_to_temp_storage(
         sv_frame_indices_per_view: Dict mapping view_idx -> list of dataset indices
         temp_dir: Directory to store temporary files
         rank: Current process rank
-        
+
     Returns:
         Path to rank directory containing manifests
     """
     rank_dir = temp_dir / f"rank_{rank}"
     rank_dir.mkdir(parents=True, exist_ok=True)
-    
+
     mv_manifest = []
-    
+
     # Write multiview frames
     for i, (frame, idx) in enumerate(zip(multiview_frames, mv_frame_indices)):
         frame_path = rank_dir / f"mv_{i:06d}.png"
         cv2.imwrite(str(frame_path), frame)
         mv_manifest.append((idx, str(frame_path)))
-    
+
     # Write singleview frames per view
     sv_manifests_per_view = {}
     for view_idx, frames in singleview_frames_per_view.items():
@@ -977,19 +990,19 @@ def write_frames_to_temp_storage(
             cv2.imwrite(str(frame_path), frame)
             sv_manifest.append((idx, str(frame_path)))
         sv_manifests_per_view[view_idx] = sv_manifest
-    
+
     # Write manifests
     mv_manifest_path = rank_dir / "mv_manifest.pkl"
     sv_manifest_path = rank_dir / "sv_manifests_per_view.pkl"
-    
-    with open(mv_manifest_path, 'wb') as f:
+
+    with open(mv_manifest_path, "wb") as f:
         pickle.dump(mv_manifest, f)
-    with open(sv_manifest_path, 'wb') as f:
+    with open(sv_manifest_path, "wb") as f:
         pickle.dump(sv_manifests_per_view, f)
-    
+
     total_sv = sum(len(m) for m in sv_manifests_per_view.values())
     print(f"[Rank {rank}] Wrote {len(mv_manifest)} multiview frames and {total_sv} singleview frames to {rank_dir}")
-    
+
     return rank_dir
 
 
@@ -1006,39 +1019,39 @@ def merge_frames_and_write_videos(
 ):
     """
     Merge frames from all ranks and write final videos (called only by rank 0).
-    
+
     Reads manifests from all ranks, sorts frames by original index, and writes videos.
     Creates separate singleview videos for each view index.
     """
     print(f"\nMerging frames from {world_size} ranks...")
-    
+
     # Collect all manifests
     all_mv_entries = []
     all_sv_entries_per_view: Dict[int, List] = {v: [] for v in view_indices}
-    
+
     for rank_idx in range(world_size):
         rank_dir = temp_dir / f"rank_{rank_idx}"
         mv_manifest_path = rank_dir / "mv_manifest.pkl"
         sv_manifest_path = rank_dir / "sv_manifests_per_view.pkl"
-        
+
         if mv_manifest_path.exists():
-            with open(mv_manifest_path, 'rb') as f:
+            with open(mv_manifest_path, "rb") as f:
                 all_mv_entries.extend(pickle.load(f))
-        
+
         if sv_manifest_path.exists():
-            with open(sv_manifest_path, 'rb') as f:
+            with open(sv_manifest_path, "rb") as f:
                 sv_manifests = pickle.load(f)
                 for view_idx, entries in sv_manifests.items():
                     if view_idx in all_sv_entries_per_view:
                         all_sv_entries_per_view[view_idx].extend(entries)
-    
+
     # Sort by original dataset index
     all_mv_entries.sort(key=lambda x: x[0])
     for view_idx in all_sv_entries_per_view:
         all_sv_entries_per_view[view_idx].sort(key=lambda x: x[0])
-    
+
     print(f"Writing {len(all_mv_entries)} multiview frames...")
-    
+
     # Write multiview video. MPEG-4 caps frame dimensions at 8192 px, so wide
     # multi-camera grids fall over silently with mp4v. AVI+MJPG has no such
     # cap and stays well-supported everywhere we play these back.
@@ -1051,8 +1064,7 @@ def merge_frames_and_write_videos(
         )
         if not multiview_writer.isOpened():
             raise RuntimeError(
-                f"Failed to open multiview VideoWriter for {multiview_out} "
-                f"at {grid_width}x{grid_height}"
+                f"Failed to open multiview VideoWriter for {multiview_out} at {grid_width}x{grid_height}"
             )
         for _, frame_path in all_mv_entries:
             frame = cv2.imread(frame_path)
@@ -1060,7 +1072,7 @@ def merge_frames_and_write_videos(
                 multiview_writer.write(frame)
         multiview_writer.release()
         print(f"Wrote {multiview_out}")
-    
+
     # Write singleview video for each view
     for view_idx in view_indices:
         sv_entries = all_sv_entries_per_view.get(view_idx, [])
@@ -1073,7 +1085,7 @@ def merge_frames_and_write_videos(
                 # Multiple views: add view index to filename
                 stem = singleview_out_base.stem
                 singleview_out = singleview_out_base.parent / f"{stem}_view{view_idx}.mp4"
-            
+
             singleview_writer = cv2.VideoWriter(
                 str(singleview_out),
                 cv2.VideoWriter_fourcc(*"mp4v"),
@@ -1096,7 +1108,7 @@ def main_inference(
 ):
     """
     Main inference function that can run in single-GPU or multi-GPU mode.
-    
+
     Args:
         args: Parsed command line arguments
         rank: Process rank (0 for single-GPU)
@@ -1106,7 +1118,7 @@ def main_inference(
     dataset_path = Path(args.dataset)
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
-    
+
     # Set device
     if device_override:
         device = device_override
@@ -1116,7 +1128,7 @@ def main_inference(
             device = f"cuda:{rank}"
         else:
             device = "cuda" if torch.cuda.is_available() else "cpu"
-    
+
     # Apply SMAL model override if provided (similar to training script)
     # This must be done before loading the dataset/model to ensure config.dd, config.N_POSE, etc. are correct
     if args.smal_file:
@@ -1128,14 +1140,14 @@ def main_inference(
             print(f"  Shape family: {config.SHAPE_FAMILY}")
             print(f"  N_POSE: {config.N_POSE}")
             print(f"  N_BETAS: {config.N_BETAS}")
-    
+
     # Parse view indices from comma-separated string
     view_indices = [int(x.strip()) for x in args.view_indices.split(",")]
-    
+
     if rank == 0:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("MULTI-VIEW INFERENCE")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Device: {device}")
         print(f"World size: {world_size}")
         print(f"Dataset: {dataset_path}")
@@ -1151,10 +1163,10 @@ def main_inference(
         print(f"View indices for singleview: {view_indices}")
         if args.smoothing_window > 0:
             print(f"Temporal smoothing: {args.smoothing_window} frames")
-        print(f"{'='*60}\n")
-    
+        print(f"{'=' * 60}\n")
+
     checkpoint_path = Path(args.checkpoint) if args.checkpoint else _find_default_checkpoint()
-    
+
     # Load dataset
     # Use num_views_to_use=None to use all available views per sample (same as training)
     # This allows the dataset to have variable numbers of views per sample
@@ -1164,16 +1176,16 @@ def main_inference(
         num_views_to_use=None,  # Use all available views (handles variable view counts)
         random_view_sampling=True,
     )
-    
+
     dataset_max_views = dataset.get_max_views_in_dataset()
     dataset_canonical_camera_order = dataset.get_canonical_camera_order()
-    
+
     if rank == 0:
         print(f"Dataset size: {len(dataset)}")
         print(f"Max views in dataset: {dataset_max_views}")
         print(f"Dataset canonical camera order: {dataset_canonical_camera_order}")
         print("Note: Samples may have fewer views than dataset max_views\n")
-    
+
     # Load model
     # CRITICAL: max_views and canonical_camera_order are inferred from the checkpoint,
     # not from the dataset. The model architecture must match what was used during training.
@@ -1184,10 +1196,10 @@ def main_inference(
         max_views=None,  # Infer from checkpoint
         canonical_camera_order=None,  # Load from checkpoint
     )
-    
+
     # Get model's max_views (from checkpoint architecture)
     model_max_views = model.max_views
-    
+
     if rank == 0:
         print(f"Model max_views (from checkpoint): {model_max_views}")
         print(f"Dataset max_views: {dataset_max_views}")
@@ -1197,7 +1209,7 @@ def main_inference(
         elif model_max_views < dataset_max_views:
             print(f"WARNING: Model supports {model_max_views} views but dataset has up to {dataset_max_views} views")
             print(f"         Samples with >{model_max_views} views will be truncated\n")
-    
+
     # Create distributed sampler if multi-GPU
     sampler = None
     if world_size > 1:
@@ -1209,21 +1221,25 @@ def main_inference(
     render_resolution = getattr(args, "render_resolution", None)
     if render_resolution is not None:
         if render_resolution <= 0:
-            raise ValueError(
-                f"--render_resolution must be a positive integer, got {render_resolution}"
-            )
+            raise ValueError(f"--render_resolution must be a positive integer, got {render_resolution}")
         if rank == 0:
             native_footage = 512  # decoded JPEG crops stored in the HDF5 are 512x512
             if render_resolution < native_footage:
-                print(f"WARNING: --render_resolution={render_resolution} is below the native "
-                      f"footage resolution ({native_footage}); rendering below native footage "
-                      f"wastes available detail.")
+                print(
+                    f"WARNING: --render_resolution={render_resolution} is below the native "
+                    f"footage resolution ({native_footage}); rendering below native footage "
+                    f"wastes available detail."
+                )
             if render_resolution > 4096:
-                print(f"WARNING: --render_resolution={render_resolution} is very large; "
-                      f"render time and single-view file size grow ~quadratically and "
-                      f"memory use may be high.")
-            print(f"Single-view render resolution: {render_resolution} "
-                  f"(native renderer image_size={int(model.renderer.image_size)})")
+                print(
+                    f"WARNING: --render_resolution={render_resolution} is very large; "
+                    f"render time and single-view file size grow ~quadratically and "
+                    f"memory use may be high."
+                )
+            print(
+                f"Single-view render resolution: {render_resolution} "
+                f"(native renderer image_size={int(model.renderer.image_size)})"
+            )
 
     # Calculate frame dimensions — derive from the model's renderer resolution.
     # Layout (single-row vs wrapped 6-per-row block layout for >12 views) is
@@ -1233,11 +1249,13 @@ def main_inference(
     # resolution; only the single-view collage honors --render_resolution.
     img_size = int(model.renderer.image_size)
     mv_layout = compute_multiview_grid_layout(model_max_views, img_size)
-    grid_width = mv_layout['grid_width']
-    grid_height = mv_layout['grid_height']
+    grid_width = mv_layout["grid_width"]
+    grid_height = mv_layout["grid_height"]
     if rank == 0:
-        print(f"Multiview grid layout: {mv_layout['num_blocks']} block(s) × "
-              f"{mv_layout['cols']} col(s) → {grid_width}×{grid_height}")
+        print(
+            f"Multiview grid layout: {mv_layout['num_blocks']} block(s) × "
+            f"{mv_layout['cols']} col(s) → {grid_width}×{grid_height}"
+        )
 
     # Determine singleview frame size (use first sample to get actual size).
     # Fallback default reflects the effective single-view resolution so a failed
@@ -1247,7 +1265,11 @@ def main_inference(
     if len(dataset) > 0:
         try:
             test_frame = render_singleview_collage(
-                model, dataset[0][0], dataset[0][1], device, view_idx=0,
+                model,
+                dataset[0][0],
+                dataset[0][1],
+                device,
+                view_idx=0,
                 render_resolution=render_resolution,
             )
             if test_frame is not None:
@@ -1270,17 +1292,23 @@ def main_inference(
 
     for clip_idx, (start_idx, end_idx) in enumerate(subclip_ranges):
         if multi_subclip and rank == 0:
-            print(f"\n{'#'*60}")
-            print(f"# SUBCLIP {clip_idx + 1}/{len(subclip_ranges)}: "
-                  f"frames [{start_idx}, {end_idx}) ({end_idx - start_idx} frames)")
-            print(f"{'#'*60}")
+            print(f"\n{'#' * 60}")
+            print(
+                f"# SUBCLIP {clip_idx + 1}/{len(subclip_ranges)}: "
+                f"frames [{start_idx}, {end_idx}) ({end_idx - start_idx} frames)"
+            )
+            print(f"{'#' * 60}")
 
         range_suffix = f"_frames{start_idx:06d}-{end_idx:06d}" if multi_subclip else ""
 
         # Compute which dataset indices this rank is responsible for in this subclip
         assigned_indices = _compute_rank_indices(
-            dataset, rank, world_size, sampler,
-            start_idx=start_idx, end_idx=end_idx,
+            dataset,
+            rank,
+            world_size,
+            sampler,
+            start_idx=start_idx,
+            end_idx=end_idx,
         )
 
         # ── Phase 1: Inference (all ranks in parallel) ──────────────────────
@@ -1313,7 +1341,9 @@ def main_inference(
             # Multi-GPU with smoothing: gather all predictions so every rank
             # can build the full temporally-ordered sequence for correct smoothing.
             if rank == 0:
-                print(f"\n── Phase 2: Gathering predictions across {world_size} ranks for smoothing (window={smoothing_window}) ──")
+                print(
+                    f"\n── Phase 2: Gathering predictions across {world_size} ranks for smoothing (window={smoothing_window}) ──"
+                )
                 if temp_base.exists():
                     shutil.rmtree(temp_base)
                 temp_base.mkdir(parents=True, exist_ok=True)
@@ -1431,8 +1461,7 @@ def main_inference(
                 )
                 if not multiview_writer.isOpened():
                     raise RuntimeError(
-                        f"Failed to open multiview VideoWriter for {multiview_out} "
-                        f"at {grid_width}x{grid_height}"
+                        f"Failed to open multiview VideoWriter for {multiview_out} at {grid_width}x{grid_height}"
                     )
                 for frame in multiview_frames:
                     multiview_writer.write(frame)
@@ -1463,26 +1492,26 @@ def main_inference(
 def ddp_main_inference(rank: int, world_size: int, args, master_port: str):
     """
     DDP wrapper around main_inference function.
-    
+
     Supports two launch modes:
     1. mp.spawn (single-node): rank is passed by spawn, local_rank == rank
     2. torchrun/SLURM (multi-node): environment variables are auto-detected and used
     """
     # Check if running under torchrun/SLURM - if so, use environment variables
     if is_torchrun_launched():
-        rank = int(os.environ['RANK'])
-        local_rank = int(os.environ['LOCAL_RANK'])
-        world_size = int(os.environ['WORLD_SIZE'])
+        rank = int(os.environ["RANK"])
+        local_rank = int(os.environ["LOCAL_RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
         gpu_rank = local_rank
     else:
         # mp.spawn mode (single-node) - local_rank == rank
         gpu_rank = rank
-    
+
     setup_ddp(rank, world_size, master_port, local_rank=gpu_rank)
-    
+
     # Set device override for this rank
     device_override = f"cuda:{gpu_rank}"
-    
+
     try:
         main_inference(args, rank=rank, world_size=world_size, device_override=device_override)
     finally:
@@ -1490,64 +1519,115 @@ def ddp_main_inference(rank: int, world_size: int, args, master_port: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Run simple multi-view inference on a preprocessed dataset"
-    )
+    parser = argparse.ArgumentParser(description="Run simple multi-view inference on a preprocessed dataset")
     parser.add_argument("--dataset", required=True, type=str, help="Path to preprocessed SLEAP HDF5 dataset")
     parser.add_argument("--fps", type=int, default=60, help="Output video FPS (default: 60)")
-    parser.add_argument("--max_frames", type=int, default=None, help="Maximum number of frames to process (default: all frames). Useful for quick testing. With --generate_num_subclips > 1, this is the length of each subclip.")
-    parser.add_argument("--generate_num_subclips", type=int, default=1,
-                        help="Generate N subclips evenly spaced across the dataset, each --max_frames "
-                             "long. Subclip i starts at index i * len(dataset) / N. Each output "
-                             "video and exported animation file is suffixed with the frame range. "
-                             "Falls back to a single full-dataset clip if subclips don't fit. "
-                             "Default: 1 (single clip).")
-    parser.add_argument("--disable_scaling", action="store_true", help="Disable part scaling (log_beta_scales) for comparison/debugging")
-    parser.add_argument("--disable_translation", action=argparse.BooleanOptionalAction, default=True, help="Disable part translation (betas_trans) for comparison/debugging. Pass --no-disable_translation to keep translation enabled.")
-    parser.add_argument("--view_indices", type=str, default="0", help="Comma-separated list of camera view indices to render for singleview output (default: '0'). E.g., '0,4,11' renders views 0, 4, and 11.")
-    parser.add_argument("--smoothing_window", type=int, default=0, help="Number of frames to average predictions over for temporal smoothing (default: 0, disabled)")
-    parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs to use (default: 1, ignored when using torchrun)")
-    parser.add_argument("--master-port", type=str, default=None, help="Master port for distributed processing (default: from MASTER_PORT env var or 12355)")
-    parser.add_argument("--smal_file", type=str, default=None, help="Path to SMAL model file to override config.py SMAL_FILE (optional)")
-    parser.add_argument("--shape_family", type=int, default=None, help="Shape family to use with --smal_file (optional, defaults to config.SHAPE_FAMILY)")
-    parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint (.pth) to use for inference (default: auto-detected from multiview_checkpoints/)")
-    parser.add_argument("--export_animation", type=str, default=None,
-                        help="Optional output path stem for SMIL animation export. "
-                             "Writes <stem>.npz + <stem>.json with raw (pre-smoothing) parameters "
-                             "and per-view cameras. Gathered to rank 0 in multi-GPU runs. "
-                             "NOTE: any string is accepted as-is (e.g. \"True\" writes True.npz) — "
-                             "no validation is performed, so pass a real path/filename stem.")
-    parser.add_argument("--render_resolution", type=int, default=None,
-                        help="Square pixel resolution for the single-view mesh visualization. "
-                             "The mesh is rendered and the background footage interpolated up to "
-                             "match (native footage is 512). Default: None = renderer's native "
-                             "image_size (224). Does NOT affect model inference / backbone input, "
-                             "and does NOT change the multi-view grid. Note: render time and "
-                             "single-view file size scale ~quadratically with this value.")
+    parser.add_argument(
+        "--max_frames",
+        type=int,
+        default=None,
+        help="Maximum number of frames to process (default: all frames). Useful for quick testing. With --generate_num_subclips > 1, this is the length of each subclip.",
+    )
+    parser.add_argument(
+        "--generate_num_subclips",
+        type=int,
+        default=1,
+        help="Generate N subclips evenly spaced across the dataset, each --max_frames "
+        "long. Subclip i starts at index i * len(dataset) / N. Each output "
+        "video and exported animation file is suffixed with the frame range. "
+        "Falls back to a single full-dataset clip if subclips don't fit. "
+        "Default: 1 (single clip).",
+    )
+    parser.add_argument(
+        "--disable_scaling", action="store_true", help="Disable part scaling (log_beta_scales) for comparison/debugging"
+    )
+    parser.add_argument(
+        "--disable_translation",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Disable part translation (betas_trans) for comparison/debugging. Pass --no-disable_translation to keep translation enabled.",
+    )
+    parser.add_argument(
+        "--view_indices",
+        type=str,
+        default="0",
+        help="Comma-separated list of camera view indices to render for singleview output (default: '0'). E.g., '0,4,11' renders views 0, 4, and 11.",
+    )
+    parser.add_argument(
+        "--smoothing_window",
+        type=int,
+        default=0,
+        help="Number of frames to average predictions over for temporal smoothing (default: 0, disabled)",
+    )
+    parser.add_argument(
+        "--num_gpus", type=int, default=1, help="Number of GPUs to use (default: 1, ignored when using torchrun)"
+    )
+    parser.add_argument(
+        "--master-port",
+        type=str,
+        default=None,
+        help="Master port for distributed processing (default: from MASTER_PORT env var or 12355)",
+    )
+    parser.add_argument(
+        "--smal_file", type=str, default=None, help="Path to SMAL model file to override config.py SMAL_FILE (optional)"
+    )
+    parser.add_argument(
+        "--shape_family",
+        type=int,
+        default=None,
+        help="Shape family to use with --smal_file (optional, defaults to config.SHAPE_FAMILY)",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Path to model checkpoint (.pth) to use for inference (default: auto-detected from multiview_checkpoints/)",
+    )
+    parser.add_argument(
+        "--export_animation",
+        type=str,
+        default=None,
+        help="Optional output path stem for SMIL animation export. "
+        "Writes <stem>.npz + <stem>.json with raw (pre-smoothing) parameters "
+        "and per-view cameras. Gathered to rank 0 in multi-GPU runs. "
+        'NOTE: any string is accepted as-is (e.g. "True" writes True.npz) — '
+        "no validation is performed, so pass a real path/filename stem.",
+    )
+    parser.add_argument(
+        "--render_resolution",
+        type=int,
+        default=None,
+        help="Square pixel resolution for the single-view mesh visualization. "
+        "The mesh is rendered and the background footage interpolated up to "
+        "match (native footage is 512). Default: None = renderer's native "
+        "image_size (224). Does NOT affect model inference / backbone input, "
+        "and does NOT change the multi-view grid. Note: render time and "
+        "single-view file size scale ~quadratically with this value.",
+    )
     args = parser.parse_args()
-    
+
     # Get master port from args or environment variable
-    master_port = args.master_port or os.environ.get('MASTER_PORT', '12355')
-    
+    master_port = args.master_port or os.environ.get("MASTER_PORT", "12355")
+
     # Check if launched via torchrun/torch.distributed.launch (HPC environment)
     if is_torchrun_launched():
         # Launched via torchrun - processes are already spawned by the launcher
-        rank = int(os.environ['RANK'])
-        world_size = int(os.environ['WORLD_SIZE'])
-        
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+
         # Only print from rank 0 to avoid duplicate output
         if rank == 0:
-            local_rank = int(os.environ['LOCAL_RANK'])
+            local_rank = int(os.environ["LOCAL_RANK"])
             print("Detected torchrun/HPC launch environment:")
             print(f"  Global rank: {rank}")
             print(f"  Local rank (GPU): {local_rank}")
             print(f"  World size: {world_size}")
             print(f"  MASTER_ADDR: {os.environ.get('MASTER_ADDR', 'not set')}")
             print(f"  MASTER_PORT: {os.environ.get('MASTER_PORT', 'not set')}")
-        
+
         # Call ddp_main_inference directly
         ddp_main_inference(rank, world_size, args, master_port)
-    
+
     elif args.num_gpus > 1:
         # Manual multi-GPU launch using mp.spawn
         if not torch.cuda.is_available():
@@ -1557,17 +1637,12 @@ def main():
         if args.num_gpus > available_gpus:
             print(f"ERROR: Requested {args.num_gpus} GPUs but only {available_gpus} available!")
             exit(1)
-        
+
         print(f"Launching multi-GPU inference on {args.num_gpus} GPUs (using mp.spawn)...")
         print(f"Master port: {master_port}")
-        
+
         # Launch multi-GPU processing using spawn
-        mp.spawn(
-            ddp_main_inference,
-            args=(args.num_gpus, args, master_port),
-            nprocs=args.num_gpus,
-            join=True
-        )
+        mp.spawn(ddp_main_inference, args=(args.num_gpus, args, master_port), nprocs=args.num_gpus, join=True)
     else:
         # Single GPU processing (existing path)
         print("Launching single-GPU inference...")

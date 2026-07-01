@@ -72,9 +72,7 @@ from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override
 #     R_cv  = Rz_180 @ R_p3d.T
 #     t_cv  = Rz_180 @ T_p3d           (Rz_180 is its own inverse)
 _RZ_180 = np.array(
-    [[-1.0, 0.0, 0.0],
-     [0.0, -1.0, 0.0],
-     [0.0, 0.0, 1.0]],
+    [[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]],
     dtype=np.float32,
 )
 
@@ -87,9 +85,7 @@ def _pytorch3d_to_opencv_camera(R_p3d: np.ndarray, T_p3d: np.ndarray) -> Tuple[n
 
 def _build_K(fx: float, fy: float, cx: float, cy: float) -> np.ndarray:
     return np.array(
-        [[fx, 0.0, cx],
-         [0.0, fy, cy],
-         [0.0, 0.0, 1.0]],
+        [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]],
         dtype=np.float32,
     )
 
@@ -118,6 +114,7 @@ def _worker_init(smal_file: Optional[str], shape_family: Optional[int]) -> None:
         apply_smal_file_override(smal_file, shape_family=shape_family)
     global _WORKER_LOADER
     from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_multiview_sample
+
     _WORKER_LOADER = load_SMIL_Unreal_multiview_sample
 
 
@@ -170,13 +167,10 @@ def _process_frame(task: Dict[str, Any]) -> Dict[str, Any]:
     # invalid — it gets view_mask=False + camera_indices=-1 downstream, exactly
     # like a subject-absent view. Disabled when min_visible_keypoints <= 0.
     min_visible_kp = int(task.get("min_visible_keypoints", 0))
-    visible_counts = [
-        int(np.asarray(vis).sum()) for vis in y["keypoint_visibility_per_view"]
-    ]
+    visible_counts = [int(np.asarray(vis).sum()) for vis in y["keypoint_visibility_per_view"]]
     if min_visible_kp > 0:
         view_valid_per_view = [
-            bool(valid and visible_counts[v] >= min_visible_kp)
-            for v, valid in enumerate(view_valid_per_view)
+            bool(valid and visible_counts[v] >= min_visible_kp) for v, valid in enumerate(view_valid_per_view)
         ]
 
     num_valid_views = int(sum(view_valid_per_view))
@@ -212,8 +206,16 @@ def _process_frame(task: Dict[str, Any]) -> Dict[str, Any]:
 
             R_p3d_t = y["cam_rot_per_view"][v]
             T_p3d_t = y["cam_trans_per_view"][v]
-            R_p3d = R_p3d_t.detach().cpu().numpy().astype(np.float32) if hasattr(R_p3d_t, "detach") else np.asarray(R_p3d_t, dtype=np.float32)
-            T_p3d = T_p3d_t.detach().cpu().numpy().astype(np.float32) if hasattr(T_p3d_t, "detach") else np.asarray(T_p3d_t, dtype=np.float32)
+            R_p3d = (
+                R_p3d_t.detach().cpu().numpy().astype(np.float32)
+                if hasattr(R_p3d_t, "detach")
+                else np.asarray(R_p3d_t, dtype=np.float32)
+            )
+            T_p3d = (
+                T_p3d_t.detach().cpu().numpy().astype(np.float32)
+                if hasattr(T_p3d_t, "detach")
+                else np.asarray(T_p3d_t, dtype=np.float32)
+            )
 
             R_cv, t_cv = _pytorch3d_to_opencv_camera(R_p3d, T_p3d)
             R_cv_list.append(R_cv)
@@ -297,13 +299,9 @@ class replicAntMultiViewPreprocessor:
         if not (1 <= jpeg_quality <= 100):
             raise ValueError(f"jpeg_quality must be in [1, 100], got {jpeg_quality}")
         if min_views_per_sample < 1:
-            raise ValueError(
-                f"min_views_per_sample must be >= 1, got {min_views_per_sample}"
-            )
+            raise ValueError(f"min_views_per_sample must be >= 1, got {min_views_per_sample}")
         if min_visible_keypoints < 0:
-            raise ValueError(
-                f"min_visible_keypoints must be >= 0, got {min_visible_keypoints}"
-            )
+            raise ValueError(f"min_visible_keypoints must be >= 0, got {min_visible_keypoints}")
 
         self.target_resolution = int(target_resolution)
         self.backbone_name = backbone_name
@@ -335,13 +333,9 @@ class replicAntMultiViewPreprocessor:
 
         # Discover cameras present at frame 0
         cam_files_00000 = list(data_path.glob(f"{dataset_name}_00000_CAM*.json"))
-        all_cam_ids = sorted(
-            {int(re.search(r"CAM(\d+)", f.name).group(1)) for f in cam_files_00000}
-        )
+        all_cam_ids = sorted({int(re.search(r"CAM(\d+)", f.name).group(1)) for f in cam_files_00000})
         if not all_cam_ids:
-            raise FileNotFoundError(
-                f"No {dataset_name}_00000_CAM*.json files under {data_path}"
-            )
+            raise FileNotFoundError(f"No {dataset_name}_00000_CAM*.json files under {data_path}")
 
         if self.camera_subset is not None:
             missing = set(self.camera_subset) - set(all_cam_ids)
@@ -356,21 +350,15 @@ class replicAntMultiViewPreprocessor:
 
         # Discover frames present (use the FIRST canonical cam as the index).
         canonical_cam = camera_subset[0]
-        cam_files = list(
-            data_path.glob(f"{dataset_name}_*_CAM{canonical_cam}.json")
-        )
+        cam_files = list(data_path.glob(f"{dataset_name}_*_CAM{canonical_cam}.json"))
         frame_indices: List[int] = []
-        pattern = re.compile(
-            rf"{re.escape(dataset_name)}_(\d+)_CAM{canonical_cam}\.json$"
-        )
+        pattern = re.compile(rf"{re.escape(dataset_name)}_(\d+)_CAM{canonical_cam}\.json$")
         for cf in cam_files:
             m = pattern.search(cf.name)
             if m:
                 frame_indices.append(int(m.group(1)))
         if not frame_indices:
-            raise FileNotFoundError(
-                f"No CAM{canonical_cam} frame JSON files matched under {data_path}"
-            )
+            raise FileNotFoundError(f"No CAM{canonical_cam} frame JSON files matched under {data_path}")
         frame_indices.sort()
 
         return dataset_name, camera_subset, frame_indices
@@ -704,8 +692,10 @@ class replicAntMultiViewPreprocessor:
             print(f"  translation_factor:      {self.translation_factor}")
             print(f"  depth_occlusion_check:   {self.depth_occlusion_check}")
             print(f"  min_views_per_sample:    {self.min_views_per_sample}")
-            print(f"  min_visible_keypoints:   {self.min_visible_keypoints} "
-                  f"({'disabled' if self.min_visible_keypoints <= 0 else 'per-view gate'})")
+            print(
+                f"  min_visible_keypoints:   {self.min_visible_keypoints} "
+                f"({'disabled' if self.min_visible_keypoints <= 0 else 'per-view gate'})"
+            )
             print(f"  jpeg_quality:            {self.jpeg_quality}")
             print(f"  num_workers:             {num_workers}")
             print()
@@ -733,9 +723,7 @@ class replicAntMultiViewPreprocessor:
         skipped: List[Tuple[int, str]] = []
 
         with h5py.File(output_hdf5, "w") as f:
-            handles = self._create_hdf5_layout(
-                f, num_alloc, max_views, n_joints, n_pose, n_betas
-            )
+            handles = self._create_hdf5_layout(f, num_alloc, max_views, n_joints, n_pose, n_betas)
             cam_idx_map = {cam_id: idx for idx, cam_id in enumerate(camera_subset)}
 
             executor_kwargs = dict(
@@ -755,16 +743,12 @@ class replicAntMultiViewPreprocessor:
                     if not result.get("ok"):
                         skipped.append((int(result["frame_idx"]), str(result.get("reason", "unknown"))))
                         if self.debug and verbose:
-                            tqdm.write(
-                                f"  SKIP frame {result['frame_idx']}: {result.get('reason')}"
-                            )
+                            tqdm.write(f"  SKIP frame {result['frame_idx']}: {result.get('reason')}")
                         continue
 
                     i = num_written
                     nv = int(result["num_views"])
-                    view_valid_per_view = list(
-                        result.get("view_valid_per_view", [True] * nv)
-                    )
+                    view_valid_per_view = list(result.get("view_valid_per_view", [True] * nv))
                     # Per-view image blobs and view_mask.
                     # The JPG image and camera geometry (K/R/t) are written for
                     # every slot regardless of subject-data validity — the image
@@ -781,9 +765,7 @@ class replicAntMultiViewPreprocessor:
                         # returns views in the same order — assert it.
                         cam_id = result["camera_ids"][v]
                         slot = cam_idx_map.get(int(cam_id), v)
-                        handles["image_jpeg_datasets"][slot][i] = np.frombuffer(
-                            result["jpeg_blobs"][v], dtype=np.uint8
-                        )
+                        handles["image_jpeg_datasets"][slot][i] = np.frombuffer(result["jpeg_blobs"][v], dtype=np.uint8)
                         if view_valid_per_view[v]:
                             view_mask_row[slot] = True
                             cam_idx_row[slot] = slot
@@ -875,12 +857,8 @@ class replicAntMultiViewPreprocessor:
             # Skipped-frame ledger.
             meta.attrs["num_skipped_frames"] = len(skipped)
             if skipped:
-                meta.attrs["skipped_frame_indices"] = np.array(
-                    [s[0] for s in skipped], dtype=np.int32
-                )
-                meta.attrs["skipped_frame_reasons"] = json.dumps(
-                    {int(idx): reason for idx, reason in skipped}
-                )
+                meta.attrs["skipped_frame_indices"] = np.array([s[0] for s in skipped], dtype=np.int32)
+                meta.attrs["skipped_frame_reasons"] = json.dumps({int(idx): reason for idx, reason in skipped})
 
         elapsed = time.time() - start_time
         if verbose:
@@ -934,29 +912,43 @@ def main() -> None:
         help='Comma-separated camera IDs (e.g. "1,2,3"). Default: all cameras at frame 0.',
     )
     parser.add_argument("--max_frames", type=int, default=None, help="Cap number of frames (smoke test)")
-    parser.add_argument("--min_views", type=int, default=2,
-                        help="Minimum valid views per sample. Frames with fewer "
-                             "cameras containing valid subject data are discarded; "
-                             "frames with >= this many keep all camera slots but "
-                             "set view_mask=False on the invalid ones. Default: 2.")
-    parser.add_argument("--min_visible_keypoints", type=int, default=0,
-                        help="Per-view visible-keypoint quality gate. A view whose "
-                             "post-occlusion visible-keypoint count is below this "
-                             "threshold is demoted to invalid (view_mask=False, "
-                             "camera_indices=-1), exactly like a subject-absent view; "
-                             "the sample is then skipped if fewer than --min_views good "
-                             "views remain. 0 disables the gate (default).")
-    parser.add_argument("--translation_factor", type=float, default=0.1,
-                        help="Loader-side uniform world scale (default 0.1 unifies mesh + data units)")
-    parser.add_argument("--depth_occlusion_check", dest="depth_occlusion_check",
-                        action="store_true", default=True)
-    parser.add_argument("--no_depth_occlusion_check", dest="depth_occlusion_check",
-                        action="store_false")
+    parser.add_argument(
+        "--min_views",
+        type=int,
+        default=2,
+        help="Minimum valid views per sample. Frames with fewer "
+        "cameras containing valid subject data are discarded; "
+        "frames with >= this many keep all camera slots but "
+        "set view_mask=False on the invalid ones. Default: 2.",
+    )
+    parser.add_argument(
+        "--min_visible_keypoints",
+        type=int,
+        default=0,
+        help="Per-view visible-keypoint quality gate. A view whose "
+        "post-occlusion visible-keypoint count is below this "
+        "threshold is demoted to invalid (view_mask=False, "
+        "camera_indices=-1), exactly like a subject-absent view; "
+        "the sample is then skipped if fewer than --min_views good "
+        "views remain. 0 disables the gate (default).",
+    )
+    parser.add_argument(
+        "--translation_factor",
+        type=float,
+        default=0.1,
+        help="Loader-side uniform world scale (default 0.1 unifies mesh + data units)",
+    )
+    parser.add_argument("--depth_occlusion_check", dest="depth_occlusion_check", action="store_true", default=True)
+    parser.add_argument("--no_depth_occlusion_check", dest="depth_occlusion_check", action="store_false")
     parser.add_argument("--depth_max_cm", type=float, default=1000.0)
     parser.add_argument("--depth_tolerance_cm", type=float, default=5.0)
     parser.add_argument("--depth_neighborhood", type=int, default=1)
-    parser.add_argument("--target_resolution", type=int, default=512,
-                        help="Stored image resolution (default: 512, native). Dataset class resizes at load.")
+    parser.add_argument(
+        "--target_resolution",
+        type=int,
+        default=512,
+        help="Stored image resolution (default: 512, native). Dataset class resizes at load.",
+    )
     parser.add_argument("--backbone_name", type=str, default="vit_large_patch16_224")
     parser.add_argument("--debug", action="store_true")
 

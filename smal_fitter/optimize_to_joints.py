@@ -1,10 +1,10 @@
-
 import sys, os
 
 # Set CUDA device visibility BEFORE importing torch: torch >= 2.3 raises an INTERNAL
 # ASSERT ("device >= 0 && device < num_gpus") if CUDA_VISIBLE_DEVICES is changed after
 # CUDA has been initialized. config.py imports no torch, so this is safe here.
 import config
+
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
 
@@ -27,7 +27,8 @@ from tqdm import trange
 import os, time, shutil
 import sys
 
-class ImageExporter():
+
+class ImageExporter:
     def __init__(self, output_dir, filenames):
         self.output_dirs = self.generate_output_folders(output_dir, filenames)
         self.stage_id = 0
@@ -48,21 +49,26 @@ class ImageExporter():
 
     def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, epoch=None):
         epoch_name = epoch if epoch is not None else self.epoch_name
-        imageio.imsave(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.png".format(self.stage_id, epoch_name)), collage_np)
+        imageio.imsave(
+            os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.png".format(self.stage_id, epoch_name)), collage_np
+        )
 
         # Export parameters
-        with open(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.pkl".format(self.stage_id, epoch_name)), 'wb') as f:
+        with open(
+            os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.pkl".format(self.stage_id, epoch_name)), "wb"
+        ) as f:
             pkl.dump(img_parameters, f)
 
         # Export mesh
         vertices = vertices[batch_id].cpu().numpy()
-        mesh = trimesh.Trimesh(vertices = vertices, faces = faces, process = False)
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
         mesh.export(os.path.join(self.output_dirs[global_id], "st{0}_ep{1}.ply".format(self.stage_id, epoch_name)))
 
+
 def main():
-    
-    parser = argparse.ArgumentParser(description='SMAL Fitter')
-    parser.add_argument('--test', action='store_true', help='Run in testing mode')
+
+    parser = argparse.ArgumentParser(description="SMAL Fitter")
+    parser.add_argument("--test", action="store_true", help="Run in testing mode")
     args = parser.parse_args()
 
     if args.test:
@@ -74,27 +80,19 @@ def main():
     if not os.path.exists(config.OUTPUT_DIR):
         os.makedirs(config.OUTPUT_DIR)
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     dataset, name = config.SEQUENCE_OR_IMAGE_NAME.split(":")
 
     if dataset == "badja":
-        data, filenames = load_badja_sequence(
-            config.BADJA_PATH, name,
-            config.CROP_SIZE, image_range=config.IMAGE_RANGE)
+        data, filenames = load_badja_sequence(config.BADJA_PATH, name, config.CROP_SIZE, image_range=config.IMAGE_RANGE)
     elif dataset == "stanfordextra":
-        data, filenames = load_stanford_sequence(
-            config.STANFORD_EXTRA_PATH, name,
-            config.CROP_SIZE
-        )
+        data, filenames = load_stanford_sequence(config.STANFORD_EXTRA_PATH, name, config.CROP_SIZE)
     else:
-        data, filenames = load_SMIL_sequence(
-            config.REPLICANT_PATH, name,
-            config.CROP_SIZE
-        )
+        data, filenames = load_SMIL_sequence(config.REPLICANT_PATH, name, config.CROP_SIZE)
 
     dataset_size = len(filenames)
-    print ("Dataset size: {0}".format(dataset_size))
+    print("Dataset size: {0}".format(dataset_size))
 
     if not config.ignore_hardcoded_body:
         assert config.SHAPE_FAMILY >= 0, "Shape family should be greater than 0"
@@ -104,7 +102,9 @@ def main():
         use_unity_prior = False
 
     if not use_unity_prior and not config.ALLOW_LIMB_SCALING:
-        print("WARNING: Limb scaling is only recommended for the new Unity prior. TODO: add a regularizer to constrain scale parameters.")
+        print(
+            "WARNING: Limb scaling is only recommended for the new Unity prior. TODO: add a regularizer to constrain scale parameters."
+        )
         config.ALLOW_LIMB_SCALING = False
 
     image_exporter = ImageExporter(config.OUTPUT_DIR, filenames)
@@ -116,10 +116,17 @@ def main():
         epochs = int(weights[7])
         lr = weights[8]
 
-        optimizer = torch.optim.Adam([
-            {'params': [param for name, param in model.named_parameters() if name != 'fov'], 'lr': lr},  # Exclude fov
-            {'params': [model.fov], 'lr': 1}  # Include fov with its own (much higher) learning rate
-        ], lr=lr, betas=(0.5, 0.999))
+        optimizer = torch.optim.Adam(
+            [
+                {
+                    "params": [param for name, param in model.named_parameters() if name != "fov"],
+                    "lr": lr,
+                },  # Exclude fov
+                {"params": [model.fov], "lr": 1},  # Include fov with its own (much higher) learning rate
+            ],
+            lr=lr,
+            betas=(0.5, 0.999),
+        )
 
         if stage_id == 0:
             model.joint_rotations.requires_grad = False
@@ -128,7 +135,9 @@ def main():
             model.fov.requires_grad = True
             target_visibility = model.target_visibility.clone()
             model.target_visibility *= 0
-            model.target_visibility[:, config.TORSO_JOINTS] = target_visibility[:, config.TORSO_JOINTS] # Turn on only torso points
+            model.target_visibility[:, config.TORSO_JOINTS] = target_visibility[
+                :, config.TORSO_JOINTS
+            ]  # Turn on only torso points
         else:
             model.joint_rotations.requires_grad = True
             model.betas.requires_grad = True
@@ -154,9 +163,8 @@ def main():
             joint_loss, global_loss, trans_loss = model.get_temporal(w_temp)
 
             desc = "EPOCH: Optimizing Stage: {}\t Epoch: {}, Loss: {:.2f}, Temporal: ({}, {}, {})".format(
-                stage_id, epoch_id,
-                acc_loss.data, joint_loss.data,
-                global_loss.data, trans_loss.data)
+                stage_id, epoch_id, acc_loss.data, joint_loss.data, global_loss.data, trans_loss.data
+            )
 
             t.set_description(desc)
             t.refresh()
@@ -173,7 +181,8 @@ def main():
 
     image_exporter.stage_id = 10
     image_exporter.epoch_name = str(0)
-    model.generate_visualization(image_exporter) # Final stage
+    model.generate_visualization(image_exporter)  # Final stage
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

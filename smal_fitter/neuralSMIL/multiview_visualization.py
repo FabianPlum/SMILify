@@ -16,17 +16,14 @@ import torch
 from smal_fitter.neuralSMIL.smil_image_regressor import rotation_6d_to_axis_angle
 
 
-def run_forward_multiview_single_sample(model,
-                                        x_data: dict,
-                                        y_data: dict,
-                                        device: str) -> Optional[dict]:
+def run_forward_multiview_single_sample(model, x_data: dict, y_data: dict, device: str) -> Optional[dict]:
     """Run a single-sample multi-view forward pass and return ``predicted_params``."""
-    images = x_data.get('images', [])
+    images = x_data.get("images", [])
     num_views = len(images)
     if num_views == 0:
         return None
 
-    cam_indices = x_data.get('camera_indices', list(range(num_views)))
+    cam_indices = x_data.get("camera_indices", list(range(num_views)))
     if isinstance(cam_indices, np.ndarray):
         cam_indices = cam_indices.tolist()
     if len(cam_indices) != num_views:
@@ -45,21 +42,21 @@ def run_forward_multiview_single_sample(model,
     view_mask = torch.ones(1, num_views, dtype=torch.bool, device=device)
 
     with torch.no_grad():
-        return model.forward_multiview(
-            images_tensors, camera_indices_tensor, view_mask, target_data=[y_data]
-        )
+        return model.forward_multiview(images_tensors, camera_indices_tensor, view_mask, target_data=[y_data])
 
 
-def create_rendered_view_with_keypoints(model,
-                                        predicted_params: dict,
-                                        view_idx: int,
-                                        target_keypoints: Optional[np.ndarray],
-                                        target_visibility: Optional[np.ndarray],
-                                        device: str,
-                                        img_size: int,
-                                        aspect_ratio: Optional[float] = None,
-                                        disable_scaling: bool = False,
-                                        disable_translation: bool = False) -> np.ndarray:
+def create_rendered_view_with_keypoints(
+    model,
+    predicted_params: dict,
+    view_idx: int,
+    target_keypoints: Optional[np.ndarray],
+    target_visibility: Optional[np.ndarray],
+    device: str,
+    img_size: int,
+    aspect_ratio: Optional[float] = None,
+    disable_scaling: bool = False,
+    disable_translation: bool = False,
+) -> np.ndarray:
     """Render a single view's predicted 2D keypoints over a blue tint background.
 
     GT keypoints are drawn as green circles, predicted keypoints as red crosses.
@@ -69,14 +66,14 @@ def create_rendered_view_with_keypoints(model,
     vis_params = predicted_params
     if disable_scaling or disable_translation:
         vis_params = predicted_params.copy()
-        if disable_scaling and 'log_beta_scales' in vis_params:
-            vis_params['log_beta_scales'] = torch.zeros_like(vis_params['log_beta_scales'])
-        if disable_translation and 'betas_trans' in vis_params:
-            vis_params['betas_trans'] = torch.zeros_like(vis_params['betas_trans'])
+        if disable_scaling and "log_beta_scales" in vis_params:
+            vis_params["log_beta_scales"] = torch.zeros_like(vis_params["log_beta_scales"])
+        if disable_translation and "betas_trans" in vis_params:
+            vis_params["betas_trans"] = torch.zeros_like(vis_params["betas_trans"])
 
-    fov = vis_params['fov_per_view'][view_idx]
-    cam_rot = vis_params['cam_rot_per_view'][view_idx]
-    cam_trans = vis_params['cam_trans_per_view'][view_idx]
+    fov = vis_params["fov_per_view"][view_idx]
+    cam_rot = vis_params["cam_rot_per_view"][view_idx]
+    cam_trans = vis_params["cam_trans_per_view"][view_idx]
 
     pred_kps = None
     try:
@@ -110,6 +107,7 @@ def create_rendered_view_with_keypoints(model,
             gt_vis = target_visibility
 
     from PIL import Image, ImageDraw, ImageFont
+
     pil_img = Image.fromarray(img)
     draw = ImageDraw.Draw(pil_img)
 
@@ -118,22 +116,22 @@ def create_rendered_view_with_keypoints(model,
             if gt_vis is None or gt_vis[j] > 0.5:
                 x, y = float(x), float(y)
                 if 0 <= x < img_size and 0 <= y < img_size:
-                    draw.ellipse([x - 3, y - 3, x + 3, y + 3], outline='green', width=2)
+                    draw.ellipse([x - 3, y - 3, x + 3, y + 3], outline="green", width=2)
 
     if pred_kps is not None:
         for j, (y, x) in enumerate(pred_kps):
             x, y = float(x), float(y)
             if 0 <= x < img_size and 0 <= y < img_size:
-                draw.line([x - 4, y, x + 4, y], fill='red', width=2)
-                draw.line([x, y - 4, x, y + 4], fill='red', width=2)
+                draw.line([x - 4, y, x + 4, y], fill="red", width=2)
+                draw.line([x, y - 4, x, y + 4], fill="red", width=2)
 
     try:
         try:
             font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
         except Exception:
             font = ImageFont.load_default()
-        draw.text((5, img_size - 25), "O GT", fill='green', font=font)
-        draw.text((5, img_size - 12), "+ Pred", fill='red', font=font)
+        draw.text((5, img_size - 25), "O GT", fill="green", font=font)
+        draw.text((5, img_size - 12), "+ Pred", fill="red", font=font)
     except Exception:
         pass
 
@@ -144,9 +142,7 @@ _MULTIVIEW_WRAP_THRESHOLD = 12
 _MULTIVIEW_WRAP_COLS = 6
 
 
-def compute_multiview_grid_layout(total_view_slots: int,
-                                  img_size: int,
-                                  margin: int = 5) -> dict:
+def compute_multiview_grid_layout(total_view_slots: int, img_size: int, margin: int = 5) -> dict:
     """Pre-compute the multi-view grid layout once for a given slot count.
 
     Views > ``_MULTIVIEW_WRAP_THRESHOLD`` wrap to ``_MULTIVIEW_WRAP_COLS`` columns
@@ -164,21 +160,21 @@ def compute_multiview_grid_layout(total_view_slots: int,
     grid_width = cols * img_size + (cols + 1) * margin
     grid_height = num_blocks * (2 * img_size + 2 * margin) + margin
     return {
-        'cols': cols,
-        'num_blocks': num_blocks,
-        'grid_width': grid_width,
-        'grid_height': grid_height,
-        'img_size': img_size,
-        'margin': margin,
-        'total_view_slots': total_view_slots,
+        "cols": cols,
+        "num_blocks": num_blocks,
+        "grid_width": grid_width,
+        "grid_height": grid_height,
+        "img_size": img_size,
+        "margin": margin,
+        "total_view_slots": total_view_slots,
     }
 
 
 def _multiview_cell_offsets(view_idx: int, layout: dict) -> tuple:
     """Pixel offsets (x, input_y, render_y) for ``view_idx`` in the given layout."""
-    cols = layout['cols']
-    img_size = layout['img_size']
-    margin = layout['margin']
+    cols = layout["cols"]
+    img_size = layout["img_size"]
+    margin = layout["margin"]
     block = view_idx // cols
     col = view_idx % cols
     x = margin + col * (img_size + margin)
@@ -187,14 +183,16 @@ def _multiview_cell_offsets(view_idx: int, layout: dict) -> tuple:
     return x, input_y, render_y
 
 
-def create_multiview_visualization(model,
-                                   x_data: dict,
-                                   y_data: dict,
-                                   device: str,
-                                   predicted_params: Optional[dict] = None,
-                                   disable_scaling: bool = False,
-                                   disable_translation: bool = False,
-                                   total_view_slots: Optional[int] = None) -> Optional[np.ndarray]:
+def create_multiview_visualization(
+    model,
+    x_data: dict,
+    y_data: dict,
+    device: str,
+    predicted_params: Optional[dict] = None,
+    disable_scaling: bool = False,
+    disable_translation: bool = False,
+    total_view_slots: Optional[int] = None,
+) -> Optional[np.ndarray]:
     """Build the input/predicted grid for a multi-view sample.
 
     Single-row layout (≤ 12 slots)::
@@ -214,7 +212,7 @@ def create_multiview_visualization(model,
 
     If ``predicted_params`` is not provided, a forward pass is run internally.
     """
-    images = x_data.get('images', [])
+    images = x_data.get("images", [])
     num_views = len(images)
     if num_views == 0:
         return None
@@ -229,12 +227,12 @@ def create_multiview_visualization(model,
     if total_view_slots is None:
         total_view_slots = num_views
     layout = compute_multiview_grid_layout(total_view_slots, img_size, margin)
-    grid_width = layout['grid_width']
-    grid_height = layout['grid_height']
+    grid_width = layout["grid_width"]
+    grid_height = layout["grid_height"]
 
     canvas = np.ones((grid_height, grid_width, 3), dtype=np.uint8) * 40
-    target_keypoints = y_data.get('keypoints_2d', None)
-    target_visibility = y_data.get('keypoint_visibility', None)
+    target_keypoints = y_data.get("keypoints_2d", None)
+    target_visibility = y_data.get("keypoint_visibility", None)
 
     for v in range(num_views):
         x_offset, input_y, render_y = _multiview_cell_offsets(v, layout)
@@ -243,6 +241,7 @@ def create_multiview_visualization(model,
         if isinstance(input_img, np.ndarray):
             if input_img.shape[0] != img_size or input_img.shape[1] != img_size:
                 from PIL import Image
+
                 pil_img = Image.fromarray(
                     (input_img * 255).astype(np.uint8) if input_img.max() <= 1 else input_img.astype(np.uint8)
                 )
@@ -256,51 +255,57 @@ def create_multiview_visualization(model,
                 input_img = np.stack([input_img] * 3, axis=-1)
             elif input_img.shape[-1] == 4:
                 input_img = input_img[:, :, :3]
-            canvas[input_y:input_y + img_size, x_offset:x_offset + img_size] = input_img
+            canvas[input_y : input_y + img_size, x_offset : x_offset + img_size] = input_img
 
         try:
             aspect_ratio = None
             try:
-                if y_data.get('cam_aspect_per_view') is not None:
-                    aspect_ratio = float(np.array(y_data['cam_aspect_per_view'][v]).reshape(-1)[0])
+                if y_data.get("cam_aspect_per_view") is not None:
+                    aspect_ratio = float(np.array(y_data["cam_aspect_per_view"][v]).reshape(-1)[0])
             except Exception:
                 aspect_ratio = None
 
             rendered_img = create_rendered_view_with_keypoints(
-                model, predicted_params, v,
-                target_keypoints, target_visibility,
-                device, img_size, aspect_ratio=aspect_ratio,
+                model,
+                predicted_params,
+                v,
+                target_keypoints,
+                target_visibility,
+                device,
+                img_size,
+                aspect_ratio=aspect_ratio,
                 disable_scaling=disable_scaling,
                 disable_translation=disable_translation,
             )
-            canvas[render_y:render_y + img_size, x_offset:x_offset + img_size] = rendered_img
+            canvas[render_y : render_y + img_size, x_offset : x_offset + img_size] = rendered_img
         except Exception as e:
             print(f"Warning: Could not render view {v}: {e}")
             placeholder = np.ones((img_size, img_size, 3), dtype=np.uint8) * 128
-            canvas[render_y:render_y + img_size, x_offset:x_offset + img_size] = placeholder
+            canvas[render_y : render_y + img_size, x_offset : x_offset + img_size] = placeholder
 
     try:
         from PIL import Image, ImageDraw, ImageFont
+
         pil_canvas = Image.fromarray(canvas)
         draw = ImageDraw.Draw(pil_canvas)
         try:
             font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
         except Exception:
             font = ImageFont.load_default()
-        cam_names = x_data.get('camera_names', [])
+        cam_names = x_data.get("camera_names", [])
         # "Input"/"Pred" row labels on every block. Camera-name labels go on
         # block 0 only — the wrapped layout reuses the same column ordering for
         # every block, and inter-block gaps are too tight to fit a label row.
-        for block in range(layout['num_blocks']):
-            _, input_y, render_y = _multiview_cell_offsets(block * layout['cols'], layout)
+        for block in range(layout["num_blocks"]):
+            _, input_y, render_y = _multiview_cell_offsets(block * layout["cols"], layout)
             draw.text((5, input_y + img_size // 2 - 6), "Input", fill=(255, 255, 255), font=font)
             draw.text((5, render_y + img_size // 2 - 6), "Pred", fill=(255, 255, 255), font=font)
-        for col in range(layout['cols']):
+        for col in range(layout["cols"]):
             v = col
             if v >= total_view_slots:
                 break
             x_pos = margin + col * (img_size + margin) + img_size // 2 - 10
-            cam_name = cam_names[v] if v < len(cam_names) else f'V{v}'
+            cam_name = cam_names[v] if v < len(cam_names) else f"V{v}"
             draw.text((x_pos, 2), str(cam_name)[:8], fill=(255, 255, 255), font=font)
         canvas = np.array(pil_canvas)
     except Exception:
@@ -311,18 +316,18 @@ def create_multiview_visualization(model,
 
 def print_joint_scale_diagnostics(model, predicted_params: dict, label: str = "") -> None:
     """Print per-joint log-beta scales for a predicted sample (training-only debug)."""
-    if 'log_beta_scales' not in predicted_params:
+    if "log_beta_scales" not in predicted_params:
         return
     try:
         import config
         from smal_fitter.neuralSMIL.training_config import TrainingConfig
 
         scale_trans_config = TrainingConfig.get_scale_trans_config()
-        use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+        use_pca_transformation = scale_trans_config.get("separate", {}).get("use_pca_transformation", True)
 
-        if model.scale_trans_mode == 'separate' and use_pca_transformation:
-            scale_weights = predicted_params['log_beta_scales'][0]
-            trans_weights = predicted_params.get('betas_trans', None)
+        if model.scale_trans_mode == "separate" and use_pca_transformation:
+            scale_weights = predicted_params["log_beta_scales"][0]
+            trans_weights = predicted_params.get("betas_trans", None)
             if trans_weights is not None:
                 trans_weights = trans_weights[0:1]
             log_beta_scales_joint, _ = model._transform_separate_pca_weights_to_joint_values(
@@ -330,7 +335,7 @@ def print_joint_scale_diagnostics(model, predicted_params: dict, label: str = ""
             )
             log_beta_scales_joint = log_beta_scales_joint[0]
         else:
-            log_beta_scales_joint = predicted_params['log_beta_scales'][0]
+            log_beta_scales_joint = predicted_params["log_beta_scales"][0]
 
         scales_joint = torch.exp(log_beta_scales_joint)
         joint_names = config.dd["J_names"]
@@ -343,8 +348,10 @@ def print_joint_scale_diagnostics(model, predicted_params: dict, label: str = ""
         for joint_idx, joint_name in enumerate(joint_names):
             if joint_idx < scales_joint.shape[0]:
                 scale_xyz = scales_joint[joint_idx].cpu().numpy()
-                print(f"{joint_name:<20} {scale_xyz[0]:>10.4f} {scale_xyz[1]:>10.4f} "
-                      f"{scale_xyz[2]:>10.4f} {scale_xyz.mean():>12.4f}")
+                print(
+                    f"{joint_name:<20} {scale_xyz[0]:>10.4f} {scale_xyz[1]:>10.4f} "
+                    f"{scale_xyz[2]:>10.4f} {scale_xyz.mean():>12.4f}"
+                )
 
         all_scales = scales_joint.cpu().numpy()
         print("\nSummary Statistics:")
@@ -358,4 +365,5 @@ def print_joint_scale_diagnostics(model, predicted_params: dict, label: str = ""
     except Exception as e:
         print(f"Warning: Failed to print joint scales: {e}")
         import traceback
+
         traceback.print_exc()

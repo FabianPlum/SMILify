@@ -44,9 +44,10 @@ import torch
 @dataclass
 class PosedSample:
     """The output of a single SMAL forward + translate call."""
-    vertices_world: np.ndarray   # (V, 3)
-    joints_world: np.ndarray     # (J, 3)
-    faces: np.ndarray            # (F, 3) int
+
+    vertices_world: np.ndarray  # (V, 3)
+    joints_world: np.ndarray  # (J, 3)
+    faces: np.ndarray  # (F, 3) int
 
 
 class SMALRendererWrapper:
@@ -57,13 +58,15 @@ class SMALRendererWrapper:
     callers should gate it behind a button.
     """
 
-    def __init__(self, smal_file: str, render_size: int, device: str = "cpu",
-                 shape_family: Optional[int] = None) -> None:
+    def __init__(
+        self, smal_file: str, render_size: int, device: str = "cpu", shape_family: Optional[int] = None
+    ) -> None:
         # The SMAL constructor reads `config.SMAL_FILE` (global). Apply the
         # override BEFORE the import-chain touches config.dd.
 
         # Defer these until paths are set.
         from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override  # noqa: E402
+
         apply_smal_file_override(smal_file, shape_family=shape_family)
 
         import config  # noqa: E402  — re-imported after override so attrs reflect the pkl
@@ -89,10 +92,10 @@ class SMALRendererWrapper:
 
     def forward(
         self,
-        betas: np.ndarray,           # (n_betas,)
-        global_rot: np.ndarray,      # (3,) axis-angle
-        joint_rot: np.ndarray,       # (n_pose+1, 3) or (n_pose, 3) axis-angle (we strip the leading row if it matches global_rot)
-        trans: np.ndarray,           # (3,)
+        betas: np.ndarray,  # (n_betas,)
+        global_rot: np.ndarray,  # (3,) axis-angle
+        joint_rot: np.ndarray,  # (n_pose+1, 3) or (n_pose, 3) axis-angle (we strip the leading row if it matches global_rot)
+        trans: np.ndarray,  # (3,)
         propagate_scaling: bool = False,
     ) -> PosedSample:
         """Run SMAL once on CPU and return world-frame vertices + joints."""
@@ -107,7 +110,11 @@ class SMALRendererWrapper:
         # posable joints). If we already have that many rows, the leading
         # one IS the global rotation; strip it and we'll re-prepend
         # `global_rot`. Otherwise concat as-is.
-        n_pose = int(self.config.N_POSE) if hasattr(self.config, "N_POSE") else (joints_t.shape[0] - 1 if joints_t.shape[0] >= 1 else 0)
+        n_pose = (
+            int(self.config.N_POSE)
+            if hasattr(self.config, "N_POSE")
+            else (joints_t.shape[0] - 1 if joints_t.shape[0] >= 1 else 0)
+        )
         if joints_t.shape[0] == n_pose + 1:
             # Drop the existing leading row, replace with the explicit global.
             joints_t = joints_t[1:]
@@ -115,7 +122,9 @@ class SMALRendererWrapper:
 
         with torch.no_grad():
             verts, joints, _, _ = self.smal(
-                betas_t, theta, propagate_scaling=propagate_scaling,
+                betas_t,
+                theta,
+                propagate_scaling=propagate_scaling,
             )
 
         # Recenter at the posed root joint before adding trans. This matches
@@ -150,10 +159,12 @@ class SMALRendererWrapper:
 
     def render_silhouette(
         self,
-        verts_world: np.ndarray,     # (V, 3)
-        faces: np.ndarray,           # (F, 3) int
-        R_cv: np.ndarray, t_cv: np.ndarray, K: np.ndarray,
-        image_size_wh: np.ndarray,   # (W, H) of the calibration frame
+        verts_world: np.ndarray,  # (V, 3)
+        faces: np.ndarray,  # (F, 3) int
+        R_cv: np.ndarray,
+        t_cv: np.ndarray,
+        K: np.ndarray,
+        image_size_wh: np.ndarray,  # (W, H) of the calibration frame
     ) -> np.ndarray:
         """Rasterise the posed mesh through one OpenCV camera and return
         a (render_size, render_size) silhouette mask in [0, 1] (float32).
@@ -172,6 +183,7 @@ class SMALRendererWrapper:
         # whole SLEAPMultiViewDataset class graph when callers only
         # need `forward(...)`.
         from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+
         R_p3d, T_p3d, fov_y, aspect_ratio = SLEAPMultiViewDataset._sleap_to_pytorch3d_camera(
             R_cv, t_cv, K, image_size_wh
         )
@@ -197,25 +209,25 @@ class SMALRendererWrapper:
 
 
 def overlay_silhouette(
-    canvas_rgb: np.ndarray,         # (H_calib, W_calib, 3) uint8
-    silhouette: np.ndarray,         # (S, S) float32 in [0, 1]
-    image_size_wh: np.ndarray,      # (W_calib, H_calib)
+    canvas_rgb: np.ndarray,  # (H_calib, W_calib, 3) uint8
+    silhouette: np.ndarray,  # (S, S) float32 in [0, 1]
+    image_size_wh: np.ndarray,  # (W_calib, H_calib)
     colour: Tuple[int, int, int] = (255, 60, 60),
     alpha: float = 0.45,
 ) -> np.ndarray:
     """Alpha-blend a square silhouette mask onto a (typically non-square)
     canvas. Stretches the silhouette to the canvas's calibration extent."""
     import cv2
+
     W_calib, H_calib = int(image_size_wh[0]), int(image_size_wh[1])
     if silhouette.shape != (H_calib, W_calib):
         sil_full = cv2.resize(silhouette, (W_calib, H_calib), interpolation=cv2.INTER_LINEAR)
     else:
         sil_full = silhouette
-    sil_full = np.clip(sil_full, 0.0, 1.0)[..., None]   # (H, W, 1)
+    sil_full = np.clip(sil_full, 0.0, 1.0)[..., None]  # (H, W, 1)
     colour_img = np.zeros_like(canvas_rgb, dtype=np.float32)
     colour_img[..., 0] = colour[0]
     colour_img[..., 1] = colour[1]
     colour_img[..., 2] = colour[2]
-    blended = (canvas_rgb.astype(np.float32) * (1.0 - alpha * sil_full)
-               + colour_img * (alpha * sil_full))
+    blended = canvas_rgb.astype(np.float32) * (1.0 - alpha * sil_full) + colour_img * (alpha * sil_full)
     return np.clip(blended, 0, 255).astype(np.uint8)

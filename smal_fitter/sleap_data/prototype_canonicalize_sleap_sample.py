@@ -53,6 +53,7 @@ import h5py
 import numpy as np
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers 3D projection)
@@ -173,9 +174,7 @@ def _load_sample(hdf5_path: Path, sample_idx: int):
 _kp2d_norm_yx_to_pixel_xy = kp2d_norm_yx_to_pixel_xy  # back-compat alias for callers below
 
 
-def per_view_reproj_error(
-    sample: dict, R: np.ndarray, t: np.ndarray, kp3d: np.ndarray
-) -> dict:
+def per_view_reproj_error(sample: dict, R: np.ndarray, t: np.ndarray, kp3d: np.ndarray) -> dict:
     """Project kp3d through (K, R, t) for each valid view, compare to stored
     2D. Returns per-view max/mean error in pixels (over visible AND has_gt_3d
     joints only).
@@ -264,16 +263,25 @@ def make_plot(
         pre_pix = project_world_to_pixel(kp3d_orig, R_orig[v], t_orig[v], K[v])
         post_pix = project_world_to_pixel(kp3d_can, R_can[v], t_can[v], K[v])
         vis = (kp_vis[v] > 0) & ~np.all(kp3d_orig == 0, axis=1)
-        ax.scatter(gt_pix[vis, 0], gt_pix[vis, 1], s=22, marker="o",
-                   facecolors="none", edgecolors="lime", linewidths=1.5, label="stored 2D")
-        ax.scatter(pre_pix[vis, 0], pre_pix[vis, 1], s=10, marker="s",
-                   c="cornflowerblue", label="proj (original)")
-        ax.scatter(post_pix[vis, 0], post_pix[vis, 1], s=24, marker="x",
-                   c="red", linewidths=1.2, label="proj (canonical)")
+        ax.scatter(
+            gt_pix[vis, 0],
+            gt_pix[vis, 1],
+            s=22,
+            marker="o",
+            facecolors="none",
+            edgecolors="lime",
+            linewidths=1.5,
+            label="stored 2D",
+        )
+        ax.scatter(pre_pix[vis, 0], pre_pix[vis, 1], s=10, marker="s", c="cornflowerblue", label="proj (original)")
+        ax.scatter(
+            post_pix[vis, 0], post_pix[vis, 1], s=24, marker="x", c="red", linewidths=1.2, label="proj (canonical)"
+        )
         title = f"view {v} ({'canonical' if v == canonical_v else 'other'})\n"
         title += f"pre max={err_pre[v]['max']:.3g}px  post max={err_post[v]['max']:.3g}px"
         ax.set_title(title, fontsize=9)
-        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xticks([])
+        ax.set_yticks([])
         if col == 0:
             ax.legend(loc="lower right", fontsize=7)
 
@@ -282,29 +290,29 @@ def make_plot(
 
     ax3d_a = fig.add_subplot(gs[1, : max(V // 2, 1)], projection="3d")
     ax3d_a.set_title("Original world frame", fontsize=10)
-    ax3d_a.scatter(kp3d_orig[has_gt_3d, 0],
-                   kp3d_orig[has_gt_3d, 1],
-                   kp3d_orig[has_gt_3d, 2],
-                   c="black", s=8, label="kp3d")
+    ax3d_a.scatter(
+        kp3d_orig[has_gt_3d, 0], kp3d_orig[has_gt_3d, 1], kp3d_orig[has_gt_3d, 2], c="black", s=8, label="kp3d"
+    )
     for v in valid_v:
         c = _cam_center(R_orig[v], t_orig[v])
         col = "red" if v == canonical_v else "gray"
         ax3d_a.scatter(c[0], c[1], c[2], c=col, s=30, marker="^")
         ax3d_a.text(c[0], c[1], c[2], f" cam{v}", fontsize=7, color=col)
-    ax3d_a.set_xlabel("X"); ax3d_a.set_ylabel("Y"); ax3d_a.set_zlabel("Z")
+    ax3d_a.set_xlabel("X")
+    ax3d_a.set_ylabel("Y")
+    ax3d_a.set_zlabel("Z")
 
-    ax3d_b = fig.add_subplot(gs[1, max(V // 2, 1):], projection="3d")
+    ax3d_b = fig.add_subplot(gs[1, max(V // 2, 1) :], projection="3d")
     ax3d_b.set_title(f"Canonical frame (cam {canonical_v} at origin)", fontsize=10)
-    ax3d_b.scatter(kp3d_can[has_gt_3d, 0],
-                   kp3d_can[has_gt_3d, 1],
-                   kp3d_can[has_gt_3d, 2],
-                   c="black", s=8)
+    ax3d_b.scatter(kp3d_can[has_gt_3d, 0], kp3d_can[has_gt_3d, 1], kp3d_can[has_gt_3d, 2], c="black", s=8)
     for v in valid_v:
         c = _cam_center(R_can[v], t_can[v])
         col = "red" if v == canonical_v else "gray"
         ax3d_b.scatter(c[0], c[1], c[2], c=col, s=30, marker="^")
         ax3d_b.text(c[0], c[1], c[2], f" cam{v}", fontsize=7, color=col)
-    ax3d_b.set_xlabel("X"); ax3d_b.set_ylabel("Y"); ax3d_b.set_zlabel("Z")
+    ax3d_b.set_xlabel("X")
+    ax3d_b.set_ylabel("Y")
+    ax3d_b.set_zlabel("Z")
 
     # Row 3: text summary.
     ax_txt = fig.add_subplot(gs[2, :])
@@ -348,11 +356,16 @@ def make_plot(
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--hdf5", required=True, help="SLEAP multi-view HDF5 path")
-    p.add_argument("--sample_idx", type=int, default=-1,
-                   help="Sample to use (default: first with has_3d_data=True and all views populated)")
+    p.add_argument(
+        "--sample_idx",
+        type=int,
+        default=-1,
+        help="Sample to use (default: first with has_3d_data=True and all views populated)",
+    )
     p.add_argument("--output_png", type=str, default="sleap_canonicalize_proto.png")
-    p.add_argument("--no_world_scale", action="store_true",
-                   help="Skip the SLEAP reader's mm->m world_scale heuristic (debugging)")
+    p.add_argument(
+        "--no_world_scale", action="store_true", help="Skip the SLEAP reader's mm->m world_scale heuristic (debugging)"
+    )
     args = p.parse_args()
 
     hdf5_path = Path(args.hdf5)
@@ -378,9 +391,7 @@ def main() -> None:
     err_pre = per_view_reproj_error(sample, R_orig, t_orig, kp3d_orig)
 
     # Canonical-frame transform.
-    R_can, t_can, kp3d_can, R_0, t_0, canonical_v = canonicalize_sample(
-        R_orig, t_orig, kp3d_orig, sample["view_mask"]
-    )
+    R_can, t_can, kp3d_can, R_0, t_0, canonical_v = canonicalize_sample(R_orig, t_orig, kp3d_orig, sample["view_mask"])
 
     err_post = per_view_reproj_error(sample, R_can, t_can, kp3d_can)
 
@@ -395,15 +406,20 @@ def main() -> None:
     valid_v = [int(v) for v in np.where(sample["view_mask"])[0]]
     for v in valid_v:
         a, b = err_pre[v], err_post[v]
-        print(f"  cam {v:>2}: pre max={a['max']:8.4g} mean={a['mean']:8.4g} | "
-              f"post max={b['max']:8.4g} mean={b['mean']:8.4g} (n={a['n']})")
+        print(
+            f"  cam {v:>2}: pre max={a['max']:8.4g} mean={a['mean']:8.4g} | "
+            f"post max={b['max']:8.4g} mean={b['mean']:8.4g} (n={a['n']})"
+        )
     pre_max_all = float(np.nanmax([err_pre[v]["max"] for v in valid_v]))
     post_max_all = float(np.nanmax([err_post[v]["max"] for v in valid_v]))
-    print(f"  ALL views: pre max={pre_max_all:.4g}px, post max={post_max_all:.4g}px, "
-          f"delta={post_max_all - pre_max_all:+.4g}px")
+    print(
+        f"  ALL views: pre max={pre_max_all:.4g}px, post max={post_max_all:.4g}px, "
+        f"delta={post_max_all - pre_max_all:+.4g}px"
+    )
 
-    make_plot(sample, R_orig, t_orig, kp3d_orig, R_can, t_can, kp3d_can,
-              canonical_v, err_pre, err_post, Path(args.output_png))
+    make_plot(
+        sample, R_orig, t_orig, kp3d_orig, R_can, t_can, kp3d_can, canonical_v, err_pre, err_post, Path(args.output_png)
+    )
     print(f"Plot written to {args.output_png}")
 
 

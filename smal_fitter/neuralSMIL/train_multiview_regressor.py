@@ -15,7 +15,9 @@ Key Features:
 # This prevents "Address family not supported by protocol" (errno: 97) errors
 # on HPC systems that don't have full IPv6 support
 import socket
+
 _original_getaddrinfo = socket.getaddrinfo
+
 
 def _getaddrinfo_ipv4_only(*args, **kwargs):
     """Force getaddrinfo to return only IPv4 results."""
@@ -25,12 +27,14 @@ def _getaddrinfo_ipv4_only(*args, **kwargs):
     # If we have IPv4 results, use them; otherwise fall back to original
     return ipv4_responses if ipv4_responses else responses
 
+
 socket.getaddrinfo = _getaddrinfo_ipv4_only
 # ===== End IPv4 forcing =====
 
 # Set matplotlib backend BEFORE any other imports
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from mpl_toolkits.mplot3d import Axes3D  # For 3D plotting (imported for side effects)
@@ -63,7 +67,13 @@ from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
 from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
-from smal_fitter.neuralSMIL.configs import MultiViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
+from smal_fitter.neuralSMIL.configs import (
+    MultiViewConfig,
+    load_config,
+    save_config_json,
+    apply_smal_file_override,
+    ConfigurationError,
+)
 from smal_fitter.neuralSMIL.multiview_visualization import (
     create_multiview_visualization,
     create_rendered_view_with_keypoints,
@@ -99,24 +109,24 @@ def set_random_seeds(seed: int = 0, deterministic: bool = False):
 def is_distributed_launch():
     """
     Check if the script was launched in distributed mode (via torchrun, SLURM, etc.).
-    
-    When launched via torchrun or SLURM with proper setup, environment variables 
+
+    When launched via torchrun or SLURM with proper setup, environment variables
     RANK, LOCAL_RANK, and WORLD_SIZE are set automatically.
-    
+
     Returns:
         bool: True if launched in distributed mode, False otherwise
     """
-    return all(var in os.environ for var in ['RANK', 'LOCAL_RANK', 'WORLD_SIZE'])
+    return all(var in os.environ for var in ["RANK", "LOCAL_RANK", "WORLD_SIZE"])
 
 
 # Keep old name for backwards compatibility
 is_torchrun_launched = is_distributed_launch
 
 
-def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int = None):
+def setup_ddp(rank: int, world_size: int, port: str = "12345", local_rank: int = None):
     """
     Initialize DDP environment with robust IPv4-only TCP store.
-    
+
     Args:
         rank: Current process rank (global rank across all nodes)
         world_size: Total number of processes
@@ -124,26 +134,27 @@ def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int =
         local_rank: Local rank within the node (for GPU assignment). If None, uses rank.
     """
     import re
-    
+
     # Get master address and port from environment
-    master_addr = os.environ.get('MASTER_ADDR', 'localhost')
-    master_port = int(os.environ.get('MASTER_PORT', port or '12345'))
-    
+    master_addr = os.environ.get("MASTER_ADDR", "localhost")
+    master_port = int(os.environ.get("MASTER_PORT", port or "12345"))
+
     # Validate that master_addr is an IPv4 address (not a hostname)
-    ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+    ipv4_pattern = r"^(\d{1,3}\.){3}\d{1,3}$"
     if not re.match(ipv4_pattern, master_addr):
         print(f"WARNING: MASTER_ADDR '{master_addr}' is not an IPv4 address!")
         print("  Attempting to resolve to IPv4...")
         try:
             import socket
+
             resolved = False
             # On HPC systems, inter-node communication uses InfiniBand.
             # Try the InfiniBand hostname first (append 'i' before first dot or at end).
-            dot_idx = master_addr.find('.')
+            dot_idx = master_addr.find(".")
             if dot_idx > 0:
-                ib_hostname = master_addr[:dot_idx] + 'i' + master_addr[dot_idx:]
+                ib_hostname = master_addr[:dot_idx] + "i" + master_addr[dot_idx:]
             else:
-                ib_hostname = master_addr + 'i'
+                ib_hostname = master_addr + "i"
             try:
                 result = socket.getaddrinfo(ib_hostname, master_port, socket.AF_INET, socket.SOCK_STREAM)
                 if result:
@@ -163,28 +174,30 @@ def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int =
                     print(f"  ERROR: Could not resolve {master_addr} to IPv4!")
         except Exception as e:
             print(f"  ERROR resolving hostname: {e}")
-    
+
     # Use local_rank for GPU assignment (important for multi-node setups)
     # Do this BEFORE init_process_group so NCCL binds to the correct GPU
     gpu_rank = local_rank if local_rank is not None else rank
-    
+
     # Debug: show available CUDA devices
     if rank == 0:
         print(f"CUDA devices available: {torch.cuda.device_count()}")
         print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
-    
+
     torch.cuda.set_device(gpu_rank)
-    
+
     # Initialize process group if not already initialized
     if not dist.is_initialized():
-        print(f"[Rank {rank}] Initializing distributed: WORLD_SIZE={world_size}, "
-              f"LOCAL_RANK/GPU={gpu_rank}, MASTER={master_addr}:{master_port}")
-        
+        print(
+            f"[Rank {rank}] Initializing distributed: WORLD_SIZE={world_size}, "
+            f"LOCAL_RANK/GPU={gpu_rank}, MASTER={master_addr}:{master_port}"
+        )
+
         try:
             # Create explicit TCPStore with IPv4 address to avoid IPv6 issues
             # This bypasses the default hostname resolution that can return IPv6
-            is_master = (rank == 0)
-            
+            is_master = rank == 0
+
             # Create TCP store with explicit timeout
             store = dist.TCPStore(
                 host_name=master_addr,
@@ -192,44 +205,36 @@ def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int =
                 world_size=world_size,
                 is_master=is_master,
                 timeout=timedelta(seconds=1800),
-                use_libuv=False  # Disable libuv to avoid potential IPv6 issues
+                use_libuv=False,  # Disable libuv to avoid potential IPv6 issues
             )
-            
+
             # Initialize process group with explicit store (bypasses env:// which can use IPv6)
             dist.init_process_group(
-                backend="nccl",
-                store=store,
-                rank=rank,
-                world_size=world_size,
-                timeout=timedelta(seconds=1800)
+                backend="nccl", store=store, rank=rank, world_size=world_size, timeout=timedelta(seconds=1800)
             )
             print(f"[Rank {rank}] Successfully initialized NCCL process group")
-            
+
         except Exception as e:
             print(f"Error initializing process group with NCCL + TCPStore: {e}")
             print(f"  MASTER_ADDR: {master_addr}")
             print(f"  MASTER_PORT: {master_port}")
             print(f"  RANK: {rank}, WORLD_SIZE: {world_size}")
             print(f"  LOCAL_RANK: {local_rank}, GPU_RANK: {gpu_rank}")
-            
+
             # Try gloo backend as fallback with explicit store
             print("Attempting fallback to gloo backend with TCPStore...")
             try:
-                is_master = (rank == 0)
+                is_master = rank == 0
                 store = dist.TCPStore(
                     host_name=master_addr,
                     port=master_port + 1,  # Use different port for gloo
                     world_size=world_size,
                     is_master=is_master,
                     timeout=timedelta(seconds=1800),
-                    use_libuv=False
+                    use_libuv=False,
                 )
                 dist.init_process_group(
-                    backend="gloo",
-                    store=store,
-                    rank=rank,
-                    world_size=world_size,
-                    timeout=timedelta(seconds=1800)
+                    backend="gloo", store=store, rank=rank, world_size=world_size, timeout=timedelta(seconds=1800)
                 )
                 print(f"[Rank {rank}] Successfully initialized with gloo backend!")
             except Exception as e2:
@@ -243,18 +248,14 @@ def cleanup_ddp():
         dist.destroy_process_group()
 
 
-def create_fractional_train_loader(train_set, 
-                                   epoch: int,
-                                   config: dict,
-                                   is_distributed: bool,
-                                   collate_fn) -> DataLoader:
+def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distributed: bool, collate_fn) -> DataLoader:
     """
     Create a DataLoader that samples a fraction of the training dataset.
-    
+
     This function enables efficient training on very large datasets by sampling
     a random subset of training examples at each epoch. The sampling is deterministic
     based on (config['seed'] + epoch), ensuring all DDP processes use the same subset.
-    
+
     Args:
         train_set: The full training dataset (or Subset)
         epoch: Current epoch number (used for deterministic sampling seed)
@@ -266,12 +267,12 @@ def create_fractional_train_loader(train_set,
             - 'pin_memory': Whether to pin memory
         is_distributed: Whether training is distributed (DDP)
         collate_fn: Collate function for the DataLoader
-        
+
     Returns:
         DataLoader configured with the fractional subset for this epoch
     """
-    dataset_fraction = config.get('dataset_fraction', 1.0)
-    
+    dataset_fraction = config.get("dataset_fraction", 1.0)
+
     if dataset_fraction >= 1.0:
         # Use full dataset - create standard sampler
         if is_distributed:
@@ -279,50 +280,50 @@ def create_fractional_train_loader(train_set,
             sampler.set_epoch(epoch)
         else:
             sampler = None
-        
+
         return DataLoader(
             train_set,
-            batch_size=config['batch_size'],
+            batch_size=config["batch_size"],
             shuffle=(sampler is None),
             sampler=sampler,
-            num_workers=config['num_workers'],
-            pin_memory=config['pin_memory'],
+            num_workers=config["num_workers"],
+            pin_memory=config["pin_memory"],
             collate_fn=collate_fn,
-            drop_last=True
+            drop_last=True,
         )
-    
+
     # Fractional sampling: create a deterministic subset for this epoch
     # All processes use the same seed to get the same subset
-    subset_seed = config['seed'] + epoch
+    subset_seed = config["seed"] + epoch
     rng = torch.Generator()
     rng.manual_seed(subset_seed)
-    
+
     # Compute number of samples to use
     full_size = len(train_set)
     n_samples = max(1, int(full_size * dataset_fraction))
-    
+
     # Generate random permutation and take first n_samples indices
     all_indices = torch.randperm(full_size, generator=rng)[:n_samples].tolist()
-    
+
     # Create a Subset view of the training data
     epoch_subset = torch.utils.data.Subset(train_set, all_indices)
-    
+
     # Create sampler for the subset
     if is_distributed:
         sampler = DistributedSampler(epoch_subset, shuffle=True)
         sampler.set_epoch(epoch)
     else:
         sampler = None
-    
+
     return DataLoader(
         epoch_subset,
-        batch_size=config['batch_size'],
+        batch_size=config["batch_size"],
         shuffle=(sampler is None),
         sampler=sampler,
-        num_workers=config['num_workers'],
-        pin_memory=config['pin_memory'],
+        num_workers=config["num_workers"],
+        pin_memory=config["pin_memory"],
         collate_fn=collate_fn,
-        drop_last=True
+        drop_last=True,
     )
 
 
@@ -350,164 +351,159 @@ def _print_component_metrics(train_components: dict, val_components: dict, inden
 class MultiViewTrainingConfig:
     """
     Configuration for multi-view training.
-    
+
     Extends the base TrainingConfig with multi-view specific settings while
     inheriting model, training, and loss configurations from the shared config.
     """
-    
+
     # Multi-view specific defaults (everything else comes from TrainingConfig)
     MULTIVIEW_DEFAULTS = {
         # Multi-view specific data settings
-        'dataset_path': None,  # Required - path to multi-view HDF5
-        'num_views_to_use': None,  # None = use all available views
-        'min_views_per_sample': 2,
-        
+        "dataset_path": None,  # Required - path to multi-view HDF5
+        "num_views_to_use": None,  # None = use all available views
+        "min_views_per_sample": 2,
         # Cross-attention settings (multi-view specific)
-        'cross_attention_layers': 2,
-        'cross_attention_heads': 8,
-        'cross_attention_dropout': 0.1,
-        
+        "cross_attention_layers": 2,
+        "cross_attention_heads": 8,
+        "cross_attention_dropout": 0.1,
         # Output directories (separate from single-view)
-        'checkpoint_dir': 'multiview_checkpoints',
-        'visualizations_dir': 'multiview_visualizations',
-        'singleview_visualizations_dir': 'multiview_singleview_renders',
-        'plots_dir': 'plots',
-
+        "checkpoint_dir": "multiview_checkpoints",
+        "visualizations_dir": "multiview_visualizations",
+        "singleview_visualizations_dir": "multiview_singleview_renders",
+        "plots_dir": "plots",
         # Validation/save frequency
-        'save_every_n_epochs': 10,
-        'validate_every_n_epochs': 1,
-        'visualize_every_n_epochs': 10,
-        'plot_history_every': 10,
-        'num_visualization_samples': 3,
-        
+        "save_every_n_epochs": 10,
+        "validate_every_n_epochs": 1,
+        "visualize_every_n_epochs": 10,
+        "plot_history_every": 10,
+        "num_visualization_samples": 3,
         # Split ratios
-        'train_ratio': 0.85,
-        'val_ratio': 0.05,
-        'test_ratio': 0.1,
-        
+        "train_ratio": 0.85,
+        "val_ratio": 0.05,
+        "test_ratio": 0.1,
         # Mesh scaling - allows network to predict global mesh scale
         # (useful when 3D ground truth has different scale than model)
-        'allow_mesh_scaling': False,
-        'mesh_scale_init': 1.0,
+        "allow_mesh_scaling": False,
+        "mesh_scale_init": 1.0,
     }
-    
+
     @classmethod
     def get_config(cls, dataset_name: str = None) -> dict:
         """
         Get full configuration by merging TrainingConfig with multi-view defaults.
-        
+
         Args:
             dataset_name: Optional dataset name to get base config for
-            
+
         Returns:
             Dictionary with all configuration parameters
         """
         # Get base config from TrainingConfig
         base_config = TrainingConfig.get_all_config(dataset_name)
-        
+
         # Build merged config
         merged = {}
-        
+
         # Training params from TrainingConfig
-        training_params = base_config['training_params']
-        merged['batch_size'] = training_params['batch_size']
-        merged['num_epochs'] = training_params['num_epochs']
-        merged['learning_rate'] = training_params['learning_rate']
-        merged['weight_decay'] = training_params.get('weight_decay', 1e-4)
-        merged['seed'] = training_params['seed']
-        merged['rotation_representation'] = training_params['rotation_representation']
-        merged['resume_checkpoint'] = training_params.get('resume_checkpoint')
-        merged['reset_ief_token_embedding'] = training_params.get('reset_ief_token_embedding', False)
-        merged['num_workers'] = training_params.get('num_workers', 4)
-        merged['pin_memory'] = training_params.get('pin_memory', True)
-        merged['deterministic'] = training_params.get('deterministic', False)
+        training_params = base_config["training_params"]
+        merged["batch_size"] = training_params["batch_size"]
+        merged["num_epochs"] = training_params["num_epochs"]
+        merged["learning_rate"] = training_params["learning_rate"]
+        merged["weight_decay"] = training_params.get("weight_decay", 1e-4)
+        merged["seed"] = training_params["seed"]
+        merged["rotation_representation"] = training_params["rotation_representation"]
+        merged["resume_checkpoint"] = training_params.get("resume_checkpoint")
+        merged["reset_ief_token_embedding"] = training_params.get("reset_ief_token_embedding", False)
+        merged["num_workers"] = training_params.get("num_workers", 4)
+        merged["pin_memory"] = training_params.get("pin_memory", True)
+        merged["deterministic"] = training_params.get("deterministic", False)
 
         # Model config from TrainingConfig
-        model_config = base_config['model_config']
-        merged['backbone_name'] = model_config['backbone_name']
-        merged['freeze_backbone'] = model_config['freeze_backbone']
-        merged['head_type'] = model_config['head_type']
-        merged['hidden_dim'] = model_config['hidden_dim']
-        merged['transformer_config'] = model_config.get('transformer_config', {})
-        merged['use_unity_prior'] = model_config.get('use_unity_prior', False)
-        
+        model_config = base_config["model_config"]
+        merged["backbone_name"] = model_config["backbone_name"]
+        merged["freeze_backbone"] = model_config["freeze_backbone"]
+        merged["head_type"] = model_config["head_type"]
+        merged["hidden_dim"] = model_config["hidden_dim"]
+        merged["transformer_config"] = model_config.get("transformer_config", {})
+        merged["use_unity_prior"] = model_config.get("use_unity_prior", False)
+
         # Scale/trans mode from TrainingConfig
-        merged['scale_trans_mode'] = TrainingConfig.get_scale_trans_mode()
-        
+        merged["scale_trans_mode"] = TrainingConfig.get_scale_trans_mode()
+
         # Loss weights from TrainingConfig (epoch 0 base weights)
-        merged['loss_weights'] = TrainingConfig.get_loss_weights_for_epoch(0)
-        
+        merged["loss_weights"] = TrainingConfig.get_loss_weights_for_epoch(0)
+
         # Add multi-view specific defaults
         merged.update(cls.MULTIVIEW_DEFAULTS)
-        
+
         # Shape family from global config
-        merged['shape_family'] = config.SHAPE_FAMILY
-        
+        merged["shape_family"] = config.SHAPE_FAMILY
+
         # Mesh scaling config from TrainingConfig (if available)
         mesh_scaling_config = TrainingConfig.get_mesh_scaling_config()
-        merged['allow_mesh_scaling'] = mesh_scaling_config.get('allow_mesh_scaling', False)
-        merged['mesh_scale_init'] = mesh_scaling_config.get('init_mesh_scale', 1.0)
-        
+        merged["allow_mesh_scaling"] = mesh_scaling_config.get("allow_mesh_scaling", False)
+        merged["mesh_scale_init"] = mesh_scaling_config.get("init_mesh_scale", 1.0)
+
         # Dataset fraction for large datasets (fraction of training data per epoch)
-        merged['dataset_fraction'] = TrainingConfig.get_dataset_fraction()
+        merged["dataset_fraction"] = TrainingConfig.get_dataset_fraction()
 
         # Optional GT camera initialization (predict deltas around GT if available)
-        merged['use_gt_camera_init'] = TrainingConfig.use_gt_camera_init
-        
+        merged["use_gt_camera_init"] = TrainingConfig.use_gt_camera_init
+
         return merged
-    
+
     @classmethod
     def from_args(cls, args) -> dict:
         """
         Create config from command line arguments.
-        
+
         Args:
             args: Parsed command line arguments
-            
+
         Returns:
             Configuration dictionary
         """
         # Start with merged config from TrainingConfig + multiview defaults
         merged_config = cls.get_config()
-        
+
         # Override with command line args
         for key, value in vars(args).items():
-            if value is not None and key != 'config':
+            if value is not None and key != "config":
                 merged_config[key] = value
-        
+
         return merged_config
-    
+
     @classmethod
     def from_file(cls, config_path: str) -> dict:
         """
         Load config from JSON file.
-        
+
         Args:
             config_path: Path to JSON configuration file
-            
+
         Returns:
             Configuration dictionary
         """
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             file_config = json.load(f)
-        
+
         # Start with merged config
         merged_config = cls.get_config()
-        
+
         # Override with file config
         merged_config.update(file_config)
-        
+
         return merged_config
-    
+
     @classmethod
     def get_loss_weights_for_epoch(cls, epoch: int, base_weights: dict = None) -> dict:
         """
         Get loss weights for a specific epoch using TrainingConfig curriculum.
-        
+
         Args:
             epoch: Current training epoch
             base_weights: Optional base weights to use instead of TrainingConfig
-            
+
         Returns:
             Dictionary of loss weights
         """
@@ -515,40 +511,42 @@ class MultiViewTrainingConfig:
             # Start with provided base weights
             weights = base_weights.copy()
             # Apply curriculum stages from TrainingConfig
-            for epoch_threshold, weight_updates in TrainingConfig.LOSS_CURRICULUM['curriculum_stages']:
+            for epoch_threshold, weight_updates in TrainingConfig.LOSS_CURRICULUM["curriculum_stages"]:
                 if epoch >= epoch_threshold:
                     weights.update(weight_updates)
             return weights
         else:
             # Use TrainingConfig directly
             return TrainingConfig.get_loss_weights_for_epoch(epoch)
-    
+
     @classmethod
     def get_learning_rate_for_epoch(cls, epoch: int) -> float:
         """
         Get learning rate for a specific epoch using TrainingConfig curriculum.
-        
+
         Args:
             epoch: Current training epoch
-            
+
         Returns:
             Learning rate for the epoch
         """
         return TrainingConfig.get_learning_rate_for_epoch(epoch)
 
 
-def train_epoch(model: MultiViewSMILImageRegressor,
-                train_loader: DataLoader,
-                optimizer: torch.optim.Optimizer,
-                device: str,
-                epoch: int,
-                training_config: dict,
-                scaler=None,
-                is_distributed: bool = False,
-                rank: int = 0) -> dict:
+def train_epoch(
+    model: MultiViewSMILImageRegressor,
+    train_loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    device: str,
+    epoch: int,
+    training_config: dict,
+    scaler=None,
+    is_distributed: bool = False,
+    rank: int = 0,
+) -> dict:
     """
     Train for one epoch.
-    
+
     Args:
         model: MultiViewSMILImageRegressor
         train_loader: DataLoader
@@ -559,7 +557,7 @@ def train_epoch(model: MultiViewSMILImageRegressor,
         scaler: GradScaler for mixed precision (optional)
         is_distributed: Whether using DDP
         rank: Process rank
-        
+
     Returns:
         Dictionary with training metrics
     """
@@ -568,17 +566,15 @@ def train_epoch(model: MultiViewSMILImageRegressor,
     # If wrapped in DDP, call custom helper methods on the underlying module.
     # NOTE: DDP does not automatically expose arbitrary custom methods.
     base_model = model.module if hasattr(model, "module") else model
-    
+
     # Get epoch-specific loss weights from curriculum
-    loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(
-        epoch, training_config.get('loss_weights')
-    )
-    
+    loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(epoch, training_config.get("loss_weights"))
+
     total_loss = 0.0
     loss_components_sum = {}
     num_batches = 0
 
-    accum_steps = training_config.get('gradient_accumulation_steps', 1)
+    accum_steps = training_config.get("gradient_accumulation_steps", 1)
 
     # Track how many mini-batches in the current accumulation window actually
     # produced a valid backward pass.  When a batch is skipped (None prediction
@@ -595,14 +591,12 @@ def train_epoch(model: MultiViewSMILImageRegressor,
             valid_steps_in_window = 0
 
         # Whether this is the last mini-batch in the current accumulation window
-        is_step_batch = ((batch_idx + 1) % accum_steps == 0
-                         or (batch_idx + 1) == len(train_loader))
+        is_step_batch = (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(train_loader)
 
         # For DDP: suppress gradient all-reduce during accumulation steps.
         # Sync only happens on the step batch to avoid redundant communication
         # and incorrect gradient averaging mid-accumulation.
-        maybe_no_sync = (model.no_sync() if (is_distributed and accum_steps > 1
-                         and not is_step_batch) else nullcontext())
+        maybe_no_sync = model.no_sync() if (is_distributed and accum_steps > 1 and not is_step_batch) else nullcontext()
 
         try:
             with maybe_no_sync:
@@ -620,9 +614,7 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                             continue
 
                         loss, loss_components = base_model.compute_multiview_batch_loss(
-                            predicted_params, y_data_batch,
-                            loss_weights=loss_weights,
-                            return_components=True
+                            predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
                         )
                         # Scale loss by accumulation steps so accumulated gradients
                         # have the same magnitude as a single large batch
@@ -634,12 +626,9 @@ def train_epoch(model: MultiViewSMILImageRegressor,
 
                     # Only step optimizer at the end of each accumulation window
                     if is_step_batch:
-                        if training_config.get('gradient_clip_norm', 0) > 0:
+                        if training_config.get("gradient_clip_norm", 0) > 0:
                             scaler.unscale_(optimizer)
-                            torch.nn.utils.clip_grad_norm_(
-                                model.parameters(),
-                                training_config['gradient_clip_norm']
-                            )
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
                         scaler.step(optimizer)
                         scaler.update()
                 else:
@@ -654,9 +643,7 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                         continue
 
                     loss, loss_components = base_model.compute_multiview_batch_loss(
-                        predicted_params, y_data_batch,
-                        loss_weights=loss_weights,
-                        return_components=True
+                        predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
                     )
                     loss = loss / accum_steps
 
@@ -664,11 +651,8 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                     valid_steps_in_window += 1
 
                     if is_step_batch:
-                        if training_config.get('gradient_clip_norm', 0) > 0:
-                            torch.nn.utils.clip_grad_norm_(
-                                model.parameters(),
-                                training_config['gradient_clip_norm']
-                            )
+                        if training_config.get("gradient_clip_norm", 0) > 0:
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
                         optimizer.step()
 
             # IEF refinement monitoring: track per-iteration pose delta norms.
@@ -676,11 +660,11 @@ def train_epoch(model: MultiViewSMILImageRegressor,
             # Healthy IEF shows delta_1 > delta_2 (coarse correction then fine-tuning).
             # Flat or growing deltas indicate the IEF is not learning to refine.
             with torch.no_grad():
-                hist = predicted_params.get('iteration_history', {}) if predicted_params else {}
-                pose_hist = hist.get('pose', [])
+                hist = predicted_params.get("iteration_history", {}) if predicted_params else {}
+                pose_hist = hist.get("pose", [])
                 for i in range(1, len(pose_hist)):
                     delta = (pose_hist[i].detach() - pose_hist[i - 1].detach()).norm(dim=-1).mean().item()
-                    key = f'ief_pose_delta_{i}'
+                    key = f"ief_pose_delta_{i}"
                     loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
 
             # Accumulate metrics (use un-scaled loss for logging)
@@ -694,14 +678,17 @@ def train_epoch(model: MultiViewSMILImageRegressor,
 
             # Update progress bar
             if rank == 0:
-                progress_bar.set_postfix({
-                    'loss': f'{loss.item() * accum_steps:.4f}',
-                    'kp2d': f'{loss_components.get("keypoint_2d", torch.tensor(0.0)).item():.4f}'
-                })
+                progress_bar.set_postfix(
+                    {
+                        "loss": f"{loss.item() * accum_steps:.4f}",
+                        "kp2d": f"{loss_components.get('keypoint_2d', torch.tensor(0.0)).item():.4f}",
+                    }
+                )
 
         except Exception as e:
             print(f"Error in batch {batch_idx}: {e}")
             import traceback
+
             traceback.print_exc()
             # Clean up GPU memory after OOM to prevent cascading failures.
             # Without this, the failed forward pass's GPU tensors stay alive
@@ -721,7 +708,7 @@ def train_epoch(model: MultiViewSMILImageRegressor,
                 except Exception:
                     pass
             continue
-    
+
     # Compute averages
     if num_batches > 0:
         avg_loss = total_loss / num_batches
@@ -729,23 +716,21 @@ def train_epoch(model: MultiViewSMILImageRegressor,
     else:
         avg_loss = 0.0
         avg_components = {}
-    
-    return {
-        'avg_loss': avg_loss,
-        'loss_components': avg_components,
-        'num_batches': num_batches
-    }
+
+    return {"avg_loss": avg_loss, "loss_components": avg_components, "num_batches": num_batches}
 
 
-def validate(model: MultiViewSMILImageRegressor,
-             val_loader: DataLoader,
-             device: str,
-             training_config: dict,
-             epoch: int = 0,
-             rank: int = 0) -> dict:
+def validate(
+    model: MultiViewSMILImageRegressor,
+    val_loader: DataLoader,
+    device: str,
+    training_config: dict,
+    epoch: int = 0,
+    rank: int = 0,
+) -> dict:
     """
     Validate the model.
-    
+
     Args:
         model: MultiViewSMILImageRegressor
         val_loader: DataLoader
@@ -753,7 +738,7 @@ def validate(model: MultiViewSMILImageRegressor,
         training_config: Training configuration dictionary
         epoch: Current epoch (for loss curriculum)
         rank: Process rank
-    
+
     Returns:
         Dictionary with validation metrics
     """
@@ -761,32 +746,28 @@ def validate(model: MultiViewSMILImageRegressor,
 
     # If wrapped in DDP, call custom helper methods on the underlying module.
     base_model = model.module if hasattr(model, "module") else model
-    
+
     # Get epoch-specific loss weights from curriculum
-    loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(
-        epoch, training_config.get('loss_weights')
-    )
-    
+    loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(epoch, training_config.get("loss_weights"))
+
     total_loss = 0.0
     loss_components_sum = {}
     num_batches = 0
-    
+
     with torch.no_grad():
         for x_data_batch, y_data_batch in tqdm(val_loader, desc="Validating", disable=(rank != 0)):
             try:
                 predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
                     x_data_batch, y_data_batch
                 )
-                
+
                 if predicted_params is None:
                     continue
-                
+
                 loss, loss_components = base_model.compute_multiview_batch_loss(
-                    predicted_params, y_data_batch,
-                    loss_weights=loss_weights,
-                    return_components=True
+                    predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
                 )
-                
+
                 total_loss += loss.item()
                 num_batches += 1
 
@@ -796,11 +777,11 @@ def validate(model: MultiViewSMILImageRegressor,
                     loss_components_sum[key] += value.item() if torch.is_tensor(value) else value
 
                 # IEF refinement monitoring (already in no_grad context)
-                hist = predicted_params.get('iteration_history', {}) if predicted_params else {}
-                pose_hist = hist.get('pose', [])
+                hist = predicted_params.get("iteration_history", {}) if predicted_params else {}
+                pose_hist = hist.get("pose", [])
                 for i in range(1, len(pose_hist)):
                     delta = (pose_hist[i] - pose_hist[i - 1]).norm(dim=-1).mean().item()
-                    key = f'ief_pose_delta_{i}'
+                    key = f"ief_pose_delta_{i}"
                     loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
 
             except Exception as e:
@@ -817,8 +798,7 @@ def validate(model: MultiViewSMILImageRegressor,
 
         if loss_components_sum:
             keys = sorted(loss_components_sum.keys())
-            comp_tensor = torch.tensor([loss_components_sum[k] for k in keys],
-                                       device=device_t, dtype=torch.float32)
+            comp_tensor = torch.tensor([loss_components_sum[k] for k in keys], device=device_t, dtype=torch.float32)
             dist.all_reduce(comp_tensor, op=dist.ReduceOp.SUM)
             loss_components_sum = {k: comp_tensor[i].item() for i, k in enumerate(keys)}
 
@@ -826,35 +806,33 @@ def validate(model: MultiViewSMILImageRegressor,
         avg_loss = total_loss / num_batches
         avg_components = {k: v / num_batches for k, v in loss_components_sum.items()}
     else:
-        avg_loss = float('inf')
+        avg_loss = float("inf")
         avg_components = {}
-    
-    return {
-        'avg_loss': avg_loss,
-        'loss_components': avg_components,
-        'num_batches': num_batches
-    }
+
+    return {"avg_loss": avg_loss, "loss_components": avg_components, "num_batches": num_batches}
 
 
-def visualize_multiview_training_progress(model: MultiViewSMILImageRegressor,
-                                           val_loader: DataLoader,
-                                           device: str,
-                                           epoch: int,
-                                           training_config: dict,
-                                           output_dir: str = 'multiview_visualizations',
-                                           num_samples: int = 3,
-                                           rank: int = 0):
+def visualize_multiview_training_progress(
+    model: MultiViewSMILImageRegressor,
+    val_loader: DataLoader,
+    device: str,
+    epoch: int,
+    training_config: dict,
+    output_dir: str = "multiview_visualizations",
+    num_samples: int = 3,
+    rank: int = 0,
+):
     """
     Visualize multi-view training progress by creating grid visualizations.
-    
+
     Creates a visualization showing:
     - Top row: Input images from each camera view
     - Bottom row: Rendered mesh using unified body params + per-view camera params
     - Overlays GT keypoints (circles) and predicted keypoints (crosses)
-    
+
     Uses a fixed random seed (42) for sample selection to ensure the same samples
     are visualized across all epochs, enabling consistent progress tracking.
-    
+
     Args:
         model: MultiViewSMILImageRegressor model
         val_loader: Validation data loader
@@ -867,16 +845,16 @@ def visualize_multiview_training_progress(model: MultiViewSMILImageRegressor,
     """
     if rank != 0:
         return  # Only main process generates visualizations
-    
+
     model.eval()
-    
+
     # Save current random states to restore after visualization
     torch_rng_state = torch.get_rng_state()
     numpy_rng_state = np.random.get_state()
     python_rng_state = random.getstate()
     if torch.cuda.is_available():
         cuda_rng_state = torch.cuda.get_rng_state()
-    
+
     # Set fixed seed for deterministic sample selection
     visualization_seed = 42
     torch.manual_seed(visualization_seed)
@@ -884,64 +862,61 @@ def visualize_multiview_training_progress(model: MultiViewSMILImageRegressor,
     random.seed(visualization_seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(visualization_seed)
-    
+
     try:
         # Create output directory for this epoch
-        epoch_dir = os.path.join(output_dir, f'epoch_{epoch:03d}')
+        epoch_dir = os.path.join(output_dir, f"epoch_{epoch:03d}")
         os.makedirs(epoch_dir, exist_ok=True)
-        
+
         # Collect samples for visualization
         collected_samples = []
         max_batches_to_check = 50  # Limit to avoid processing entire dataset
-        
+
         with torch.no_grad():
             for batch_idx, (x_data_batch, y_data_batch) in enumerate(val_loader):
                 if batch_idx >= max_batches_to_check or len(collected_samples) >= num_samples:
                     break
-                
+
                 # Collect individual samples from the batch
                 for i, (x_data, y_data) in enumerate(zip(x_data_batch, y_data_batch)):
                     if len(collected_samples) >= num_samples:
                         break
-                    
+
                     # Skip if no valid images
-                    if not x_data.get('images') or len(x_data.get('images', [])) == 0:
+                    if not x_data.get("images") or len(x_data.get("images", [])) == 0:
                         continue
-                    
+
                     collected_samples.append((x_data, y_data))
-        
+
         if len(collected_samples) == 0:
             print(f"Warning: No samples collected for visualization at epoch {epoch}")
             return
-        
+
         # Get the base model (unwrap DDP if needed)
-        base_model = model.module if hasattr(model, 'module') else model
-        
+        base_model = model.module if hasattr(model, "module") else model
+
         # Process each sample
         for sample_idx, (x_data, y_data) in enumerate(collected_samples):
             try:
-                predicted_params = run_forward_multiview_single_sample(
-                    base_model, x_data, y_data, device
-                )
+                predicted_params = run_forward_multiview_single_sample(base_model, x_data, y_data, device)
                 if predicted_params is not None:
-                    print_joint_scale_diagnostics(
-                        base_model, predicted_params, label=f"Multiview Sample {sample_idx}"
-                    )
+                    print_joint_scale_diagnostics(base_model, predicted_params, label=f"Multiview Sample {sample_idx}")
                 visualization = create_multiview_visualization(
                     base_model, x_data, y_data, device, predicted_params=predicted_params
                 )
 
                 if visualization is not None:
                     # Save visualization
-                    output_path = os.path.join(epoch_dir, f'sample_{sample_idx:03d}_epoch_{epoch:03d}.png')
+                    output_path = os.path.join(epoch_dir, f"sample_{sample_idx:03d}_epoch_{epoch:03d}.png")
                     imageio.imsave(output_path, visualization)
-                    
+
             except Exception as e:
                 print(f"Warning: Failed to create visualization for sample {sample_idx}: {e}")
                 import traceback
+
                 traceback.print_exc()
                 continue
-        
+
         print(f"Generated {len(collected_samples)} multi-view visualizations for epoch {epoch} in {epoch_dir}")
 
     finally:
@@ -958,10 +933,12 @@ def visualize_multiview_training_progress(model: MultiViewSMILImageRegressor,
             torch.cuda.set_rng_state(cuda_rng_state)
 
 
-def draw_keypoints_on_image(image_rgb: np.ndarray,
-                            gt_kps: Optional[np.ndarray] = None,
-                            gt_vis: Optional[np.ndarray] = None,
-                            pred_kps: Optional[np.ndarray] = None) -> np.ndarray:
+def draw_keypoints_on_image(
+    image_rgb: np.ndarray,
+    gt_kps: Optional[np.ndarray] = None,
+    gt_vis: Optional[np.ndarray] = None,
+    pred_kps: Optional[np.ndarray] = None,
+) -> np.ndarray:
     """
     Draw GT (green circles) and "pred" (red crosses) keypoints on top of an RGB image.
 
@@ -987,27 +964,28 @@ def draw_keypoints_on_image(image_rgb: np.ndarray,
         for j, (y, x) in enumerate(gt_kps):
             if gt_vis is None or gt_vis[j] > 0.5:
                 x, y = float(x), float(y)
-                draw.ellipse([x - 3, y - 3, x + 3, y + 3], outline='green', width=2)
+                draw.ellipse([x - 3, y - 3, x + 3, y + 3], outline="green", width=2)
 
     # Pred keypoints (red crosses)
     if pred_kps is not None:
-        for (y, x) in pred_kps:
+        for y, x in pred_kps:
             x, y = float(x), float(y)
-            draw.line([x - 4, y, x + 4, y], fill='red', width=2)
-            draw.line([x, y - 4, x, y + 4], fill='red', width=2)
+            draw.line([x - 4, y, x + 4, y], fill="red", width=2)
+            draw.line([x, y - 4, x, y + 4], fill="red", width=2)
 
     return np.array(pil_img)
 
 
 class SingleViewImageExporter:
     """Image exporter for single-view rendered visualizations."""
+
     def __init__(self, output_dir: str, sample_idx: int, view_idx: int, epoch: int):
         self.output_dir = output_dir
         self.sample_idx = sample_idx
         self.view_idx = view_idx
         self.epoch = epoch
         os.makedirs(output_dir, exist_ok=True)
-    
+
     def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, epoch=None):
         """Export visualization image with sample and view info in filename."""
         filename = f"sample_{self.sample_idx:03d}_view_{self.view_idx:02d}_epoch_{self.epoch:03d}.png"
@@ -1017,7 +995,7 @@ class SingleViewImageExporter:
 def export_mesh_as_obj(vertices: torch.Tensor, faces: torch.Tensor, output_path: str):
     """
     Export mesh vertices and faces as OBJ file.
-    
+
     Args:
         vertices: Vertex positions tensor of shape (N, 3) or (1, N, 3)
         faces: Face indices tensor of shape (F, 3) or (1, F, 3)
@@ -1028,42 +1006,44 @@ def export_mesh_as_obj(vertices: torch.Tensor, faces: torch.Tensor, output_path:
         vertices = vertices[0]  # (N, 3)
     if faces.dim() == 3:
         faces = faces[0]  # (F, 3)
-    
+
     # Convert to numpy
     verts_np = vertices.detach().cpu().numpy()
     faces_np = faces.detach().cpu().numpy()
-    
+
     # OBJ files use 1-based indexing for faces
     faces_np = faces_np + 1
-    
+
     # Write OBJ file
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         # Write vertices
         for v in verts_np:
             f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
-        
+
         # Write faces
         for face in faces_np:
             f.write(f"f {face[0]} {face[1]} {face[2]}\n")
 
 
-def visualize_singleview_renders(model: MultiViewSMILImageRegressor,
-                                  val_loader: DataLoader,
-                                  device: str,
-                                  epoch: int,
-                                  training_config: dict,
-                                  output_dir: str = 'singleview_visualizations',
-                                  num_samples: int = 3,
-                                  rank: int = 0):
+def visualize_singleview_renders(
+    model: MultiViewSMILImageRegressor,
+    val_loader: DataLoader,
+    device: str,
+    epoch: int,
+    training_config: dict,
+    output_dir: str = "singleview_visualizations",
+    num_samples: int = 3,
+    rank: int = 0,
+):
     """
     Generate single-view rendered mesh visualizations for multi-view samples.
-    
+
     This function renders the SMIL mesh using predicted parameters and camera
     settings for each view, producing SMALFitter-style collages that show:
     - Original input image
     - Rendered mesh overlay
     - Keypoint projections
-    
+
     Args:
         model: MultiViewSMILImageRegressor model
         val_loader: Validation data loader
@@ -1076,16 +1056,16 @@ def visualize_singleview_renders(model: MultiViewSMILImageRegressor,
     """
     if rank != 0:
         return
-    
+
     model.eval()
-    
+
     # Save random states
     torch_rng_state = torch.get_rng_state()
     numpy_rng_state = np.random.get_state()
     python_rng_state = random.getstate()
     if torch.cuda.is_available():
         cuda_rng_state = torch.cuda.get_rng_state()
-    
+
     # Set fixed seed for deterministic sample selection
     visualization_seed = 42
     torch.manual_seed(visualization_seed)
@@ -1093,54 +1073,54 @@ def visualize_singleview_renders(model: MultiViewSMILImageRegressor,
     random.seed(visualization_seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(visualization_seed)
-    
+
     try:
         # Create output directory for this epoch
-        epoch_dir = os.path.join(output_dir, f'epoch_{epoch:03d}')
+        epoch_dir = os.path.join(output_dir, f"epoch_{epoch:03d}")
         os.makedirs(epoch_dir, exist_ok=True)
-        
+
         # Collect samples
         collected_samples = []
         max_batches_to_check = 50
-        
+
         with torch.no_grad():
             for batch_idx, (x_data_batch, y_data_batch) in enumerate(val_loader):
                 if batch_idx >= max_batches_to_check or len(collected_samples) >= num_samples:
                     break
-                
+
                 for i, (x_data, y_data) in enumerate(zip(x_data_batch, y_data_batch)):
                     if len(collected_samples) >= num_samples:
                         break
-                    if not x_data.get('images') or len(x_data.get('images', [])) == 0:
+                    if not x_data.get("images") or len(x_data.get("images", [])) == 0:
                         continue
                     collected_samples.append((x_data, y_data))
-        
+
         if len(collected_samples) == 0:
             print(f"Warning: No samples collected for single-view visualization at epoch {epoch}")
             return
-        
+
         # Get base model
-        base_model = model.module if hasattr(model, 'module') else model
-        
+        base_model = model.module if hasattr(model, "module") else model
+
         # Process each sample
         num_rendered = 0
         for sample_idx, (x_data, y_data) in enumerate(collected_samples):
             try:
                 views_rendered = render_singleview_for_sample(
-                    base_model, x_data, y_data, device, training_config,
-                    epoch_dir, sample_idx, epoch
+                    base_model, x_data, y_data, device, training_config, epoch_dir, sample_idx, epoch
                 )
                 if views_rendered > 0:
                     num_rendered += 1
             except Exception as e:
                 print(f"Warning: Failed to render single-view for sample {sample_idx}: {e}")
                 import traceback
+
                 traceback.print_exc()
                 continue
             finally:
                 # Clear GPU memory between samples to prevent accumulation
                 torch.cuda.empty_cache()
-        
+
         print(f"Generated single-view renders for {num_rendered} samples (epoch {epoch}) in {epoch_dir}")
 
     finally:
@@ -1157,17 +1137,19 @@ def visualize_singleview_renders(model: MultiViewSMILImageRegressor,
             torch.cuda.set_rng_state(cuda_rng_state)
 
 
-def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
-                                  x_data: dict,
-                                  y_data: dict,
-                                  device: str,
-                                  training_config: dict,
-                                  output_dir: str,
-                                  sample_idx: int,
-                                  epoch: int) -> int:
+def render_singleview_for_sample(
+    model: MultiViewSMILImageRegressor,
+    x_data: dict,
+    y_data: dict,
+    device: str,
+    training_config: dict,
+    output_dir: str,
+    sample_idx: int,
+    epoch: int,
+) -> int:
     """
     Render single-view mesh visualizations for each view in a multi-view sample.
-    
+
     Args:
         model: MultiViewSMILImageRegressor model
         x_data: Input data dictionary
@@ -1177,84 +1159,84 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
         output_dir: Output directory for visualizations
         sample_idx: Sample index
         epoch: Current epoch
-        
+
     Returns:
         Number of views successfully rendered
     """
-    images = x_data.get('images', [])
+    images = x_data.get("images", [])
     num_views = len(images)
-    
+
     if num_views == 0:
         return 0
-    
+
     # Get camera indices
-    cam_indices = x_data.get('camera_indices', list(range(num_views)))
+    cam_indices = x_data.get("camera_indices", list(range(num_views)))
     if isinstance(cam_indices, np.ndarray):
         cam_indices = cam_indices.tolist()
-    
+
     # Preprocess images and prepare for model
     images_per_view = []
     for img in images:
         img_tensor = model.preprocess_image(img).to(device)  # (1, 3, H, W)
         images_per_view.append(img_tensor.squeeze(0))  # (3, H, W)
-    
+
     images_tensors = [img.unsqueeze(0) for img in images_per_view]  # List of (1, 3, H, W)
     camera_indices_tensor = torch.tensor([cam_indices], device=device)  # (1, num_views)
     view_mask = torch.ones(1, num_views, dtype=torch.bool, device=device)  # (1, num_views)
-    
+
     # Forward pass to get predictions
     with torch.no_grad():
         predicted_params = model.forward_multiview(
-            images_tensors,
-            camera_indices_tensor,
-            view_mask,
-            target_data=[y_data]
+            images_tensors, camera_indices_tensor, view_mask, target_data=[y_data]
         )
-    
-    print_joint_scale_diagnostics(
-        model, predicted_params, label=f"Sample {sample_idx} (Single-View Renders)"
-    )
+
+    print_joint_scale_diagnostics(model, predicted_params, label=f"Sample {sample_idx} (Single-View Renders)")
 
     # Render each view separately using SMALFitter
     views_rendered = 0
-    
+
     # Get per-view camera parameters from predictions
     # NOTE: These are LISTS of tensors, one per view, not batched tensors
-    fov_per_view = predicted_params.get('fov_per_view', None)  # List of (batch_size, 1)
-    cam_rot_per_view = predicted_params.get('cam_rot_per_view', None)  # List of (batch_size, 3, 3)
-    cam_trans_per_view = predicted_params.get('cam_trans_per_view', None)  # List of (batch_size, 3)
-    
+    fov_per_view = predicted_params.get("fov_per_view", None)  # List of (batch_size, 1)
+    cam_rot_per_view = predicted_params.get("cam_rot_per_view", None)  # List of (batch_size, 3, 3)
+    cam_trans_per_view = predicted_params.get("cam_trans_per_view", None)  # List of (batch_size, 3)
+
     # IMPORTANT: Use the model's renderer image size, not the backbone input size
     # The model's renderer is initialized with a specific size, and _render_keypoints_with_camera
     # normalizes by this size. We must match this exactly for correct visualization.
     model_renderer_size = model.renderer.image_size
     target_size = model_renderer_size
-    
+
     if sample_idx == 0:
         print(f"\n[Visualization] Using model renderer image size: {target_size}")
         print(f"  Original image size: {images[0].shape if isinstance(images[0], np.ndarray) else 'tensor'}")
         print(f"  Model renderer size: {model_renderer_size}")
         print("  This ensures keypoint normalization matches training")
-    
+
     # Debug: Print predicted params summary and input fingerprint for EACH sample
     # This helps diagnose if model receives different inputs but outputs same predictions
     img_fingerprint = images_tensors[0][0, 0, :5, :5].mean().item()  # Small patch mean as fingerprint
     print(f"\n[Sample {sample_idx}] Input fingerprint (img patch mean): {img_fingerprint:.6f}")
-    print(f"  trans: [{predicted_params['trans'][0, 0].item():.4f}, {predicted_params['trans'][0, 1].item():.4f}, {predicted_params['trans'][0, 2].item():.4f}]")
-    print(f"  global_rot[0:3]: [{predicted_params['global_rot'][0, 0].item():.4f}, {predicted_params['global_rot'][0, 1].item():.4f}, {predicted_params['global_rot'][0, 2].item():.4f}]")
+    print(
+        f"  trans: [{predicted_params['trans'][0, 0].item():.4f}, {predicted_params['trans'][0, 1].item():.4f}, {predicted_params['trans'][0, 2].item():.4f}]"
+    )
+    print(
+        f"  global_rot[0:3]: [{predicted_params['global_rot'][0, 0].item():.4f}, {predicted_params['global_rot'][0, 1].item():.4f}, {predicted_params['global_rot'][0, 2].item():.4f}]"
+    )
     if fov_per_view is not None:
         print(f"  fov_per_view[0]: {fov_per_view[0][0, 0].item():.4f}")
-    if model.allow_mesh_scaling and 'mesh_scale' in predicted_params:
+    if model.allow_mesh_scaling and "mesh_scale" in predicted_params:
         print(f"  mesh_scale: {predicted_params['mesh_scale'][0].item():.4f}")
-    
+
     for view_idx in range(num_views):
         try:
             # Get original image for this view
             original_image = images[view_idx]  # (H, W, 3) in [0, 1] range
-            
+
             # Resize image to renderer's expected size (target_size)
             # This ensures SMALFitter and renderer use consistent image dimensions
             from PIL import Image
+
             if isinstance(original_image, np.ndarray):
                 # Convert to PIL, resize, then back to numpy
                 pil_img = Image.fromarray((original_image * 255).astype(np.uint8))
@@ -1262,53 +1244,55 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 resized_image = np.array(pil_img).astype(np.float32) / 255.0
             else:
                 # Tensor case - convert to numpy first, then use PIL for consistency
-                img_np = original_image.cpu().numpy() if hasattr(original_image, 'cpu') else original_image.numpy()
+                img_np = original_image.cpu().numpy() if hasattr(original_image, "cpu") else original_image.numpy()
                 pil_img = Image.fromarray((img_np * 255).astype(np.uint8))
                 pil_img = pil_img.resize((target_size, target_size), Image.BILINEAR)
                 resized_image = np.array(pil_img).astype(np.float32) / 255.0
-            
+
             resized_image = np.clip(resized_image, 0.0, 1.0)
             rgb = torch.from_numpy(resized_image).permute(2, 0, 1).unsqueeze(0).float()  # (1, 3, H, W)
-            
+
             # Verify RGB range (SMALFitter expects [0, 1])
             assert rgb.min() >= 0.0 and rgb.max() <= 1.0, f"RGB values out of range: [{rgb.min():.3f}, {rgb.max():.3f}]"
-            
+
             # Get keypoints for this view
-            keypoints_2d = y_data.get('keypoints_2d', None)
-            visibility = y_data.get('keypoint_visibility', None)
-            
+            keypoints_2d = y_data.get("keypoints_2d", None)
+            visibility = y_data.get("keypoint_visibility", None)
+
             if keypoints_2d is not None:
                 # Handle multi-view format (num_views, n_joints, 2) or single-view (n_joints, 2)
                 if len(keypoints_2d.shape) == 3:
                     view_keypoints = keypoints_2d[view_idx] if view_idx < keypoints_2d.shape[0] else None
-                    view_visibility = visibility[view_idx] if visibility is not None and view_idx < visibility.shape[0] else None
+                    view_visibility = (
+                        visibility[view_idx] if visibility is not None and view_idx < visibility.shape[0] else None
+                    )
                 else:
                     view_keypoints = keypoints_2d if view_idx == 0 else None
                     view_visibility = visibility if view_idx == 0 else None
             else:
                 view_keypoints = None
                 view_visibility = None
-            
+
             # Create silhouette matching the resized image size
             sil = torch.zeros(1, 1, target_size, target_size)
-            
+
             # Create data batch for SMALFitter
             if view_keypoints is not None and view_visibility is not None:
                 # Convert normalized keypoints to pixel coordinates
                 pixel_coords = view_keypoints.copy()
                 pixel_coords[:, 0] = pixel_coords[:, 0] * target_size  # y coordinates
                 pixel_coords[:, 1] = pixel_coords[:, 1] * target_size  # x coordinates
-                
+
                 num_joints = len(view_keypoints)
                 joints = torch.tensor(pixel_coords.reshape(1, num_joints, 2), dtype=torch.float32)
                 vis = torch.tensor(view_visibility.reshape(1, num_joints), dtype=torch.float32)
-                
+
                 temp_batch = (rgb, sil, joints, vis)
                 rgb_only = False
             else:
                 temp_batch = rgb
                 rgb_only = True
-            
+
             # Create SMALFitter for this view
             temp_fitter = SMALFitter(
                 device=device,
@@ -1316,35 +1300,37 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 batch_size=1,
                 shape_family=config.SHAPE_FAMILY,
                 use_unity_prior=False,
-                rgb_only=rgb_only
+                rgb_only=rgb_only,
             )
-            
+
             # CRITICAL: Match propagate_scaling to the training model's setting.
             # The model learns scales with propagate_scaling=True (set in SMILImageRegressor.__init__),
             # so visualization must also use propagate_scaling=True for consistent geometry.
             temp_fitter.propagate_scaling = model.propagate_scaling
-            
+
             # Set target joints for visualization
             if view_keypoints is not None and view_visibility is not None:
                 pixel_coords = view_keypoints.copy()
                 pixel_coords[:, 0] = pixel_coords[:, 0] * target_size
                 pixel_coords[:, 1] = pixel_coords[:, 1] * target_size
                 temp_fitter.target_joints = torch.tensor(pixel_coords, dtype=torch.float32, device=device).unsqueeze(0)
-                temp_fitter.target_visibility = torch.tensor(view_visibility, dtype=torch.float32, device=device).unsqueeze(0)
+                temp_fitter.target_visibility = torch.tensor(
+                    view_visibility, dtype=torch.float32, device=device
+                ).unsqueeze(0)
             else:
                 n_joints = temp_fitter.joint_rotations.shape[1] + 1  # Include root joint
                 temp_fitter.target_joints = torch.zeros((1, n_joints, 2), device=device)
                 temp_fitter.target_visibility = torch.zeros((1, n_joints), device=device)
-            
+
             # Set predicted body parameters
             # Convert 6D rotation to axis-angle if needed
-            if model.rotation_representation == '6d':
-                global_rot_aa = rotation_6d_to_axis_angle(predicted_params['global_rot'][0:1].detach())
-                joint_rot_aa = rotation_6d_to_axis_angle(predicted_params['joint_rot'][0:1].detach())
+            if model.rotation_representation == "6d":
+                global_rot_aa = rotation_6d_to_axis_angle(predicted_params["global_rot"][0:1].detach())
+                joint_rot_aa = rotation_6d_to_axis_angle(predicted_params["joint_rot"][0:1].detach())
             else:
-                global_rot_aa = predicted_params['global_rot'][0:1].detach()
-                joint_rot_aa = predicted_params['joint_rot'][0:1].detach()
-            
+                global_rot_aa = predicted_params["global_rot"][0:1].detach()
+                joint_rot_aa = predicted_params["joint_rot"][0:1].detach()
+
             # IMPORTANT: SMALFitter parameters have specific shapes:
             # - global_rotation: (num_images, 3)
             # - joint_rotations: (num_images, N_POSE, 3)
@@ -1354,34 +1340,34 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
             temp_fitter.global_rotation.data = global_rot_aa.to(device)
             temp_fitter.joint_rotations.data = joint_rot_aa.to(device)
             # betas is 1D in SMALFitter, squeeze the batch dimension
-            temp_fitter.betas.data = predicted_params['betas'][0].detach().to(device)  # (n_betas,)
-            temp_fitter.trans.data = predicted_params['trans'][0:1].detach().to(device)
-            
+            temp_fitter.betas.data = predicted_params["betas"][0].detach().to(device)  # (n_betas,)
+            temp_fitter.trans.data = predicted_params["trans"][0:1].detach().to(device)
+
             # Set FOV - fov in SMALFitter is (num_images,) shaped
             if fov_per_view is not None and view_idx < len(fov_per_view):
                 # fov_per_view is a List of (batch_size, 1) tensors
                 fov_val = fov_per_view[view_idx][0, 0].detach().to(device)  # scalar
                 temp_fitter.fov.data = fov_val.unsqueeze(0)  # (1,)
-            elif 'fov' in predicted_params:
-                temp_fitter.fov.data = predicted_params['fov'][0:1].detach().to(device)  # (1,)
-            
+            elif "fov" in predicted_params:
+                temp_fitter.fov.data = predicted_params["fov"][0:1].detach().to(device)  # (1,)
+
             # Set scale and translation parameters if available
             #
             # IMPORTANT: Scales ARE applied during training loss computation in `_predict_canonical_joints_3d`
             # and `_render_keypoints_with_camera` for 'separate' mode. The model learns scales implicitly
             # through 2D/3D keypoint supervision. We must apply them here to match training behavior.
-            if 'log_beta_scales' in predicted_params and 'betas_trans' in predicted_params:
-                if model.scale_trans_mode == 'ignore':
+            if "log_beta_scales" in predicted_params and "betas_trans" in predicted_params:
+                if model.scale_trans_mode == "ignore":
                     # 'ignore' mode: scales/translations are not used
                     pass
-                elif model.scale_trans_mode == 'separate':
+                elif model.scale_trans_mode == "separate":
                     # 'separate' mode: check if using PCA or per-joint values
                     scale_trans_config = TrainingConfig.get_scale_trans_config()
-                    use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
-                    
-                    scales = predicted_params['log_beta_scales'][0:1].detach()
-                    trans = predicted_params['betas_trans'][0:1].detach()
-                    
+                    use_pca_transformation = scale_trans_config.get("separate", {}).get("use_pca_transformation", True)
+
+                    scales = predicted_params["log_beta_scales"][0:1].detach()
+                    trans = predicted_params["betas_trans"][0:1].detach()
+
                     if use_pca_transformation:
                         # PCA weights - convert to per-joint values for SMALFitter
                         try:
@@ -1392,16 +1378,16 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                             scales = None
                             trans = None
                     # else: Already per-joint values (batch_size, n_joints, 3) - use directly
-                    
+
                     if scales is not None:
                         temp_fitter.log_beta_scales.data = scales.to(device)
                     if trans is not None:
                         temp_fitter.betas_trans.data = trans.to(device)
                 else:
                     # 'entangled_with_betas' mode: values are already per-joint
-                    temp_fitter.log_beta_scales.data = predicted_params['log_beta_scales'][0:1].detach().to(device)
-                    temp_fitter.betas_trans.data = predicted_params['betas_trans'][0:1].detach().to(device)
-            
+                    temp_fitter.log_beta_scales.data = predicted_params["log_beta_scales"][0:1].detach().to(device)
+                    temp_fitter.betas_trans.data = predicted_params["betas_trans"][0:1].detach().to(device)
+
             # Set per-view camera parameters on the renderer
             # IMPORTANT: This must be done AFTER setting body parameters to ensure
             # the renderer uses the correct camera for this view
@@ -1419,29 +1405,26 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                         temp_fitter.fov.data = view_fov
                     else:
                         view_fov = temp_fitter.fov.data
-                    
+
                     # Set camera parameters on renderer - this is critical for correct visualization
                     # IMPORTANT: Must set camera BEFORE calling generate_visualization
                     # If the dataset provides a GT-derived aspect ratio, use it for rendering geometry.
                     # This is critical for calibrated cameras with W!=H and/or fx!=fy.
                     aspect = None
                     try:
-                        if y_data.get('cam_aspect_per_view') is not None:
-                            aspect = float(np.array(y_data['cam_aspect_per_view'][view_idx]).reshape(-1)[0])
+                        if y_data.get("cam_aspect_per_view") is not None:
+                            aspect = float(np.array(y_data["cam_aspect_per_view"][view_idx]).reshape(-1)[0])
                     except Exception:
                         aspect = None
 
                     temp_fitter.renderer.set_camera_parameters(
-                        R=cam_rot,
-                        T=cam_trans,
-                        fov=view_fov,
-                        aspect_ratio=aspect
+                        R=cam_rot, T=cam_trans, fov=view_fov, aspect_ratio=aspect
                     )
-                    
+
                     # Verify camera was set correctly
                     # The renderer should now use the updated camera
                     assert temp_fitter.renderer.cameras is not None, "Camera not set on renderer"
-                    
+
                     # Debug output for first sample, first view
                     if sample_idx == 0 and view_idx == 0:
                         print(f"\n[Camera Debug] View {view_idx}:")
@@ -1461,33 +1444,51 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                     #
                     # This catches unit-scale issues (e.g., mm vs m) and convention mismatches in R/T parsing.
                     try:
-                        has_3d = bool(y_data.get('has_3d_data', False))
-                        kp3d = y_data.get('keypoints_3d', None)
-                        gt_cam_R_all = y_data.get('cam_rot_per_view', None)
-                        gt_cam_T_all = y_data.get('cam_trans_per_view', None)
-                        gt_cam_fov_all = y_data.get('cam_fov_per_view', None)
+                        has_3d = bool(y_data.get("has_3d_data", False))
+                        kp3d = y_data.get("keypoints_3d", None)
+                        gt_cam_R_all = y_data.get("cam_rot_per_view", None)
+                        gt_cam_T_all = y_data.get("cam_trans_per_view", None)
+                        gt_cam_fov_all = y_data.get("cam_fov_per_view", None)
 
-                        if has_3d and kp3d is not None and gt_cam_R_all is not None and gt_cam_T_all is not None and gt_cam_fov_all is not None:
+                        if (
+                            has_3d
+                            and kp3d is not None
+                            and gt_cam_R_all is not None
+                            and gt_cam_T_all is not None
+                            and gt_cam_fov_all is not None
+                        ):
                             # Extract GT cam params for this view
-                            gt_R = torch.from_numpy(np.array(gt_cam_R_all[view_idx])).to(device=device, dtype=torch.float32).unsqueeze(0)  # (1,3,3)
-                            gt_T = torch.from_numpy(np.array(gt_cam_T_all[view_idx])).to(device=device, dtype=torch.float32).unsqueeze(0)  # (1,3)
+                            gt_R = (
+                                torch.from_numpy(np.array(gt_cam_R_all[view_idx]))
+                                .to(device=device, dtype=torch.float32)
+                                .unsqueeze(0)
+                            )  # (1,3,3)
+                            gt_T = (
+                                torch.from_numpy(np.array(gt_cam_T_all[view_idx]))
+                                .to(device=device, dtype=torch.float32)
+                                .unsqueeze(0)
+                            )  # (1,3)
                             gt_fov_arr = np.array(gt_cam_fov_all[view_idx]).reshape(-1)
                             gt_fov = torch.from_numpy(gt_fov_arr).to(device=device, dtype=torch.float32)  # (1,)
                             if gt_fov.numel() != 1:
                                 gt_fov = gt_fov[:1]
 
                             # GT 3D points (world coords, should already be scaled into SMILify world units by dataset)
-                            pts3d = torch.from_numpy(np.array(kp3d)).to(device=device, dtype=torch.float32).unsqueeze(0)  # (1,J,3)
+                            pts3d = (
+                                torch.from_numpy(np.array(kp3d)).to(device=device, dtype=torch.float32).unsqueeze(0)
+                            )  # (1,J,3)
 
                             # Project using GT camera (temporarily swap camera, then restore predicted camera)
                             gt_aspect = None
                             try:
-                                if y_data.get('cam_aspect_per_view') is not None:
-                                    gt_aspect = float(np.array(y_data['cam_aspect_per_view'][view_idx]).reshape(-1)[0])
+                                if y_data.get("cam_aspect_per_view") is not None:
+                                    gt_aspect = float(np.array(y_data["cam_aspect_per_view"][view_idx]).reshape(-1)[0])
                             except Exception:
                                 gt_aspect = None
-                            temp_fitter.renderer.set_camera_parameters(R=gt_R, T=gt_T, fov=gt_fov, aspect_ratio=gt_aspect)
-                            
+                            temp_fitter.renderer.set_camera_parameters(
+                                R=gt_R, T=gt_T, fov=gt_fov, aspect_ratio=gt_aspect
+                            )
+
                             # Get original image dimensions for correct aspect ratio projection
                             # The camera intrinsics are calibrated for the original (potentially non-square) image
                             if isinstance(original_image, np.ndarray):
@@ -1498,20 +1499,24 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                                     orig_H, orig_W = original_image.shape[1], original_image.shape[2]
                                 else:  # Likely (H, W, C)
                                     orig_H, orig_W = original_image.shape[0], original_image.shape[1]
-                            
+
                             # Use original image dimensions for projection to account for aspect ratio
                             # transform_points_screen expects image_size as (W, H)
                             screen_size = torch.tensor([[orig_W, orig_H]], dtype=torch.float32, device=device)
-                            proj = temp_fitter.renderer.cameras.transform_points_screen(pts3d, image_size=screen_size)[:, :, [1, 0]]  # (1,J,2) (y,x)
+                            proj = temp_fitter.renderer.cameras.transform_points_screen(pts3d, image_size=screen_size)[
+                                :, :, [1, 0]
+                            ]  # (1,J,2) (y,x)
                             proj_np = proj[0].detach().cpu().numpy()
-                            
+
                             # Scale projected coordinates from original image space to resized (square) image space
                             # proj_np is (J, 2) with (y, x) coordinates in original image pixels
                             proj_np[:, 0] = proj_np[:, 0] * target_size / orig_H  # y coordinates
                             proj_np[:, 1] = proj_np[:, 1] * target_size / orig_W  # x coordinates
 
                             # Restore predicted camera for SMALFitter visualization
-                            temp_fitter.renderer.set_camera_parameters(R=cam_rot, T=cam_trans, fov=view_fov, aspect_ratio=aspect)
+                            temp_fitter.renderer.set_camera_parameters(
+                                R=cam_rot, T=cam_trans, fov=view_fov, aspect_ratio=aspect
+                            )
 
                             # Only draw overlay if we have 2D keypoints for this view
                             if view_keypoints is not None and view_visibility is not None:
@@ -1525,7 +1530,9 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                                     gt_vis=view_visibility,
                                     pred_kps=proj_np,
                                 )
-                                overlay_name = f"sample_{sample_idx:03d}_view_{view_idx:02d}_epoch_{epoch:03d}_gtcam_gt3dproj.png"
+                                overlay_name = (
+                                    f"sample_{sample_idx:03d}_view_{view_idx:02d}_epoch_{epoch:03d}_gtcam_gt3dproj.png"
+                                )
                                 imageio.imsave(os.path.join(output_dir, overlay_name), overlay)
 
                             # Debug stats for first sample/view
@@ -1534,17 +1541,21 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                                 kpnorm = float(torch.max(torch.abs(pts3d)).item())
                                 print(f"\n[GT Cam+3D Sanity] view {view_idx}:")
                                 print(f"  GT fov_y: {float(gt_fov[0].item()):.2f} deg")
-                                print(f"  ||GT cam_T||: {tnorm:.3f}  (should be O(0.1-10) after scaling, not O(100-1000))")
+                                print(
+                                    f"  ||GT cam_T||: {tnorm:.3f}  (should be O(0.1-10) after scaling, not O(100-1000))"
+                                )
                                 print(f"  max|GT kp3d|: {kpnorm:.3f} (same unit scale as SMAL verts/joints)")
                                 if view_keypoints is not None and view_visibility is not None:
-                                    vis_mask = (np.array(view_visibility).reshape(-1) > 0.5)
+                                    vis_mask = np.array(view_visibility).reshape(-1) > 0.5
                                     if vis_mask.any():
                                         gt2d_px = view_keypoints.copy()
                                         gt2d_px[:, 0] = gt2d_px[:, 0] * target_size
                                         gt2d_px[:, 1] = gt2d_px[:, 1] * target_size
                                         diff = proj_np[vis_mask] - gt2d_px[vis_mask]
                                         err_px = float(np.mean(np.linalg.norm(diff, axis=1)))
-                                        print(f"  mean reproj err (GT 3D + GT cam -> 2D): {err_px:.2f} px @ {target_size}px")
+                                        print(
+                                            f"  mean reproj err (GT 3D + GT cam -> 2D): {err_px:.2f} px @ {target_size}px"
+                                        )
                     except Exception as _e:
                         # Best-effort debug only; never break training visualization.
                         print(f"Warning: Failed to perform GT Cam+3D Sanity check: {_e}")
@@ -1553,37 +1564,35 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 # Fallback: if no per-view camera params, use temp_fitter's default camera
                 # This shouldn't happen in multi-view, but handle gracefully
                 temp_fitter.renderer.set_camera_parameters(
-                    R=temp_fitter.renderer.cameras.R,
-                    T=temp_fitter.renderer.cameras.T,
-                    fov=temp_fitter.fov.data
+                    R=temp_fitter.renderer.cameras.R, T=temp_fitter.renderer.cameras.T, fov=temp_fitter.fov.data
                 )
-            
+
             # Export mesh geometry as OBJ file for external inspection
             # This uses the same parameters that will be used for rendering
             with torch.no_grad():
                 # Get mesh vertices using the same process as generate_visualization
                 batch_betas = temp_fitter.betas.expand(1, -1)
-                batch_pose = torch.cat([
-                    temp_fitter.global_rotation[0:1].unsqueeze(1),
-                    temp_fitter.joint_rotations[0:1]
-                ], dim=1)
-                
+                batch_pose = torch.cat(
+                    [temp_fitter.global_rotation[0:1].unsqueeze(1), temp_fitter.joint_rotations[0:1]], dim=1
+                )
+
                 # Get scale/trans parameters
                 batch_logscale = None
                 batch_trans = None
-                if hasattr(temp_fitter, 'log_beta_scales') and temp_fitter.log_beta_scales is not None:
+                if hasattr(temp_fitter, "log_beta_scales") and temp_fitter.log_beta_scales is not None:
                     batch_logscale = temp_fitter.log_beta_scales[0:1]
-                if hasattr(temp_fitter, 'betas_trans') and temp_fitter.betas_trans is not None:
+                if hasattr(temp_fitter, "betas_trans") and temp_fitter.betas_trans is not None:
                     batch_trans = temp_fitter.betas_trans[0:1]
-                
+
                 # Generate mesh
                 mesh_verts, mesh_joints, _, _ = temp_fitter.smal_model(
-                    batch_betas, batch_pose,
+                    batch_betas,
+                    batch_pose,
                     betas_logscale=batch_logscale,
                     betas_trans=batch_trans,
-                    propagate_scaling=temp_fitter.propagate_scaling
+                    propagate_scaling=temp_fitter.propagate_scaling,
                 )
-                
+
                 # Apply transformation to match training rendering logic:
                 # - If use_ue_scaling: apply 10x scaling
                 # - If allow_mesh_scaling: apply predicted mesh_scale
@@ -1593,44 +1602,48 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 if model.use_ue_scaling:
                     root_joint = mesh_joints[:, 0:1, :]
                     mesh_verts = (mesh_verts - root_joint) * 10 + temp_fitter.trans[0:1].unsqueeze(1)
-                elif model.allow_mesh_scaling and 'mesh_scale' in predicted_params:
-                    mesh_scale = predicted_params['mesh_scale'][0:1]  # (1, 1)
+                elif model.allow_mesh_scaling and "mesh_scale" in predicted_params:
+                    mesh_scale = predicted_params["mesh_scale"][0:1]  # (1, 1)
                     root_joint = mesh_joints[:, 0:1, :]
-                    mesh_verts = (mesh_verts - root_joint) * mesh_scale.unsqueeze(-1) + temp_fitter.trans[0:1].unsqueeze(1)
+                    mesh_verts = (mesh_verts - root_joint) * mesh_scale.unsqueeze(-1) + temp_fitter.trans[
+                        0:1
+                    ].unsqueeze(1)
                 else:
                     mesh_verts = mesh_verts + temp_fitter.trans[0:1].unsqueeze(1)
-                
+
                 # Get faces
                 mesh_faces = temp_fitter.smal_model.faces
-                
+
                 # Export OBJ file
                 obj_filename = f"sample_{sample_idx:03d}_view_{view_idx:02d}_epoch_{epoch:03d}.obj"
                 obj_path = os.path.join(output_dir, obj_filename)
                 export_mesh_as_obj(mesh_verts, mesh_faces, obj_path)
-                
+
                 if sample_idx == 0 and view_idx == 0:
                     print(f"  Exported mesh to: {obj_path}")
-                    print(f"  Mesh vertices: {mesh_verts.shape}, range: [{mesh_verts.min():.3f}, {mesh_verts.max():.3f}]")
+                    print(
+                        f"  Mesh vertices: {mesh_verts.shape}, range: [{mesh_verts.min():.3f}, {mesh_verts.max():.3f}]"
+                    )
                     print(f"  Mesh faces: {mesh_faces.shape}")
-            
+
             # ===================== DEBUG: Print model trans and 3D coordinate stats =====================
             # Compute predicted 3D joints for this sample
             with torch.no_grad():
                 pred_joints_3d = model._predict_canonical_joints_3d(predicted_params)  # (1, J, 3)
                 pred_joints_mean = pred_joints_3d[0].mean(dim=0).cpu().numpy()  # (3,)
-                model_trans = predicted_params['trans'][0].detach().cpu().numpy()  # (3,)
-            
+                model_trans = predicted_params["trans"][0].detach().cpu().numpy()  # (3,)
+
             # Get GT 3D keypoints if available
             gt_kp3d_mean = None
-            if y_data.get('has_3d_data', False) and y_data.get('keypoints_3d') is not None:
-                gt_kp3d = np.array(y_data['keypoints_3d'])  # (J, 3)
+            if y_data.get("has_3d_data", False) and y_data.get("keypoints_3d") is not None:
+                gt_kp3d = np.array(y_data["keypoints_3d"])  # (J, 3)
                 gt_kp3d_mean = gt_kp3d.mean(axis=0)  # (3,)
-            
+
             # Print debug info only for first view of each sample (body params are shared across views)
             if view_idx == 0:
                 # Print global_rot (root rotation) to check if it's varying or staying near identity
-                global_rot_raw = predicted_params['global_rot'][0].detach().cpu()
-                if model.rotation_representation == '6d':
+                global_rot_raw = predicted_params["global_rot"][0].detach().cpu()
+                if model.rotation_representation == "6d":
                     # Convert 6D to axis-angle for readability
                     global_rot_aa = rotation_6d_to_axis_angle(global_rot_raw.unsqueeze(0))[0].numpy()
                 else:
@@ -1638,32 +1651,34 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 # Compute rotation magnitude (angle in degrees)
                 rot_angle_rad = np.linalg.norm(global_rot_aa)
                 rot_angle_deg = np.degrees(rot_angle_rad)
-                
-                print(f"  Mean pred 3D: [{pred_joints_mean[0]:.4f}, {pred_joints_mean[1]:.4f}, {pred_joints_mean[2]:.4f}]")
+
+                print(
+                    f"  Mean pred 3D: [{pred_joints_mean[0]:.4f}, {pred_joints_mean[1]:.4f}, {pred_joints_mean[2]:.4f}]"
+                )
                 if gt_kp3d_mean is not None:
                     print(f"  Mean GT 3D:  [{gt_kp3d_mean[0]:.4f}, {gt_kp3d_mean[1]:.4f}, {gt_kp3d_mean[2]:.4f}]")
                 print(f"  Root rot magnitude: {rot_angle_deg:.2f}°")
-            
+
             # Create image exporter for this view
             image_exporter = SingleViewImageExporter(output_dir, sample_idx, view_idx, epoch)
-            
+
             # Generate visualization - apply_UE_transform MUST match model.use_ue_scaling
             # to ensure 2D rendering uses the same transformation as 3D keypoint computation.
             # This is critical for consistency between visualize_3d_keypoints() and 2D mesh renders.
             # Pass mesh_scale if allow_mesh_scaling is enabled to match training render path
             vis_mesh_scale = None
-            if model.allow_mesh_scaling and 'mesh_scale' in predicted_params:
-                vis_mesh_scale = predicted_params['mesh_scale'][0:1].detach()
+            if model.allow_mesh_scaling and "mesh_scale" in predicted_params:
+                vis_mesh_scale = predicted_params["mesh_scale"][0:1].detach()
             temp_fitter.generate_visualization(
                 image_exporter,
                 apply_UE_transform=model.use_ue_scaling,  # MUST match model setting!
                 img_idx=view_idx,
                 mesh_scale=vis_mesh_scale,
-                epoch=epoch
+                epoch=epoch,
             )
-            
+
             views_rendered += 1
-            
+
         except Exception as e:
             print(f"Warning: Failed to render view {view_idx} for sample {sample_idx}: {e}")
             continue
@@ -1672,14 +1687,14 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
             # SMALFitter (nn.Module) has circular refs that prevent immediate
             # deallocation on `del`; gc.collect() breaks the cycles so
             # empty_cache() can actually return the memory to CUDA.
-            if 'temp_fitter' in locals():
+            if "temp_fitter" in locals():
                 del temp_fitter
             gc.collect()
             torch.cuda.empty_cache()
-    
+
     # Generate 3D keypoint visualization if 3D data is available
     # This is done once per sample (body params are shared across views)
-    if y_data.get('has_3d_data', False) and y_data.get('keypoints_3d') is not None:
+    if y_data.get("has_3d_data", False) and y_data.get("keypoints_3d") is not None:
         try:
             visualize_3d_keypoints(
                 model=model,
@@ -1688,33 +1703,36 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
                 device=device,
                 sample_idx=sample_idx,
                 epoch=epoch,
-                output_dir=output_dir
+                output_dir=output_dir,
             )
         except Exception as e:
             print(f"Warning: Failed to create 3D keypoint visualization for sample {sample_idx}: {e}")
             import traceback
+
             traceback.print_exc()
-    
+
     return views_rendered
 
 
-def visualize_3d_keypoints(model: MultiViewSMILImageRegressor,
-                            predicted_params: dict,
-                            y_data: dict,
-                            device: str,
-                            sample_idx: int,
-                            epoch: int,
-                            output_dir: str):
+def visualize_3d_keypoints(
+    model: MultiViewSMILImageRegressor,
+    predicted_params: dict,
+    y_data: dict,
+    device: str,
+    sample_idx: int,
+    epoch: int,
+    output_dir: str,
+):
     """
     Create a 3D visualization comparing GT 3D keypoints with predicted 3D joints.
-    
+
     The visualization shows:
     - GT 3D keypoints (circles) in one color per joint
     - Predicted 3D joints (crosses) in matching colors
     - Thin lines connecting GT to predicted for each joint
-    
+
     This helps diagnose alignment issues and understand where 3D errors originate.
-    
+
     Args:
         model: MultiViewSMILImageRegressor model
         predicted_params: Dictionary of predicted parameters
@@ -1725,128 +1743,143 @@ def visualize_3d_keypoints(model: MultiViewSMILImageRegressor,
         output_dir: Directory to save visualization
     """
     # Check if 3D data is available
-    if not y_data.get('has_3d_data', False) or y_data.get('keypoints_3d') is None:
+    if not y_data.get("has_3d_data", False) or y_data.get("keypoints_3d") is None:
         return  # Skip if no 3D data
-    
+
     try:
         # Get GT 3D keypoints
-        gt_kp3d = np.array(y_data['keypoints_3d'])  # (J, 3)
+        gt_kp3d = np.array(y_data["keypoints_3d"])  # (J, 3)
         num_joints = gt_kp3d.shape[0]
-        
+
         # Get predicted 3D joints
-        base_model = model.module if hasattr(model, 'module') else model
+        base_model = model.module if hasattr(model, "module") else model
         with torch.no_grad():
             pred_joints_3d = base_model._predict_canonical_joints_3d(predicted_params)  # (1, J, 3)
             pred_joints_3d = pred_joints_3d[0].cpu().numpy()  # (J, 3)
-        
+
         # Ensure same number of joints
         min_joints = min(num_joints, pred_joints_3d.shape[0])
         gt_kp3d = gt_kp3d[:min_joints]
         pred_joints_3d = pred_joints_3d[:min_joints]
-        
+
         # Identify filtered keypoints (NaN or all zeros - these were filtered during preprocessing)
         gt_norms = np.linalg.norm(gt_kp3d, axis=1)
         gt_valid = ~(np.isnan(gt_kp3d).any(axis=1) | np.isinf(gt_kp3d).any(axis=1) | (gt_norms < 1e-6))
-        
+
         # Get joint names if available
         joint_names = None
         try:
-            if hasattr(base_model, 'smal_model') and hasattr(base_model.smal_model, 'J_names'):
+            if hasattr(base_model, "smal_model") and hasattr(base_model.smal_model, "J_names"):
                 joint_names = base_model.smal_model.J_names
-            elif hasattr(config, 'joint_names'):
+            elif hasattr(config, "joint_names"):
                 joint_names = config.joint_names
         except Exception:
             pass
-        
+
         # Track which joints are plotted vs suppressed
         plotted_joint_indices = []
         suppressed_joint_indices = []
-        
+
         # Create 3D plot
         fig = plt.figure(figsize=(12, 10))
-        ax = fig.add_subplot(111, projection='3d')
-        
+        ax = fig.add_subplot(111, projection="3d")
+
         # Generate unique colors for each joint using a colormap
         try:
             # Try new matplotlib API (3.5+)
-            cmap = plt.colormaps['tab20']  # 20 distinct colors
+            cmap = plt.colormaps["tab20"]  # 20 distinct colors
             if min_joints > 20:
                 # Use a continuous colormap if we have more than 20 joints
-                cmap = plt.colormaps['hsv']
+                cmap = plt.colormaps["hsv"]
         except AttributeError:
             # Fallback to old API
-            cmap = plt.cm.get_cmap('tab20')  # 20 distinct colors
+            cmap = plt.cm.get_cmap("tab20")  # 20 distinct colors
             if min_joints > 20:
                 # Use a continuous colormap if we have more than 20 joints
-                cmap = plt.cm.get_cmap('hsv')
-        
+                cmap = plt.cm.get_cmap("hsv")
+
         # Plot GT keypoints and predicted joints with connecting lines (only valid joints)
         for j in range(min_joints):
             if not gt_valid[j]:
                 # Skip filtered keypoints
                 suppressed_joint_indices.append(j)
                 continue
-            
+
             plotted_joint_indices.append(j)
             color = cmap(j / max(min_joints - 1, 1))  # Normalize to [0, 1]
-            
+
             # GT keypoint (circle)
-            ax.scatter(gt_kp3d[j, 0], gt_kp3d[j, 1], gt_kp3d[j, 2],
-                      c=[color], marker='o', s=100, alpha=0.8)
-            
+            ax.scatter(gt_kp3d[j, 0], gt_kp3d[j, 1], gt_kp3d[j, 2], c=[color], marker="o", s=100, alpha=0.8)
+
             # Predicted joint (cross)
-            ax.scatter(pred_joints_3d[j, 0], pred_joints_3d[j, 1], pred_joints_3d[j, 2],
-                      c=[color], marker='x', s=150, linewidths=3, alpha=0.8)
-            
+            ax.scatter(
+                pred_joints_3d[j, 0],
+                pred_joints_3d[j, 1],
+                pred_joints_3d[j, 2],
+                c=[color],
+                marker="x",
+                s=150,
+                linewidths=3,
+                alpha=0.8,
+            )
+
             # Line connecting GT to predicted
-            ax.plot([gt_kp3d[j, 0], pred_joints_3d[j, 0]],
-                   [gt_kp3d[j, 1], pred_joints_3d[j, 1]],
-                   [gt_kp3d[j, 2], pred_joints_3d[j, 2]],
-                   color=color, linewidth=1.5, alpha=0.6, linestyle='--')
-        
+            ax.plot(
+                [gt_kp3d[j, 0], pred_joints_3d[j, 0]],
+                [gt_kp3d[j, 1], pred_joints_3d[j, 1]],
+                [gt_kp3d[j, 2], pred_joints_3d[j, 2]],
+                color=color,
+                linewidth=1.5,
+                alpha=0.6,
+                linestyle="--",
+            )
+
         # Set labels and title
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        ax.set_title(f'Sample {sample_idx:03d} - Epoch {epoch:03d}\n'
-                    f'GT 3D Keypoints (circles) vs Predicted 3D Joints (crosses)')
-        
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.set_title(
+            f"Sample {sample_idx:03d} - Epoch {epoch:03d}\nGT 3D Keypoints (circles) vs Predicted 3D Joints (crosses)"
+        )
+
         # Set equal aspect ratio for better visualization
         # Compute bounds using only valid (plotted) points
         if len(plotted_joint_indices) > 0:
             valid_gt = gt_kp3d[plotted_joint_indices]
             valid_pred = pred_joints_3d[plotted_joint_indices]
             all_points = np.concatenate([valid_gt, valid_pred], axis=0)
-            
+
             if len(all_points) > 0:
                 x_range = all_points[:, 0].max() - all_points[:, 0].min()
                 y_range = all_points[:, 1].max() - all_points[:, 1].min()
                 z_range = all_points[:, 2].max() - all_points[:, 2].min()
                 max_range = max(x_range, y_range, z_range) if max(x_range, y_range, z_range) > 0 else 1.0
-                
+
                 x_center = all_points[:, 0].mean()
                 y_center = all_points[:, 1].mean()
                 z_center = all_points[:, 2].mean()
-                
-                ax.set_xlim([x_center - max_range/2, x_center + max_range/2])
-                ax.set_ylim([y_center - max_range/2, y_center + max_range/2])
-                ax.set_zlim([z_center - max_range/2, z_center + max_range/2])
-        
+
+                ax.set_xlim([x_center - max_range / 2, x_center + max_range / 2])
+                ax.set_ylim([y_center - max_range / 2, y_center + max_range / 2])
+                ax.set_zlim([z_center - max_range / 2, z_center + max_range / 2])
+
         # Create comprehensive legend with plotted and suppressed joints
         from matplotlib.lines import Line2D
+
         legend_elements = []
-        
+
         # Add marker explanations
-        legend_elements.append(Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', 
-                                     markersize=10, label='GT keypoints (○)'))
-        legend_elements.append(Line2D([0], [0], marker='x', color='gray', markersize=10, 
-                                     linewidth=3, label='Predicted joints (×)'))
-        legend_elements.append(Line2D([0], [0], color='gray', linestyle='--', linewidth=1.5, 
-                                     label='Error vectors'))
-        
+        legend_elements.append(
+            Line2D([0], [0], marker="o", color="w", markerfacecolor="gray", markersize=10, label="GT keypoints (○)")
+        )
+        legend_elements.append(
+            Line2D([0], [0], marker="x", color="gray", markersize=10, linewidth=3, label="Predicted joints (×)")
+        )
+        legend_elements.append(Line2D([0], [0], color="gray", linestyle="--", linewidth=1.5, label="Error vectors"))
+
         # Add separator
-        legend_elements.append(Line2D([0], [0], linestyle='', label='---'))
-        
+        legend_elements.append(Line2D([0], [0], linestyle="", label="---"))
+
         # Add plotted joints
         if len(plotted_joint_indices) > 0:
             plotted_names = []
@@ -1855,21 +1888,26 @@ def visualize_3d_keypoints(model: MultiViewSMILImageRegressor,
                     plotted_names.append(f"{j}: {joint_names[j]}")
                 else:
                     plotted_names.append(f"joint_{j}")
-            
+
             # Group joints for readability (max 10 per line)
             if len(plotted_names) <= 10:
-                legend_elements.append(Line2D([0], [0], linestyle='', 
-                                             label=f'Plotted ({len(plotted_joint_indices)}): {", ".join(plotted_names)}'))
+                legend_elements.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        linestyle="",
+                        label=f"Plotted ({len(plotted_joint_indices)}): {', '.join(plotted_names)}",
+                    )
+                )
             else:
                 # Split into chunks
                 for i in range(0, len(plotted_names), 10):
-                    chunk = plotted_names[i:i+10]
-                    prefix = 'Plotted:' if i == 0 else ''
-                    legend_elements.append(Line2D([0], [0], linestyle='', 
-                                                 label=f'{prefix} {", ".join(chunk)}'))
+                    chunk = plotted_names[i : i + 10]
+                    prefix = "Plotted:" if i == 0 else ""
+                    legend_elements.append(Line2D([0], [0], linestyle="", label=f"{prefix} {', '.join(chunk)}"))
         else:
-            legend_elements.append(Line2D([0], [0], linestyle='', label='Plotted: None'))
-        
+            legend_elements.append(Line2D([0], [0], linestyle="", label="Plotted: None"))
+
         # Add suppressed joints
         if len(suppressed_joint_indices) > 0:
             suppressed_names = []
@@ -1878,25 +1916,29 @@ def visualize_3d_keypoints(model: MultiViewSMILImageRegressor,
                     suppressed_names.append(f"{j}: {joint_names[j]}")
                 else:
                     suppressed_names.append(f"joint_{j}")
-            
+
             # Group suppressed joints for readability
             if len(suppressed_names) <= 10:
-                legend_elements.append(Line2D([0], [0], linestyle='', 
-                                             label=f'Suppressed ({len(suppressed_joint_indices)}): {", ".join(suppressed_names)}'))
+                legend_elements.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        linestyle="",
+                        label=f"Suppressed ({len(suppressed_joint_indices)}): {', '.join(suppressed_names)}",
+                    )
+                )
             else:
                 # Split into chunks
                 for i in range(0, len(suppressed_names), 10):
-                    chunk = suppressed_names[i:i+10]
-                    prefix = 'Suppressed:' if i == 0 else ''
-                    legend_elements.append(Line2D([0], [0], linestyle='', 
-                                                 label=f'{prefix} {", ".join(chunk)}'))
+                    chunk = suppressed_names[i : i + 10]
+                    prefix = "Suppressed:" if i == 0 else ""
+                    legend_elements.append(Line2D([0], [0], linestyle="", label=f"{prefix} {', '.join(chunk)}"))
         else:
-            legend_elements.append(Line2D([0], [0], linestyle='', label='Suppressed: None'))
-        
+            legend_elements.append(Line2D([0], [0], linestyle="", label="Suppressed: None"))
+
         # Add legend
-        ax.legend(handles=legend_elements, loc='upper left', fontsize=8, 
-                 bbox_to_anchor=(1.05, 1), framealpha=0.9)
-        
+        ax.legend(handles=legend_elements, loc="upper left", fontsize=8, bbox_to_anchor=(1.05, 1), framealpha=0.9)
+
         # Add text with error statistics (only for valid joints)
         if len(plotted_joint_indices) > 0:
             valid_gt = gt_kp3d[plotted_joint_indices]
@@ -1904,20 +1946,26 @@ def visualize_3d_keypoints(model: MultiViewSMILImageRegressor,
             errors = np.linalg.norm(valid_gt - valid_pred, axis=1)
             mean_error = np.mean(errors)
             max_error = np.max(errors)
-            textstr = f'Mean error: {mean_error:.4f}\nMax error: {max_error:.4f}\nValid joints: {len(plotted_joint_indices)}/{min_joints}'
+            textstr = f"Mean error: {mean_error:.4f}\nMax error: {max_error:.4f}\nValid joints: {len(plotted_joint_indices)}/{min_joints}"
         else:
-            textstr = 'No valid joints to plot'
-        
-        ax.text2D(0.02, 0.98, textstr, transform=ax.transAxes, 
-                 fontsize=10, verticalalignment='top',
-                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-        
+            textstr = "No valid joints to plot"
+
+        ax.text2D(
+            0.02,
+            0.98,
+            textstr,
+            transform=ax.transAxes,
+            fontsize=10,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        )
+
         # Save figure
-        output_path = os.path.join(output_dir, f'sample_{sample_idx:03d}_epoch_{epoch:03d}_3d_keypoints.png')
+        output_path = os.path.join(output_dir, f"sample_{sample_idx:03d}_epoch_{epoch:03d}_3d_keypoints.png")
         plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
-        
+
         if sample_idx == 0:
             print(f"  Generated 3D keypoint visualization: {output_path}")
             if len(plotted_joint_indices) > 0:
@@ -1930,31 +1978,32 @@ def visualize_3d_keypoints(model: MultiViewSMILImageRegressor,
                 print(f"  Plotted joints: {len(plotted_joint_indices)}, Suppressed: {len(suppressed_joint_indices)}")
             else:
                 print("  No valid joints to plot (all filtered)")
-        
+
     except Exception as e:
         print(f"Warning: Failed to create 3D keypoint visualization for sample {sample_idx}: {e}")
         import traceback
+
         traceback.print_exc()
 
 
 def save_checkpoint(model, optimizer, scheduler, epoch, config, metrics, filepath):
     """Save training checkpoint."""
     checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
-        'config': config,
-        'metrics': metrics,
+        "epoch": epoch,
+        "model_state_dict": model.module.state_dict() if hasattr(model, "module") else model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
+        "config": config,
+        "metrics": metrics,
     }
     torch.save(checkpoint, filepath)
     print(f"Checkpoint saved: {filepath}")
 
 
-def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cuda'):
+def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cuda"):
     """
     Load training checkpoint.
-    
+
     Note: The model architecture should already match the checkpoint (max_views, etc.)
     since model creation uses checkpoint config when resuming. This function just loads
     the state dict and optimizer/scheduler states.
@@ -1963,8 +2012,8 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cud
 
     # Load model state dict, skipping keys whose shapes changed between
     # architecture versions (e.g. token_embedding after IEF feedback fix).
-    saved_state = checkpoint['model_state_dict']
-    current_model = model.module if hasattr(model, 'module') else model
+    saved_state = checkpoint["model_state_dict"]
+    current_model = model.module if hasattr(model, "module") else model
     current_state = current_model.state_dict()
 
     # SMALFitter default parameters whose first dim is batch_size.
@@ -1972,8 +2021,11 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cud
     # the optimization-based fitter.  A batch_size change should not be
     # treated as an architecture change.
     _batch_dim_keys = {
-        'global_rotation', 'joint_rotations', 'trans',
-        'log_beta_scales', 'betas_trans',
+        "global_rotation",
+        "joint_rotations",
+        "trans",
+        "log_beta_scales",
+        "betas_trans",
     }
 
     filtered_state = {}
@@ -1983,12 +2035,14 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cud
         if key in current_state and param.shape != current_state[key].shape:
             # Check if this is a batch-size-only mismatch on a SMALFitter default
             cur_shape = current_state[key].shape
-            if (key in _batch_dim_keys
-                    and param.shape[1:] == cur_shape[1:]
-                    and param.shape[0] != cur_shape[0]):
+            if key in _batch_dim_keys and param.shape[1:] == cur_shape[1:] and param.shape[0] != cur_shape[0]:
                 # Adapt: take first slice or repeat to match new batch dim
                 new_bs = cur_shape[0]
-                adapted = param[:new_bs] if param.shape[0] >= new_bs else param[0:1].expand(new_bs, *param.shape[1:]).contiguous()
+                adapted = (
+                    param[:new_bs]
+                    if param.shape[0] >= new_bs
+                    else param[0:1].expand(new_bs, *param.shape[1:]).contiguous()
+                )
                 filtered_state[key] = adapted
                 resized.append(f"  {key}: {param.shape} -> {adapted.shape} (batch dim adapted)")
             else:
@@ -2006,33 +2060,35 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device='cud
             print(s)
 
     current_model.load_state_dict(filtered_state, strict=False)
-    
-    if optimizer and 'optimizer_state_dict' in checkpoint:
+
+    if optimizer and "optimizer_state_dict" in checkpoint:
         if skipped:
             print("Optimizer state NOT loaded (architecture changed — momentum buffers have stale shapes).")
             print("Optimizer will start fresh with current LR schedule.")
         else:
-            saved_opt = checkpoint['optimizer_state_dict']
-            if len(saved_opt.get('param_groups', [])) != len(optimizer.param_groups):
-                print(f"Optimizer param group count changed "
-                      f"({len(saved_opt.get('param_groups', []))} -> {len(optimizer.param_groups)}). "
-                      f"Optimizer state NOT loaded — starting fresh.")
+            saved_opt = checkpoint["optimizer_state_dict"]
+            if len(saved_opt.get("param_groups", [])) != len(optimizer.param_groups):
+                print(
+                    f"Optimizer param group count changed "
+                    f"({len(saved_opt.get('param_groups', []))} -> {len(optimizer.param_groups)}). "
+                    f"Optimizer state NOT loaded — starting fresh."
+                )
             else:
                 optimizer.load_state_dict(saved_opt)
-    
-    if scheduler and checkpoint.get('scheduler_state_dict'):
+
+    if scheduler and checkpoint.get("scheduler_state_dict"):
         if skipped:
             print("Scheduler state NOT loaded (architecture changed — restarting LR schedule from scratch).")
         else:
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
-    epoch = 0 if skipped else checkpoint.get('epoch', 0)
+    epoch = 0 if skipped else checkpoint.get("epoch", 0)
     if skipped:
         print(f"Epoch counter reset to 0 (was {checkpoint.get('epoch', 0)}) so LR warmup applies to new layers.")
-    return epoch, checkpoint.get('metrics', {})
+    return epoch, checkpoint.get("metrics", {})
 
 
-def plot_training_history(training_history, save_path='training_history.png'):
+def plot_training_history(training_history, save_path="training_history.png"):
     """
     Plot training and validation loss history.
 
@@ -2040,8 +2096,8 @@ def plot_training_history(training_history, save_path='training_history.png'):
         training_history: Dict with 'train_loss' and 'val_loss' lists
         save_path: Path to save the plot
     """
-    train_losses = training_history['train_loss']
-    val_losses = training_history['val_loss']
+    train_losses = training_history["train_loss"]
+    val_losses = training_history["val_loss"]
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -2050,34 +2106,34 @@ def plot_training_history(training_history, save_path='training_history.png'):
     val_epochs = np.linspace(0, len(train_losses) - 1, len(val_losses)).astype(int) if val_losses else []
 
     # Left: linear scale
-    axes[0].plot(train_epochs, train_losses, label='Train', color='blue')
+    axes[0].plot(train_epochs, train_losses, label="Train", color="blue")
     if val_losses:
-        axes[0].plot(val_epochs, val_losses, label='Val', color='red')
-    axes[0].set_xlabel('Epoch')
-    axes[0].set_ylabel('Loss')
-    axes[0].set_title('Training & Validation Loss')
+        axes[0].plot(val_epochs, val_losses, label="Val", color="red")
+    axes[0].set_xlabel("Epoch")
+    axes[0].set_ylabel("Loss")
+    axes[0].set_title("Training & Validation Loss")
     axes[0].xaxis.set_major_locator(MaxNLocator(integer=True))
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 
     # Right: log scale
-    axes[1].plot(train_epochs, train_losses, label='Train', color='blue')
+    axes[1].plot(train_epochs, train_losses, label="Train", color="blue")
     if val_losses:
-        axes[1].plot(val_epochs, val_losses, label='Val', color='red')
-    axes[1].set_xlabel('Epoch')
-    axes[1].set_ylabel('Loss (log scale)')
-    axes[1].set_title('Training & Validation Loss (log)')
-    axes[1].set_yscale('log')
+        axes[1].plot(val_epochs, val_losses, label="Val", color="red")
+    axes[1].set_xlabel("Epoch")
+    axes[1].set_ylabel("Loss (log scale)")
+    axes[1].set_title("Training & Validation Loss (log)")
+    axes[1].set_yscale("log")
     axes[1].xaxis.set_major_locator(MaxNLocator(integer=True))
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
 
 
-def plot_loss_components(training_history, save_path='loss_components.png'):
+def plot_loss_components(training_history, save_path="loss_components.png"):
     """
     Plot per-component loss history for train and validation.
 
@@ -2085,8 +2141,8 @@ def plot_loss_components(training_history, save_path='loss_components.png'):
         training_history: Dict with 'loss_components' and 'val_loss_components' lists of dicts
         save_path: Path to save the plot
     """
-    train_components_list = training_history.get('loss_components', [])
-    val_components_list = training_history.get('val_loss_components', [])
+    train_components_list = training_history.get("loss_components", [])
+    val_components_list = training_history.get("val_loss_components", [])
 
     if not train_components_list:
         return
@@ -2120,19 +2176,19 @@ def plot_loss_components(training_history, save_path='loss_components.png'):
 
         train_vals = [comp.get(key, 0.0) for comp in train_components_list]
         train_epochs = list(range(len(train_vals)))
-        ax.plot(train_epochs, train_vals, label='Train', color='blue', alpha=0.7)
+        ax.plot(train_epochs, train_vals, label="Train", color="blue", alpha=0.7)
 
         if val_components_list:
             val_vals = [comp.get(key, 0.0) for comp in val_components_list]
             val_epochs = np.linspace(0, len(train_vals) - 1, len(val_vals)).astype(int)
-            ax.plot(val_epochs, val_vals, label='Val', color='red', alpha=0.7)
+            ax.plot(val_epochs, val_vals, label="Val", color="red", alpha=0.7)
 
         ax.set_title(key)
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Loss (log)')
-        ax.set_yscale('log')
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss (log)")
+        ax.set_yscale("log")
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.legend(fontsize='small')
+        ax.legend(fontsize="small")
         ax.grid(True, alpha=0.3)
 
     # Hide unused subplots
@@ -2141,11 +2197,11 @@ def plot_loss_components(training_history, save_path='loss_components.png'):
         axes[row, col].set_visible(False)
 
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
 
 
-def plot_learning_rate(training_history, save_path='learning_rate.png'):
+def plot_learning_rate(training_history, save_path="learning_rate.png"):
     """
     Plot learning rate schedule over training.
 
@@ -2153,20 +2209,20 @@ def plot_learning_rate(training_history, save_path='learning_rate.png'):
         training_history: Dict with 'learning_rates' list
         save_path: Path to save the plot
     """
-    lrs = training_history.get('learning_rates', [])
+    lrs = training_history.get("learning_rates", [])
     if not lrs:
         return
 
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(list(range(len(lrs))), lrs, color='green')
-    ax.set_xlabel('Epoch')
-    ax.set_ylabel('Learning Rate')
-    ax.set_title('Learning Rate Schedule')
-    ax.set_yscale('log')
+    ax.plot(list(range(len(lrs))), lrs, color="green")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Learning Rate")
+    ax.set_title("Learning Rate Schedule")
+    ax.set_yscale("log")
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
 
 
@@ -2178,7 +2234,7 @@ def main(config: dict):
     - Loss curriculum (base_weights + curriculum_stages)
     - Learning rate curriculum (lr_stages)
     - Model configuration (backbone, head_type, etc.)
-    
+
     Args:
         config: Training configuration dictionary (from MultiViewTrainingConfig)
     """
@@ -2188,99 +2244,99 @@ def main(config: dict):
     # apply_smal_file_override(), but that only patched the parent's globals.
     # We must re-apply here so config.N_POSE, config.N_BETAS, config.dd, etc.
     # match the checkpoint / JSON config in every worker.
-    _smal_file = config.get('smal_file')
+    _smal_file = config.get("smal_file")
     if _smal_file:
         apply_smal_file_override(
             _smal_file,
-            shape_family=config.get('shape_family'),
+            shape_family=config.get("shape_family"),
         )
 
     # Re-sync joint importance / ignored joint locations / loss curriculum to
     # TrainingConfig in this process.
     # Same reason as SMAL override above: DDP workers (mp.spawn / torchrun) start as
     # fresh Python processes and do not inherit TrainingConfig mutations from the parent.
-    if 'joint_importance_config' in config:
-        TrainingConfig.JOINT_IMPORTANCE_CONFIG = config['joint_importance_config']
-    if 'ignored_joint_locations_config' in config:
-        TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = config['ignored_joint_locations_config']
-    if 'loss_curriculum_config' in config:
-        TrainingConfig.LOSS_CURRICULUM = config['loss_curriculum_config']
-    if 'lr_curriculum_config' in config:
-        TrainingConfig.LEARNING_RATE_CURRICULUM = config['lr_curriculum_config']
+    if "joint_importance_config" in config:
+        TrainingConfig.JOINT_IMPORTANCE_CONFIG = config["joint_importance_config"]
+    if "ignored_joint_locations_config" in config:
+        TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = config["ignored_joint_locations_config"]
+    if "loss_curriculum_config" in config:
+        TrainingConfig.LOSS_CURRICULUM = config["loss_curriculum_config"]
+    if "lr_curriculum_config" in config:
+        TrainingConfig.LEARNING_RATE_CURRICULUM = config["lr_curriculum_config"]
 
     # Extract distributed training config
-    is_distributed = config.get('is_distributed', False)
-    rank = config.get('rank', 0)
-    world_size = config.get('world_size', 1)
-    device_override = config.get('device_override', None)
+    is_distributed = config.get("is_distributed", False)
+    rank = config.get("rank", 0)
+    world_size = config.get("world_size", 1)
+    device_override = config.get("device_override", None)
 
     # Set random seeds
-    set_random_seeds(config['seed'], deterministic=config.get('deterministic', False))
-    
+    set_random_seeds(config["seed"], deterministic=config.get("deterministic", False))
+
     # Set device
     if device_override:
         device = device_override
     else:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    
+
     if rank == 0:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("MULTI-VIEW SMIL IMAGE REGRESSOR TRAINING")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Device: {device}")
         print(f"Distributed: {is_distributed} (world_size={world_size})")
         print(f"Dataset: {config['dataset_path']}")
         print(f"Backbone: {config['backbone_name']}")
         print(f"Num views to use: {config.get('num_views_to_use', 'all')}")
         print(f"Cross-attention layers: {config['cross_attention_layers']}")
-        print(f"{'='*60}\n")
-    
+        print(f"{'=' * 60}\n")
+
     # Create output directories
-    os.makedirs(config['checkpoint_dir'], exist_ok=True)
-    os.makedirs(config['visualizations_dir'], exist_ok=True)
-    os.makedirs(config.get('plots_dir', 'plots'), exist_ok=True)
-    
+    os.makedirs(config["checkpoint_dir"], exist_ok=True)
+    os.makedirs(config["visualizations_dir"], exist_ok=True)
+    os.makedirs(config.get("plots_dir", "plots"), exist_ok=True)
+
     # Load dataset
     if rank == 0:
         print("Loading multi-view dataset...")
-    
-    aug_config = config.get('augmentation', {})
-    aug_enabled = aug_config.get('enabled', False)
+
+    aug_config = config.get("augmentation", {})
+    aug_enabled = aug_config.get("enabled", False)
     dataset = SLEAPMultiViewDataset(
-        hdf5_path=config['dataset_path'],
-        rotation_representation=config['rotation_representation'],
-        num_views_to_use=config.get('num_views_to_use'),
+        hdf5_path=config["dataset_path"],
+        rotation_representation=config["rotation_representation"],
+        num_views_to_use=config.get("num_views_to_use"),
         random_view_sampling=True,
         augment=False,  # Toggled on/off around train vs val; see training loop
         augmentation_config=aug_config if aug_enabled else None,
     )
-    
+
     if rank == 0:
         dataset.print_dataset_summary()
-    
+
     # Get canonical camera order and max_views from dataset
     dataset_canonical_camera_order = dataset.get_canonical_camera_order()
     dataset_max_views = dataset.get_max_views_in_dataset()
-    
+
     if rank == 0:
         print(f"Max views in dataset: {dataset_max_views}")
         print(f"Dataset canonical camera order: {dataset_canonical_camera_order}")
-    
+
     # If resuming from checkpoint, get max_views and canonical_camera_order from checkpoint
     # CRITICAL: The model architecture must match the checkpoint, not the dataset.
     # The model can still handle samples with fewer views than max_views via view_mask.
-    resume_checkpoint_path = config.get('resume_checkpoint')
+    resume_checkpoint_path = config.get("resume_checkpoint")
     if resume_checkpoint_path and os.path.exists(resume_checkpoint_path):
         if rank == 0:
             print("\nResuming from checkpoint - inferring model architecture from checkpoint...")
-        checkpoint = torch.load(resume_checkpoint_path, map_location='cpu')  # Load on CPU first
+        checkpoint = torch.load(resume_checkpoint_path, map_location="cpu")  # Load on CPU first
         ckpt_config = checkpoint.get("config", {})
         state_dict = checkpoint.get("model_state_dict", checkpoint)
-        
+
         # Infer max_views from checkpoint state dict
-        if 'view_embeddings.weight' in state_dict:
-            max_views = state_dict['view_embeddings.weight'].shape[0]
+        if "view_embeddings.weight" in state_dict:
+            max_views = state_dict["view_embeddings.weight"].shape[0]
             if rank == 0:
                 print(f"Inferred max_views={max_views} from checkpoint view_embeddings.weight shape")
         else:
@@ -2288,7 +2344,7 @@ def main(config: dict):
             max_views = ckpt_config.get("max_views", dataset_max_views)
             if rank == 0:
                 print(f"Using max_views={max_views} from checkpoint config or dataset")
-        
+
         # Get canonical_camera_order from checkpoint
         canonical_camera_order = ckpt_config.get("canonical_camera_order", None)
         if canonical_camera_order is None:
@@ -2298,13 +2354,15 @@ def main(config: dict):
                 # Create placeholder if lengths don't match
                 canonical_camera_order = [f"Camera{i}" for i in range(max_views)]
                 if rank == 0:
-                    print(f"Created placeholder canonical camera order (indices 0-{max_views-1})")
+                    print(f"Created placeholder canonical camera order (indices 0-{max_views - 1})")
         else:
             if rank == 0:
                 print(f"Loaded canonical camera order from checkpoint: {canonical_camera_order}")
-        
+
         if rank == 0:
-            print(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
+            print(
+                f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras"
+            )
             if max_views > dataset_max_views:
                 print(f"Note: Model supports {max_views} views, dataset has up to {dataset_max_views} views")
                 print("      Model will handle samples with fewer views via view_mask")
@@ -2317,21 +2375,20 @@ def main(config: dict):
         canonical_camera_order = dataset_canonical_camera_order
         if rank == 0:
             print(f"\nCreating new model with max_views={max_views} from dataset")
-    
+
     # Split dataset
     total_size = len(dataset)
-    train_size = int(total_size * config['train_ratio'])
-    val_size = int(total_size * config['val_ratio'])
+    train_size = int(total_size * config["train_ratio"])
+    val_size = int(total_size * config["val_ratio"])
     test_size = total_size - train_size - val_size
-    
+
     train_set, val_set, test_set = torch.utils.data.random_split(
-        dataset, [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(config['seed'])
+        dataset, [train_size, val_size, test_size], generator=torch.Generator().manual_seed(config["seed"])
     )
-    
+
     # Get dataset fraction config
-    dataset_fraction = config.get('dataset_fraction', 1.0)
-    
+    dataset_fraction = config.get("dataset_fraction", 1.0)
+
     if rank == 0:
         print("\nDataset split:")
         print(f"  Train: {len(train_set)}")
@@ -2343,7 +2400,7 @@ def main(config: dict):
             print(f"  Samples per epoch: {samples_per_epoch} (of {len(train_set)} total)")
             print("  Note: Different random subset sampled each epoch for diversity")
         if aug_enabled:
-            geo_enabled = aug_config.get('geometric_enabled', False)
+            geo_enabled = aug_config.get("geometric_enabled", False)
             aug_types = "photometric" + (" + geometric" if geo_enabled else "")
             print(f"  Augmentation: enabled ({aug_types})")
         else:
@@ -2354,131 +2411,130 @@ def main(config: dict):
         val_sampler = DistributedSampler(val_set, shuffle=False)
     else:
         val_sampler = None
-    
+
     val_loader = DataLoader(
         val_set,
-        batch_size=config['batch_size'],
+        batch_size=config["batch_size"],
         shuffle=False,
         sampler=val_sampler,
-        num_workers=config['num_workers'],
-        pin_memory=config['pin_memory'],
-        collate_fn=multiview_collate_fn
+        num_workers=config["num_workers"],
+        pin_memory=config["pin_memory"],
+        collate_fn=multiview_collate_fn,
     )
-    
+
     # Note: train_loader is created per-epoch to support fractional dataset sampling
     # See create_fractional_train_loader() and the training loop below
-    
+
     # Create model
     if rank == 0:
         print("\nCreating multi-view model...")
-    
+
     # Determine input resolution based on backbone
     # This ensures the renderer is initialized with the correct size
-    backbone_name = config['backbone_name']
+    backbone_name = config["backbone_name"]
     from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
-    input_resolution = config.get(
-        'input_resolution',
-        BackboneFactory.get_default_input_resolution(backbone_name)
-    )
+
+    input_resolution = config.get("input_resolution", BackboneFactory.get_default_input_resolution(backbone_name))
 
     if rank == 0:
         print(f"Using input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
-    
+
     # Get mesh scaling config
-    allow_mesh_scaling = config.get('allow_mesh_scaling', False)
-    mesh_scale_init = config.get('mesh_scale_init', 1.0)
-    
+    allow_mesh_scaling = config.get("allow_mesh_scaling", False)
+    mesh_scale_init = config.get("mesh_scale_init", 1.0)
+
     if rank == 0 and allow_mesh_scaling:
         print(f"Mesh scaling enabled with init={mesh_scale_init}")
-    
+
     model = create_multiview_regressor(
         device=device,
-        batch_size=config['batch_size'],
-        shape_family=config.get('shape_family', -1),
-        use_unity_prior=config.get('use_unity_prior', False),
+        batch_size=config["batch_size"],
+        shape_family=config.get("shape_family", -1),
+        use_unity_prior=config.get("use_unity_prior", False),
         max_views=max_views,
         canonical_camera_order=canonical_camera_order,
-        cross_attention_layers=config['cross_attention_layers'],
-        cross_attention_heads=config['cross_attention_heads'],
-        cross_attention_dropout=config['cross_attention_dropout'],
+        cross_attention_layers=config["cross_attention_layers"],
+        cross_attention_heads=config["cross_attention_heads"],
+        cross_attention_dropout=config["cross_attention_dropout"],
         backbone_name=backbone_name,
-        freeze_backbone=config['freeze_backbone'] or config.get('backbone_unfreeze_epoch') is not None,
-        head_type=config['head_type'],
-        hidden_dim=config['hidden_dim'],
-        rotation_representation=config['rotation_representation'],
-        scale_trans_mode=config['scale_trans_mode'],
-        use_ue_scaling=config.get('use_ue_scaling', False),
+        freeze_backbone=config["freeze_backbone"] or config.get("backbone_unfreeze_epoch") is not None,
+        head_type=config["head_type"],
+        hidden_dim=config["hidden_dim"],
+        rotation_representation=config["rotation_representation"],
+        scale_trans_mode=config["scale_trans_mode"],
+        use_ue_scaling=config.get("use_ue_scaling", False),
         input_resolution=input_resolution,
         allow_mesh_scaling=allow_mesh_scaling,
         mesh_scale_init=mesh_scale_init,
-        use_gt_camera_init=config.get('use_gt_camera_init', False),
-        transformer_config=config.get('transformer_config', {}),
-        backbone_chunk_size=config.get('backbone_chunk_size', None)
+        use_gt_camera_init=config.get("use_gt_camera_init", False),
+        transformer_config=config.get("transformer_config", {}),
+        backbone_chunk_size=config.get("backbone_chunk_size", None),
     )
-    
+
     model = model.to(device)
-    
+
     # Wrap in DDP if distributed
     if is_distributed:
         # Extract GPU index from device string (e.g., "cuda:0" -> 0)
         # In single-node multi-GPU, this matches local_rank
-        gpu_idx = int(device.split(':')[1]) if ':' in device else rank
+        gpu_idx = int(device.split(":")[1]) if ":" in device else rank
         model = DDP(model, device_ids=[gpu_idx], find_unused_parameters=True)
-    
+
     # Count parameters
     if rank == 0:
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f"Total parameters: {total_params:,}")
         print(f"Trainable parameters: {trainable_params:,}")
-        if config.get('backbone_chunk_size'):
+        if config.get("backbone_chunk_size"):
             print(f"Backbone chunk size: {config['backbone_chunk_size']} (reduces peak VRAM)")
-        if config.get('use_mixed_precision'):
+        if config.get("use_mixed_precision"):
             print("Mixed precision training: enabled")
-        accum = config.get('gradient_accumulation_steps', 1)
+        accum = config.get("gradient_accumulation_steps", 1)
         if accum > 1:
             print(f"Gradient accumulation: {accum} steps (effective batch size: {config['batch_size'] * accum})")
-        if config.get('backbone_unfreeze_epoch') is not None:
-            print(f"Staged backbone freezing: frozen until epoch {config['backbone_unfreeze_epoch']}, "
-                  f"then LR multiplier {config.get('backbone_lr_multiplier', 0.1)}")
+        if config.get("backbone_unfreeze_epoch") is not None:
+            print(
+                f"Staged backbone freezing: frozen until epoch {config['backbone_unfreeze_epoch']}, "
+                f"then LR multiplier {config.get('backbone_lr_multiplier', 0.1)}"
+            )
 
     # Create optimizer with separate param groups for backbone vs head.
     # This enables discriminative learning rates after backbone unfreeze.
-    base_model = model.module if hasattr(model, 'module') else model
+    base_model = model.module if hasattr(model, "module") else model
     backbone_param_ids = {id(p) for p in base_model.backbone.parameters()}
     head_params = [p for p in model.parameters() if id(p) not in backbone_param_ids]
     backbone_params = list(base_model.backbone.parameters())
 
-    backbone_lr_multiplier = config.get('backbone_lr_multiplier', 0.1)
-    optimizer = optim.AdamW([
-        {'params': head_params, 'lr': config['learning_rate']},
-        {'params': backbone_params, 'lr': config['learning_rate'] * backbone_lr_multiplier},
-    ], weight_decay=config['weight_decay'])
-    
+    backbone_lr_multiplier = config.get("backbone_lr_multiplier", 0.1)
+    optimizer = optim.AdamW(
+        [
+            {"params": head_params, "lr": config["learning_rate"]},
+            {"params": backbone_params, "lr": config["learning_rate"] * backbone_lr_multiplier},
+        ],
+        weight_decay=config["weight_decay"],
+    )
+
     # Create scheduler
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=config['num_epochs'],
-        eta_min=config['learning_rate'] * 0.01
+        optimizer, T_max=config["num_epochs"], eta_min=config["learning_rate"] * 0.01
     )
-    
+
     # Mixed precision scaler
-    scaler = torch.cuda.amp.GradScaler() if config.get('use_mixed_precision', False) else None
-    
+    scaler = torch.cuda.amp.GradScaler() if config.get("use_mixed_precision", False) else None
+
     # Load checkpoint if specified
     start_epoch = 0
-    best_val_loss = float('inf')
-    
-    if config.get('resume_checkpoint'):
-        if os.path.exists(config['resume_checkpoint']):
+    best_val_loss = float("inf")
+
+    if config.get("resume_checkpoint"):
+        if os.path.exists(config["resume_checkpoint"]):
             if rank == 0:
                 print(f"Resuming from checkpoint: {config['resume_checkpoint']}")
-            loaded_epoch, metrics = load_checkpoint(
-                config['resume_checkpoint'], model, optimizer, scheduler, device
-            )
+            loaded_epoch, metrics = load_checkpoint(config["resume_checkpoint"], model, optimizer, scheduler, device)
             # Start from the next epoch since the checkpoint epoch has already been completed
             start_epoch = loaded_epoch + 1
-            best_val_loss = metrics.get('best_val_loss', float('inf'))
+            best_val_loss = metrics.get("best_val_loss", float("inf"))
             if rank == 0:
                 print(f"Resuming training from epoch {start_epoch} (checkpoint was at epoch {loaded_epoch})")
 
@@ -2486,9 +2542,9 @@ def main(config: dict):
             # clear its Adam momentum so stale oscillatory gradients don't carry over.
             # Set "reset_ief_token_embedding": true in the training config to activate;
             # remove or set to false after the first resumed run.
-            if config.get('reset_ief_token_embedding', False):
-                base_model = model.module if hasattr(model, 'module') else model
-                if hasattr(base_model, 'transformer_head'):
+            if config.get("reset_ief_token_embedding", False):
+                base_model = model.module if hasattr(model, "module") else model
+                if hasattr(base_model, "transformer_head"):
                     te = base_model.transformer_head.token_embedding
                     nn.init.xavier_uniform_(te.weight, gain=0.01)
                     nn.init.constant_(te.bias, 0)
@@ -2499,25 +2555,31 @@ def main(config: dict):
                         if id(p) in te_param_ids:
                             optimizer.state[p] = {}
                     if rank == 0:
-                        print("reset_ief_token_embedding: token_embedding weights and "
-                              "optimizer state reset. Set flag to false for subsequent runs.")
-    
+                        print(
+                            "reset_ief_token_embedding: token_embedding weights and "
+                            "optimizer state reset. Set flag to false for subsequent runs."
+                        )
+
     # Training loop
     if rank == 0:
         print(f"\nStarting training for {config['num_epochs']} epochs...")
         print(f"Base loss weights: {config['loss_weights']}")
-        print(f"Using TrainingConfig loss curriculum: {len(TrainingConfig.LOSS_CURRICULUM['curriculum_stages'])} stages")
-        print(f"Using TrainingConfig LR curriculum: {len(TrainingConfig.LEARNING_RATE_CURRICULUM['lr_stages'])} stages\n")
-    
+        print(
+            f"Using TrainingConfig loss curriculum: {len(TrainingConfig.LOSS_CURRICULUM['curriculum_stages'])} stages"
+        )
+        print(
+            f"Using TrainingConfig LR curriculum: {len(TrainingConfig.LEARNING_RATE_CURRICULUM['lr_stages'])} stages\n"
+        )
+
     training_history = {
-        'train_loss': [],
-        'val_loss': [],
-        'loss_components': [],
-        'val_loss_components': [],
-        'learning_rates': []
+        "train_loss": [],
+        "val_loss": [],
+        "loss_components": [],
+        "val_loss_components": [],
+        "learning_rates": [],
     }
-    
-    for epoch in range(start_epoch, config['num_epochs']):
+
+    for epoch in range(start_epoch, config["num_epochs"]):
         # Create train_loader for this epoch (supports fractional dataset sampling)
         # This ensures DDP processes use the same random subset when dataset_fraction < 1
         train_loader = create_fractional_train_loader(
@@ -2525,86 +2587,103 @@ def main(config: dict):
             epoch=epoch,
             config=config,
             is_distributed=is_distributed,
-            collate_fn=multiview_collate_fn
+            collate_fn=multiview_collate_fn,
         )
-        
+
         # Staged backbone unfreeze
-        unfreeze_epoch = config.get('backbone_unfreeze_epoch')
+        unfreeze_epoch = config.get("backbone_unfreeze_epoch")
         if unfreeze_epoch is not None and epoch == unfreeze_epoch:
-            _backbone = model.module.backbone if hasattr(model, 'module') else model.backbone
+            _backbone = model.module.backbone if hasattr(model, "module") else model.backbone
             for param in _backbone.parameters():
                 param.requires_grad = True
             if rank == 0:
                 trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-                print(f"\nEpoch {epoch}: Unfroze backbone (LR multiplier: {backbone_lr_multiplier}). "
-                      f"Trainable params: {trainable:,}")
+                print(
+                    f"\nEpoch {epoch}: Unfroze backbone (LR multiplier: {backbone_lr_multiplier}). "
+                    f"Trainable params: {trainable:,}"
+                )
 
         # Update learning rate based on curriculum from TrainingConfig
         curriculum_lr = MultiViewTrainingConfig.get_learning_rate_for_epoch(epoch)
-        optimizer.param_groups[0]['lr'] = curriculum_lr  # head
-        optimizer.param_groups[1]['lr'] = curriculum_lr * backbone_lr_multiplier  # backbone
-        
+        optimizer.param_groups[0]["lr"] = curriculum_lr  # head
+        optimizer.param_groups[1]["lr"] = curriculum_lr * backbone_lr_multiplier  # backbone
+
         # Train (with augmentation enabled)
         dataset.augment = aug_enabled
         train_metrics = train_epoch(
-            model, train_loader, optimizer, device, epoch, config,
-            scaler=scaler, is_distributed=is_distributed, rank=rank
+            model,
+            train_loader,
+            optimizer,
+            device,
+            epoch,
+            config,
+            scaler=scaler,
+            is_distributed=is_distributed,
+            rank=rank,
         )
         dataset.augment = False
 
-        training_history['train_loss'].append(train_metrics['avg_loss'])
-        training_history['loss_components'].append(train_metrics['loss_components'])
-        training_history['learning_rates'].append(curriculum_lr)
+        training_history["train_loss"].append(train_metrics["avg_loss"])
+        training_history["loss_components"].append(train_metrics["loss_components"])
+        training_history["learning_rates"].append(curriculum_lr)
 
         # Validate (augmentation disabled)
-        if epoch % config['validate_every_n_epochs'] == 0:
+        if epoch % config["validate_every_n_epochs"] == 0:
             val_metrics = validate(model, val_loader, device, config, epoch=epoch, rank=rank)
-            training_history['val_loss'].append(val_metrics['avg_loss'])
-            training_history['val_loss_components'].append(val_metrics.get('loss_components', {}))
-            
+            training_history["val_loss"].append(val_metrics["avg_loss"])
+            training_history["val_loss_components"].append(val_metrics.get("loss_components", {}))
+
             # Get current epoch loss weights for logging
-            current_loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(
-                epoch, config.get('loss_weights')
-            )
-            
+            current_loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(epoch, config.get("loss_weights"))
+
             if rank == 0:
                 print(f"\nEpoch {epoch} Summary:")
                 print(f"  Train Loss: {train_metrics['avg_loss']:.4f}")
                 print(f"  Val Loss: {val_metrics['avg_loss']:.4f}")
                 _print_component_metrics(
-                    train_components=train_metrics.get('loss_components', {}),
-                    val_components=val_metrics.get('loss_components', {}),
-                    indent="  "
+                    train_components=train_metrics.get("loss_components", {}),
+                    val_components=val_metrics.get("loss_components", {}),
+                    indent="  ",
                 )
                 print(f"  LR (curriculum): {curriculum_lr:.2e}")
-                print(f"  Key loss weights: kp2d={current_loss_weights.get('keypoint_2d', 0):.4f}, "
-                      f"joint_rot={current_loss_weights.get('joint_rot', 0):.4f}, "
-                      f"limb_scale_reg={current_loss_weights.get('limb_scale_regularization', 0):.6f}, "
-                      f"limb_trans_reg={current_loss_weights.get('limb_trans_regularization', 0):.6f}")
-            
+                print(
+                    f"  Key loss weights: kp2d={current_loss_weights.get('keypoint_2d', 0):.4f}, "
+                    f"joint_rot={current_loss_weights.get('joint_rot', 0):.4f}, "
+                    f"limb_scale_reg={current_loss_weights.get('limb_scale_regularization', 0):.6f}, "
+                    f"limb_trans_reg={current_loss_weights.get('limb_trans_regularization', 0):.6f}"
+                )
+
             # Save best model
-            if val_metrics['avg_loss'] < best_val_loss:
-                best_val_loss = val_metrics['avg_loss']
+            if val_metrics["avg_loss"] < best_val_loss:
+                best_val_loss = val_metrics["avg_loss"]
                 if rank == 0:
                     save_checkpoint(
-                        model, optimizer, scheduler, epoch, config,
-                        {'best_val_loss': best_val_loss, 'val_metrics': val_metrics},
-                        os.path.join(config['checkpoint_dir'], 'best_model.pth')
+                        model,
+                        optimizer,
+                        scheduler,
+                        epoch,
+                        config,
+                        {"best_val_loss": best_val_loss, "val_metrics": val_metrics},
+                        os.path.join(config["checkpoint_dir"], "best_model.pth"),
                     )
-        
+
         # Note: We use curriculum LR, so scheduler.step() is commented out
         # scheduler.step()
-        
+
         # Save periodic checkpoint
-        if rank == 0 and (epoch + 1) % config['save_every_n_epochs'] == 0:
+        if rank == 0 and (epoch + 1) % config["save_every_n_epochs"] == 0:
             save_checkpoint(
-                model, optimizer, scheduler, epoch, config,
-                {'train_loss': train_metrics['avg_loss']},
-                os.path.join(config['checkpoint_dir'], f'checkpoint_epoch_{epoch:04d}.pth')
+                model,
+                optimizer,
+                scheduler,
+                epoch,
+                config,
+                {"train_loss": train_metrics["avg_loss"]},
+                os.path.join(config["checkpoint_dir"], f"checkpoint_epoch_{epoch:04d}.pth"),
             )
-        
+
         # Generate visualizations periodically
-        visualize_every = config.get('visualize_every_n_epochs', 10)
+        visualize_every = config.get("visualize_every_n_epochs", 10)
         if rank == 0 and visualize_every > 0 and (epoch + 1) % visualize_every == 0:
             # Multi-view grid visualization (keypoint overlay)
             visualize_multiview_training_progress(
@@ -2613,17 +2692,19 @@ def main(config: dict):
                 device=device,
                 epoch=epoch,
                 training_config=config,
-                output_dir=config['visualizations_dir'],
-                num_samples=config.get('num_visualization_samples', 3),
-                rank=rank
+                output_dir=config["visualizations_dir"],
+                num_samples=config.get("num_visualization_samples", 3),
+                rank=rank,
             )
             # Flush GPU memory between visualization passes
             gc.collect()
             torch.cuda.empty_cache()
 
             # Single-view mesh renders (full SMALFitter visualization per view)
-            singleview_dir = config.get('singleview_visualizations_dir',
-                                         config['visualizations_dir'].replace('visualizations', 'singleview_renders'))
+            singleview_dir = config.get(
+                "singleview_visualizations_dir",
+                config["visualizations_dir"].replace("visualizations", "singleview_renders"),
+            )
             visualize_singleview_renders(
                 model=model,
                 val_loader=val_loader,
@@ -2631,8 +2712,8 @@ def main(config: dict):
                 epoch=epoch,
                 training_config=config,
                 output_dir=singleview_dir,
-                num_samples=config.get('num_visualization_samples', 3),
-                rank=rank
+                num_samples=config.get("num_visualization_samples", 3),
+                rank=rank,
             )
 
             # Free GPU memory fragmented by visualization (SMALFitter instances, renderers, etc.)
@@ -2640,21 +2721,12 @@ def main(config: dict):
             torch.cuda.empty_cache()
 
         # Plot training history periodically
-        plot_every = config.get('plot_history_every', 10)
-        plots_dir = config.get('plots_dir', 'plots')
+        plot_every = config.get("plot_history_every", 10)
+        plots_dir = config.get("plots_dir", "plots")
         if rank == 0 and plot_every > 0 and (epoch + 1) % plot_every == 0:
-            plot_training_history(
-                training_history,
-                os.path.join(plots_dir, f'training_history_epoch_{epoch}.png')
-            )
-            plot_loss_components(
-                training_history,
-                os.path.join(plots_dir, f'loss_components_epoch_{epoch}.png')
-            )
-            plot_learning_rate(
-                training_history,
-                os.path.join(plots_dir, f'learning_rate_epoch_{epoch}.png')
-            )
+            plot_training_history(training_history, os.path.join(plots_dir, f"training_history_epoch_{epoch}.png"))
+            plot_loss_components(training_history, os.path.join(plots_dir, f"loss_components_epoch_{epoch}.png"))
+            plot_learning_rate(training_history, os.path.join(plots_dir, f"learning_rate_epoch_{epoch}.png"))
 
         # Flush GPU memory on ALL ranks before starting the next epoch.
         # Rank 0 gets cleanup inside the visualization block, but non-zero ranks
@@ -2671,20 +2743,24 @@ def main(config: dict):
     # Save final model
     if rank == 0:
         save_checkpoint(
-            model, optimizer, scheduler, config['num_epochs'] - 1, config,
-            {'training_history': training_history},
-            os.path.join(config['checkpoint_dir'], 'final_model.pth')
+            model,
+            optimizer,
+            scheduler,
+            config["num_epochs"] - 1,
+            config,
+            {"training_history": training_history},
+            os.path.join(config["checkpoint_dir"], "final_model.pth"),
         )
-        
+
         # Save training history
-        with open(os.path.join(config['checkpoint_dir'], 'training_history.json'), 'w') as f:
+        with open(os.path.join(config["checkpoint_dir"], "training_history.json"), "w") as f:
             json.dump(training_history, f, indent=2)
-        
+
         # Save final training plots
-        plots_dir = config.get('plots_dir', 'plots')
-        plot_training_history(training_history, os.path.join(plots_dir, 'final_training_history.png'))
-        plot_loss_components(training_history, os.path.join(plots_dir, 'final_loss_components.png'))
-        plot_learning_rate(training_history, os.path.join(plots_dir, 'final_learning_rate.png'))
+        plots_dir = config.get("plots_dir", "plots")
+        plot_training_history(training_history, os.path.join(plots_dir, "final_training_history.png"))
+        plot_loss_components(training_history, os.path.join(plots_dir, "final_loss_components.png"))
+        plot_learning_rate(training_history, os.path.join(plots_dir, "final_learning_rate.png"))
 
         print("\nTraining completed!")
         print(f"Best validation loss: {best_val_loss:.4f}")
@@ -2695,14 +2771,14 @@ def main(config: dict):
 def ddp_main(rank, world_size, config, master_port):
     """
     DDP wrapper around existing main() function.
-    
+
     Supports two launch modes:
     1. mp.spawn (single-node): rank is passed by spawn, local_rank == rank
     2. torchrun/SLURM (multi-node): environment variables are auto-detected and used
-    
+
     When torchrun (or other distributed training frameworks) environment is detected, the environment variables take precedence
     over the passed arguments for rank/world_size/local_rank.
-    
+
     Args:
         rank: Current process rank (may be overridden by env vars if torchrun detected)
         world_size: Total number of processes (may be overridden by env vars)
@@ -2711,22 +2787,22 @@ def ddp_main(rank, world_size, config, master_port):
     """
     # Check if running under torchrun/SLURM - if so, use environment variables
     if is_torchrun_launched():
-        rank = int(os.environ['RANK'])
-        local_rank = int(os.environ['LOCAL_RANK'])
-        world_size = int(os.environ['WORLD_SIZE'])
+        rank = int(os.environ["RANK"])
+        local_rank = int(os.environ["LOCAL_RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
         gpu_rank = local_rank
     else:
         # mp.spawn mode (single-node) - local_rank == rank
         gpu_rank = rank
-    
+
     setup_ddp(rank, world_size, master_port, local_rank=gpu_rank)
-    
+
     # Modify config for distributed training
-    config['device_override'] = f"cuda:{gpu_rank}"
-    config['is_distributed'] = True
-    config['rank'] = rank
-    config['world_size'] = world_size
-    
+    config["device_override"] = f"cuda:{gpu_rank}"
+    config["is_distributed"] = True
+    config["rank"] = rank
+    config["world_size"] = world_size
+
     try:
         # Call existing main() with minimal modifications
         main(config)
@@ -2757,89 +2833,131 @@ if __name__ == "__main__":
             # Distributed training (single node, 4 GPUs)
             torchrun --nproc_per_node=4 train_multiview_regressor.py \\
                 --config configs/examples/multiview_baseline.json
-        """
+        """,
     )
-    
+
     # Dataset (optional when using --config with dataset.data_path set)
-    parser.add_argument("--dataset_path", type=str, default=None,
-                       help="Path to multi-view SLEAP HDF5 dataset. "
-                            "Optional when using --config with dataset.data_path set. "
-                            "CLI value overrides config file.")
-    
+    parser.add_argument(
+        "--dataset_path",
+        type=str,
+        default=None,
+        help="Path to multi-view SLEAP HDF5 dataset. "
+        "Optional when using --config with dataset.data_path set. "
+        "CLI value overrides config file.",
+    )
+
     # Model configuration (defaults are None so JSON config values are not overridden)
-    parser.add_argument("--backbone_name", type=str, default=None,
-                       help="Backbone network name (default: from config or vit_large_patch16_224)")
-    parser.add_argument("--freeze_backbone", action="store_true",
-                       help="Freeze backbone weights")
-    parser.add_argument("--head_type", type=str, default=None,
-                       choices=['mlp', 'transformer_decoder'],
-                       help="Type of regression head (default: from config)")
-    parser.add_argument("--hidden_dim", type=int, default=None,
-                       help="Hidden dimension for MLP head (default: from config)")
-    parser.add_argument("--cross_attention_layers", type=int, default=None,
-                       help="Number of cross-attention layers (default: from config)")
-    parser.add_argument("--cross_attention_heads", type=int, default=None,
-                       help="Number of cross-attention heads (default: from config)")
-    
+    parser.add_argument(
+        "--backbone_name",
+        type=str,
+        default=None,
+        help="Backbone network name (default: from config or vit_large_patch16_224)",
+    )
+    parser.add_argument("--freeze_backbone", action="store_true", help="Freeze backbone weights")
+    parser.add_argument(
+        "--head_type",
+        type=str,
+        default=None,
+        choices=["mlp", "transformer_decoder"],
+        help="Type of regression head (default: from config)",
+    )
+    parser.add_argument(
+        "--hidden_dim", type=int, default=None, help="Hidden dimension for MLP head (default: from config)"
+    )
+    parser.add_argument(
+        "--cross_attention_layers",
+        type=int,
+        default=None,
+        help="Number of cross-attention layers (default: from config)",
+    )
+    parser.add_argument(
+        "--cross_attention_heads", type=int, default=None, help="Number of cross-attention heads (default: from config)"
+    )
+
     # Training configuration
-    parser.add_argument("--batch_size", type=int, default=None,
-                       help="Batch size (default: from config)")
-    parser.add_argument("--num_epochs", type=int, default=None,
-                       help="Number of training epochs (default: from config)")
-    parser.add_argument("--learning_rate", type=float, default=None,
-                       help="Learning rate (default: from config)")
-    parser.add_argument("--weight_decay", type=float, default=None,
-                       help="Weight decay (default: from config)")
-    parser.add_argument("--gradient_clip_norm", type=float, default=None,
-                       help="Gradient clipping norm (default: from config)")
-    parser.add_argument("--seed", type=int, default=None,
-                       help="Random seed (default: from config)")
-    parser.add_argument("--dataset_fraction", type=float, default=None,
-                       help="Fraction of training data to use per epoch (0-1, default: from config). "
-                            "Useful for large datasets - samples different subset each epoch.")
-    
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size (default: from config)")
+    parser.add_argument("--num_epochs", type=int, default=None, help="Number of training epochs (default: from config)")
+    parser.add_argument("--learning_rate", type=float, default=None, help="Learning rate (default: from config)")
+    parser.add_argument("--weight_decay", type=float, default=None, help="Weight decay (default: from config)")
+    parser.add_argument(
+        "--gradient_clip_norm", type=float, default=None, help="Gradient clipping norm (default: from config)"
+    )
+    parser.add_argument("--seed", type=int, default=None, help="Random seed (default: from config)")
+    parser.add_argument(
+        "--dataset_fraction",
+        type=float,
+        default=None,
+        help="Fraction of training data to use per epoch (0-1, default: from config). "
+        "Useful for large datasets - samples different subset each epoch.",
+    )
+
     # Multi-view specific
-    parser.add_argument("--num_views_to_use", type=int, default=None,
-                       help="Max views to use per sample (None = all)")
-    
+    parser.add_argument("--num_views_to_use", type=int, default=None, help="Max views to use per sample (None = all)")
+
     # Output configuration
-    parser.add_argument("--checkpoint_dir", type=str, default=None,
-                       help="Checkpoint directory (default: from config)")
-    parser.add_argument("--visualizations_dir", type=str, default=None,
-                       help="Visualizations directory (default: from config)")
-    parser.add_argument("--save_every_n_epochs", type=int, default=None,
-                       help="Save checkpoint every N epochs (default: from config)")
-    parser.add_argument("--visualize_every_n_epochs", type=int, default=None,
-                       help="Generate visualizations every N epochs, 0 to disable (default: from config)")
-    parser.add_argument("--num_visualization_samples", type=int, default=None,
-                       help="Number of samples to visualize each time (default: from config)")
-    
+    parser.add_argument("--checkpoint_dir", type=str, default=None, help="Checkpoint directory (default: from config)")
+    parser.add_argument(
+        "--visualizations_dir", type=str, default=None, help="Visualizations directory (default: from config)"
+    )
+    parser.add_argument(
+        "--save_every_n_epochs", type=int, default=None, help="Save checkpoint every N epochs (default: from config)"
+    )
+    parser.add_argument(
+        "--visualize_every_n_epochs",
+        type=int,
+        default=None,
+        help="Generate visualizations every N epochs, 0 to disable (default: from config)",
+    )
+    parser.add_argument(
+        "--num_visualization_samples",
+        type=int,
+        default=None,
+        help="Number of samples to visualize each time (default: from config)",
+    )
+
     # Resume training
-    parser.add_argument("--resume_checkpoint", type=str, default=None,
-                       help="Path to checkpoint to resume from")
-    parser.add_argument("--reset_ief_token_embedding", action="store_true", default=None,
-                       help="Reinitialise token_embedding weights and clear its Adam state after "
-                            "loading a checkpoint. Use once to break an IEF oscillatory attractor, "
-                            "then remove the flag for subsequent runs.")
-    
+    parser.add_argument("--resume_checkpoint", type=str, default=None, help="Path to checkpoint to resume from")
+    parser.add_argument(
+        "--reset_ief_token_embedding",
+        action="store_true",
+        default=None,
+        help="Reinitialise token_embedding weights and clear its Adam state after "
+        "loading a checkpoint. Use once to break an IEF oscillatory attractor, "
+        "then remove the flag for subsequent runs.",
+    )
+
     # Configuration file
-    parser.add_argument("--config", type=str, default=None,
-                       help="Path to JSON configuration file")
-    
+    parser.add_argument("--config", type=str, default=None, help="Path to JSON configuration file")
+
     # Distributed training
-    parser.add_argument("--num_gpus", type=int, default=1,
-                       help="Number of GPUs to use for training (default: 1, ignored when using torchrun)")
-    parser.add_argument("--master-port", type=str, default=None,
-                       help="Master port for distributed training (default: from MASTER_PORT env var or 12355)")
-    
+    parser.add_argument(
+        "--num_gpus",
+        type=int,
+        default=1,
+        help="Number of GPUs to use for training (default: 1, ignored when using torchrun)",
+    )
+    parser.add_argument(
+        "--master-port",
+        type=str,
+        default=None,
+        help="Master port for distributed training (default: from MASTER_PORT env var or 12355)",
+    )
+
     # Mixed precision and memory optimization
-    parser.add_argument("--use_mixed_precision", action="store_true",
-                       help="Use mixed precision training")
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=None,
-                       help="Accumulate gradients over N mini-batches before optimizer step")
-    parser.add_argument("--use_gt_camera_init", action="store_true", default=None,
-                       help="Use GT camera params (when available) as base and predict deltas")
-    
+    parser.add_argument("--use_mixed_precision", action="store_true", help="Use mixed precision training")
+    parser.add_argument(
+        "--gradient_accumulation_steps",
+        type=int,
+        default=None,
+        help="Accumulate gradients over N mini-batches before optimizer step",
+    )
+    parser.add_argument(
+        "--use_gt_camera_init",
+        action="store_true",
+        default=None,
+        help="Use GT camera params (when available) as base and predict deltas",
+    )
+
     args = parser.parse_args()
 
     # ---------------------------------------------------------------
@@ -2850,60 +2968,61 @@ if __name__ == "__main__":
     if args.config:
         # Detect whether this is a new-style config (has "mode" field) or legacy
         import json as _json
+
         with open(args.config) as _f:
             _raw = _json.load(_f)
 
-        if 'mode' in _raw:
+        if "mode" in _raw:
             # New config system: load via unified config, apply CLI overrides
             _is_new_config = True
             cli_overrides = {}
             if args.batch_size is not None:
-                cli_overrides['training'] = cli_overrides.get('training', {})
-                cli_overrides['training']['batch_size'] = args.batch_size
+                cli_overrides["training"] = cli_overrides.get("training", {})
+                cli_overrides["training"]["batch_size"] = args.batch_size
             if args.num_epochs is not None:
-                cli_overrides['training'] = cli_overrides.get('training', {})
-                cli_overrides['training']['num_epochs'] = args.num_epochs
+                cli_overrides["training"] = cli_overrides.get("training", {})
+                cli_overrides["training"]["num_epochs"] = args.num_epochs
             if args.learning_rate is not None:
-                cli_overrides['optimizer'] = cli_overrides.get('optimizer', {})
-                cli_overrides['optimizer']['learning_rate'] = args.learning_rate
+                cli_overrides["optimizer"] = cli_overrides.get("optimizer", {})
+                cli_overrides["optimizer"]["learning_rate"] = args.learning_rate
             if args.weight_decay is not None:
-                cli_overrides['optimizer'] = cli_overrides.get('optimizer', {})
-                cli_overrides['optimizer']['weight_decay'] = args.weight_decay
+                cli_overrides["optimizer"] = cli_overrides.get("optimizer", {})
+                cli_overrides["optimizer"]["weight_decay"] = args.weight_decay
             if args.seed is not None:
-                cli_overrides['training'] = cli_overrides.get('training', {})
-                cli_overrides['training']['seed'] = args.seed
+                cli_overrides["training"] = cli_overrides.get("training", {})
+                cli_overrides["training"]["seed"] = args.seed
             if args.dataset_path is not None:
-                cli_overrides['dataset'] = cli_overrides.get('dataset', {})
-                cli_overrides['dataset']['data_path'] = args.dataset_path
+                cli_overrides["dataset"] = cli_overrides.get("dataset", {})
+                cli_overrides["dataset"]["data_path"] = args.dataset_path
             if args.backbone_name is not None:
-                cli_overrides['model'] = cli_overrides.get('model', {})
-                cli_overrides['model']['backbone_name'] = args.backbone_name
+                cli_overrides["model"] = cli_overrides.get("model", {})
+                cli_overrides["model"]["backbone_name"] = args.backbone_name
             if args.num_views_to_use is not None:
-                cli_overrides['num_views_to_use'] = args.num_views_to_use
+                cli_overrides["num_views_to_use"] = args.num_views_to_use
             if args.cross_attention_layers is not None:
-                cli_overrides['cross_attention_layers'] = args.cross_attention_layers
+                cli_overrides["cross_attention_layers"] = args.cross_attention_layers
             if args.cross_attention_heads is not None:
-                cli_overrides['cross_attention_heads'] = args.cross_attention_heads
+                cli_overrides["cross_attention_heads"] = args.cross_attention_heads
             if args.checkpoint_dir is not None:
-                cli_overrides['output'] = cli_overrides.get('output', {})
-                cli_overrides['output']['checkpoint_dir'] = args.checkpoint_dir
+                cli_overrides["output"] = cli_overrides.get("output", {})
+                cli_overrides["output"]["checkpoint_dir"] = args.checkpoint_dir
             if args.resume_checkpoint is not None:
-                cli_overrides['training'] = cli_overrides.get('training', {})
-                cli_overrides['training']['resume_checkpoint'] = args.resume_checkpoint
+                cli_overrides["training"] = cli_overrides.get("training", {})
+                cli_overrides["training"]["resume_checkpoint"] = args.resume_checkpoint
             if args.use_gt_camera_init is not None:
-                cli_overrides['training'] = cli_overrides.get('training', {})
-                cli_overrides['training']['use_gt_camera_init'] = args.use_gt_camera_init
+                cli_overrides["training"] = cli_overrides.get("training", {})
+                cli_overrides["training"]["use_gt_camera_init"] = args.use_gt_camera_init
             if args.reset_ief_token_embedding:
-                cli_overrides['training'] = cli_overrides.get('training', {})
-                cli_overrides['training']['reset_ief_token_embedding'] = True
+                cli_overrides["training"] = cli_overrides.get("training", {})
+                cli_overrides["training"]["reset_ief_token_embedding"] = True
             if args.gradient_accumulation_steps is not None:
-                cli_overrides['training'] = cli_overrides.get('training', {})
-                cli_overrides['training']['gradient_accumulation_steps'] = args.gradient_accumulation_steps
+                cli_overrides["training"] = cli_overrides.get("training", {})
+                cli_overrides["training"]["gradient_accumulation_steps"] = args.gradient_accumulation_steps
 
             new_config = load_config(
                 config_file=args.config,
                 cli_overrides=cli_overrides,
-                expected_mode='multiview',
+                expected_mode="multiview",
             )
 
             # Apply smal_model overrides (SMAL_FILE / SHAPE_FAMILY).
@@ -2919,26 +3038,26 @@ if __name__ == "__main__":
                     config.SHAPE_FAMILY = int(new_config.smal_model.shape_family)
 
             # Sync scale_trans_mode to legacy TrainingConfig
-            TrainingConfig.SCALE_TRANS_BETA_CONFIG['mode'] = new_config.scale_trans_beta.mode
+            TrainingConfig.SCALE_TRANS_BETA_CONFIG["mode"] = new_config.scale_trans_beta.mode
 
             # Sync joint_importance to legacy TrainingConfig
             TrainingConfig.JOINT_IMPORTANCE_CONFIG = {
-                'enabled': new_config.joint_importance.enabled,
-                'important_joint_names': list(new_config.joint_importance.important_joint_names),
-                'weight_multiplier': new_config.joint_importance.weight_multiplier,
+                "enabled": new_config.joint_importance.enabled,
+                "important_joint_names": list(new_config.joint_importance.important_joint_names),
+                "weight_multiplier": new_config.joint_importance.weight_multiplier,
             }
 
             # Sync ignored_joint_locations to legacy TrainingConfig
             TrainingConfig.IGNORED_JOINT_LOCATIONS_CONFIG = {
-                'enabled': new_config.ignored_joint_locations.enabled,
-                'ignored_joint_names': list(new_config.ignored_joint_locations.ignored_joint_names),
+                "enabled": new_config.ignored_joint_locations.enabled,
+                "ignored_joint_names": list(new_config.ignored_joint_locations.ignored_joint_names),
             }
 
             # Sync loss curriculum to legacy TrainingConfig
             # Convert curriculum_stages from Dict[int, Dict] to List[(int, Dict)] format
             TrainingConfig.LOSS_CURRICULUM = {
-                'base_weights': dict(new_config.loss_curriculum.base_weights),
-                'curriculum_stages': [
+                "base_weights": dict(new_config.loss_curriculum.base_weights),
+                "curriculum_stages": [
                     (epoch, dict(updates))
                     for epoch, updates in sorted(new_config.loss_curriculum.curriculum_stages.items())
                 ],
@@ -2946,30 +3065,28 @@ if __name__ == "__main__":
 
             # Sync learning rate curriculum to legacy TrainingConfig
             TrainingConfig.LEARNING_RATE_CURRICULUM = {
-                'base_learning_rate': new_config.optimizer.learning_rate,
-                'lr_stages': [
-                    (epoch, lr)
-                    for epoch, lr in sorted(new_config.optimizer.lr_schedule.items())
-                ],
+                "base_learning_rate": new_config.optimizer.learning_rate,
+                "lr_stages": [(epoch, lr) for epoch, lr in sorted(new_config.optimizer.lr_schedule.items())],
             }
 
             # Convert to legacy flat dict for existing main()
             training_config = new_config.to_multiview_legacy_dict()
-            training_config['shape_family'] = (
+            training_config["shape_family"] = (
                 int(new_config.smal_model.shape_family)
-                if getattr(new_config, "smal_model", None) is not None and new_config.smal_model.shape_family is not None
+                if getattr(new_config, "smal_model", None) is not None
+                and new_config.smal_model.shape_family is not None
                 else config.SHAPE_FAMILY
             )
-            training_config['smal_file'] = (
+            training_config["smal_file"] = (
                 new_config.smal_model.smal_file
                 if getattr(new_config, "smal_model", None) is not None and new_config.smal_model.smal_file
-                else getattr(config, 'SMAL_FILE', None)
+                else getattr(config, "SMAL_FILE", None)
             )
-            training_config['scale_trans_config'] = TrainingConfig.get_scale_trans_config()
+            training_config["scale_trans_config"] = TrainingConfig.get_scale_trans_config()
 
             # Save resolved config for reproducibility
             os.makedirs(new_config.output.checkpoint_dir, exist_ok=True)
-            save_config_json(new_config, os.path.join(new_config.output.checkpoint_dir, 'config.json'))
+            save_config_json(new_config, os.path.join(new_config.output.checkpoint_dir, "config.json"))
 
             print(f"Loaded config from: {args.config}")
             print(f"Resolved config saved to: {os.path.join(new_config.output.checkpoint_dir, 'config.json')}")
@@ -2977,57 +3094,59 @@ if __name__ == "__main__":
             # Legacy JSON config (no "mode" field)
             training_config = MultiViewTrainingConfig.from_file(args.config)
             for key, value in vars(args).items():
-                if value is not None and key != 'config':
+                if value is not None and key != "config":
                     training_config[key] = value
     else:
         training_config = MultiViewTrainingConfig.from_args(args)
 
     # Validate dataset path: must be provided via CLI or config file
-    _dataset_path = training_config.get('dataset_path') if isinstance(training_config, dict) else getattr(training_config, 'dataset_path', None)
+    _dataset_path = (
+        training_config.get("dataset_path")
+        if isinstance(training_config, dict)
+        else getattr(training_config, "dataset_path", None)
+    )
     if not _dataset_path:
-        print("ERROR: No dataset path provided. Specify one via --dataset_path or in your "
-              "config file under dataset.data_path.", file=sys.stderr)
+        print(
+            "ERROR: No dataset path provided. Specify one via --dataset_path or in your "
+            "config file under dataset.data_path.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     if not os.path.exists(_dataset_path):
         print(f"ERROR: Dataset path does not exist: {_dataset_path}", file=sys.stderr)
         sys.exit(1)
 
     # Ensure checkpoint will contain smal_file, shape_family and scale_trans_config for inference
-    if 'shape_family' not in training_config:
-        training_config['shape_family'] = config.SHAPE_FAMILY
-    if 'smal_file' not in training_config:
-        training_config['smal_file'] = getattr(config, 'SMAL_FILE', None)
-    if 'scale_trans_config' not in training_config:
-        training_config['scale_trans_config'] = TrainingConfig.get_scale_trans_config()
+    if "shape_family" not in training_config:
+        training_config["shape_family"] = config.SHAPE_FAMILY
+    if "smal_file" not in training_config:
+        training_config["smal_file"] = getattr(config, "SMAL_FILE", None)
+    if "scale_trans_config" not in training_config:
+        training_config["scale_trans_config"] = TrainingConfig.get_scale_trans_config()
 
     # Get master port from args or environment variable
-    master_port = args.master_port or os.environ.get('MASTER_PORT', '12355')
-    
+    master_port = args.master_port or os.environ.get("MASTER_PORT", "12355")
+
     # Check if launched via torchrun/torch.distributed.launch (HPC environment)
     # This is detected by the presence of RANK, LOCAL_RANK, and WORLD_SIZE env vars
     if is_torchrun_launched():
         # Launched via torchrun - processes are already spawned by the launcher
-        rank = int(os.environ['RANK'])
-        world_size = int(os.environ['WORLD_SIZE'])
-        
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+
         # Only print from rank 0 to avoid duplicate output
         if rank == 0:
-            local_rank = int(os.environ['LOCAL_RANK'])
+            local_rank = int(os.environ["LOCAL_RANK"])
             print("Detected torchrun/HPC launch environment:")
             print(f"  Global rank: {rank}")
             print(f"  Local rank (GPU): {local_rank}")
             print(f"  World size: {world_size}")
             print(f"  MASTER_ADDR: {os.environ.get('MASTER_ADDR', 'not set')}")
             print(f"  MASTER_PORT: {os.environ.get('MASTER_PORT', 'not set')}")
-        
+
         # Call ddp_main directly - it will read LOCAL_RANK from env internally
-        ddp_main(
-            rank,
-            world_size,
-            training_config,
-            master_port
-        )
-    
+        ddp_main(rank, world_size, training_config, master_port)
+
     elif args.num_gpus > 1:
         # Manual multi-GPU launch using mp.spawn
         if not torch.cuda.is_available():
@@ -3037,21 +3156,17 @@ if __name__ == "__main__":
         if args.num_gpus > available_gpus:
             print(f"ERROR: Requested {args.num_gpus} GPUs but only {available_gpus} available!")
             exit(1)
-            
+
         print(f"Launching multi-GPU training on {args.num_gpus} GPUs (using mp.spawn)...")
         print(f"Master port: {master_port}")
         print(f"Batch size per GPU: {args.batch_size if args.batch_size else 'from config'}")
-        print(f"Total effective batch size: {args.batch_size * args.num_gpus if args.batch_size else 'config_batch_size * num_gpus'}")
-        
-        # Launch multi-GPU training using spawn
-        mp.spawn(
-            ddp_main,
-            args=(args.num_gpus, training_config, master_port),
-            nprocs=args.num_gpus,
-            join=True
+        print(
+            f"Total effective batch size: {args.batch_size * args.num_gpus if args.batch_size else 'config_batch_size * num_gpus'}"
         )
+
+        # Launch multi-GPU training using spawn
+        mp.spawn(ddp_main, args=(args.num_gpus, training_config, master_port), nprocs=args.num_gpus, join=True)
     else:
         # Single GPU training (existing path)
         print("Launching single-GPU training...")
         main(training_config)
-

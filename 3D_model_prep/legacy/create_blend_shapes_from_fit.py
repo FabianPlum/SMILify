@@ -6,6 +6,7 @@ import pickle
 pkl_filepath = "D:/SMAL/SMILify/3D_model_prep/smpl_ATTA.pkl"
 npz_filepath = "D:/SMAL/SMILify/Fitter_RESULTS/fit3d_results_ALL_ANTS_ALL_METHODS/Stage3.npz"
 
+
 def load_pkl_file(filepath):
     """
     Load the .pkl file containing the SMPL model.
@@ -17,9 +18,9 @@ def load_pkl_file(filepath):
     - dict: Dictionary containing the contents of the .pkl file.
     """
     try:
-        with open(filepath, 'rb') as f:
+        with open(filepath, "rb") as f:
             print("\nContents of loaded SMPL file:")
-            data = pickle.load(f, encoding='latin1')
+            data = pickle.load(f, encoding="latin1")
             for key in data:
                 print(key)
         print("Loaded .pkl file successfully.")
@@ -27,6 +28,7 @@ def load_pkl_file(filepath):
     except Exception as e:
         print(f"Failed to load .pkl file: {e}")
         return None
+
 
 def create_mesh_from_pkl(data):
     """
@@ -57,6 +59,7 @@ def create_mesh_from_pkl(data):
 
     return obj
 
+
 def load_npz_file(filepath):
     """
     Load the .npz file and list its contents.
@@ -77,6 +80,7 @@ def load_npz_file(filepath):
     except Exception as e:
         print(f"Failed to load .npz file: {e}")
         return None
+
 
 def create_blendshapes(data, obj):
     """
@@ -104,6 +108,7 @@ def create_blendshapes(data, obj):
 
     print(f"Created {len(deform_verts)} blendshapes.")
 
+
 def create_armature_and_weights(data, obj):
     """
     Create an armature based on the joint locations and assign weights to the mesh vertices.
@@ -121,7 +126,7 @@ def create_armature_and_weights(data, obj):
     kintree_table = data["kintree_table"]
 
     # Create armature
-    bpy.ops.object.add(type='ARMATURE', enter_editmode=True)
+    bpy.ops.object.add(type="ARMATURE", enter_editmode=True)
     armature = bpy.context.object
     armature.name = "SMPL_Armature"
     armature.show_in_front = True
@@ -136,12 +141,12 @@ def create_armature_and_weights(data, obj):
         if parent_idx != -1:
             bone.parent = armature.data.edit_bones[f"Bone_{parent_idx}"]
 
-    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode="OBJECT")
 
     # Parent mesh to armature
     obj.select_set(True)
     bpy.context.view_layer.objects.active = armature
-    bpy.ops.object.parent_set(type='ARMATURE')
+    bpy.ops.object.parent_set(type="ARMATURE")
 
     # Assign vertex weights
     for i, vertex_weights in enumerate(weights):
@@ -150,7 +155,8 @@ def create_armature_and_weights(data, obj):
                 vertex_group = obj.vertex_groups.get(f"Bone_{j}")
                 if vertex_group is None:
                     vertex_group = obj.vertex_groups.new(name=f"Bone_{j}")
-                vertex_group.add([i], weight, 'ADD')
+                vertex_group.add([i], weight, "ADD")
+
 
 def main(pkl_filepath, npz_filepath):
     """
@@ -174,6 +180,7 @@ def main(pkl_filepath, npz_filepath):
             print("Failed to create mesh from .pkl file.")
     else:
         print("Failed to load .pkl file.")
+
 
 if __name__ == "__main__":
     main(pkl_filepath, npz_filepath)
