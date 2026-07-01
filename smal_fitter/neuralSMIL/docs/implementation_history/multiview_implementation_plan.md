@@ -1627,12 +1627,12 @@ The following files have been created implementing the multi-view system:
 
 ```bash
 # Preprocess multi-view SLEAP data
-python smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py \
+python -m smal_fitter.sleap_data.preprocess_sleap_multiview_dataset \
     /path/to/sleap/sessions multiview_sleap.h5 \
     --min_views 2
 
 # Train multi-view model
-python smal_fitter/neuralSMIL/train_multiview_regressor.py \
+python -m smal_fitter.neuralSMIL.train_multiview_regressor \
     --dataset_path multiview_sleap.h5 \
     --batch_size 8 \
     --num_epochs 100

@@ -1,13 +1,13 @@
 # Example Configuration Files
 
-This folder contains example JSON configs for single-view and multi-view training. Use them as templates or run them directly with `--config configs/examples/<name>.json`.
+This folder contains example JSON configs for single-view and multi-view training. Use them as templates or run them directly with `--config smal_fitter/neuralSMIL/configs/examples/<name>.json`.
 
 ## Required field: `mode`
 
 Every config **must** include at the top level:
 
-- `"mode": "singleview"` — for `train_smil_regressor.py`
-- `"mode": "multiview"` — for `train_multiview_regressor.py`
+- `"mode": "singleview"` — for `train_smil_regressor` (`python -m smal_fitter.neuralSMIL.train_smil_regressor`)
+- `"mode": "multiview"` — for `train_multiview_regressor` (`python -m smal_fitter.neuralSMIL.train_multiview_regressor`)
 
 The loader uses `mode` to choose the config class and to validate the file.
 
@@ -29,21 +29,23 @@ The loader uses `mode` to choose the config class and to validate the file.
 
 ## Using the examples
 
+Run these from the repo root:
+
 ```bash
 # Single-view (set data_path in JSON or override)
-python train_smil_regressor.py --config configs/examples/singleview_baseline.json
+python -m smal_fitter.neuralSMIL.train_smil_regressor --config smal_fitter/neuralSMIL/configs/examples/singleview_baseline.json
 
 # Multi-view (often override dataset path)
-python train_multiview_regressor.py --config configs/examples/multiview_baseline.json --dataset_path /path/to/multiview.h5
+python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json --dataset_path /path/to/multiview.h5
 
 # Multi-view with mixed precision (CLI override)
-python train_multiview_regressor.py --config configs/examples/multiview_sticks.json --use_mixed_precision
+python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/multiview_sticks.json --use_mixed_precision
 ```
 
 Copy an example to your project and edit; keep the `mode` field so the loader and legacy bridge continue to work.
 
 **Before running an example as-is:**
-- Run from `smal_fitter/neuralSMIL/` so the `configs/examples/<name>.json` path resolves. The `data_path` / `smal_file` paths *inside* each config are relative to your working directory.
+- Run from the repo root so the `smal_fitter/neuralSMIL/configs/examples/<name>.json` path resolves. The `data_path` / `smal_file` paths *inside* each config are relative to your working directory.
 - The referenced datasets (`*.h5`) and SMAL model files (`*.pkl`) are **not shipped** in the repo — point them at your local copies (in the JSON, or via `--dataset_path` / config `smal_model.smal_file`).
 - Several examples (including `singleview_baseline.json` and `multiview_baseline.json`) set `training.resume_checkpoint` to a specific path — running them unedited will try to resume from a checkpoint that likely doesn't exist on your machine. Clear it for a fresh run.
 
