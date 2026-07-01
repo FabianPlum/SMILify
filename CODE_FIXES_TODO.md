@@ -27,10 +27,35 @@
 - **Symptom:** Triangulation solver docstring at [multiview_smil_regressor.py:1682](smal_fitter/neuralSMIL/multiview_smil_regressor.py#L1682) says "via SVD" while the implementation uses normal equations + `torch.linalg.solve`.
 - **Fix:** correct the in-code docstring (pure comment fix).
 
-### C4 — Inconsistent CLI flag naming convention across scripts 🔍
-- **Source:** neuralSMIL/README.md + configs/README.md audits (multiple).
-- **Symptom:** Same concept spelled differently across entrypoints: `--smal_file` (run_multiview_inference.py, dataset_preprocessing.py) vs `--smal-file` (test_smil_regressor_ground_truth.py). Training scripts use underscores (`--batch_size`, `--num_epochs`) while several docs assumed hyphens. argparse does not treat them as aliases.
-- **Decision needed:** standardize on underscores repo-wide (and optionally register hyphen aliases) so commands are predictable for students.
+### C4 — Repo-wide CLI flag inconsistencies ✅
+- **Source:** neuralSMIL/README.md + configs/README.md audits; **expanded 2026-07-01 via a full-repo argparse scan** (108 `.py` files, 41 define flags). argparse does NOT treat `-` and `_` as aliases, so a command copy-pasted between scripts errors out. Two classes:
+
+**(a) Same flag, inconsistent hyphen vs underscore spelling:**
+
+| Concept | `--hyphen-form` (files) | `--underscore_form` (files) |
+|---|---|---|
+| smal model file | benchmark_model, dataset_preprocessing, test_smil_regressor_ground_truth | run_multiview_inference, sleap_data/*, replicAnt_data/* |
+| shape family | benchmark_model, dataset_preprocessing, test_smil_regressor_ground_truth, pointcloud2smil/sample_smil_model | run_multiview_inference, replicAnt_data/*, tests/validate_multiview_replicant_loader |
+| batch size | fitter_3d/pointcloud2smil/{sample_smil_model, smil_pointnet} | benchmark_model, train_multiview_regressor, train_smil_regressor |
+| num workers | fitter_3d/pointcloud2smil/smil_pointnet | benchmark_model, dataset_preprocessing, preprocess_dataset, sleap_data/*, replicAnt_data/* |
+| output dir | fitter_3d/pointcloud2smil/sample_smil_model, plot_pca_data | custom_processing/batch_process_models, fitter_3d/SDF_batch, fitter_3d/SDF_tests, tests/validate_multiview_replicant_loader |
+| rotation representation | fitter_3d/pointcloud2smil/smil_pointnet, test_smil_regressor_ground_truth | dataset_preprocessing, preprocess_dataset, train_smil_regressor, sleap_data/sleap_dataset |
+| master port | run_multiview_inference, train_multiview_regressor | train_smil_regressor |
+
+**(b) Same concept, different flag NAME (dataset input) — and one overloaded name:**
+
+| Entrypoint | dataset-input flag | model-file flag |
+|---|---|---|
+| benchmark_model.py | `--dataset_path` | `--smal-file` |
+| run_multiview_inference.py | `--dataset` | `--smal_file` |
+| train_multiview_regressor.py | `--dataset_path` | (JSON only) |
+| train_smil_regressor.py | `--data_path` | (JSON only) |
+
+- The dataset input is spelled **three** ways: `--dataset_path` / `--dataset` / `--data_path`.
+- **`--dataset` is overloaded:** an HDF5 path in `run_multiview_inference.py`, but a fixed-choice *legacy selector* (`masked_simple`/`pose_only_simple`/`test_textured`/`simple`) in `train_smil_regressor.py` — a genuine footgun.
+- *Not* an inconsistency: `--num_epochs` is consistently underscore in code (the `--num-epochs` in old docs was a doc error, now fixed).
+
+- **Fix (proposed):** standardize on underscores (the neuralSMIL majority); register the other spelling as an argparse alias per flag for back-compat; give the dataset input ONE name (`--dataset_path`) across benchmark/inference/train; and rename `train_smil_regressor.py`'s legacy `--dataset` selector to something unambiguous (e.g. `--builtin_dataset`).
 
 ### C5 — `multiview_mouse_UNET_long.json` sets `use_mixed_precision: false` 🔍
 - **Source:** configs/examples/README.md audit (major).
@@ -77,3 +102,9 @@
 ### C12 — stray test file collected from repo root ✅
 - **Symptom:** `smal_fitter/sleap_data/test_sleap_preprocessing.py` is picked up by bare `pytest` (no `testpaths`) and errors: `from preprocess_sleap_dataset import ...` (cwd-relative).
 - **Fix:** add `testpaths = tests` to `pytest.ini` (and/or move/repair this file).
+
+### C13 — Inference uses a strict state_dict load; benchmark is tolerant ✅
+- **Found:** verifying the Getting Started inference command (2026-07-01).
+- **Symptom:** `run_multiview_inference.py` → `load_multiview_model_from_checkpoint` (~L430) does a **strict** `load_state_dict`, so it raises `RuntimeError: size mismatch` when the checkpoint's head dims differ from the reconstructed model — e.g. an older ViT stick checkpoint with a 9-dim camera-rotation head (`transformer_head.cam_rot_head` [9], `init_cam_rot` [1,9]) vs the current 6D-rotation model ([6] / [1,6]); `param_norm` / `token_embedding` differ by 3 accordingly. `benchmark_model.py` loads the **same** checkpoint fine (it re-infers dims from tensor shapes).
+- **Note:** observed with an OLD substitute checkpoint (pre-6D-rotation refactor, `ViT_Large_Full_Stick_3D_post_decoder_fix`); a current-code checkpoint likely loads. But the asymmetry (benchmark tolerant, inference strict) is real and will bite anyone loading a slightly-older checkpoint for inference.
+- **Fix (proposed):** make the inference loader as tolerant as benchmark's (re-infer head dims / handle 6D-vs-9D cam-rot), or at minimum emit a clear error pointing at the rotation-representation mismatch instead of a raw size-mismatch dump.
