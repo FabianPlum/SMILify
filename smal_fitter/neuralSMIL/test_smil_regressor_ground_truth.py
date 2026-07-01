@@ -570,7 +570,7 @@ def visualize_3d_keypoint_alignment(
     ax2 = fig.add_subplot(122, projection="3d")
 
     # Color code points by error magnitude
-    colors = ["green" if err < tolerance else "red" for err in errors_valid]
+    ["green" if err < tolerance else "red" for err in errors_valid]
     sizes = [30 + min(err * 100, 70) for err in errors_valid]  # Size based on error magnitude
 
     # Plot ground truth points colored by error

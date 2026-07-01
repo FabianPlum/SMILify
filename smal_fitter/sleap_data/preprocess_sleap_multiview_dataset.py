@@ -1980,7 +1980,7 @@ Examples:
             views_missing_annotations = stats.get("views_missing_annotations", 0)
             total_attempted = stats.get("total_views_attempted", 0)
             total_included = stats.get("total_views_included", 0)
-            total_excluded_processing = total_attempted - total_included
+            total_attempted - total_included
             total_excluded_all = total_potential - total_included
 
             print("\nView statistics:")

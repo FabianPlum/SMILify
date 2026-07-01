@@ -27,4 +27,14 @@ ignore = [
     # assert, so this rule must stay off (isort, when enabled later, must be
     # configured not to move imports across the os.environ setup too).
     "E402",
+    # ambiguous-variable-name (l / I / O). `I` is used for the identity matrix
+    # in the math/model code (smal_model, blendshape scripts); renaming there
+    # hurts readability more than it helps. Left off for this codebase.
+    "E741",
 ]
+
+[lint.per-file-ignores]
+# config_test.py deliberately does `from config import *` to smoke-test the
+# legacy root-config surface — the star import (F403) and the names it pulls in
+# (F405) are intentional there.
+"tests/config_test.py" = ["F403", "F405"]

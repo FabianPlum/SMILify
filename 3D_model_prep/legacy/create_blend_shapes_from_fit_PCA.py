@@ -51,7 +51,7 @@ npz_filepath = "/home/fabi/dev/SMILify/fit3d_results_ref/Stage_3_deform_fine.npz
 
 try:
     from sklearn.decomposition import PCA
-except:
+except Exception:
     print("nWARNING: Module sklearn not found!" + "Un-comment pip install at the top of the script!\n")
     blendshapes_from_PCA = False
 
@@ -272,7 +272,7 @@ def export_smpl_model(start_frame=0, stop_frame=1):
     joint_hierarchy_npy_path = bpy.path.abspath("//test_joint_hierarchy.npy")
     j_regressor_npy_path = bpy.path.abspath("//test_joint_regressor.npy")
     y_axis_vertices_npy_path = bpy.path.abspath("//test_y_axis_vertices.npy")
-    posedirs_npy_path = bpy.path.abspath("//test_posedirs.npy")
+    bpy.path.abspath("//test_posedirs.npy")
 
     smpl_file_path = bpy.path.abspath("//smpl_ATTA.pkl")
 
@@ -709,7 +709,7 @@ def cleanup_mesh(obj, center_tolerance=0.005):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
-def export_smpl_model(obj, pkl_data, export_path, joint_positions):
+def export_smpl_model(obj, pkl_data, export_path, joint_positions):  # noqa: F811 — legacy: shadows a different, unused frame-export `export_smpl_model` (~line 245); left as-is, consolidate in a cleanup pass
     """
     Export the updated model as a new SMPL file with the blendshapes stored in the model's shapedirs.
 
@@ -727,7 +727,7 @@ def export_smpl_model(obj, pkl_data, export_path, joint_positions):
 
     # update all changed elements due to topoly changes
 
-    vertices_npy_path = bpy.path.abspath("//test_vertices.npy")
+    bpy.path.abspath("//test_vertices.npy")
     faces_npy_path = bpy.path.abspath("//test_faces.npy")
     vertex_groups_npy_path = bpy.path.abspath("//test_vertex_groups.npy")
     j_regressor_npy_path = bpy.path.abspath("//test_joint_regressor.npy")

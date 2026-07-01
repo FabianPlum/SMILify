@@ -454,7 +454,7 @@ def main():
             c = all_coords[cam_name]
             s = all_scores[cam_name]
             # Extract only the subsampled frame rows
-            valid_idx = subsample_indices[subsample_indices < c.shape[0]]
+            subsample_indices[subsample_indices < c.shape[0]]
             sub_c = np.full((n_sub, n_keypoints, 2), np.nan, dtype=np.float64)
             sub_s = np.full((n_sub, n_keypoints), np.nan, dtype=np.float64)
             mask = subsample_indices < c.shape[0]

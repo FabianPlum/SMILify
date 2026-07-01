@@ -81,11 +81,6 @@ class OptimizedSMILDataset(torch.utils.data.Dataset):
             f"rotation: {self.rotation_representation}"
         )
 
-    def __del__(self):
-        """Cleanup HDF5 file handle when dataset is destroyed."""
-        if hasattr(self, "hdf5_file") and self.hdf5_file is not None:
-            self.hdf5_file.close()
-
     def _ensure_file_open(self):
         """Ensure HDF5 file is open in current worker process."""
         import torch.utils.data

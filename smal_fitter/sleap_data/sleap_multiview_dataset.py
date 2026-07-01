@@ -937,7 +937,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         if hasattr(self, "_file") and self._file is not None:
             try:
                 self._file.close()
-            except:
+            except Exception:
                 pass
 
 

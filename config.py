@@ -84,7 +84,7 @@ if ignore_hardcoded_body:
         dd = u.load()
 
     # check if joint locations are static
-    if "static_joint_locs" in dd and dd["static_joint_locs"] == True:
+    if "static_joint_locs" in dd and dd["static_joint_locs"]:
         STATIC_JOINT_LOCATIONS = True
         if DEBUG:
             print("INFO: Joint locations are static")

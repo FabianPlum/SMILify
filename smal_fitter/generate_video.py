@@ -2,7 +2,8 @@
 ### ffmpeg -framerate 50 -i %04d.png -pix_fmt yuv420p rs_dog.gif
 ###
 
-import sys, os
+import sys
+import os
 
 # Set CUDA_VISIBLE_DEVICES before importing torch: torch >= 2.3 raises an INTERNAL
 # ASSERT if CUDA_VISIBLE_DEVICES changes after CUDA has been initialized. config.py

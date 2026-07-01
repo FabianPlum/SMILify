@@ -524,7 +524,7 @@ def export_J_regressor_to_npy(
     vertices, _ = mesh_to_numpy(mesh_obj)
     joints = armature_obj.data.bones
     joint_locations = np.array([bone.head_local for bone in joints], dtype=np.float32)
-    if influence_type == "inverse_distance" or influence_type == None:
+    if influence_type == "inverse_distance" or influence_type is None:
         nearest_indices, nearest_weights = find_nearest_neighbors(vertices, joint_locations, n)
         J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
 
@@ -601,10 +601,10 @@ def load_pkl_file(filepath):
                 try:
                     if type(data_de_chumpied[key]) is not str:
                         print(data_de_chumpied[key].shape)
-                except:
+                except Exception:
                     try:
                         print(len(data_de_chumpied[key]))
-                    except:
+                    except Exception:
                         # if it's not a numpy array or a list, just print the type
                         print(type(data_de_chumpied[key]))
         print("Loaded .pkl file successfully.")
@@ -615,7 +615,7 @@ def load_pkl_file(filepath):
                 print(f"Found scaledirs with shape: {data_de_chumpied['scaledirs'].shape}")
             if "transdirs" in data_de_chumpied:
                 print(f"Found transdirs with shape: {data_de_chumpied['transdirs'].shape}")
-        except:
+        except Exception:
             print("No valid scaledirs or transdirs found.")
 
         return data_de_chumpied
@@ -1164,8 +1164,8 @@ def apply_entangled_pca_and_create_shapekeys(
     # Separate the original mean into shape, scale, and translation parts
     vertex_mean = original_mean[: v * 3].reshape(v, 3)
     # the scale and translation mean are already used to compute the mean mesh so they don't get re-applied.
-    scale_mean = original_mean[v * 3 : v * 3 + n_joints]
-    translation_mean = original_mean[v * 3 + n_joints :].reshape(n_joints, 3)
+    original_mean[v * 3 : v * 3 + n_joints]
+    original_mean[v * 3 + n_joints :].reshape(n_joints, 3)
 
     # Get covariance matrix from transformed data
     transformed_betas = pca.transform(combined_features)
@@ -1690,7 +1690,7 @@ def export_smpl_model(obj, export_path, pkl_data=None):
             print(f"Including scaledirs in export with shape: {pkl_data['scaledirs'].shape}")
         if "transdirs" in pkl_data:
             print(f"Including transdirs in export with shape: {pkl_data['transdirs'].shape}")
-    except:
+    except Exception:
         print("No scaledirs or transdirs found.")
 
     # Write out the new pkl file to the same location as the input pkl file with the user-specified name
@@ -2835,8 +2835,8 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         kintree_table = pkl_data["kintree_table"]
         joint_names = pkl_data["J_names"] if "J_names" in pkl_data else [f"J_{i}" for i in range(joints.shape[0])]
         J_regressor = np.copy(pkl_data["J_regressor"]) if "J_regressor" in pkl_data else None
-        global_rots = npz_data["global_rot"] if "global_rot" in npz_data else None  # (N, 3)
-        joint_rots = npz_data["joint_rot"] if "joint_rot" in npz_data else None  # (N, J-1, 3)
+        npz_data["global_rot"] if "global_rot" in npz_data else None  # (N, 3)
+        npz_data["joint_rot"] if "joint_rot" in npz_data else None  # (N, J-1, 3)
         translations = npz_data["trans"] if "trans" in npz_data else None  # (N, 3)
 
         n_meshes = len(verts_array)
@@ -4074,7 +4074,7 @@ def unregister():
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
-                except:
+                except Exception:
                     pass
 
     # Clean up reference measurements file
@@ -4083,7 +4083,7 @@ def unregister():
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-            except:
+            except Exception:
                 pass
 
     for cls in classes:

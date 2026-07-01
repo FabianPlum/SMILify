@@ -522,7 +522,7 @@ class SLEAPDataLoader:
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Extract 2D keypoints for camera_dirs structure."""
         instances = camera_data["instances"]
-        frames = camera_data["frames"]
+        camera_data["frames"]
 
         # Use pred_points if available, otherwise fall back to points
         if "pred_points" in camera_data and len(camera_data["pred_points"]) > 0:
@@ -999,7 +999,7 @@ class SLEAPDataLoader:
                 color = colors[i]
                 if visibility[i]:
                     # Visible keypoint
-                    scatter = ax.scatter(x, y, c=[color], s=75, alpha=0.9, edgecolors="white", linewidth=2, zorder=5)
+                    ax.scatter(x, y, c=[color], s=75, alpha=0.9, edgecolors="white", linewidth=2, zorder=5)
                     # Add to legend
                     legend_elements.append(
                         plt.Line2D(

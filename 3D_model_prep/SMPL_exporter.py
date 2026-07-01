@@ -195,7 +195,7 @@ def export_smpl_model(start_frame=0, stop_frame=1):
     joint_hierarchy_npy_path = bpy.path.abspath("//test_joint_hierarchy.npy")
     j_regressor_npy_path = bpy.path.abspath("//test_joint_regressor.npy")
     y_axis_vertices_npy_path = bpy.path.abspath("//test_y_axis_vertices.npy")
-    posedirs_npy_path = bpy.path.abspath("//test_posedirs.npy")
+    bpy.path.abspath("//test_posedirs.npy")
 
     smpl_file_path = bpy.path.abspath("//smpl_ATTA.pkl")
 

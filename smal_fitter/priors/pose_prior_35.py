@@ -315,15 +315,12 @@ class Prior(object):
         prefix = 3
         if "33parts" in prior_path:
             pose_len = 99
-            id2name = id2name33
             name2id = name2id33
         elif "35parts" in prior_path:
             pose_len = 105
-            id2name = id2name35
             name2id = name2id35
         else:
             pose_len = 93
-            id2name = id2name31
             name2id = name2id31
 
         self.use_ind = np.ones(pose_len, dtype=bool)

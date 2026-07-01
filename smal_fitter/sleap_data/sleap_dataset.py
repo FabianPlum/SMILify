@@ -127,7 +127,7 @@ class SLEAPDataset(torch.utils.data.Dataset):
         with h5py.File(self.hdf5_path, "r") as f:
             # Load image data
             image_jpeg_bytes = f["images/image_jpeg"][idx]
-            mask = f["images/mask"][idx]
+            f["images/mask"][idx]
 
             # Decode JPEG image
             image = self._decode_jpeg_image(image_jpeg_bytes)
@@ -136,12 +136,12 @@ class SLEAPDataset(torch.utils.data.Dataset):
             global_rot = f["parameters/global_rot"][idx]
             joint_rot = f["parameters/joint_rot"][idx]
             betas = f["parameters/betas"][idx]
-            trans = f["parameters/trans"][idx]
-            fov = f["parameters/fov"][idx]
-            cam_rot = f["parameters/cam_rot"][idx]
-            cam_trans = f["parameters/cam_trans"][idx]
-            scale_weights = f["parameters/scale_weights"][idx]
-            trans_weights = f["parameters/trans_weights"][idx]
+            f["parameters/trans"][idx]
+            f["parameters/fov"][idx]
+            f["parameters/cam_rot"][idx]
+            f["parameters/cam_trans"][idx]
+            f["parameters/scale_weights"][idx]
+            f["parameters/trans_weights"][idx]
 
             # Load keypoint data
             keypoints_2d = f["keypoints/keypoints_2d"][idx]

@@ -1119,7 +1119,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         # for prediction (which is correct, since both use view position indexing).
         if num_views > 0:
             # Get camera indices for verification (if available)
-            camera_indices = predicted_params.get("camera_indices", None)  # (B, num_views) - canonical camera indices
+            predicted_params.get("camera_indices", None)  # (B, num_views) - canonical camera indices
 
             # FOV loss
             if loss_weights.get("fov", 0) > 0:
@@ -1353,7 +1353,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         )
                         if torch.isfinite(ief_kp2d):
                             total_loss = total_loss + w * loss_weights["keypoint_2d"] * ief_kp2d
-                    except Exception as e:
+                    except Exception:
                         pass  # projection can fail for degenerate intermediate cameras
 
                 # Retain parameter-level losses when GT is available (cheap, extra signal)
@@ -1526,7 +1526,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         This mirrors the SMAL forward + scaling/trans logic used in `_render_keypoints_with_camera`,
         but returns 3D joints instead of rendering/projecting to 2D.
         """
-        batch_size = body_params["global_rot"].shape[0]
+        body_params["global_rot"].shape[0]
 
         # Convert rotations to axis-angle format for SMAL model
         if self.rotation_representation == "6d":
@@ -2001,7 +2001,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
 
     def _collect_body_targets_batch(self, target_data: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         """Collect body parameter targets from batch."""
-        batch_size = len(target_data)
+        len(target_data)
         targets = {}
 
         # Global rotation
@@ -2287,7 +2287,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             target_keypoints = target_keypoints[sample_mask]
             visibility = visibility[sample_mask]
 
-        batch_size = rendered_joints.shape[0]
+        rendered_joints.shape[0]
 
         # Sanitize rendered joints
         rendered_joints = torch.nan_to_num(rendered_joints, nan=0.0, posinf=0.0, neginf=0.0)
@@ -2429,7 +2429,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         Returns:
             Tuple of (predicted_params, y_data_batch, auxiliary_data)
         """
-        batch_size = len(x_data_batch)
+        len(x_data_batch)
 
         # Collect images and camera info from all samples
         all_images_per_view = []
