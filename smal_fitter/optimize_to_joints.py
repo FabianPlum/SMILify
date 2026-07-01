@@ -3,10 +3,13 @@ import os
 # Set CUDA device visibility BEFORE importing torch: torch >= 2.3 raises an INTERNAL
 # ASSERT ("device >= 0 && device < num_gpus") if CUDA_VISIBLE_DEVICES is changed after
 # CUDA has been initialized. config.py imports no torch, so this is safe here.
+# Use setdefault so an explicit external CUDA_VISIBLE_DEVICES (e.g. "0,1" for
+# multi-GPU DDP training) is respected — importing this module must NOT silently
+# pin visibility to a single GPU.
 import config
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
+os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", config.GPU_IDS)
 
 import numpy as np
 import argparse

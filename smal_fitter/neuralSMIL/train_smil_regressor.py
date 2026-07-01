@@ -5,6 +5,28 @@ This script demonstrates how to train the SMILImageRegressor network
 to predict SMIL parameters from input images.
 """
 
+# ── Multi-GPU visibility (must run before ANY import) ────────────────────────
+# Several modules setdefault CUDA_VISIBLE_DEVICES to config.GPU_IDS ("0") at
+# import time. When multi-GPU training is requested (--num_gpus N > 1) and the
+# user has not pinned CUDA_VISIBLE_DEVICES themselves, expose the first N GPUs
+# HERE — before those imports run — so torch sees all requested devices. If the
+# user set CUDA_VISIBLE_DEVICES explicitly, it is respected as-is.
+import os
+import sys
+
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    try:
+        _requested_gpus = 1
+        for _i, _arg in enumerate(sys.argv):
+            if _arg == "--num_gpus" and _i + 1 < len(sys.argv):
+                _requested_gpus = int(sys.argv[_i + 1])
+            elif _arg.startswith("--num_gpus="):
+                _requested_gpus = int(_arg.split("=", 1)[1])
+        if _requested_gpus > 1:
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(_g) for _g in range(_requested_gpus))
+    except Exception:
+        pass
+
 # Set matplotlib backend BEFORE any other imports to prevent tkinter issues
 import matplotlib
 
