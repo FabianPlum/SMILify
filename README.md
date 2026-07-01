@@ -1,5 +1,9 @@
 # SMILify
 
+[![tests](https://github.com/FabianPlum/SMILify/actions/workflows/tests.yml/badge.svg)](https://github.com/FabianPlum/SMILify/actions/workflows/tests.yml)
+[![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
 This repository is based on [SMALify](https://github.com/benjiebob/SMALify) with the aim to turn any rigged 3D model into
 a SMAL compatible model. There are Blender files to convert your mesh and lots of code
 changes to deal with arbitrary armature configurations, rather than assuming a fixed
