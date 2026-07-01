@@ -24,6 +24,11 @@ def run_script_with_env(module, args=[], env=None):
     """Run an entrypoint module (`python -m`) with custom environment variables."""
     return run_script(module, args, env=env)
 
+# NOTE: marked `slow` — this launches the optimisation-based fitter as a subprocess,
+# which does pytorch3d rasterisation/rendering. That is fine on a GPU but pathologically
+# slow on CPU, so it is excluded from the CPU-only CI run (`pytest -m "not slow"`) and
+# meant to be run on a GPU (`pytest -m slow` or the full `pytest`).
+@pytest.mark.slow
 def test_fitter_3d_optimise(capsys):
     result = run_script('fitter_3d.optimise', ['--mesh_dir', 'fitter_3d/ATTA_BOI', '--scheme', 'default', '--lr', '1e-3', '--nits', '10'])
     assert result.returncode == 0, f"fitter_3d.optimise failed with error:\n{result.stderr}"
@@ -32,6 +37,10 @@ def test_fitter_3d_optimise(capsys):
     captured = capsys.readouterr()
     print(captured.out)
 
+# NOTE: marked `slow` — same reason as test_fitter_3d_optimise: it runs the
+# optimisation-based joint fitter (pytorch3d rendering) as a subprocess, which is
+# GPU-appropriate and far too slow for the CPU-only CI run.
+@pytest.mark.slow
 def test_smal_fitter_optimize_to_joints(capsys):
     result = run_script('smal_fitter.optimize_to_joints', ['--test'])
     assert result.returncode == 0, f"smal_fitter.optimize_to_joints failed with error:\n{result.stderr}"
