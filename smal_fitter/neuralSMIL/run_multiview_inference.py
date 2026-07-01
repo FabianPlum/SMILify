@@ -1517,7 +1517,9 @@ def main():
     parser.add_argument("--export_animation", type=str, default=None,
                         help="Optional output path stem for SMIL animation export. "
                              "Writes <stem>.npz + <stem>.json with raw (pre-smoothing) parameters "
-                             "and per-view cameras. Gathered to rank 0 in multi-GPU runs.")
+                             "and per-view cameras. Gathered to rank 0 in multi-GPU runs. "
+                             "NOTE: any string is accepted as-is (e.g. \"True\" writes True.npz) — "
+                             "no validation is performed, so pass a real path/filename stem.")
     parser.add_argument("--render_resolution", type=int, default=None,
                         help="Square pixel resolution for the single-view mesh visualization. "
                              "The mesh is rendered and the background footage interpolated up to "
