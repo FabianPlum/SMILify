@@ -9,7 +9,7 @@ from pathlib import Path
 import glob
 
 # Import functions from SDF_tests
-from SDF_tests import (
+from fitter_3d.SDF_tests import (
     compute_sdf,
     smooth_distances,
     visualize_sdf,

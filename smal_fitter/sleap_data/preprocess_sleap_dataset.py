@@ -30,19 +30,11 @@ import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
 
-# Add paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Import SLEAPDataLoader with fallback
-try:
-    from sleap_data_loader import SLEAPDataLoader
-except ImportError:
-    sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-    from sleap_data_loader import SLEAPDataLoader
+from sleap_data_loader import SLEAPDataLoader
 
 import config
-from neuralSMIL.configs.config_utils import apply_smal_file_override
+from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override
 
 
 class SLEAPDatasetPreprocessor:

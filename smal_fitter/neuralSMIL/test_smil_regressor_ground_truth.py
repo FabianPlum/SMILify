@@ -24,16 +24,13 @@ import cv2
 import matplotlib.pyplot as plt
 from typing import Dict, Any
 
-# Add the parent directories to the path to import modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from smil_image_regressor import SMILImageRegressor, safe_to_tensor, axis_angle_to_rotation_6d, rotation_6d_to_axis_angle
-from smil_datasets import replicAntSMILDataset
-from smal_fitter import SMALFitter
-from Unreal2Pytorch3D import load_SMIL_Unreal_sample
+from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor, safe_to_tensor, axis_angle_to_rotation_6d, rotation_6d_to_axis_angle
+from smal_fitter.neuralSMIL.smil_datasets import replicAntSMILDataset
+from smal_fitter.fitter import SMALFitter
+from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_sample
 import config
-from configs import apply_smal_file_override
+from smal_fitter.neuralSMIL.configs import apply_smal_file_override
 
 
 def extract_target_parameters(y_data, device, rotation_representation='axis_angle'):
@@ -87,7 +84,7 @@ def extract_target_parameters(y_data, device, rotation_representation='axis_angl
     # Joint scales and translations (if available)
     if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
         # Import the PCA transformation function
-        from Unreal2Pytorch3D import sample_pca_transforms_from_dirs
+        from smal_fitter.Unreal2Pytorch3D import sample_pca_transforms_from_dirs
         
         # Compute actual scale and translation parameters from PCA weights
         translation_out, scale_out = sample_pca_transforms_from_dirs(

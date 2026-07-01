@@ -1,4 +1,4 @@
-from draw_smal_joints import SMALJointDrawer
+from smal_fitter.draw_smal_joints import SMALJointDrawer
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,11 +14,11 @@ import torch.nn as nn
 
 from functools import reduce
 
-from p3d_renderer import Renderer
+from smal_fitter.p3d_renderer import Renderer
 from smal_model.smal_torch import SMAL
-from utils import eul_to_axis
+from smal_fitter.utils import eul_to_axis
 
-from priors.joint_limits_prior import LimitPrior
+from smal_fitter.priors.joint_limits_prior import LimitPrior
 
 import config
 
@@ -53,7 +53,7 @@ if config.ignore_hardcoded_body:
 
             return res ** 2
 else:
-    from priors.pose_prior_35 import Prior
+    from smal_fitter.priors.pose_prior_35 import Prior
 
 
 class SMALFitter(nn.Module):

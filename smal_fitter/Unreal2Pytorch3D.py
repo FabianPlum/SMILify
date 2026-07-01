@@ -2,7 +2,6 @@ import os as _os, sys as _sys
 if __name__ == "__main__":
     # Set CUDA_VISIBLE_DEVICES BEFORE torch is imported below: torch >= 2.3 raises an
     # INTERNAL ASSERT if it changes after CUDA init. Guarded so importers are unaffected.
-    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     import config as _config
     _os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     _os.environ["CUDA_VISIBLE_DEVICES"] = _config.GPU_IDS
@@ -20,11 +19,10 @@ from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 from scipy.spatial.transform import Rotation
 
-sys.path.append(os.path.dirname(sys.path[0]))
-from smal_fitter import SMALFitter
+from smal_fitter.fitter import SMALFitter
 import config
 
-from optimize_to_joints import ImageExporter
+from smal_fitter.optimize_to_joints import ImageExporter
 from nibabel import eulerangles
 
 # Data structures and functions for rendering

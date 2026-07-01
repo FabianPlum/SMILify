@@ -14,19 +14,11 @@ import tempfile
 import argparse
 from pathlib import Path
 
-# Add paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from preprocess_sleap_dataset import SLEAPDatasetPreprocessor
-from sleap_dataset import SLEAPDataset
+from smal_fitter.sleap_data.preprocess_sleap_dataset import SLEAPDatasetPreprocessor
+from smal_fitter.sleap_data.sleap_dataset import SLEAPDataset
 
-# Import UnifiedSMILDataset with fallback
-try:
-    from smal_fitter.neuralSMIL.smil_datasets import UnifiedSMILDataset
-except ImportError:
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'neuralSMIL'))
-    from smil_datasets import UnifiedSMILDataset
+from smal_fitter.neuralSMIL.smil_datasets import UnifiedSMILDataset
 
 
 def test_preprocessing(sessions_dir: str, output_path: str, 

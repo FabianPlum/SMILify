@@ -11,11 +11,9 @@ from scipy.spatial.transform import Rotation
 
 # Add the parent directories to the path to import modules
 # not very pretty, but it works.
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from Unreal2Pytorch3D import load_SMIL_Unreal_sample, Render_SMAL_Model_from_Unreal_data
-from utils import eul_to_axis
+from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_sample, Render_SMAL_Model_from_Unreal_data
+from smal_fitter.utils import eul_to_axis
 
 # Import rotation utilities from PyTorch3D
 from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, rotation_6d_to_matrix, matrix_to_rotation_6d
@@ -72,7 +70,7 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
         self.original_resolution = self._detect_input_resolution()
         
         # Determine target resolution based on backbone
-        from backbone_factory import BackboneFactory
+        from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
         self.target_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
     def _detect_input_resolution(self):
@@ -202,14 +200,14 @@ class UnifiedSMILDataset:
             raise ValueError(f"Could not open HDF5 file {data_path}: {e}") from e
 
         if is_multiview:
-            from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+            from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
             return SLEAPMultiViewDataset(data_path, **kwargs)
 
         if dataset_type == 'sleap':
-            from sleap_data.sleap_dataset import SLEAPDataset
+            from smal_fitter.sleap_data.sleap_dataset import SLEAPDataset
             return SLEAPDataset(data_path, **kwargs)
 
-        from optimized_dataset import OptimizedSMILDataset
+        from smal_fitter.neuralSMIL.optimized_dataset import OptimizedSMILDataset
         return OptimizedSMILDataset(data_path, **kwargs)
 
     @staticmethod
@@ -263,7 +261,7 @@ class UnifiedSMILDataset:
         Returns:
             Dictionary containing preprocessing statistics
         """
-        from dataset_preprocessing import DatasetPreprocessor, print_statistics
+        from smal_fitter.neuralSMIL.dataset_preprocessing import DatasetPreprocessor, print_statistics
         
         # Create preprocessor
         preprocessor = DatasetPreprocessor(

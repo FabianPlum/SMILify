@@ -12,13 +12,7 @@ from __future__ import print_function
 import os
 import sys
 
-# Ensure neuralSMIL is on path when run as script
-if __name__ == "__main__":
-    _neural_smil = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    if _neural_smil not in sys.path:
-        sys.path.insert(0, _neural_smil)
-
-from configs import (
+from smal_fitter.neuralSMIL.configs import (
     load_config,
     load_from_json,
     validate_json_mode,

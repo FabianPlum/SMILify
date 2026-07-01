@@ -18,14 +18,12 @@ from scipy.spatial.transform import Rotation
 # Import from parent modules
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from smal_fitter import SMALFitter
+from smal_fitter.fitter import SMALFitter
 import config
-from training_config import TrainingConfig
-from backbone_factory import BackboneFactory, BackboneInterface
-from transformer_decoder import build_smil_transformer_decoder_head
+from smal_fitter.neuralSMIL.training_config import TrainingConfig
+from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory, BackboneInterface
+from smal_fitter.neuralSMIL.transformer_decoder import build_smil_transformer_decoder_head
 
 # Import rotation utilities from PyTorch3D
 from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, rotation_6d_to_matrix, matrix_to_rotation_6d
@@ -204,7 +202,7 @@ class SMILImageRegressor(SMALFitter):
             self.joint_trans_dim = 0
         elif self.scale_trans_mode == 'separate':
             # Check if we should use PCA transformation or per-joint values
-            from training_config import TrainingConfig
+            from smal_fitter.neuralSMIL.training_config import TrainingConfig
             scale_trans_config = TrainingConfig.get_scale_trans_config()
             use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
             
@@ -582,7 +580,7 @@ class SMILImageRegressor(SMALFitter):
             scales_flat = output[:, idx:idx + self.scales_dim]
             if self.scale_trans_mode == 'separate':
                 # Check if using PCA or per-joint
-                from training_config import TrainingConfig
+                from smal_fitter.neuralSMIL.training_config import TrainingConfig
                 scale_trans_config = TrainingConfig.get_scale_trans_config()
                 use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
                 if use_pca_transformation:
@@ -603,7 +601,7 @@ class SMILImageRegressor(SMALFitter):
             trans_flat = output[:, idx:idx + self.joint_trans_dim]
             if self.scale_trans_mode == 'separate':
                 # Check if using PCA or per-joint
-                from training_config import TrainingConfig
+                from smal_fitter.neuralSMIL.training_config import TrainingConfig
                 scale_trans_config = TrainingConfig.get_scale_trans_config()
                 use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
                 if use_pca_transformation:
@@ -891,7 +889,7 @@ class SMILImageRegressor(SMALFitter):
             # For entangled mode, we still need to compute the per-joint values
             # but we'll use the same betas for all three PCA spaces
             if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
-                from Unreal2Pytorch3D import sample_pca_transforms_from_dirs
+                from smal_fitter.Unreal2Pytorch3D import sample_pca_transforms_from_dirs
                 translation_out, scale_out = sample_pca_transforms_from_dirs(
                     config.dd, y_data['scale_weights'], y_data['trans_weights']
                 )
@@ -1633,7 +1631,7 @@ class SMILImageRegressor(SMALFitter):
                 pred_scales = valid_predicted_params['log_beta_scales']  # (num_valid, ...)
                 
                 # Check if using PCA or per-joint
-                from training_config import TrainingConfig
+                from smal_fitter.neuralSMIL.training_config import TrainingConfig
                 scale_trans_config = TrainingConfig.get_scale_trans_config()
                 use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
                 
@@ -1670,7 +1668,7 @@ class SMILImageRegressor(SMALFitter):
                 pred_trans = valid_predicted_params['betas_trans']  # (num_valid, ...)
                 
                 # Check if using PCA or per-joint
-                from training_config import TrainingConfig
+                from smal_fitter.neuralSMIL.training_config import TrainingConfig
                 scale_trans_config = TrainingConfig.get_scale_trans_config()
                 use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
                 

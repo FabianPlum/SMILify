@@ -30,26 +30,12 @@ from tqdm import tqdm
 from collections import defaultdict
 import json
 
-# Add paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Import SLEAPDataLoader with fallback
-try:
-    from sleap_data_loader import SLEAPDataLoader
-except ImportError:
-    sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-    from sleap_data_loader import SLEAPDataLoader
-
-# Import SLEAP3DDataLoader for 3D keypoints and camera parameters
-try:
-    from sleap_3d_loader import SLEAP3DDataLoader
-except ImportError:
-    sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-    from smal_fitter.sleap_data.sleap_3d_loader import SLEAP3DDataLoader
+from sleap_data_loader import SLEAPDataLoader
+from smal_fitter.sleap_data.sleap_3d_loader import SLEAP3DDataLoader
 
 import config
-from neuralSMIL.configs.config_utils import apply_smal_file_override
+from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override
 
 
 class SLEAPMultiViewPreprocessor:
@@ -1759,7 +1745,7 @@ Examples:
         target_resolution = args.target_resolution
     else:
         # Derive from backbone using BackboneFactory as single source of truth
-        from neuralSMIL.backbone_factory import BackboneFactory
+        from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
         target_resolution = BackboneFactory.get_default_input_resolution(args.backbone_name)
     args.target_resolution = target_resolution
 
