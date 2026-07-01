@@ -42,7 +42,7 @@ class ImageExporter():
 def main():
     parser = argparse.ArgumentParser(description="Export visualization frames from a fitted checkpoint")
     parser.add_argument(
-        "--checkpoint-name",
+        "--checkpoint_name",
         default=getattr(config, "CHECKPOINT_NAME", None),
         help="Checkpoint folder name under checkpoints/ (e.g. timestamp from a training run)",
     )
@@ -50,7 +50,7 @@ def main():
     checkpoint_name = args.checkpoint_name
     if not checkpoint_name:
         sys.exit(
-            "error: checkpoint name required — set config.CHECKPOINT_NAME or pass --checkpoint-name "
+            "error: checkpoint name required — set config.CHECKPOINT_NAME or pass --checkpoint_name "
             "(see legacy/README.md)"
         )
 
