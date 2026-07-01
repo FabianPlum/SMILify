@@ -27,8 +27,6 @@ import sys
 # ASSERT ("device >= 0 && device < num_gpus") if CUDA is initialized before CVD is set.
 # config.py imports no torch, so importing it here is safe. setdefault lets an explicit
 # external CUDA_VISIBLE_DEVICES (e.g. for a specific/multi GPU with --device) still win.
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
 os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", config.GPU_IDS)
@@ -42,23 +40,20 @@ import torch
 from torch.utils.data import DataLoader
 from matplotlib import pyplot as plt
 
-# Add parent directories to path (mirrors train_multiview_regressor.py)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
-from configs import apply_smal_file_override
+from smal_fitter.neuralSMIL.configs import apply_smal_file_override
 
 # Multi-view imports (always available)
-from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
-from multiview_smil_regressor import create_multiview_regressor
-from train_multiview_regressor import MultiViewTrainingConfig, load_checkpoint, set_random_seeds
+from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
+from smal_fitter.neuralSMIL.multiview_smil_regressor import create_multiview_regressor
+from smal_fitter.neuralSMIL.train_multiview_regressor import MultiViewTrainingConfig, load_checkpoint, set_random_seeds
 
 # Single-view imports
-from smil_image_regressor import SMILImageRegressor
-from smil_datasets import UnifiedSMILDataset
-from training_config import TrainingConfig
-from train_smil_regressor import custom_collate_fn, set_random_seeds as sv_set_random_seeds
+from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
+from smal_fitter.neuralSMIL.smil_datasets import UnifiedSMILDataset
+from smal_fitter.neuralSMIL.training_config import TrainingConfig
+from smal_fitter.neuralSMIL.train_smil_regressor import custom_collate_fn, set_random_seeds as sv_set_random_seeds
 
 
 def _detect_model_type(checkpoint: dict) -> str:
@@ -398,7 +393,7 @@ def _create_singleview_model(
     apply_smal_file_override(smal_file, shape_family=shape_family)
 
     backbone_name = model_config["backbone_name"]
-    from backbone_factory import BackboneFactory
+    from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
     input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
     log_fn(f"Singleview model config:")
@@ -933,7 +928,7 @@ def _run_multiview_benchmark(
 
     # Create model (mirror training script)
     backbone_name = config_from_ckpt["backbone_name"]
-    from backbone_factory import BackboneFactory
+    from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
     input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
     log_fn(f"\nUsing input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
 

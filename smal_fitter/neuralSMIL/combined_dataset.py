@@ -93,7 +93,7 @@ class CombinedSMILDataset:
             Loaded dataset instance
         """
         # Import here to avoid circular dependencies
-        from smil_datasets import UnifiedSMILDataset
+        from smal_fitter.neuralSMIL.smil_datasets import UnifiedSMILDataset
         
         if dataset_type == 'auto':
             # Auto-detect based on path
@@ -104,7 +104,7 @@ class CombinedSMILDataset:
                 **self.dataset_kwargs
             )
         elif dataset_type == 'replicant':
-            from smil_datasets import replicAntSMILDataset
+            from smal_fitter.neuralSMIL.smil_datasets import replicAntSMILDataset
             return replicAntSMILDataset(
                 dataset_path,
                 rotation_representation=self.rotation_representation,
@@ -114,8 +114,7 @@ class CombinedSMILDataset:
         elif dataset_type == 'sleap':
             import sys
             import os
-            sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'sleap_data'))
-            from sleap_dataset import SLEAPDataset
+            from smal_fitter.sleap_data.sleap_dataset import SLEAPDataset
             return SLEAPDataset(
                 dataset_path,
                 rotation_representation=self.rotation_representation,
@@ -123,7 +122,7 @@ class CombinedSMILDataset:
                 **self.dataset_kwargs
             )
         elif dataset_type == 'optimized_hdf5':
-            from optimized_dataset import OptimizedSMILDataset
+            from smal_fitter.neuralSMIL.optimized_dataset import OptimizedSMILDataset
             return OptimizedSMILDataset(
                 dataset_path,
                 rotation_representation=self.rotation_representation,

@@ -37,8 +37,7 @@ import streamlit as st
 
 # Make multiview_common importable when streamlit launches the module directly.
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE.parent))  # smal_fitter/ on path
-from multiview_common.canonical_frame import (  # noqa: E402
+from smal_fitter.multiview_common.canonical_frame import (  # noqa: E402
     cam_center_world,
     kp2d_norm_yx_to_pixel_xy,
     project_world_to_pixel,
@@ -46,7 +45,7 @@ from multiview_common.canonical_frame import (  # noqa: E402
 # SMAL rendering is an optional add-on (model + PyTorch3D). Failure to
 # import does NOT block the viewer; we just disable the SMAL features.
 try:
-    from multiview_common.smal_render import SMALRendererWrapper, overlay_silhouette  # noqa: E402
+    from smal_fitter.multiview_common.smal_render import SMALRendererWrapper, overlay_silhouette  # noqa: E402
     _SMAL_AVAILABLE = True
 except Exception as _e:  # pragma: no cover
     SMALRendererWrapper = None  # type: ignore

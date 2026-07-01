@@ -1,6 +1,5 @@
 
 import sys, os
-sys.path.append(os.path.dirname(sys.path[0]))
 
 # Set CUDA device visibility BEFORE importing torch: torch >= 2.3 raises an INTERNAL
 # ASSERT ("device >= 0 && device < num_gpus") if CUDA_VISIBLE_DEVICES is changed after
@@ -14,13 +13,13 @@ import cv2
 import argparse
 
 import matplotlib.pyplot as plt
-from smal_fitter import SMALFitter
+from smal_fitter.fitter import SMALFitter
 import pickle as pkl
 
 import torch
 import imageio
 
-from data_loader import load_badja_sequence, load_stanford_sequence, load_SMIL_sequence
+from smal_fitter.data_loader import load_badja_sequence, load_stanford_sequence, load_SMIL_sequence
 import trimesh
 
 from tqdm import trange

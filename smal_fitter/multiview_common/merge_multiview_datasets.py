@@ -88,8 +88,7 @@ from tqdm import tqdm
 
 # Shared geometry helpers (see canonical_frame.py for the conventions doc).
 _THIS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(_THIS_DIR.parent))  # smal_fitter/ on path
-from multiview_common.canonical_frame import (  # noqa: E402
+from smal_fitter.multiview_common.canonical_frame import (  # noqa: E402
     RZ_180,
     align_to_pytorch3d_reader_convention,
     canonicalize_sample,

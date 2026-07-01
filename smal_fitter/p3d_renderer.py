@@ -14,7 +14,7 @@ from pytorch3d.renderer import (
     FoVPerspectiveCameras
 )
 from pytorch3d.io import load_objs_as_meshes
-from utils import perspective_proj_withz
+from smal_fitter.utils import perspective_proj_withz
 
 
 class Renderer(torch.nn.Module):

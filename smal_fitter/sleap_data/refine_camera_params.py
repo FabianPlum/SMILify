@@ -35,8 +35,7 @@ from scipy.optimize import least_squares
 from tqdm import tqdm
 
 # Reuse functions from triangulation script
-sys.path.insert(0, os.path.dirname(__file__))
-from triangulate_3d_points import (
+from smal_fitter.sleap_data.triangulate_3d_points import (
     load_calibration,
     load_all_2d_data,
     undistort_points,
@@ -571,7 +570,7 @@ def main():
         )
 
         # Save
-        from triangulate_3d_points import save_points3d_h5
+        from smal_fitter.sleap_data.triangulate_3d_points import save_points3d_h5
         save_points3d_h5(tracks_3d_full, args.output_points3d)
 
         # Full reprojection analysis

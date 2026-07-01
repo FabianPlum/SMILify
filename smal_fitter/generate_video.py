@@ -4,7 +4,6 @@
 ###
 
 import sys, os
-sys.path.append(os.path.dirname(sys.path[0]))
 
 # Set CUDA_VISIBLE_DEVICES before importing torch: torch >= 2.3 raises an INTERNAL
 # ASSERT if CUDA_VISIBLE_DEVICES changes after CUDA has been initialized. config.py
@@ -18,13 +17,13 @@ import cv2
 import argparse
 
 import matplotlib.pyplot as plt
-from smal_fitter import SMALFitter
+from smal_fitter.fitter import SMALFitter
 
 import torch
 import imageio
 import config
 
-from data_loader import load_badja_sequence, load_stanford_sequence
+from smal_fitter.data_loader import load_badja_sequence, load_stanford_sequence
 import time
 
 import pickle as pkl

@@ -6,7 +6,7 @@ This module provides functionality to load 3D keypoint coordinates and camera
 calibration parameters from SLEAP datasets for multi-view model fitting.
 
 Usage:
-    from sleap_3d_loader import SLEAP3DDataLoader
+    from smal_fitter.sleap_data.sleap_3d_loader import SLEAP3DDataLoader
     
     loader = SLEAP3DDataLoader(session_path="/path/to/session")
     keypoints_3d = loader.get_3d_keypoints(frame_idx=0)
@@ -56,9 +56,6 @@ def get_default_device() -> str:
         return "cuda:0"
     return "cpu"
 
-# Add paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
 class SLEAP3DDataLoader:
@@ -683,11 +680,7 @@ class SLEAP3DDataLoader:
             - keypoints_2d: (n_keypoints, 2) array of 2D coordinates
             - visibility: (n_keypoints,) boolean array
         """
-        try:
-            from sleap_data_loader import SLEAPDataLoader
-        except ImportError:
-            sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-            from sleap_data_loader import SLEAPDataLoader
+        from sleap_data_loader import SLEAPDataLoader
         
         # Use SLEAPDataLoader to load data (same as preprocessing scripts)
         loader = SLEAPDataLoader(

@@ -1,8 +1,6 @@
 import sys
 import os
 
-# Add the base path of the repository to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import json
 import imageio.v2 as imageio
@@ -10,8 +8,8 @@ import numpy as np
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.pyplot as plt
 import torch
-from smal_fitter import SMALFitter
-from optimize_to_joints import ImageExporter
+from smal_fitter.fitter import SMALFitter
+from smal_fitter.optimize_to_joints import ImageExporter
 from scipy.spatial.transform import Rotation
 import config
 

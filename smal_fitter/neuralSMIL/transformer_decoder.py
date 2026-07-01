@@ -222,7 +222,7 @@ class SMILTransformerDecoderHead(nn.Module):
             self.joint_trans_dim = 0
         elif self.scale_trans_mode == 'separate':
             # In separate mode, check if we should use PCA or per-joint values
-            from training_config import TrainingConfig
+            from smal_fitter.neuralSMIL.training_config import TrainingConfig
             scale_trans_config = TrainingConfig.get_scale_trans_config()
             use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
             
@@ -516,7 +516,7 @@ class SMILTransformerDecoderHead(nn.Module):
         if self.scales_dim > 0:
             if self.scale_trans_mode == 'separate':
                 # Check if using PCA or per-joint
-                from training_config import TrainingConfig
+                from smal_fitter.neuralSMIL.training_config import TrainingConfig
                 scale_trans_config = TrainingConfig.get_scale_trans_config()
                 use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
                 if use_pca_transformation:
@@ -531,7 +531,7 @@ class SMILTransformerDecoderHead(nn.Module):
         if self.joint_trans_dim > 0:
             if self.scale_trans_mode == 'separate':
                 # Check if using PCA or per-joint
-                from training_config import TrainingConfig
+                from smal_fitter.neuralSMIL.training_config import TrainingConfig
                 scale_trans_config = TrainingConfig.get_scale_trans_config()
                 use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
                 if use_pca_transformation:

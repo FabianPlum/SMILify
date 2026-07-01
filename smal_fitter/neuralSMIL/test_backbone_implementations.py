@@ -12,16 +12,13 @@ import sys
 import os
 from typing import Dict, Any
 
-# Add the parent directories to the path to import modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Change to the project root directory to find SMAL files
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 os.chdir(project_root)
 
-from backbone_factory import BackboneFactory, BackboneInterface
-from memory_optimization import MemoryMonitor, get_backbone_memory_requirements
+from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory, BackboneInterface
+from smal_fitter.neuralSMIL.memory_optimization import MemoryMonitor, get_backbone_memory_requirements
 
 # Import config with error handling for missing SMAL files
 try:
@@ -214,7 +211,7 @@ def test_smil_integration():
         print(f"\nTesting SMIL integration with {backbone_name}:")
         
         try:
-            from smil_image_regressor import SMILImageRegressor
+            from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
             
             # Initialize model
             model = SMILImageRegressor(
@@ -295,8 +292,8 @@ def test_training_compatibility():
         print(f"\nTesting training compatibility with {backbone_name}:")
         
         try:
-            from smil_image_regressor import SMILImageRegressor
-            from memory_optimization import recommend_training_config
+            from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
+            from smal_fitter.neuralSMIL.memory_optimization import recommend_training_config
             
             # Get training recommendations
             training_config = recommend_training_config(backbone_name, 24.0)

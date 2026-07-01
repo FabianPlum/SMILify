@@ -24,13 +24,10 @@ import psutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-# Add paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from Unreal2Pytorch3D import load_SMIL_Unreal_sample, compute_keypoint_visibility
+from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_sample, compute_keypoint_visibility
 import config
-from configs import apply_smal_file_override
+from smal_fitter.neuralSMIL.configs import apply_smal_file_override
 
 
 class DatasetPreprocessor:
@@ -79,7 +76,7 @@ class DatasetPreprocessor:
         self.verbose = verbose
         
         # Determine target resolution based on backbone
-        from backbone_factory import BackboneFactory
+        from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
         if target_resolution is not None and target_resolution != 224:
             # Explicit override takes priority
             self.target_resolution = target_resolution
@@ -311,7 +308,7 @@ class DatasetPreprocessor:
             return np.zeros(len(keypoints_2d), dtype=np.float32)
         
         # Import here to avoid circular dependencies
-        from Unreal2Pytorch3D import compute_keypoint_visibility
+        from smal_fitter.Unreal2Pytorch3D import compute_keypoint_visibility
         
         # Use the same visibility computation as in training
         # Note: mask is already dilated when loaded by Unreal2Pytorch3D

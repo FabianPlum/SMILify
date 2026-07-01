@@ -42,9 +42,6 @@ import numpy as np
 
 
 _REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO))
-sys.path.insert(0, str(_REPO / "smal_fitter"))
-sys.path.insert(0, str(_REPO / "smal_fitter" / "neuralSMIL"))
 
 
 def _check_sample(
@@ -54,8 +51,8 @@ def _check_sample(
     tol: float = 1e-5,
     fov_tol_deg: float = 1e-3,
 ) -> bool:
-    from Unreal2Pytorch3D import load_SMIL_Unreal_multiview_sample
-    from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+    from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_multiview_sample
+    from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
 
     ds = SLEAPMultiViewDataset(hdf5_path, augment=False)
     if sample_idx >= len(ds):
@@ -189,7 +186,7 @@ def main() -> None:
         sys.exit(2)
 
     # Apply override BEFORE any module touches config.dd.
-    from configs.config_utils import apply_smal_file_override  # noqa: E402
+    from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override  # noqa: E402
     apply_smal_file_override(args.smal_file, shape_family=args.shape_family)
 
     print(f"HDF5:         {args.hdf5}")
