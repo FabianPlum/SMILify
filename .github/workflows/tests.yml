@@ -1,0 +1,43 @@
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch/PR.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest (CPU, torch 2.3.1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        # Login shell so the micromamba-created env is on PATH in every step.
+        shell: bash -el {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up CPU conda env (cached)
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment-ci.yml
+          # Cache the solved env + package downloads; key auto-derived from the
+          # env file, so it invalidates when environment-ci.yml changes.
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Show resolved versions
+        run: |
+          python -c "import torch, torchvision, pytorch3d, numpy; print(f'torch {torch.__version__} | torchvision {torchvision.__version__} | pytorch3d {pytorch3d.__version__} | numpy {numpy.__version__} | cuda {torch.cuda.is_available()}')"
+
+      - name: Run fast test suite
+        # Slow/integration tests need datasets not committed to the repo.
+        run: python -m pytest -m "not slow" -q

@@ -1,0 +1,43 @@
+# CPU-only environment for GitHub Actions CI (hosted runners have no GPU).
+#
+# Mirrors the RECOMMENDED stack from environment.yml — PyTorch 2.3.1 /
+# torchvision 0.18.1 — but CPU-only and sourced entirely from conda-forge so it
+# resolves without a CUDA toolkit. PyTorch3D is 0.7.7 here: conda-forge ships a
+# `cpu_py310` build compiled against torch 2.3.1, whereas 0.7.8 is only on the
+# GPU `pytorch3d` channel. 0.7.7 is also the stack the local Linux box runs.
+#
+# The test suite selects its device via `torch.cuda.is_available()`, so on a
+# CPU runner it exercises the same code paths as the GPU env for everything in
+# `pytest -m "not slow"` (the slow/integration tests need datasets that are not
+# committed to the repo and are intentionally excluded from CI).
+#
+# Keep the pinned versions in sync with environment.yml when that stack changes.
+name: smilify-ci
+channels:
+  - conda-forge
+dependencies:
+  # --- core deep-learning stack (CPU) — pinned to match environment.yml ---
+  - python=3.10
+  - pytorch=2.3.*=cpu*        # -> 2.3.1 cpu_mkl
+  - torchvision=0.18.*        # -> 0.18.1 (cpu)
+  - pytorch3d=0.7.7=cpu_py310*
+  - numpy<2                   # torch 2.3.1 predates full numpy-2 support (local known-good: 1.26.4)
+
+  # --- scientific / IO stack (mirrors environment.yml) ---
+  - scipy
+  - h5py
+  - pandas
+  - pillow
+  - imageio
+  - scikit-image
+  - trimesh
+  - tqdm
+  - psutil
+  - pyyaml
+  - matplotlib
+  - timm
+  - opencv          # conda-forge package; provides the cv2 module
+  - nibabel
+  - pycocotools
+  - toml
+  - pytest
