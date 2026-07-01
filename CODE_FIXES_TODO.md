@@ -7,7 +7,9 @@
 
 **Status legend:** 🔍 needs-verification · ✅ confirmed (ready to fix) · 🛠 fixed · ❎ won't-fix/not-a-bug
 
-> **Each open item has a GitHub issue** (linked in its header). Note: `C#` are this file's internal tracker ids; `#N` are GitHub issue/PR numbers (one shared sequence) — they are **not** the same. C14/C15 are fixed (no issue); C17 → existing #15.
+> **Each open item has a GitHub issue** (linked in its header). Note: `C#` are this file's internal tracker ids; `#N` are GitHub issue/PR numbers (one shared sequence) — they are **not** the same. C14/C15 are fixed (no issue); C17 → existing #15; C18 → #46; C19 → #47; C20 → #48.
+
+> **🛠 RESOLVED (2026-07-01) — import-structure refactor (branch `refactor/import-structure`):** **C8–C12 and the umbrella C16 are fixed.** Approach: make the tree a proper package (empty `__init__.py` in `smal_fitter/`, `smal_fitter/neuralSMIL/`, `smal_fitter/priors/`, `fitter_3d/`, `fitter_3d/pointcloud2smil/`, `custom_processing/`), rename `smal_fitter/smal_fitter.py` → `smal_fitter/fitter.py`, rewrite **all** cross-module imports to the absolute repo-root form, **remove all 47 `sys.path` hacks**, and launch entrypoints as `python -m <module>` from the repo root. **Deliberately NOT pip-installable** (rejected as bloat) — the goal was one consistent import convention, not packaging. Verified: `pytest` green (**83 passed** via `pytest` / `pytest tests/` / `python -m pytest`, no `PYTHONPATH`), 69/69 modules + 175 internal import targets resolve, and the benchmark / inference (incl. `mp.spawn`) / training / legacy `optimize_to_joints` flows all run under `-m`.
 
 ---
 
@@ -80,7 +82,7 @@
 
 <!-- ID — title — status — file:line — note -->
 
-### C8 — Test suite does not run clean under any single pytest invocation ✅  · [#36](https://github.com/FabianPlum/SMILify/issues/36)
+### C8 — Test suite does not run clean under any single pytest invocation 🛠 FIXED  · [#36](https://github.com/FabianPlum/SMILify/issues/36)
 - **Found:** while verifying tests/README (P0 #3) by *actually running* `pytest`.
 - **Empirical state (env `pytorch3d`, 2026-06-30):**
   - `pytest tests/ -m "not slow"` → **70 passed**, but `test_triangulation_consistency.py` (12) errors and `test_animation_export.py` (5) errors on collection.
@@ -89,19 +91,19 @@
 - **Root cause:** no `tests/conftest.py` and no `testpaths` in `pytest.ini`, so each test module relies on its own ad-hoc `sys.path` hacks, which conflict.
 - **Fix (proposed):** add a `conftest.py` that puts the right dirs on `sys.path` once, add `testpaths = tests` to `pytest.ini`, and resolve C9/C10/C11/C12 so `pytest tests/` just works.
 
-### C9 — `smal_fitter` is ambiguous (dir vs module); no `smal_fitter/__init__.py` ✅  · [#37](https://github.com/FabianPlum/SMILify/issues/37)
+### C9 — `smal_fitter` is ambiguous (dir vs module); no `smal_fitter/__init__.py` 🛠 FIXED  · [#37](https://github.com/FabianPlum/SMILify/issues/37)
 - **Symptom:** `from smal_fitter import SMALFitter` ([smal_fitter/neuralSMIL/smil_image_regressor.py:24](smal_fitter/neuralSMIL/smil_image_regressor.py#L24)) only resolves when `smal_fitter/` is on `sys.path` (so `smal_fitter` → `smal_fitter.py`). Under pytest, repo root is on the path first, so `smal_fitter` resolves to the **directory** (namespace package) and the import fails: `cannot import name 'SMALFitter' from 'smal_fitter'`.
 - **Fix:** decide whether `smal_fitter` is a package (add `__init__.py`, make imports `from smal_fitter.smal_fitter import SMALFitter`) or keep it a sys.path dir — and make it consistent. Affects all of neuralSMIL.
 
-### C10 — `utils` module name collision (`smal_fitter/utils.py` vs `fitter_3d/utils.py`) ✅  · [#38](https://github.com/FabianPlum/SMILify/issues/38)
+### C10 — `utils` module name collision (`smal_fitter/utils.py` vs `fitter_3d/utils.py`) 🛠 FIXED  · [#38](https://github.com/FabianPlum/SMILify/issues/38)
 - **Symptom:** with `smal_fitter/` on `PYTHONPATH`, `from utils import perspective_proj_withz` ([smal_fitter/p3d_renderer.py:17](smal_fitter/p3d_renderer.py#L17)) resolves to `fitter_3d/utils.py` (wrong module, no such symbol) → `test_fitter_3d_optimise` fails. Without it, the triangulation tests fail instead.
 - **Fix:** disambiguate the two `utils` modules (package-qualified imports, or rename one).
 
-### C11 — `tests/test_animation_export.py` uses an import style that can't work ✅  · [#39](https://github.com/FabianPlum/SMILify/issues/39)
+### C11 — `tests/test_animation_export.py` uses an import style that can't work 🛠 FIXED  · [#39](https://github.com/FabianPlum/SMILify/issues/39)
 - **Symptom:** `from smal_fitter.neuralSMIL.animation_export import ...` requires `smal_fitter` (and `neuralSMIL`) to be importable **packages**; they have no `__init__.py`, so this errors (`'smal_fitter' is not a package`) under every invocation tried. Inconsistent with the rest of the suite (which imports via `sys.path`).
 - **Fix:** rewrite the import to match the suite's convention (depends on C9 decision).
 
-### C12 — stray test file collected from repo root ✅  · [#40](https://github.com/FabianPlum/SMILify/issues/40)
+### C12 — stray test file collected from repo root 🛠 FIXED  · [#40](https://github.com/FabianPlum/SMILify/issues/40)
 - **Symptom:** `smal_fitter/sleap_data/test_sleap_preprocessing.py` is picked up by bare `pytest` (no `testpaths`) and errors: `from preprocess_sleap_dataset import ...` (cwd-relative).
 - **Fix:** add `testpaths = tests` to `pytest.ini` (and/or move/repair this file).
 
@@ -126,7 +128,7 @@
 - **NOTE — C14's grep was incomplete:** it scoped to `smal_fitter/*.py` and missed `smal_fitter/neuralSMIL/`. Those entrypoints DO handle CVD but LATE (in `main()`, after `import torch`): `train_multiview_regressor.py:2227` (only CUDA_DEVICE_ORDER), `train_smil_regressor.py:1310-1311`, `test_smil_regressor_ground_truth.py:1159-1160`, `main.py:103-104`; `run_multiview_inference.py` only *prints* CVD, never sets it (why inference works on 2.3.1). They passed in testing, but the late-set pattern is fragile on torch ≥ 2.3 — normalize (set CVD before torch) in the code pass.
 - **Also pre-existing (not from this branch):** importing `Unreal2Pytorch3D` (and its chain) sets `CUDA_VISIBLE_DEVICES` = `config.GPU_IDS` at **import time** — verified the same on `master`. Any importer (dataset_preprocessing, run_singleview_inference, train_smil_regressor, smil_datasets, …) inherits this side effect. Pin down the exact module and remove the import-time write when normalizing CVD handling.
 
-### C16 — Unify import / package management across the repo ✅ (umbrella)  · [#42](https://github.com/FabianPlum/SMILify/issues/42)
+### C16 — Unify import / package management across the repo 🛠 FIXED (umbrella)  · [#42](https://github.com/FabianPlum/SMILify/issues/42)
 - **Symptom:** scripts depend on *where* they are run from and on ad-hoc `sys.path.append(...)` hacks, so imports and cross-module communication break depending on the working directory. There is no proper package: `smal_fitter/` (and `smal_fitter/neuralSMIL/`) have no `__init__.py`, so `smal_fitter` is ambiguous (the directory vs the `smal_fitter.py` module), `from smal_fitter import SMALFitter` only resolves from certain paths, and there are name collisions (`smal_fitter/utils.py` vs `fitter_3d/utils.py`). Most visible in the **test suite** (no single `pytest` invocation runs green) but it runs throughout — neuralSMIL scripts must be launched from specific directories, and the CVD import-order breakage in C14/C15 is downstream of the same fragility.
 - **Umbrella / root cause for:** C8 (no `conftest.py` / `testpaths`), C9 (`smal_fitter` not a package), C10 (`utils` name collision), C11 (`test_animation_export` import style), C12 (stray collected test), and the import-order pieces of C14 / C15.
 - **Fix direction:** make the repo a proper installable package — add `__init__.py` files + a `pyproject.toml`/setup so it can be `pip install -e .`; replace the ad-hoc `sys.path.append` hacks with package-qualified imports; resolve the `utils` and `smal_fitter` name collisions. Then a single `pytest` — and every entrypoint — works regardless of CWD. This is the foundational cleanup the other import-related items build on; do it before C17.
@@ -134,3 +136,20 @@
 ### C17 — Run `ruff` across the repo — SEPARATE PR, do LAST 📌  · [#15](https://github.com/FabianPlum/SMILify/issues/15)
 - Once the functional fixes above (especially **C16** import/packaging) are done, let `ruff` loose on the repo (lint + format + autofix) to clean up unused imports, dead code, style, etc.
 - **Separate PR**, tracked by issue [#15](https://github.com/FabianPlum/SMILify/issues/15). Deliberately last, so `ruff` operates on the unified package structure rather than churning code that is about to be restructured by C16.
+
+### C18 — `benchmark_model.py` reports PCK at only one resolution 🔍  · [#46](https://github.com/FabianPlum/SMILify/issues/46)
+- **Found:** running the neuralSMIL benchmark (2026-07-01).
+- **Symptom:** `PCK@Npx` is resolution-dependent, but [benchmark_model.py](smal_fitter/neuralSMIL/benchmark_model.py) reports it at a **single** scale — `target_resolution`/`max(override_size)` for single-view ([_compute_pck_errors_singleview](smal_fitter/neuralSMIL/benchmark_model.py#L517-L536)), per-view native `image_sizes`/override for multi-view ([_get_original_image_size](smal_fitter/neuralSMIL/benchmark_model.py#L108-L121)). `input_resolution` (224 ViT / 512 UNet) is derived in both paths ([SV](smal_fitter/neuralSMIL/benchmark_model.py#L397), [MV](smal_fitter/neuralSMIL/benchmark_model.py#L932)) but only **logged**, never used for PCK. `PCK@5px` at 224 vs at a native 2048-frame are wildly different, so one number is ambiguous.
+- **Fix:** report **two** PCKs (@5 + full curve, both paths, plots + `.npy`): (1) at the model **input resolution** (H=W=`input_resolution`), (2) at **native** resolution (`--orig_width`/`--orig_height` override if given, else dataset). If the override flag is passed, native = override — **no** redundant third PCK for the dataset's stored sizes. Exactly two reports.
+
+### C19 — `smal_fitter/priors/shape_prior.py` imports nonexistent `global_utils` (dead module) 🔍  · [#47](https://github.com/FabianPlum/SMILify/issues/47)
+- **Found:** import-health sweep during the import-structure refactor (2026-07-01).
+- **Symptom:** [smal_fitter/priors/shape_prior.py](smal_fitter/priors/shape_prior.py) starts with `from global_utils import config`, but no `global_utils` module exists anywhere in the repo → `ModuleNotFoundError`.
+- **Scope:** `shape_prior` is **imported by nothing** in the active tree (dead legacy module from upstream SMALify); **pre-existing** on `master`, not caused by the import refactor — so nothing currently breaks.
+- **Fix:** delete the dead module, or (if the quadruped shape prior is still wanted) repair the import (`import config`) and wire it back in.
+
+### C20 — `smal_fitter/outputs_imgs_to_video.py` runs file I/O at import time (no `__main__` guard) 🔍  · [#48](https://github.com/FabianPlum/SMILify/issues/48)
+- **Found:** import-health sweep during the import-structure refactor (2026-07-01).
+- **Symptom:** [smal_fitter/outputs_imgs_to_video.py](smal_fitter/outputs_imgs_to_video.py) executes its video-assembly routine at **module top level** (no `if __name__ == "__main__":` guard) against a hardcoded path, so merely *importing* it runs that code and raises `FileNotFoundError`.
+- **Scope:** **imported by nothing** (standalone legacy helper); **pre-existing** on `master`, not caused by the import refactor. Makes the file unsafe to import for reuse/tooling.
+- **Fix:** move the top-level execution into an `if __name__ == "__main__":` block (and/or an `argparse` CLI) so importing only defines `create_video_from_images(...)`.

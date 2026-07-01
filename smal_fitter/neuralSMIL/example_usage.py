@@ -7,8 +7,8 @@ alongside the traditional MLP regression head.
 
 import torch
 import numpy as np
-from smil_image_regressor import SMILImageRegressor
-from training_config import TrainingConfig
+from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
+from smal_fitter.neuralSMIL.training_config import TrainingConfig
 
 def create_dummy_data(batch_size=2, image_size=224):
     """Create dummy data for testing."""

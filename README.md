@@ -27,7 +27,7 @@ Example 4-5 camera inference results with a model trained on data collected from
 | Path | What lives here |
 |---|---|
 | [`smal_fitter/neuralSMIL/`](smal_fitter/neuralSMIL/) | **Neural inference** — learned regressors that predict SMIL parameters from images (single- and multi-view). Training, inference and benchmarking entrypoints live here. |
-| [`smal_fitter/smal_fitter.py`](smal_fitter/smal_fitter.py) | **Optimization-based fitting** (`SMALFitter`, an `nn.Module`) — see *Architecture* below. |
+| [`smal_fitter/fitter.py`](smal_fitter/fitter.py) | **Optimization-based fitting** (`SMALFitter`, an `nn.Module`) — see *Architecture* below. |
 | [`smal_fitter/sleap_data/`](smal_fitter/sleap_data/) | SLEAP multi-view preprocessing toolchain + dataset loaders. |
 | [`smal_model/`](smal_model/) | The SMAL/SMIL parametric model (differentiable linear-blend skinning). |
 | [`fitter_3d/`](fitter_3d/) | 3D **mesh registration** — fits a template model to target `.obj` meshes (used when building new parametric models). |
@@ -42,7 +42,7 @@ Example 4-5 camera inference results with a model trained on data collected from
 SMILify fits the same `smal_model` (SMAL/SMIL parametric model) in two ways:
 
 1. **Neural inference** ([`smal_fitter/neuralSMIL/`](smal_fitter/neuralSMIL/)) — learned regressors predict SMIL parameters (pose, shape, translation, cameras) directly from RGB images, single- or multi-view. This is the primary, actively-developed path; everything from *Dataset preprocessing* onward in this README describes it. See [smal_fitter/neuralSMIL/README.md](smal_fitter/neuralSMIL/README.md).
-2. **Optimization-based fitting** ([`smal_fitter/smal_fitter.py`](smal_fitter/smal_fitter.py), class `SMALFitter`) — an `nn.Module` that optimizes per-frame pose, shape (betas), translation and FOV by gradient descent against 2D-joint reprojection, silhouette and prior losses. Driven by the root [`config.py`](config.py); see [legacy/README.md](legacy/README.md). The related 3D **mesh registration** in [`fitter_3d/`](fitter_3d/) is the optimization pipeline used to author new parametric models.
+2. **Optimization-based fitting** ([`smal_fitter/fitter.py`](smal_fitter/fitter.py), class `SMALFitter`) — an `nn.Module` that optimizes per-frame pose, shape (betas), translation and FOV by gradient descent against 2D-joint reprojection, silhouette and prior losses. Driven by the root [`config.py`](config.py); see [legacy/README.md](legacy/README.md). The related 3D **mesh registration** in [`fitter_3d/`](fitter_3d/) is the optimization pipeline used to author new parametric models.
 
 New parametric models are authored in Blender via the SMIL addon — see *Adding new parametric models* below.
 
@@ -63,11 +63,11 @@ The conda environment is defined in [environment.yml](environment.yml). The reco
    conda activate pytorch3d
    ```
 
-3. **Test your installation:**
+3. **Test your installation** (run from the repo root):
    ```bash
-   pytest tests/ -m "not slow" --continue-on-collection-errors
+   pytest tests/ -m "not slow"
    ```
-   (See [tests/README.md](tests/README.md) — a couple of modules currently error on import while the test harness is being repaired.)
+   (See [tests/README.md](tests/README.md).)
 
 > On an HPC cluster you can instead run [`hpc_files/install.sh`](hpc_files/install.sh), which performs the same conda setup end-to-end (supports `--skip-tests` and a configurable `ENV_NAME`).
 
@@ -151,7 +151,7 @@ The `label` column must match the session sub-folder name exactly.
 _(Example command, using only the first 500 frames of a multi-view session. Remove the '--max_frames_per_session', if you wish to use the complete dataset)_
 
 ```bash
-python smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py \
+python -m smal_fitter.sleap_data.preprocess_sleap_multiview_dataset \
     /path/to/sessions \
     output_dataset.h5 \
     --joint_lookup_table /path/to/sessions/joint_lookup.csv \
@@ -187,7 +187,7 @@ Everything — model, dataset, optimiser, loss curriculum, output paths — is c
 In practice the only CLI argument you usually need is `--num_gpus` to match the hardware available on your system:
 
 ```bash
-python smal_fitter/neuralSMIL/train_multiview_regressor.py \
+python -m smal_fitter.neuralSMIL.train_multiview_regressor \
     --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json \
     --num_gpus 2
 ```
@@ -195,7 +195,7 @@ python smal_fitter/neuralSMIL/train_multiview_regressor.py \
 Training resumes automatically from `training.resume_checkpoint` if set in the config. You can also pass it on the CLI:
 
 ```bash
-python smal_fitter/neuralSMIL/train_multiview_regressor.py \
+python -m smal_fitter.neuralSMIL.train_multiview_regressor \
     --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json \
     --resume_checkpoint multiview_checkpoints/best_model.pth
 ```
@@ -203,7 +203,7 @@ python smal_fitter/neuralSMIL/train_multiview_regressor.py \
 Alternatively, launch via `torchrun` for cluster use (ignores `--num_gpus`):
 
 ```bash
-torchrun --nproc_per_node=4 smal_fitter/neuralSMIL/train_multiview_regressor.py \
+torchrun --nproc_per_node=4 -m smal_fitter.neuralSMIL.train_multiview_regressor \
     --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json
 ```
 
@@ -234,7 +234,7 @@ Inference runs on a **pre-processed HDF5 dataset** (the same format produced by 
 The script loads the checkpoint automatically from `multiview_checkpoints/best_model.pth` (or `final_model.pth`) unless another path is set in the config.
 
 ```bash
-python smal_fitter/neuralSMIL/run_multiview_inference.py \
+python -m smal_fitter.neuralSMIL.run_multiview_inference \
     --dataset output_dataset.h5 \
     --smal_file 3D_model_prep/SMILy_STICK.pkl \
     --num_gpus 2
@@ -263,7 +263,7 @@ The single-view script works directly on a raw video or a folder of images.
 When `--crop_mode bbox_crop` is used, bounding boxes are derived from an existing SLEAP project, tightly cropping each frame around the detected specimen — this is the recommended mode when the model was trained with `bbox_crop`.
 
 ```bash
-python smal_fitter/neuralSMIL/run_singleview_inference.py \
+python -m smal_fitter.neuralSMIL.run_singleview_inference \
     --checkpoint checkpoints/best_model.pth \
     --input_video /path/to/video.mp4 \
     --output_folder /path/to/output \
@@ -296,7 +296,7 @@ The model type is **auto-detected** from the checkpoint — no flag needed:
 - otherwise → single-view
 
 ```bash
-python smal_fitter/neuralSMIL/benchmark_model.py \
+python -m smal_fitter.neuralSMIL.benchmark_model \
     --checkpoint multiview_checkpoints/best_model.pth \
     --dataset_path output_dataset.h5 \
     --smal-file 3D_model_prep/SMILy_STICK.pkl \
@@ -348,7 +348,7 @@ The addon panel provides a single interface for importing existing SMIL/SMAL `.p
 2. **Register the template to target meshes** — use the [3D mesh registration pipeline](fitter_3d/) to fit the template model to a collection of target `.obj` meshes (e.g. 3D scans of different individuals or species). Registration optimises shape, pose, scale, and per-vertex deformations to align the template topology to each target (see the [fitter_3d README](fitter_3d/README.md) for configuration details). The registration results are saved as `.npz` files containing the registered vertex positions and labels for each target.
 
    ```bash
-   python fitter_3d/optimise.py --mesh_dir path/to/target_meshes --yaml_src fitter_3d/ants_cfg.yaml
+   python -m fitter_3d.optimise --mesh_dir path/to/target_meshes --yaml_src fitter_3d/ants_cfg.yaml
    ```
 
    <img src="docs/ant_registered_meshes.gif" width="800">

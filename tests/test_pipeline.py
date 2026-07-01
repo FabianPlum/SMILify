@@ -6,42 +6,35 @@ import os
 # Add the parent directory to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
 
-def run_script(script_path, args=[]):
-    command = [sys.executable, script_path] + args
-    result = subprocess.run(command, capture_output=True, text=True)
-    print(f"\nOutput from {script_path}:")
+# Entrypoints are launched as modules (`python -m pkg.mod`) from the repo root, so
+# absolute imports resolve regardless of where pytest itself runs. Running a script
+# by path would instead put the script's own dir on sys.path and break those imports.
+def run_script(module, args=[], env=None):
+    command = [sys.executable, '-m', module] + args
+    result = subprocess.run(command, capture_output=True, text=True, cwd=parent_dir, env=env)
+    print(f"\nOutput from -m {module}:")
     print(result.stdout)
     if result.stderr:
-        print(f"Output from {script_path}:")
+        print(f"Output from -m {module}:")
         print(result.stderr)
     return result
 
-def run_script_with_env(script_path, args=[], env=None):
-    """Run script with custom environment variables."""
-    command = [sys.executable, script_path] + args
-    result = subprocess.run(command, capture_output=True, text=True, env=env)
-    print(f"\nOutput from {script_path}:")
-    print(result.stdout)
-    if result.stderr:
-        print(f"Output from {script_path}:")
-        print(result.stderr)
-    return result
+def run_script_with_env(module, args=[], env=None):
+    """Run an entrypoint module (`python -m`) with custom environment variables."""
+    return run_script(module, args, env=env)
 
 def test_fitter_3d_optimise(capsys):
-    script_path = os.path.join(parent_dir, 'fitter_3d', 'optimise.py')
-    result = run_script(script_path, ['--mesh_dir', 'fitter_3d/ATTA_BOI', '--scheme', 'default', '--lr', '1e-3', '--nits', '10'])
-    assert result.returncode == 0, f"fitter_3d/optimise.py failed with error:\n{result.stderr}"
-    
+    result = run_script('fitter_3d.optimise', ['--mesh_dir', 'fitter_3d/ATTA_BOI', '--scheme', 'default', '--lr', '1e-3', '--nits', '10'])
+    assert result.returncode == 0, f"fitter_3d.optimise failed with error:\n{result.stderr}"
+
     # Capture and print the output
     captured = capsys.readouterr()
     print(captured.out)
 
 def test_smal_fitter_optimize_to_joints(capsys):
-    script_path = os.path.join(parent_dir, 'smal_fitter', 'optimize_to_joints.py')
-    result = run_script(script_path, ['--test'])
-    assert result.returncode == 0, f"smal_fitter/optimize_to_joints.py failed with error:\n{result.stderr}"
+    result = run_script('smal_fitter.optimize_to_joints', ['--test'])
+    assert result.returncode == 0, f"smal_fitter.optimize_to_joints failed with error:\n{result.stderr}"
     
     # Capture and print the output
     captured = capsys.readouterr()
@@ -49,8 +42,7 @@ def test_smal_fitter_optimize_to_joints(capsys):
 
 def test_neural_smil_config_validation():
     """Test neural SMIL training configuration logic (pure, no filesystem dependencies)."""
-    sys.path.insert(0, os.path.join(parent_dir, 'smal_fitter', 'neuralSMIL'))
-    from training_config import TrainingConfig
+    from smal_fitter.neuralSMIL.training_config import TrainingConfig
 
     # Test dataset path resolution
     test_textured_path = TrainingConfig.get_data_path('test_textured')
@@ -89,15 +81,12 @@ def test_neural_smil_training_pipeline(capsys):
     temp_dir = tempfile.mkdtemp(prefix='neural_smil_test_')
     
     try:
-        # Create a temporary test configuration that overrides training parameters for quick testing
-        script_path = os.path.join(parent_dir, 'smal_fitter', 'neuralSMIL', 'train_smil_regressor.py')
-        
         # Run with test_textured dataset and minimal epochs for quick integration test
         # Use environment variable to override checkpoint directory for testing
         test_env = os.environ.copy()
         test_env['PYTEST_TEMP_DIR'] = temp_dir
-        
-        result = run_script_with_env(script_path, [
+
+        result = run_script_with_env('smal_fitter.neuralSMIL.train_smil_regressor', [
             '--dataset', 'test_textured',
             '--num_epochs', '2',  # Very minimal training for integration test
             '--batch_size', '4',  # Small batch size for testing

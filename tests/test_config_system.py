@@ -14,14 +14,11 @@ import tempfile
 
 import pytest
 
-# Ensure neuralSMIL is importable
 _neural_smil = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "smal_fitter", "neuralSMIL")
 )
-if _neural_smil not in sys.path:
-    sys.path.insert(0, _neural_smil)
 
-from configs import (
+from smal_fitter.neuralSMIL.configs import (
     BaseTrainingConfig,
     SingleViewConfig,
     MultiViewConfig,
@@ -248,10 +245,7 @@ class TestSmalModelDownstreamOverwrite:
 
     def test_apply_smal_file_override_sets_smal_file_and_shape_family(self):
         """apply_smal_file_override overwrites config.SMAL_FILE and config.SHAPE_FAMILY as used by scripts."""
-        # Ensure repo root is on path so "import config" in apply_smal_file_override finds project config.py
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        if repo_root not in sys.path:
-            sys.path.insert(0, repo_root)
         import config as project_config
         original_smal = getattr(project_config, "SMAL_FILE", None)
         original_shape = getattr(project_config, "SHAPE_FAMILY", -1)

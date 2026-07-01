@@ -34,8 +34,6 @@ from pathlib import Path
 # Standard sys.path pattern used by sibling scripts in this directory so
 # `import config` and `from neuralSMIL...` resolve when the script is run
 # directly (rather than as a module).
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import imageio.v2 as iio
 import matplotlib
@@ -45,8 +43,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import config
-from neuralSMIL.configs.config_utils import apply_smal_file_override
-from Unreal2Pytorch3D import load_SMIL_Unreal_multiview_sample
+from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override
+from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_multiview_sample
 
 
 def _plot_panel(

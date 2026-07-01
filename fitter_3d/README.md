@@ -22,13 +22,13 @@ Two options to run an optimisation:
 
 - Single stage. Pass args into optimise.py to start a single scheme of optimisation, for example:
 
-`python fitter_3d/optimise.py --mesh_dir fitter_3d/ATTA_BOI --scheme default --lr 1e-3 --nits 100`
+`python -m fitter_3d.optimise --mesh_dir fitter_3d/ATTA_BOI --scheme default --lr 1e-3 --nits 100`
 
 (`--mesh_dir` defaults to `fitter_3d/ATTA_BOI`, the bundled example mesh, so it can be omitted for a first run.)
 
 - For a more complicated (eg multi-stage) and fine tuned optimisation, add a custom .yaml file. See example_cfg.yaml for how it must be organised. This can then be called in optimise.py using:
 
-`python fitter_3d/optimise.py --mesh_dir fitter_3d/ATTA_BOI --yaml_src fitter_3d/example_cfg.yaml`
+`python -m fitter_3d.optimise --mesh_dir fitter_3d/ATTA_BOI --yaml_src fitter_3d/example_cfg.yaml`
 
 Note: only the top-level `args:` block in the YAML (e.g. `results_dir`, `shape_family_id`) overrides the matching command-line flags. The per-stage settings (`scheme`, `nits`, `lr`, `loss_weights`) are taken entirely from the YAML's `stages:` list — when a YAML is supplied, the CLI `--scheme`/`--lr`/`--nits` are ignored.
 

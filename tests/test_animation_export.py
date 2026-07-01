@@ -16,8 +16,6 @@ import torch
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 NEURAL_DIR = os.path.join(os.path.dirname(CURRENT_DIR), "smal_fitter", "neuralSMIL")
-sys.path.append(os.path.dirname(CURRENT_DIR))
-sys.path.append(NEURAL_DIR)
 
 from smal_fitter.neuralSMIL.animation_export import (  # noqa: E402
     AnimationRecorder,

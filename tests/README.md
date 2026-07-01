@@ -11,9 +11,9 @@ animation export.
 conda activate pytorch3d
 ```
 
-- **Run pytest from the repository root, scoped to `tests/`** (`pytest tests/`) so the `data/` relative paths resolve and pytest does not pick up the stray, currently-broken `smal_fitter/sleap_data/test_sleap_preprocessing.py`.
+- **Run pytest from the repository root** (`pytest`, or `pytest tests/`) so the `data/` relative paths resolve. `pytest.ini` sets `testpaths = tests`, so a plain `pytest` collects only this directory; module-local `test_*.py` files elsewhere in the tree (e.g. `smal_fitter/sleap_data/`) are dev/integration scripts run explicitly by path, not auto-collected.
 - The **slow** training test (`test_neural_smil_training_pipeline`) shells out to
-  `train_smil_regressor.py` on the `test_textured` dataset, which must exist at
+  `python -m smal_fitter.neuralSMIL.train_smil_regressor` on the `test_textured` dataset, which must exist at
   `data/replicAnt_trials/replicAnt-x-SMIL-TEX/` (20 images + SMIL annotations).
 - The fitter tests run the real optimization scripts, so they need PyTorch3D and a
   valid `config.SMAL_FILE` model (`test_fitter_3d_optimise` uses the bundled
@@ -21,30 +21,22 @@ conda activate pytorch3d
 
 ## Running tests
 
-> **⚠️ Known issue — test-harness import paths are being repaired (not yet fixed).**
-> The suite does **not** collect cleanly under a plain `pytest` run yet:
-> `tests/test_animation_export.py` and `tests/test_triangulation_consistency.py` fail to import
-> because `smal_fitter` is not a proper Python package (no `__init__.py`) and the test modules
-> rely on conflicting `sys.path` hacks. There is currently **no single invocation that runs the
-> whole suite green** — putting `smal_fitter/` on the path fixes the triangulation tests but
-> breaks the `fitter_3d` subprocess test via a `utils` module-name collision. A fix
-> (a `tests/conftest.py` + `testpaths = tests` in `pytest.ini`) is planned. Until then, use the
-> commands below.
+The whole suite collects and runs cleanly from the repository root — no `PYTHONPATH`
+prefix, no `--continue-on-collection-errors`, and no per-module workarounds are needed.
 
 The only registered marker is `slow` (see `pytest.ini`); `test_neural_smil_training_pipeline`
 is the single test carrying it.
 
 ```bash
-# Fast tests, tolerating the known collection errors — ~70 pass today
-pytest tests/ -m "not slow" --continue-on-collection-errors
+# The whole suite
+pytest
 
-# The modules that currently pass cleanly on their own
+# Fast tests only (skip the slow training subprocess)
+pytest -m "not slow"
+
+# A subset of modules
 pytest tests/test_config_system.py tests/test_augmentation.py \
        tests/test_curriculum_sync.py tests/test_pipeline.py -m "not slow"
-
-# The triangulation tests pass ONLY with smal_fitter on the path
-# (this very requirement is what breaks test_fitter_3d_optimise — hence the planned fix)
-PYTHONPATH=smal_fitter pytest tests/test_triangulation_consistency.py
 
 # A single test function
 pytest tests/test_pipeline.py::test_neural_smil_config_validation -v -s
@@ -72,13 +64,13 @@ Two files in this directory are **not** pytest modules (no `test_*` functions) a
 
 | Test | Speed | What it does |
 |------|-------|--------------|
-| `test_fitter_3d_optimise` | medium | Runs `fitter_3d/optimise.py --mesh_dir fitter_3d/ATTA_BOI --scheme default --lr 1e-3 --nits 10` on the bundled Atta mesh. |
+| `test_fitter_3d_optimise` | medium | Runs `python -m fitter_3d.optimise --mesh_dir fitter_3d/ATTA_BOI --scheme default --lr 1e-3 --nits 10` on the bundled Atta mesh. |
 | `test_smal_fitter_optimize_to_joints` | medium | Runs the SMAL `optimize_to_joints` optimization pipeline. |
 | `test_neural_smil_config_validation` | fast (<1 s, **pure logic, no filesystem**) | Asserts `get_data_path('test_textured')` resolves to `data/replicAnt_trials/replicAnt-x-SMIL-TEX`, the 85/5/10 train/val/test split, that the loss-curriculum weights are a dict containing `keypoint_2d`, and that the per-epoch learning rate is positive. |
-| `test_neural_smil_training_pipeline` | **slow** (`@pytest.mark.slow`) | Shells out to `train_smil_regressor.py` for **2 epochs** on `test_textured` with `--batch_size 4 --checkpoint DISABLE_CHECKPOINT_LOADING --scale_trans_mode ignore`. Writes to a temporary directory and disables checkpoint saving, so it never overwrites trained models; artifacts are cleaned up afterwards. Asserts training completes. |
+| `test_neural_smil_training_pipeline` | **slow** (`@pytest.mark.slow`) | Shells out to `python -m smal_fitter.neuralSMIL.train_smil_regressor` for **2 epochs** on `test_textured` with `--batch_size 4 --checkpoint DISABLE_CHECKPOINT_LOADING --scale_trans_mode ignore`. Writes to a temporary directory and disables checkpoint saving, so it never overwrites trained models; artifacts are cleaned up afterwards. Asserts training completes. |
 
 ## CI
 
-Once the import-path issue above is resolved, `pytest tests/ -m "not slow"` is the fast-feedback
-signal on every change, and `pytest tests/ -m "slow"` exercises the full training subprocess on
-scheduled builds (or before a release).
+`pytest -m "not slow"` is the fast-feedback signal on every change, and
+`pytest -m "slow"` exercises the full training subprocess on scheduled builds
+(or before a release).

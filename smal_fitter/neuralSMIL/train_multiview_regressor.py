@@ -56,18 +56,15 @@ import gc
 import imageio
 from typing import Optional
 
-# Add parent directories to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from multiview_smil_regressor import MultiViewSMILImageRegressor, create_multiview_regressor
-from smil_image_regressor import rotation_6d_to_axis_angle
-from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
-from smal_fitter import SMALFitter
+from smal_fitter.neuralSMIL.multiview_smil_regressor import MultiViewSMILImageRegressor, create_multiview_regressor
+from smal_fitter.neuralSMIL.smil_image_regressor import rotation_6d_to_axis_angle
+from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
+from smal_fitter.fitter import SMALFitter
 import config
-from training_config import TrainingConfig
-from configs import MultiViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
-from multiview_visualization import (
+from smal_fitter.neuralSMIL.training_config import TrainingConfig
+from smal_fitter.neuralSMIL.configs import MultiViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
+from smal_fitter.neuralSMIL.multiview_visualization import (
     create_multiview_visualization,
     create_rendered_view_with_keypoints,
     print_joint_scale_diagnostics,
@@ -2378,7 +2375,7 @@ def main(config: dict):
     # Determine input resolution based on backbone
     # This ensures the renderer is initialized with the correct size
     backbone_name = config['backbone_name']
-    from backbone_factory import BackboneFactory
+    from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
     input_resolution = config.get(
         'input_resolution',
         BackboneFactory.get_default_input_resolution(backbone_name)

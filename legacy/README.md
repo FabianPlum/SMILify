@@ -20,7 +20,7 @@ Run on the default synthetic sample image generated with _[replicAnt](https://gi
 <img src="../docs/SMIL-fit-ATTA.gif">
 
 ```
-python smal_fitter/optimize_to_joints.py
+python -m smal_fitter.optimize_to_joints
 ```
 
 Outputs are written to a timestamped directory `checkpoints/<YYYYMMDD-HHMMSS>/` (`config.OUTPUT_DIR`). Files named `stX_epY` mean stage X, iteration Y of the fitter; the final output is `st10_ep0` (`config.EPOCH_NAME`).
@@ -38,7 +38,7 @@ Outputs are written to a timestamped directory `checkpoints/<YYYYMMDD-HHMMSS>/` 
 > **Current limitation:** `generate_video.py` reads `config.CHECKPOINT_NAME`, but `config.py` does **not** define `CHECKPOINT_NAME` by default — so the script raises `AttributeError` as shipped. Until this is fixed, add `CHECKPOINT_NAME = "<YYYYMMDD-HHMMSS>"` to `config.py` (the timestamped directory name under `checkpoints/` from your run). `EPOCH_NAME` defaults to `"st10_ep0"` (the final stage); set it to another `stX_epY` to render an intermediate result.
 
 ```
-python smal_fitter/generate_video.py
+python -m smal_fitter.generate_video
 ```
 
 The video is exported to `exported/`. Assemble the frames with e.g. [FFMPEG](https://ffmpeg.org/):
@@ -60,7 +60,7 @@ SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176
 ```
 
 ```
-python smal_fitter/optimize_to_joints.py
+python -m smal_fitter.optimize_to_joints
 ```
 
 ## Running on alternative data

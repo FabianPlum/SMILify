@@ -11,7 +11,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from remove_temp_files import remove_temp_files, remove_empty_and_no_stl_directories, count_valid_scans
+from custom_processing.remove_temp_files import remove_temp_files, remove_empty_and_no_stl_directories, count_valid_scans
 
 # URL to scrape
 BASE_URL = "https://biomedisa.info/antscan/?show_all=True#"

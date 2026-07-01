@@ -381,7 +381,7 @@ betas = calc.calculate_betas([1.75, 70.0, 1.80, 0.85], gender='male')  # 4-featu
 print(betas)   # numpy array of 10 beta values
 ```
 
-Run the module directly for a worked demo: `python custom_processing/smpl_beta_calculator.py` (executes `demo()`).
+Run the module directly for a worked demo: `python -m custom_processing.smpl_beta_calculator` (executes `demo()`).
 
 ---
 

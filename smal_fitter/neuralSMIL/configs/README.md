@@ -12,28 +12,30 @@ This package provides a single, type-safe configuration system for both **single
 
 ## Quick start
 
+Run from the repo root (entrypoints are launched as modules).
+
 ### Single-view training with a JSON config
 
 ```bash
-python train_smil_regressor.py --config configs/examples/singleview_baseline.json
+python -m smal_fitter.neuralSMIL.train_smil_regressor --config smal_fitter/neuralSMIL/configs/examples/singleview_baseline.json
 ```
 
 ### Multi-view training with a JSON config
 
 ```bash
-python train_multiview_regressor.py --config configs/examples/multiview_baseline.json
+python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json
 ```
 
 ### Multi-GPU training
 
 ```bash
-python train_multiview_regressor.py --config configs/examples/multiview_mouse_UNET_long.json --num_gpus 2
+python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/multiview_mouse_UNET_long.json --num_gpus 2
 ```
 
 ### Override from CLI
 
 ```bash
-python train_smil_regressor.py --config configs/examples/singleview_baseline.json --batch_size 8 --dataset my_data.h5
+python -m smal_fitter.neuralSMIL.train_smil_regressor --config smal_fitter/neuralSMIL/configs/examples/singleview_baseline.json --batch_size 8 --dataset my_data.h5
 ```
 
 ### Without a config file (legacy behavior)
@@ -358,15 +360,17 @@ JSON does not allow integer keys. Use **string** keys for epoch-based dicts; the
 
 ## Using the examples
 
+Run these from the repo root.
+
 ```bash
 # Single-view
-python train_smil_regressor.py --config configs/examples/singleview_baseline.json
+python -m smal_fitter.neuralSMIL.train_smil_regressor --config smal_fitter/neuralSMIL/configs/examples/singleview_baseline.json
 
 # Multi-view
-python train_multiview_regressor.py --config configs/examples/multiview_baseline.json --dataset_path /path/to/multiview.h5
+python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json --dataset_path /path/to/multiview.h5
 
 # Multi-view with mixed precision (CLI override)
-python train_multiview_regressor.py --config configs/examples/multiview_sticks.json --use_mixed_precision
+python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/multiview_sticks.json --use_mixed_precision
 ```
 
 Copy an example to your project and edit; keep the `mode` field and the structure above so the loader and legacy bridge continue to work.

@@ -14,13 +14,7 @@ import GPUtil
 from collections import defaultdict
 import pickle as pkl
 
-# Add the parent directory to the Python path to find config module
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
-
-from utils import try_mkdir, plot_mesh, equal_3d_axes
+from fitter_3d.utils import try_mkdir, plot_mesh, equal_3d_axes
 
 class PerformanceMonitor:
     def __init__(self):
