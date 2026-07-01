@@ -20,19 +20,14 @@ Usage:
 """
 
 import os
-import sys
 import argparse
 import copy
-import time
-from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, Tuple, Optional
 
-import h5py
 import numpy as np
 import cv2
 import toml
 from scipy.optimize import least_squares
-from tqdm import tqdm
 
 # Reuse functions from triangulation script
 from smal_fitter.sleap_data.triangulate_3d_points import (
@@ -48,6 +43,7 @@ from smal_fitter.sleap_data.triangulate_3d_points import (
 # ---------------------------------------------------------------------------
 # Gather 3D-2D correspondences for a single camera
 # ---------------------------------------------------------------------------
+
 
 def gather_correspondences(
     kp_3d: np.ndarray,
@@ -83,7 +79,7 @@ def gather_correspondences(
     if len(fi_idx) == 0:
         return np.zeros((0, 3)), np.zeros((0, 2))
 
-    pts_3d = kp_3d[fi_idx, ki_idx]       # (M, 3)
+    pts_3d = kp_3d[fi_idx, ki_idx]  # (M, 3)
     pts_2d_raw = coords_2d[fi_idx, ki_idx]  # (M, 2)
 
     # Undistort using ORIGINAL distortion params (these are not optimized)
@@ -104,10 +100,11 @@ def gather_correspondences(
 # Camera parameter packing / unpacking
 # ---------------------------------------------------------------------------
 
+
 def pack_params(cam: dict, optimize_intrinsics: bool = True) -> np.ndarray:
     """Pack camera parameters into a flat vector."""
     rvec = cam["rvec"].ravel()  # (3,)
-    t = cam["t"].ravel()        # (3,)
+    t = cam["t"].ravel()  # (3,)
 
     if optimize_intrinsics:
         K = cam["K"]
@@ -117,8 +114,7 @@ def pack_params(cam: dict, optimize_intrinsics: bool = True) -> np.ndarray:
         return np.concatenate([rvec, t])  # 6 params
 
 
-def unpack_params(params: np.ndarray, cam_template: dict,
-                  optimize_intrinsics: bool = True) -> dict:
+def unpack_params(params: np.ndarray, cam_template: dict, optimize_intrinsics: bool = True) -> dict:
     """Unpack flat vector back into a camera dict."""
     cam = copy.deepcopy(cam_template)
     cam["rvec"] = params[:3]
@@ -127,11 +123,14 @@ def unpack_params(params: np.ndarray, cam_template: dict,
 
     if optimize_intrinsics:
         fx, fy, cx, cy = params[6:10]
-        cam["K"] = np.array([
-            [fx,  0, cx],
-            [ 0, fy, cy],
-            [ 0,  0,  1],
-        ], dtype=np.float64)
+        cam["K"] = np.array(
+            [
+                [fx, 0, cx],
+                [0, fy, cy],
+                [0, 0, 1],
+            ],
+            dtype=np.float64,
+        )
 
     return cam
 
@@ -139,6 +138,7 @@ def unpack_params(params: np.ndarray, cam_template: dict,
 # ---------------------------------------------------------------------------
 # Residual function for scipy.optimize.least_squares
 # ---------------------------------------------------------------------------
+
 
 def reprojection_residuals(
     params: np.ndarray,
@@ -157,7 +157,7 @@ def reprojection_residuals(
 
     ones = np.ones((pts_3d.shape[0], 1), dtype=np.float64)
     pts_hom = np.hstack([pts_3d, ones])  # (M, 4)
-    proj = (P @ pts_hom.T).T             # (M, 3)
+    proj = (P @ pts_hom.T).T  # (M, 3)
     proj_2d = proj[:, :2] / proj[:, 2:3]  # (M, 2)
 
     return (proj_2d - pts_2d).ravel()  # (2*M,)
@@ -166,6 +166,7 @@ def reprojection_residuals(
 # ---------------------------------------------------------------------------
 # Per-camera optimization
 # ---------------------------------------------------------------------------
+
 
 def optimize_camera(
     cam_name: str,
@@ -184,7 +185,7 @@ def optimize_camera(
 
     x0 = pack_params(cam, optimize_intrinsics)
     res0 = reprojection_residuals(x0, pts_3d, pts_2d, cam, optimize_intrinsics)
-    err0 = np.sqrt(res0[::2]**2 + res0[1::2]**2)
+    err0 = np.sqrt(res0[::2] ** 2 + res0[1::2] ** 2)
 
     result = least_squares(
         reprojection_residuals,
@@ -192,15 +193,13 @@ def optimize_camera(
         args=(pts_3d, pts_2d, cam, optimize_intrinsics),
         method="trf",
         loss="soft_l1",
-        f_scale=5.0,   # Huber transition at 5px
+        f_scale=5.0,  # Huber transition at 5px
         max_nfev=500,
         verbose=0,
     )
 
-    res_final = reprojection_residuals(
-        result.x, pts_3d, pts_2d, cam, optimize_intrinsics
-    )
-    err_final = np.sqrt(res_final[::2]**2 + res_final[1::2]**2)
+    res_final = reprojection_residuals(result.x, pts_3d, pts_2d, cam, optimize_intrinsics)
+    err_final = np.sqrt(res_final[::2] ** 2 + res_final[1::2] ** 2)
 
     refined_cam = unpack_params(result.x, cam, optimize_intrinsics)
 
@@ -217,10 +216,12 @@ def optimize_camera(
     }
 
     if verbose:
-        print(f"  {cam_name}: {n_pts:,d} pts | "
-              f"median {stats['median_err_before']:.2f} -> {stats['median_err_after']:.2f} px | "
-              f"<5px {stats['pct_under_5px_before']:.1f}% -> {stats['pct_under_5px_after']:.1f}% | "
-              f"<10px {stats['pct_under_10px_before']:.1f}% -> {stats['pct_under_10px_after']:.1f}%")
+        print(
+            f"  {cam_name}: {n_pts:,d} pts | "
+            f"median {stats['median_err_before']:.2f} -> {stats['median_err_after']:.2f} px | "
+            f"<5px {stats['pct_under_5px_before']:.1f}% -> {stats['pct_under_5px_after']:.1f}% | "
+            f"<10px {stats['pct_under_10px_before']:.1f}% -> {stats['pct_under_10px_after']:.1f}%"
+        )
 
     return refined_cam, stats
 
@@ -229,8 +230,8 @@ def optimize_camera(
 # Save refined calibration
 # ---------------------------------------------------------------------------
 
-def save_calibration_toml(cameras: Dict[str, dict], output_path: str,
-                          original_cal_path: str):
+
+def save_calibration_toml(cameras: Dict[str, dict], output_path: str, original_cal_path: str):
     """Save refined camera parameters back to calibration.toml format."""
     original = toml.load(original_cal_path)
 
@@ -255,6 +256,7 @@ def save_calibration_toml(cameras: Dict[str, dict], output_path: str,
 # Compute quick reprojection stats (lighter than full reprojection_analysis)
 # ---------------------------------------------------------------------------
 
+
 def quick_reproj_stats(
     tracks_3d: np.ndarray,
     all_coords: Dict[str, np.ndarray],
@@ -277,10 +279,14 @@ def quick_reproj_stats(
             continue
         cam = cameras[cam_name]
         pts_3d, pts_2d = gather_correspondences(
-            kp_3d, valid_3d,
-            all_coords[cam_name], all_scores[cam_name],
-            cam, confidence_threshold,
-            max_points=max_points_per_cam, rng=rng,
+            kp_3d,
+            valid_3d,
+            all_coords[cam_name],
+            all_scores[cam_name],
+            cam,
+            confidence_threshold,
+            max_points=max_points_per_cam,
+            rng=rng,
         )
         if len(pts_3d) == 0:
             continue
@@ -307,35 +313,51 @@ def quick_reproj_stats(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Iterative camera parameter refinement",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("session_dir",
-                        help="Path to session directory with calibration.toml")
-    parser.add_argument("--output", "-o", default=None,
-                        help="Output calibration.toml path "
-                             "(default: <session_dir>/calibration_refined.toml)")
-    parser.add_argument("--output_points3d", default=None,
-                        help="Output points3d path after final re-triangulation "
-                             "(default: <session_dir>/points3d_refined.h5)")
+    parser.add_argument("session_dir", help="Path to session directory with calibration.toml")
+    parser.add_argument(
+        "--output",
+        "-o",
+        default=None,
+        help="Output calibration.toml path (default: <session_dir>/calibration_refined.toml)",
+    )
+    parser.add_argument(
+        "--output_points3d",
+        default=None,
+        help="Output points3d path after final re-triangulation (default: <session_dir>/points3d_refined.h5)",
+    )
     parser.add_argument("--confidence_threshold", type=float, default=0.3)
     parser.add_argument("--min_views", type=int, default=3)
     parser.add_argument("--reproj_threshold", type=float, default=15.0)
-    parser.add_argument("--max_points_per_cam", type=int, default=200000,
-                        help="Max correspondences per camera for optimization (default: 200k)")
-    parser.add_argument("--subsample_frames", type=int, default=5000,
-                        help="Frames to use for intermediate triangulations (default: 5000)")
-    parser.add_argument("--iterations", type=int, default=5,
-                        help="Max refinement iterations (default: 5)")
-    parser.add_argument("--convergence_threshold", type=float, default=0.05,
-                        help="Stop if median reproj improvement < this (px, default: 0.05)")
-    parser.add_argument("--extrinsics_only", action="store_true",
-                        help="Only optimize extrinsics (R, t)")
+    parser.add_argument(
+        "--max_points_per_cam",
+        type=int,
+        default=200000,
+        help="Max correspondences per camera for optimization (default: 200k)",
+    )
+    parser.add_argument(
+        "--subsample_frames",
+        type=int,
+        default=5000,
+        help="Frames to use for intermediate triangulations (default: 5000)",
+    )
+    parser.add_argument("--iterations", type=int, default=5, help="Max refinement iterations (default: 5)")
+    parser.add_argument(
+        "--convergence_threshold",
+        type=float,
+        default=0.05,
+        help="Stop if median reproj improvement < this (px, default: 0.05)",
+    )
+    parser.add_argument("--extrinsics_only", action="store_true", help="Only optimize extrinsics (R, t)")
     parser.add_argument("--exclude_cameras", type=str, nargs="+", default=None)
-    parser.add_argument("--full_triangulation", action="store_true",
-                        help="Run full-frame triangulation at the end (slow)")
+    parser.add_argument(
+        "--full_triangulation", action="store_true", help="Run full-frame triangulation at the end (slow)"
+    )
     parser.add_argument("--quiet", action="store_true")
 
     args = parser.parse_args()
@@ -357,7 +379,9 @@ def main():
         print(f"Session:      {session_dir}")
         print(f"Output cal:   {args.output}")
         print(f"Output 3D:    {args.output_points3d}")
-        print(f"Optimize:     {'extrinsics + intrinsics (10 params/cam)' if optimize_intrinsics else 'extrinsics only (6 params/cam)'}")
+        print(
+            f"Optimize:     {'extrinsics + intrinsics (10 params/cam)' if optimize_intrinsics else 'extrinsics only (6 params/cam)'}"
+        )
         print(f"Iterations:   {args.iterations}")
         print(f"Subsample:    {args.subsample_frames} frames for intermediate triangulations")
         print(f"Max pts/cam:  {args.max_points_per_cam:,d}")
@@ -377,9 +401,7 @@ def main():
     # ---- Load 2D data ----
     if verbose:
         print("\nLoading 2D keypoint data:")
-    all_coords, all_scores, node_names = load_all_2d_data(
-        session_dir, cameras, verbose=verbose
-    )
+    all_coords, all_scores, node_names = load_all_2d_data(session_dir, cameras, verbose=verbose)
 
     n_frames_total = max(c.shape[0] for c in all_coords.values())
     n_keypoints = list(all_coords.values())[0].shape[1]
@@ -398,21 +420,25 @@ def main():
 
     for iteration in range(1, args.iterations + 1):
         if verbose:
-            print(f"\n{'#'*70}")
+            print(f"\n{'#' * 70}")
             print(f"# ITERATION {iteration}/{args.iterations}")
-            print(f"{'#'*70}")
+            print(f"{'#' * 70}")
 
         # Step 1: Triangulate with current camera params (on subsample)
         if verbose:
             print(f"\n  Step 1: Triangulating {n_sub} frames...")
 
         tracks_3d, tri_stats = triangulate_all(
-            current_cameras, all_coords, all_scores,
-            n_frames=n_frames_total, n_keypoints=n_keypoints,
+            current_cameras,
+            all_coords,
+            all_scores,
+            n_frames=n_frames_total,
+            n_keypoints=n_keypoints,
             confidence_threshold=args.confidence_threshold,
             min_views=args.min_views,
             reproj_threshold=args.reproj_threshold,
-            undistort=True, use_ransac=True,
+            undistort=True,
+            use_ransac=True,
             verbose=verbose,
             frame_indices=subsample_indices,
         )
@@ -428,7 +454,7 @@ def main():
             c = all_coords[cam_name]
             s = all_scores[cam_name]
             # Extract only the subsampled frame rows
-            valid_idx = subsample_indices[subsample_indices < c.shape[0]]
+            subsample_indices[subsample_indices < c.shape[0]]
             sub_c = np.full((n_sub, n_keypoints, 2), np.nan, dtype=np.float64)
             sub_s = np.full((n_sub, n_keypoints), np.nan, dtype=np.float64)
             mask = subsample_indices < c.shape[0]
@@ -438,19 +464,24 @@ def main():
             sub_scores[cam_name] = sub_s
 
         pre_stats = quick_reproj_stats(
-            tracks_3d, sub_coords, sub_scores,
-            current_cameras, args.confidence_threshold,
+            tracks_3d,
+            sub_coords,
+            sub_scores,
+            current_cameras,
+            args.confidence_threshold,
             max_points_per_cam=args.max_points_per_cam,
         )
 
         if verbose:
-            print(f"\n  Pre-optimization reproj: median={pre_stats['median_px']:.2f}px, "
-                  f"<5px={pre_stats['pct_under_5px']:.1f}%, "
-                  f"<10px={pre_stats['pct_under_10px']:.1f}%")
+            print(
+                f"\n  Pre-optimization reproj: median={pre_stats['median_px']:.2f}px, "
+                f"<5px={pre_stats['pct_under_5px']:.1f}%, "
+                f"<10px={pre_stats['pct_under_10px']:.1f}%"
+            )
 
         # Step 3: Optimize each camera
         if verbose:
-            print(f"\n  Step 2: Optimizing camera parameters...")
+            print("\n  Step 2: Optimizing camera parameters...")
 
         cam_rng = np.random.default_rng(42 + iteration)
         for cam_name in sorted(current_cameras.keys()):
@@ -458,8 +489,10 @@ def main():
                 continue
 
             pts_3d, pts_2d = gather_correspondences(
-                kp_3d, valid_3d,
-                sub_coords[cam_name], sub_scores[cam_name],
+                kp_3d,
+                valid_3d,
+                sub_coords[cam_name],
+                sub_scores[cam_name],
                 current_cameras[cam_name],
                 confidence_threshold=args.confidence_threshold,
                 max_points=args.max_points_per_cam,
@@ -467,8 +500,10 @@ def main():
             )
 
             refined_cam, opt_stats = optimize_camera(
-                cam_name, current_cameras[cam_name],
-                pts_3d, pts_2d,
+                cam_name,
+                current_cameras[cam_name],
+                pts_3d,
+                pts_2d,
                 optimize_intrinsics=optimize_intrinsics,
                 verbose=verbose,
             )
@@ -478,35 +513,44 @@ def main():
 
         # Step 4: Evaluate post-optimization (re-triangulate with updated params)
         if verbose:
-            print(f"\n  Step 3: Re-triangulating to evaluate...")
+            print("\n  Step 3: Re-triangulating to evaluate...")
 
         tracks_3d_post, _ = triangulate_all(
-            current_cameras, all_coords, all_scores,
-            n_frames=n_frames_total, n_keypoints=n_keypoints,
+            current_cameras,
+            all_coords,
+            all_scores,
+            n_frames=n_frames_total,
+            n_keypoints=n_keypoints,
             confidence_threshold=args.confidence_threshold,
             min_views=args.min_views,
             reproj_threshold=args.reproj_threshold,
-            undistort=True, use_ransac=True,
+            undistort=True,
+            use_ransac=True,
             verbose=False,
             frame_indices=subsample_indices,
         )
 
         # Rebuild sub_coords/sub_scores for post evaluation with updated cameras
         post_stats = quick_reproj_stats(
-            tracks_3d_post, sub_coords, sub_scores,
-            current_cameras, args.confidence_threshold,
+            tracks_3d_post,
+            sub_coords,
+            sub_scores,
+            current_cameras,
+            args.confidence_threshold,
             max_points_per_cam=args.max_points_per_cam,
         )
 
         if verbose:
-            print(f"\n  Post-optimization reproj: median={post_stats['median_px']:.2f}px, "
-                  f"<5px={post_stats['pct_under_5px']:.1f}%, "
-                  f"<10px={post_stats['pct_under_10px']:.1f}%")
-            improvement = pre_stats['median_px'] - post_stats['median_px']
+            print(
+                f"\n  Post-optimization reproj: median={post_stats['median_px']:.2f}px, "
+                f"<5px={post_stats['pct_under_5px']:.1f}%, "
+                f"<10px={post_stats['pct_under_10px']:.1f}%"
+            )
+            improvement = pre_stats["median_px"] - post_stats["median_px"]
             print(f"  Improvement this iteration: {improvement:+.2f}px median")
 
         # Convergence check
-        current_median = post_stats['median_px']
+        current_median = post_stats["median_px"]
         if prev_median is not None:
             delta = prev_median - current_median
             if verbose:
@@ -519,25 +563,23 @@ def main():
 
     # ---- Summary ----
     if verbose:
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("REFINEMENT COMPLETE")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
-        print(f"\n  Parameter changes (original -> refined):")
+        print("\n  Parameter changes (original -> refined):")
         header = f"  {'Camera':<12} {'dR (deg)':>10} {'dt (mm)':>10}"
         if optimize_intrinsics:
             header += f" {'dfx':>10} {'dfy':>10} {'dcx':>10} {'dcy':>10}"
         print(header)
-        print(f"  {'-'*len(header)}")
+        print(f"  {'-' * len(header)}")
 
         for cam_name in sorted(cameras.keys()):
             orig = cameras[cam_name]
             ref = current_cameras[cam_name]
 
             R_diff = ref["R"] @ orig["R"].T
-            angle_diff = np.degrees(np.arccos(np.clip(
-                (np.trace(R_diff) - 1) / 2, -1, 1
-            )))
+            angle_diff = np.degrees(np.arccos(np.clip((np.trace(R_diff) - 1) / 2, -1, 1)))
             dt = np.linalg.norm(ref["t"] - orig["t"])
 
             row = f"  {cam_name:<12} {angle_diff:>9.4f}° {dt:>9.3f}"
@@ -555,35 +597,44 @@ def main():
     # ---- Optional: full re-triangulation ----
     if args.full_triangulation:
         if verbose:
-            print(f"\n{'#'*70}")
+            print(f"\n{'#' * 70}")
             print("# FINAL: Full re-triangulation with refined cameras")
-            print(f"{'#'*70}")
+            print(f"{'#' * 70}")
 
         tracks_3d_full, final_stats = triangulate_all(
-            current_cameras, all_coords, all_scores,
-            n_frames=n_frames_total, n_keypoints=n_keypoints,
+            current_cameras,
+            all_coords,
+            all_scores,
+            n_frames=n_frames_total,
+            n_keypoints=n_keypoints,
             confidence_threshold=args.confidence_threshold,
             min_views=args.min_views,
             reproj_threshold=args.reproj_threshold,
-            undistort=True, use_ransac=True,
+            undistort=True,
+            use_ransac=True,
             verbose=verbose,
         )
 
         # Save
         from smal_fitter.sleap_data.triangulate_3d_points import save_points3d_h5
+
         save_points3d_h5(tracks_3d_full, args.output_points3d)
 
         # Full reprojection analysis
         if verbose:
             reprojection_analysis(
-                tracks_3d_full, session_dir, all_coords, all_scores,
-                current_cameras, node_names,
+                tracks_3d_full,
+                session_dir,
+                all_coords,
+                all_scores,
+                current_cameras,
+                node_names,
                 confidence_threshold=args.confidence_threshold,
                 label="REFINED",
             )
 
     if verbose:
-        print(f"\nDone.")
+        print("\nDone.")
         print(f"  Refined calibration: {args.output}")
         if args.full_triangulation:
             print(f"  Refined 3D points:   {args.output_points3d}")

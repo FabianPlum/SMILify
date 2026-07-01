@@ -43,19 +43,26 @@ def main():
         help="Path to a points3d.h5 file with shape (n_frames, 1, n_keypoints, 3)",
     )
     parser.add_argument(
-        "--calibration", "-c", default=None,
+        "--calibration",
+        "-c",
+        default=None,
         help="Path to calibration.toml (default: calibration.toml next to points3d file)",
     )
     parser.add_argument(
-        "--output", "-o", default=None,
+        "--output",
+        "-o",
+        default=None,
         help="Output reprojections.h5 path (default: reprojections.h5 next to points3d file)",
     )
     parser.add_argument(
-        "--exclude_cameras", nargs="+", default=None,
+        "--exclude_cameras",
+        nargs="+",
+        default=None,
         help="Camera names to exclude (e.g. Camera8 Camera10)",
     )
     parser.add_argument(
-        "--quiet", action="store_true",
+        "--quiet",
+        action="store_true",
         help="Suppress progress output",
     )
 
@@ -89,8 +96,7 @@ def main():
 
     if tracks_3d.ndim != 4 or tracks_3d.shape[1] != 1 or tracks_3d.shape[3] != 3:
         print(
-            f"ERROR: expected tracks shape (n_frames, 1, n_keypoints, 3), "
-            f"got {tracks_3d.shape}",
+            f"ERROR: expected tracks shape (n_frames, 1, n_keypoints, 3), got {tracks_3d.shape}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -98,8 +104,7 @@ def main():
     if verbose:
         n_frames, _, n_kp, _ = tracks_3d.shape
         valid = ~np.isnan(tracks_3d[:, 0]).any(axis=-1) & (tracks_3d[:, 0] != 0).any(axis=-1)
-        print(f"  Loaded: {n_frames} frames × {n_kp} keypoints "
-              f"({valid.sum()} valid 3D points)")
+        print(f"  Loaded: {n_frames} frames × {n_kp} keypoints ({valid.sum()} valid 3D points)")
 
     # Load calibration
     cameras = load_calibration(cal_path)

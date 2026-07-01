@@ -9,17 +9,13 @@ overwrite of config.py (SMAL_FILE, SHAPE_FAMILY) via apply_smal_file_override.
 
 import json
 import os
-import sys
 import tempfile
 
 import pytest
 
-_neural_smil = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "smal_fitter", "neuralSMIL")
-)
+_neural_smil = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "smal_fitter", "neuralSMIL"))
 
 from smal_fitter.neuralSMIL.configs import (
-    BaseTrainingConfig,
     SingleViewConfig,
     MultiViewConfig,
     MultiViewOutputConfig,
@@ -39,6 +35,7 @@ MULTIVIEW_JSON = os.path.join(EXAMPLES_DIR, "multiview_baseline.json")
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def singleview_config():
@@ -63,6 +60,7 @@ def _write_tmp_json(data: dict) -> str:
 # ---------------------------------------------------------------------------
 # Loading & type checks
 # ---------------------------------------------------------------------------
+
 
 class TestLoadConfig:
     def test_singleview_returns_correct_type(self, singleview_config):
@@ -120,12 +118,21 @@ class TestValidateJsonMode:
 # Legacy dict conversion
 # ---------------------------------------------------------------------------
 
+
 class TestLegacyDictSingleView:
     def test_has_required_keys(self, singleview_config):
         d = singleview_config.to_legacy_dict()
-        for key in ("data_path", "training_params", "model_config",
-                     "loss_curriculum", "learning_rate_curriculum",
-                     "output_config", "split_config", "shape_family", "smal_file"):
+        for key in (
+            "data_path",
+            "training_params",
+            "model_config",
+            "loss_curriculum",
+            "learning_rate_curriculum",
+            "output_config",
+            "split_config",
+            "shape_family",
+            "smal_file",
+        ):
             assert key in d, f"Missing key: {key}"
 
     def test_model_backbone(self, singleview_config):
@@ -148,10 +155,18 @@ class TestLegacyDictSingleView:
 class TestLegacyDictMultiView:
     def test_has_required_keys(self, multiview_config):
         d = multiview_config.to_multiview_legacy_dict()
-        for key in ("batch_size", "dataset_path", "backbone_name",
-                     "cross_attention_layers", "cross_attention_heads",
-                     "checkpoint_dir", "shape_family", "smal_file",
-                     "loss_weights", "use_gt_camera_init"):
+        for key in (
+            "batch_size",
+            "dataset_path",
+            "backbone_name",
+            "cross_attention_layers",
+            "cross_attention_heads",
+            "checkpoint_dir",
+            "shape_family",
+            "smal_file",
+            "loss_weights",
+            "use_gt_camera_init",
+        ):
             assert key in d, f"Missing key: {key}"
 
     def test_cross_attention_defaults(self, multiview_config):
@@ -168,6 +183,7 @@ class TestLegacyDictMultiView:
 # ---------------------------------------------------------------------------
 # SMAL model argument passing (singleview / multiview) and downstream overwrite
 # ---------------------------------------------------------------------------
+
 
 class TestSmalModelSingleView:
     """Singleview smal_model argument passing and legacy dict output."""
@@ -247,10 +263,13 @@ class TestSmalModelDownstreamOverwrite:
         """apply_smal_file_override overwrites config.SMAL_FILE and config.SHAPE_FAMILY as used by scripts."""
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         import config as project_config
+
         original_smal = getattr(project_config, "SMAL_FILE", None)
         original_shape = getattr(project_config, "SHAPE_FAMILY", -1)
         # Use a path that exists: try example from singleview_baseline.json, else skip
-        smal_path = os.path.join(repo_root, "3D_model_prep", "SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl")
+        smal_path = os.path.join(
+            repo_root, "3D_model_prep", "SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl"
+        )
         if not os.path.isfile(smal_path):
             smal_path = os.path.join(repo_root, "3D_model_prep", "SMIL_OmniAnt.pkl")
         if not os.path.isfile(smal_path):
@@ -267,6 +286,7 @@ class TestSmalModelDownstreamOverwrite:
 # ---------------------------------------------------------------------------
 # Curriculum
 # ---------------------------------------------------------------------------
+
 
 class TestCurriculum:
     def test_epoch_0_uses_base_weights(self):
@@ -293,6 +313,7 @@ class TestCurriculum:
 # ---------------------------------------------------------------------------
 # CLI overrides
 # ---------------------------------------------------------------------------
+
 
 class TestCLIOverrides:
     def test_cli_overrides_batch_size(self):
@@ -327,6 +348,7 @@ class TestCLIOverrides:
 # ---------------------------------------------------------------------------
 # Validation errors
 # ---------------------------------------------------------------------------
+
 
 class TestValidation:
     def test_bad_split_ratios(self):
@@ -365,6 +387,7 @@ class TestValidation:
 # ---------------------------------------------------------------------------
 # Round-trip save / load
 # ---------------------------------------------------------------------------
+
 
 class TestRoundTrip:
     def test_singleview_round_trip(self, singleview_config):
@@ -409,6 +432,7 @@ class TestRoundTrip:
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
+
 
 class TestDefaults:
     def test_singleview_default_creates(self):

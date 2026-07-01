@@ -12,14 +12,14 @@ max_vertices = 20000
 
 # Custom function to export a mesh object to an OBJ file
 def export_mesh_to_obj(obj, filepath):
-    if obj.type != 'MESH':
+    if obj.type != "MESH":
         raise TypeError("The selected object is not a mesh.")
 
     # Convert mesh to triangles
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.mesh.quads_convert_to_tris()
-    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode="OBJECT")
 
     mesh = obj.data
     vertices = []
@@ -34,7 +34,7 @@ def export_mesh_to_obj(obj, filepath):
         else:
             raise ValueError(f"Face with vertices {poly.vertices} is not a triangle and will be skipped.")
 
-    with open(filepath, 'w') as file:
+    with open(filepath, "w") as file:
         for vert in vertices:
             file.write(f"v {vert.x} {vert.y} {vert.z}\n")
 
@@ -46,7 +46,7 @@ def export_mesh_to_obj(obj, filepath):
 
 # Function to extract files from a ZIP
 def extract_zip(zip_path, extract_to):
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
         zip_ref.extractall(extract_to)
 
 
@@ -71,21 +71,21 @@ def get_mesh_file_path(directory):
 # Function to apply simplification modifiers
 def apply_modifiers(obj):
     # Apply Edge Split Modifier
-    edge_split = obj.modifiers.new(name="EdgeSplit", type='EDGE_SPLIT')
+    edge_split = obj.modifiers.new(name="EdgeSplit", type="EDGE_SPLIT")
     edge_split.split_angle = 1.5708  # 90 degrees
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier="EdgeSplit")
 
     # Apply Weld Modifier
-    weld = obj.modifiers.new(name="Weld", type='WELD')
+    weld = obj.modifiers.new(name="Weld", type="WELD")
     weld.merge_threshold = 0.01  # Adjust threshold as needed
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier="Weld")
 
     # Apply Limited Dissolve in Edit Mode
-    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.dissolve_limited(angle_limit=0.01)  # Adjust angle limit as needed
-    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode="OBJECT")
 
 
 # Create the top-level output directory if it doesn't exist
@@ -144,12 +144,12 @@ for zip_file_name in os.listdir(zip_folder_path):
         obj = bpy.context.selected_objects[0]
 
         # Rotate the mesh around the X axis by 90 degrees
-        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.mode_set(mode="OBJECT")
         bpy.context.view_layer.objects.active = obj
-        bpy.ops.transform.rotate(value=1.5708, orient_axis='X')
+        bpy.ops.transform.rotate(value=1.5708, orient_axis="X")
 
         # Rotate the mesh around the Z axis by 90 degrees
-        bpy.ops.transform.rotate(value=1.5708, orient_axis='Z')
+        bpy.ops.transform.rotate(value=1.5708, orient_axis="Z")
 
         # Scale the mesh so that its X dimension is one Blender unit long
         bbox = obj.bound_box
@@ -178,8 +178,8 @@ for zip_file_name in os.listdir(zip_folder_path):
         current_vertices = initial_vertices
 
         while current_vertices > max_vertices:
-            modifier = obj.modifiers.new(name="Decimate", type='DECIMATE')
-            modifier.decimate_type = 'COLLAPSE'
+            modifier = obj.modifiers.new(name="Decimate", type="DECIMATE")
+            modifier.decimate_type = "COLLAPSE"
             modifier.use_symmetry = False
             modifier.use_collapse_triangulate = True
             modifier.use_dissolve_boundaries = False

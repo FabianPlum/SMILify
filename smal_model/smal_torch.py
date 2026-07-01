@@ -1,8 +1,9 @@
 """
 
-    PyTorch implementation of the SMAL/SMPL model
+PyTorch implementation of the SMAL/SMPL model
 
 """
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -16,12 +17,14 @@ from .smal_basics import align_smal_template_to_symmetry_axis  # , get_smal_temp
 import torch.nn as nn
 import config
 
+
 class CustomUnpickler(pkl.Unpickler):
     """Custom unpickler that handles legacy SMAL model files containing chumpy arrays"""
-    def __init__(self, file, encoding='latin1'):
+
+    def __init__(self, file, encoding="latin1"):
         """Initialize with latin1 encoding to handle legacy pickle files"""
         super().__init__(file, encoding=encoding)
-    
+
     def find_class(self, module, name):
         """Override class lookup to handle chumpy arrays"""
         if module == "chumpy.ch" and name == "Ch":
@@ -30,6 +33,7 @@ class CustomUnpickler(pkl.Unpickler):
 
     class ChumpyWrapper:
         """Wrapper class that mimics chumpy array behavior but stores only numpy arrays"""
+
         def __init__(self, *args, **kwargs):
             """Initialize with data from args or empty array"""
             self.data = np.array(args[0]) if args else np.array([])
@@ -42,7 +46,7 @@ class CustomUnpickler(pkl.Unpickler):
             """Handle unpickling of chumpy arrays in various formats"""
             if isinstance(state, dict):
                 # Handle old chumpy format where data is stored in 'x' key
-                self.data = np.array(state.get('x', []))
+                self.data = np.array(state.get("x", []))
             else:
                 # Handle both tuple/list format and direct data format
                 self.data = np.array(state[0] if isinstance(state, (tuple, list)) else state)
@@ -53,25 +57,26 @@ class CustomUnpickler(pkl.Unpickler):
             """Mimic chumpy's .r property which returns the underlying data"""
             return self.data
 
+
 def load_smal_model(file_path):
     """Load a SMAL model file and convert any chumpy arrays to numpy arrays
-    
+
     Args:
         file_path: Path to the SMAL model pickle file
-        
+
     Returns:
         dict: Model data with all chumpy arrays converted to numpy arrays
     """
-    with open(file_path, 'rb') as f:
+    with open(file_path, "rb") as f:
         data = CustomUnpickler(f).load()
         # Convert any remaining ChumpyWrapper instances to numpy arrays
-        return {k: np.array(v) if isinstance(v, CustomUnpickler.ChumpyWrapper) else v 
-                for k, v in data.items()}
+        return {k: np.array(v) if isinstance(v, CustomUnpickler.ChumpyWrapper) else v for k, v in data.items()}
+
 
 # IF There are chumpy variables (in the legacy SMAL models) convert them to numpy.
 # With the custom unpickler, this should no longer be necessary.
 def undo_chumpy(x):
-    if hasattr(x, 'r') and not isinstance(x, np.ndarray):
+    if hasattr(x, "r") and not isinstance(x, np.ndarray):
         print("WARNING: chumpy variable: ", x)
     try:
         return x if isinstance(x, np.ndarray) else x.r
@@ -92,21 +97,21 @@ class SMAL(nn.Module):
                 print(key)
                 try:
                     print(value.shape)
-                except:
+                except Exception:
                     pass
                 print(value)
 
-        self.f = dd['f']
+        self.f = dd["f"]
 
         self.faces = torch.from_numpy(self.f.astype(int)).to(device)
 
         # replaced logic in here (which requried SMPL library with L58-L68)
         # v_template = get_smal_template(
-        #     model_name=config.SMAL_FILE, 
-        #     data_name=config.SMAL_DATA_FILE, 
+        #     model_name=config.SMAL_FILE,
+        #     data_name=config.SMAL_DATA_FILE,
         #     shape_family_id=shape_family_id)
 
-        v_template = dd['v_template']
+        v_template = dd["v_template"]
 
         # Size of mesh [Number of vertices, 3]
         self.size = [v_template.shape[0], 3]
@@ -114,12 +119,10 @@ class SMAL(nn.Module):
         """
         READ IN LEARNED BLEND SHAPES
         """
-        self.num_betas = dd['shapedirs'].shape[-1]
+        self.num_betas = dd["shapedirs"].shape[-1]
         # Shape blend shape basis -> betas are blend shapes(?)
-        shapedir = np.reshape(
-            undo_chumpy(dd['shapedirs']), [-1, self.num_betas]).T.copy()
-        self.shapedirs = Variable(
-            torch.Tensor(shapedir), requires_grad=False).to(device)
+        shapedir = np.reshape(undo_chumpy(dd["shapedirs"]), [-1, self.num_betas]).T.copy()
+        self.shapedirs = Variable(torch.Tensor(shapedir), requires_grad=False).to(device)
 
         if config.DEBUG:
             print("\nBETAS AND SHAPES:")
@@ -128,13 +131,12 @@ class SMAL(nn.Module):
             print(self.shapedirs[0][:21])
 
         if shape_family_id != -1:
-            with open(config.SMAL_DATA_FILE, 'rb') as f:
+            with open(config.SMAL_DATA_FILE, "rb") as f:
                 data = CustomUnpickler(f).load()
 
-            betas = data['cluster_means'][shape_family_id]
+            betas = data["cluster_means"][shape_family_id]
             # TODO - THESE CLUSTER MEANS ARE NOT GOING TO BE USED IN OUR SMIL MODEL FOR NOW!
-            v_template = v_template + np.matmul(betas[None, :], shapedir).reshape(
-                -1, self.size[0], self.size[1])[0]
+            v_template = v_template + np.matmul(betas[None, :], shapedir).reshape(-1, self.size[0], self.size[1])[0]
 
         try:
             symmetry_axis_vertices = dd["sym_verts"]
@@ -150,66 +152,61 @@ class SMAL(nn.Module):
             self.center_inds = np.array([])
         elif config.ignore_hardcoded_body:
             v_sym, self.left_inds, self.right_inds, self.center_inds = align_smal_template_to_symmetry_axis(
-                v_template,
-                sym_file=None,
-                I=symmetry_axis_vertices)
+                v_template, sym_file=None, I=symmetry_axis_vertices
+            )
             # symmetry file
         else:
             v_sym, self.left_inds, self.right_inds, self.center_inds = align_smal_template_to_symmetry_axis(
-                v_template,
-                sym_file=config.SMAL_SYM_FILE,
-                I=symmetry_axis_vertices)
+                v_template, sym_file=config.SMAL_SYM_FILE, I=symmetry_axis_vertices
+            )
             # symmetry file
 
         # Mean template vertices
-        self.v_template = Variable(
-            torch.Tensor(v_sym),
-            requires_grad=False).to(device)
+        self.v_template = Variable(torch.Tensor(v_sym), requires_grad=False).to(device)
 
         # Regressor for joint locations given shape
         try:
-            self.J_regressor = Variable(
-                torch.Tensor(dd['J_regressor'].T.todense()),
-                requires_grad=False).to(device)
-        except:
+            self.J_regressor = Variable(torch.Tensor(dd["J_regressor"].T.todense()), requires_grad=False).to(device)
+        except Exception:
             # in custom Blender exporter the J_regressor is stored in dense matrix form
-            self.J_regressor = Variable(
-                torch.Tensor(dd['J_regressor'].T),
-                requires_grad=False).to(device)
-        
+            self.J_regressor = Variable(torch.Tensor(dd["J_regressor"].T), requires_grad=False).to(device)
+
         # only relevant for static joint locations, otherwise joint locations (J) are computed from the shape-dependent joint locations
         if config.STATIC_JOINT_LOCATIONS:
-            self.J = Variable(
-                torch.Tensor(dd['J']),
-                requires_grad=False).to(device)
+            self.J = Variable(torch.Tensor(dd["J"]), requires_grad=False).to(device)
 
         # Pose blend shape basis
-        num_pose_basis = dd['posedirs'].shape[-1]
+        num_pose_basis = dd["posedirs"].shape[-1]
 
         # If there are no pose blend shapes, create a zeros tensor of appropriate size
-        if dd['posedirs'].size != 0: # != np.empty(0):
-            posedirs = np.reshape(
-                undo_chumpy(dd['posedirs']), [-1, num_pose_basis]).T
+        if dd["posedirs"].size != 0:  # != np.empty(0):
+            posedirs = np.reshape(undo_chumpy(dd["posedirs"]), [-1, num_pose_basis]).T
 
-            self.posedirs = Variable(
-                torch.Tensor(posedirs), requires_grad=False).to(device)
+            self.posedirs = Variable(torch.Tensor(posedirs), requires_grad=False).to(device)
         else:
             # shape joints - 1 (root bone) * 3 * 3 , vertices * 3
-            posedirs = np.zeros(((self.J_regressor.shape[1] - 1) * 3 * 3,
-                                 self.v_template.shape[0] * 3))
+            posedirs = np.zeros(((self.J_regressor.shape[1] - 1) * 3 * 3, self.v_template.shape[0] * 3))
 
-            self.posedirs = Variable(
-                torch.Tensor(posedirs), requires_grad=False).to(device)
+            self.posedirs = Variable(torch.Tensor(posedirs), requires_grad=False).to(device)
 
         # indices of parents for each joints
-        self.parents = dd['kintree_table'][0].astype(np.int32)
+        self.parents = dd["kintree_table"][0].astype(np.int32)
 
         # LBS weights
-        self.weights = Variable(
-            torch.Tensor(undo_chumpy(dd['weights'])),
-            requires_grad=False).to(device)
+        self.weights = Variable(torch.Tensor(undo_chumpy(dd["weights"])), requires_grad=False).to(device)
 
-    def __call__(self, beta, theta, trans=None, del_v=None, betas_logscale=None, betas_trans=None, get_skin=True, v_template=None, propagate_scaling=False):
+    def __call__(
+        self,
+        beta,
+        theta,
+        trans=None,
+        del_v=None,
+        betas_logscale=None,
+        betas_trans=None,
+        get_skin=True,
+        v_template=None,
+        propagate_scaling=False,
+    ):
 
         nBetas = beta.shape[1]
 
@@ -225,7 +222,6 @@ class SMAL(nn.Module):
 
         if nBetas > 0:
             if del_v is None:
-
                 if config.DEBUG:
                     print("size 0 : ", self.size[0])
                     print("size 1 : ", self.size[1])
@@ -237,14 +233,19 @@ class SMAL(nn.Module):
                 if self.shapedirs[:nBetas, :].shape[1] != 3 * v_template.shape[0]:
                     temp_shape = torch.reshape(self.shapedirs[:nBetas, :], [1, 3 * v_template.shape[0]])
                     temp_shape_rep = temp_shape.repeat(20, 1)
-                    v_shaped = v_template + torch.reshape(torch.matmul(beta, temp_shape_rep),
-                                                          [-1, self.size[0], self.size[1]])
+                    v_shaped = v_template + torch.reshape(
+                        torch.matmul(beta, temp_shape_rep), [-1, self.size[0], self.size[1]]
+                    )
                 else:
-                    v_shaped = v_template + torch.reshape(torch.matmul(beta, self.shapedirs[:nBetas, :]),
-                                                          [-1, self.size[0], self.size[1]])
+                    v_shaped = v_template + torch.reshape(
+                        torch.matmul(beta, self.shapedirs[:nBetas, :]), [-1, self.size[0], self.size[1]]
+                    )
             else:
-                v_shaped = v_template + del_v + torch.reshape(torch.matmul(beta, self.shapedirs[:nBetas, :]),
-                                                              [-1, self.size[0], self.size[1]])
+                v_shaped = (
+                    v_template
+                    + del_v
+                    + torch.reshape(torch.matmul(beta, self.shapedirs[:nBetas, :]), [-1, self.size[0], self.size[1]])
+                )
         else:
             if del_v is None:
                 v_shaped = v_template.unsqueeze(0)
@@ -297,18 +298,21 @@ class SMAL(nn.Module):
             pose_feature = torch.zeros([1, 1]).to(beta.device)
         """
 
-        v_posed = torch.reshape(
-            torch.matmul(pose_feature, self.posedirs),
-            [-1, self.size[0], self.size[1]]) + v_shaped
+        v_posed = torch.reshape(torch.matmul(pose_feature, self.posedirs), [-1, self.size[0], self.size[1]]) + v_shaped
 
         # 4. Get the global joint location
         # DEBUG - delete once betas are provided
         # betas_logscale = None
 
         self.J_transformed, A = batch_global_rigid_transformation(
-            Rs, J, self.parents, betas_logscale=betas_logscale, betas_trans=betas_trans,
+            Rs,
+            J,
+            self.parents,
+            betas_logscale=betas_logscale,
+            betas_trans=betas_trans,
             propagate_scaling=propagate_scaling,
-            num_joints=NUM_JOINTS)
+            num_joints=NUM_JOINTS,
+        )
 
         # 5. Do skinning:
         num_batch = theta.shape[0]
@@ -316,9 +320,7 @@ class SMAL(nn.Module):
         weights_t = self.weights.repeat([num_batch, 1])
         W = torch.reshape(weights_t, [num_batch, -1, NUM_JOINTS])
 
-        T = torch.reshape(
-            torch.matmul(W, torch.reshape(A, [num_batch, NUM_JOINTS, 16])),
-            [num_batch, -1, 4, 4])
+        T = torch.reshape(torch.matmul(W, torch.reshape(A, [num_batch, NUM_JOINTS, 16])), [num_batch, -1, 4, 4])
 
         if config.DEBUG:
             print("\nv_posed    : ", v_posed.shape)
@@ -327,8 +329,7 @@ class SMAL(nn.Module):
             print("pose_feature : ", pose_feature.shape)
             print("T : ", T.shape)
 
-        v_posed_homo = torch.cat(
-            [v_posed, torch.ones([num_batch, v_posed.shape[1], 1]).to(device=beta.device)], 2)
+        v_posed_homo = torch.cat([v_posed, torch.ones([num_batch, v_posed.shape[1], 1]).to(device=beta.device)], 2)
         v_homo = torch.matmul(T, v_posed_homo.unsqueeze(-1))
 
         verts = v_homo[:, :, :3, 0]
@@ -350,15 +351,18 @@ class SMAL(nn.Module):
             joints = torch.stack([joint_x, joint_y, joint_z], dim=2)
 
         if NUM_JOINTS == 35 and not config.ignore_hardcoded_body:  # assuming configuration of WLDO and SMAL is used:
-            joints = torch.cat([
-                joints,
-                verts[:, None, 1863],  # end_of_nose
-                verts[:, None, 26],  # chin
-                verts[:, None, 2124],  # right ear tip
-                verts[:, None, 150],  # left ear tip
-                verts[:, None, 3055],  # left eye
-                verts[:, None, 1097],  # right eye
-            ], dim=1)
+            joints = torch.cat(
+                [
+                    joints,
+                    verts[:, None, 1863],  # end_of_nose
+                    verts[:, None, 26],  # chin
+                    verts[:, None, 2124],  # right ear tip
+                    verts[:, None, 150],  # left ear tip
+                    verts[:, None, 3055],  # left eye
+                    verts[:, None, 1097],  # right eye
+                ],
+                dim=1,
+            )
 
         if get_skin:
             return verts, joints, Rs, v_shaped

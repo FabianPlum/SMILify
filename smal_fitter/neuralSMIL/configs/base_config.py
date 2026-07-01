@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 @dataclass
 class DatasetConfig:
     """Dataset paths and split configuration."""
+
     data_path: Optional[str] = None  # Required at runtime
     train_ratio: float = 0.85
     val_ratio: float = 0.05
@@ -45,14 +46,15 @@ class DatasetConfig:
 @dataclass
 class ModelConfig:
     """Neural network model architecture."""
-    backbone_name: str = 'vit_large_patch16_224'
+
+    backbone_name: str = "vit_large_patch16_224"
     freeze_backbone: bool = True
     backbone_unfreeze_epoch: Optional[int] = None  # When set, backbone is frozen at init and unfrozen at this epoch.
     # Overrides freeze_backbone (backbone is always frozen when this is set).
     # Set to null/None to use freeze_backbone as-is.
     backbone_lr_multiplier: float = 0.1  # Backbone LR = curriculum_lr * this multiplier after unfreeze
     hidden_dim: int = 1024  # Auto-adjusted based on backbone in validate()
-    head_type: str = 'transformer_decoder'  # 'mlp' or 'transformer_decoder'
+    head_type: str = "transformer_decoder"  # 'mlp' or 'transformer_decoder'
     use_unity_prior: bool = False
     rgb_only: bool = False
 
@@ -73,13 +75,15 @@ class ModelConfig:
         if self.input_resolution is not None:
             return self.input_resolution
         from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
+
         return BackboneFactory.get_default_input_resolution(self.backbone_name)
 
     def validate(self):
-        if self.head_type not in ('mlp', 'transformer_decoder'):
+        if self.head_type not in ("mlp", "transformer_decoder"):
             raise ValueError(f"Invalid head_type '{self.head_type}', must be 'mlp' or 'transformer_decoder'")
         if self.backbone_unfreeze_epoch is not None and not self.freeze_backbone:
             import warnings
+
             warnings.warn(
                 f"backbone_unfreeze_epoch={self.backbone_unfreeze_epoch} is set but "
                 f"freeze_backbone=False. The backbone will be frozen at init and "
@@ -96,19 +100,19 @@ class ModelConfig:
         decoder spatial channels, so a fixed 512 is a reasonable default that
         keeps the transformer decoder lightweight while still being expressive.
         """
-        if self.backbone_name.startswith('vit'):
-            if 'base' in self.backbone_name:
+        if self.backbone_name.startswith("vit"):
+            if "base" in self.backbone_name:
                 return 768
-            elif 'large' in self.backbone_name:
+            elif "large" in self.backbone_name:
                 return 1024
-        elif self.backbone_name.startswith('resnet'):
+        elif self.backbone_name.startswith("resnet"):
             return 2048
-        elif self.backbone_name.startswith('unet_'):
+        elif self.backbone_name.startswith("unet_"):
             _unet_hidden: dict = {
-                'unet_efficientnet_b0': 512,
-                'unet_efficientnet_b3': 512,
-                'unet_resnet34':        512,
-                'unet_mobilenet_v3':    256,
+                "unet_efficientnet_b0": 512,
+                "unet_efficientnet_b3": 512,
+                "unet_resnet34": 512,
+                "unet_mobilenet_v3": 256,
             }
             return _unet_hidden.get(self.backbone_name, 512)
         return self.hidden_dim
@@ -117,31 +121,34 @@ class ModelConfig:
 @dataclass
 class OptimizerConfig:
     """Optimizer and learning rate scheduling."""
+
     learning_rate: float = 5e-5  # Base LR (epoch 0)
     weight_decay: float = 1e-4
     gradient_clip_norm: float = 1.0
-    optimizer_type: str = 'adamw'
+    optimizer_type: str = "adamw"
 
     # Learning rate curriculum: epoch threshold -> learning rate
     # JSON keys are strings, converted to int on load via config_utils
-    lr_schedule: Dict[int, float] = field(default_factory=lambda: {
-        0: 5e-5,
-        10: 3e-5,
-        20: 2e-5,
-        60: 1e-5,
-        100: 1e-5,
-        150: 2e-6,
-        200: 2e-6,
-        250: 1e-6,
-        300: 1e-5,
-        350: 1e-6,
-        400: 1e-5,
-        475: 1e-6,
-        490: 5e-7,
-        500: 5e-6,
-        550: 1e-6,
-        718: 1e-5,
-    })
+    lr_schedule: Dict[int, float] = field(
+        default_factory=lambda: {
+            0: 5e-5,
+            10: 3e-5,
+            20: 2e-5,
+            60: 1e-5,
+            100: 1e-5,
+            150: 2e-6,
+            200: 2e-6,
+            250: 1e-6,
+            300: 1e-5,
+            350: 1e-6,
+            400: 1e-5,
+            475: 1e-6,
+            490: 5e-7,
+            500: 5e-6,
+            550: 1e-6,
+            718: 1e-5,
+        }
+    )
 
     def get_learning_rate_for_epoch(self, epoch: int) -> float:
         """Get learning rate for given epoch following curriculum."""
@@ -157,140 +164,144 @@ class LossCurriculumConfig:
     """Loss weights and curriculum stages for progressive training."""
 
     # Base loss weights (applied throughout training)
-    base_weights: Dict[str, float] = field(default_factory=lambda: {
-        'global_rot': 0.0,
-        'joint_rot': 0.001,
-        'betas': 0.0005,
-        'trans': 0.0005,
-        'fov': 0.001,
-        'cam_rot': 0.01,
-        'cam_trans': 0.01,
-        'log_beta_scales': 0.0005,
-        'betas_trans': 0.0005,
-        'keypoint_2d': 0.1,
-        'keypoint_3d': 0.25,
-        'silhouette': 0.0,
-        'joint_angle_regularization': 0.001,
-        'limb_scale_regularization': 0.01,
-        'limb_trans_regularization': 1,
-    })
+    base_weights: Dict[str, float] = field(
+        default_factory=lambda: {
+            "global_rot": 0.0,
+            "joint_rot": 0.001,
+            "betas": 0.0005,
+            "trans": 0.0005,
+            "fov": 0.001,
+            "cam_rot": 0.01,
+            "cam_trans": 0.01,
+            "log_beta_scales": 0.0005,
+            "betas_trans": 0.0005,
+            "keypoint_2d": 0.1,
+            "keypoint_3d": 0.25,
+            "silhouette": 0.0,
+            "joint_angle_regularization": 0.001,
+            "limb_scale_regularization": 0.01,
+            "limb_trans_regularization": 1,
+        }
+    )
 
     # Curriculum stages: epoch threshold -> dict of weight overrides
     # JSON keys are strings, converted to int on load via config_utils
-    curriculum_stages: Dict[int, Dict[str, float]] = field(default_factory=lambda: {
-        1: {
-            'joint_angle_regularization': 0.01,
-            'limb_scale_regularization': 0.1,
-            'limb_trans_regularization': 1,
-        },
-        10: {
-            'keypoint_2d': 0.1,
-            'joint_angle_regularization': 0.005,
-            'limb_scale_regularization': 0.05,
-            'limb_trans_regularization': 1,
-        },
-        25: {
-            'keypoint_2d': 0.2,
-            'joint_angle_regularization': 0.0025,
-            'limb_scale_regularization': 0.02,
-            'limb_trans_regularization': 1,
-        },
-        35: {
-            'keypoint_3d': 1,
-            'joint_angle_regularization': 0.001,
-            'limb_scale_regularization': 0.01,
-            'limb_trans_regularization': 1,
-        },
-        45: {
-            'keypoint_3d': 1,
-            'joint_angle_regularization': 0.0001,
-            'limb_scale_regularization': 0.005,
-            'limb_trans_regularization': 1,
-        },
-        50: {
-            'keypoint_3d': 2,
-            'joint_angle_regularization': 0.00005,
-            'limb_scale_regularization': 0.001,
-            'limb_trans_regularization': 0.5,
-        },
-        100: {
-            'keypoint_3d': 2,
-            'keypoint_2d': 0.2,
-            'joint_angle_regularization': 0.00001,
-            'limb_scale_regularization': 0.0000001,
-            'limb_trans_regularization': 0.1,
-        },
-        300: {
-            'keypoint_3d': 2,
-            'keypoint_2d': 0.2,
-            'joint_angle_regularization': 0.00001,
-            'limb_scale_regularization': 0.0000001,
-            'limb_trans_regularization': 0.1,
-            'fov': 0.0000001,
-            'cam_rot': 0.00000001,
-            'cam_trans': 0.00000001,
-        },
-        400: {
-            'keypoint_3d': 2,
-            'keypoint_2d': 0.4,
-            'joint_angle_regularization': 0.0001,
-            'limb_scale_regularization': 0.00001,
-            'limb_trans_regularization': 0.1,
-            'fov': 0.0000001,
-            'cam_rot': 0.00000001,
-            'cam_trans': 0.00000001,
-        },
-        460: {
-            'keypoint_3d': 2,
-            'keypoint_2d': 0.2,
-            'joint_angle_regularization': 0.00001,
-            'limb_scale_regularization': 0.001,
-            'limb_trans_regularization': 0.1,
-            'fov': 0.0000001,
-            'cam_rot': 0.00000001,
-            'cam_trans': 0.00000001,
-        },
-        490: {
-            'keypoint_3d': 2,
-            'keypoint_2d': 0.2,
-            'joint_angle_regularization': 0.000001,
-            'limb_scale_regularization': 0.0001,
-            'limb_trans_regularization': 0.1,
-            'fov': 0.0000001,
-            'cam_rot': 0.00000001,
-            'cam_trans': 0.00000001,
-        },
-        500: {
-            'keypoint_3d': 20,
-            'keypoint_2d': 0.2,
-            'joint_angle_regularization': 0.0000001,
-            'limb_scale_regularization': 0.00001,
-            'limb_trans_regularization': 0.1,
-            'fov': 0.000001,
-            'cam_rot': 0.0000001,
-            'cam_trans': 0.0000001,
-        },
-        560: {
-            'keypoint_3d': 20,
-            'keypoint_2d': 0.2,
-            'joint_angle_regularization': 0.0000001,
-            'limb_scale_regularization': 0.001,
-            'limb_trans_regularization': 1.0,
-            'fov': 0.000001,
-            'cam_rot': 0.0000001,
-            'cam_trans': 0.0000001,
-        },
-        575: {
-            'keypoint_3d': 20,
-            'keypoint_2d': 0.2,
-            'joint_angle_regularization': 0.0000001,
-            'limb_scale_regularization': 0.0025,
-            'limb_trans_regularization': 1.0,
-            'fov': 0.000001,
-            'cam_rot': 0.0000001,
-            'cam_trans': 0.0000001,
-        },
-    })
+    curriculum_stages: Dict[int, Dict[str, float]] = field(
+        default_factory=lambda: {
+            1: {
+                "joint_angle_regularization": 0.01,
+                "limb_scale_regularization": 0.1,
+                "limb_trans_regularization": 1,
+            },
+            10: {
+                "keypoint_2d": 0.1,
+                "joint_angle_regularization": 0.005,
+                "limb_scale_regularization": 0.05,
+                "limb_trans_regularization": 1,
+            },
+            25: {
+                "keypoint_2d": 0.2,
+                "joint_angle_regularization": 0.0025,
+                "limb_scale_regularization": 0.02,
+                "limb_trans_regularization": 1,
+            },
+            35: {
+                "keypoint_3d": 1,
+                "joint_angle_regularization": 0.001,
+                "limb_scale_regularization": 0.01,
+                "limb_trans_regularization": 1,
+            },
+            45: {
+                "keypoint_3d": 1,
+                "joint_angle_regularization": 0.0001,
+                "limb_scale_regularization": 0.005,
+                "limb_trans_regularization": 1,
+            },
+            50: {
+                "keypoint_3d": 2,
+                "joint_angle_regularization": 0.00005,
+                "limb_scale_regularization": 0.001,
+                "limb_trans_regularization": 0.5,
+            },
+            100: {
+                "keypoint_3d": 2,
+                "keypoint_2d": 0.2,
+                "joint_angle_regularization": 0.00001,
+                "limb_scale_regularization": 0.0000001,
+                "limb_trans_regularization": 0.1,
+            },
+            300: {
+                "keypoint_3d": 2,
+                "keypoint_2d": 0.2,
+                "joint_angle_regularization": 0.00001,
+                "limb_scale_regularization": 0.0000001,
+                "limb_trans_regularization": 0.1,
+                "fov": 0.0000001,
+                "cam_rot": 0.00000001,
+                "cam_trans": 0.00000001,
+            },
+            400: {
+                "keypoint_3d": 2,
+                "keypoint_2d": 0.4,
+                "joint_angle_regularization": 0.0001,
+                "limb_scale_regularization": 0.00001,
+                "limb_trans_regularization": 0.1,
+                "fov": 0.0000001,
+                "cam_rot": 0.00000001,
+                "cam_trans": 0.00000001,
+            },
+            460: {
+                "keypoint_3d": 2,
+                "keypoint_2d": 0.2,
+                "joint_angle_regularization": 0.00001,
+                "limb_scale_regularization": 0.001,
+                "limb_trans_regularization": 0.1,
+                "fov": 0.0000001,
+                "cam_rot": 0.00000001,
+                "cam_trans": 0.00000001,
+            },
+            490: {
+                "keypoint_3d": 2,
+                "keypoint_2d": 0.2,
+                "joint_angle_regularization": 0.000001,
+                "limb_scale_regularization": 0.0001,
+                "limb_trans_regularization": 0.1,
+                "fov": 0.0000001,
+                "cam_rot": 0.00000001,
+                "cam_trans": 0.00000001,
+            },
+            500: {
+                "keypoint_3d": 20,
+                "keypoint_2d": 0.2,
+                "joint_angle_regularization": 0.0000001,
+                "limb_scale_regularization": 0.00001,
+                "limb_trans_regularization": 0.1,
+                "fov": 0.000001,
+                "cam_rot": 0.0000001,
+                "cam_trans": 0.0000001,
+            },
+            560: {
+                "keypoint_3d": 20,
+                "keypoint_2d": 0.2,
+                "joint_angle_regularization": 0.0000001,
+                "limb_scale_regularization": 0.001,
+                "limb_trans_regularization": 1.0,
+                "fov": 0.000001,
+                "cam_rot": 0.0000001,
+                "cam_trans": 0.0000001,
+            },
+            575: {
+                "keypoint_3d": 20,
+                "keypoint_2d": 0.2,
+                "joint_angle_regularization": 0.0000001,
+                "limb_scale_regularization": 0.0025,
+                "limb_trans_regularization": 1.0,
+                "fov": 0.000001,
+                "cam_rot": 0.0000001,
+                "cam_trans": 0.0000001,
+            },
+        }
+    )
 
     def get_weights_for_epoch(self, epoch: int) -> Dict[str, float]:
         """Get loss weights for given epoch, applying curriculum overrides."""
@@ -304,42 +315,50 @@ class LossCurriculumConfig:
 @dataclass
 class ScaleTransBetaConfig:
     """Scale and translation beta handling configuration."""
-    mode: str = 'entangled_with_betas'  # 'ignore', 'separate', or 'entangled_with_betas'
+
+    mode: str = "entangled_with_betas"  # 'ignore', 'separate', or 'entangled_with_betas'
 
     # Per-mode loss weight overrides (applied on top of base loss weights)
-    ignore_loss_weights: Dict[str, float] = field(default_factory=lambda: {
-        'log_beta_scales': 0.0,
-        'betas_trans': 0.0,
-    })
-    separate_loss_weights: Dict[str, float] = field(default_factory=lambda: {
-        'log_beta_scales': 0.0005,
-        'betas_trans': 0.0005,
-    })
-    entangled_loss_weights: Dict[str, float] = field(default_factory=lambda: {
-        'betas': 0.0005,
-        'log_beta_scales': 0.01,
-        'betas_trans': 0.01,
-    })
+    ignore_loss_weights: Dict[str, float] = field(
+        default_factory=lambda: {
+            "log_beta_scales": 0.0,
+            "betas_trans": 0.0,
+        }
+    )
+    separate_loss_weights: Dict[str, float] = field(
+        default_factory=lambda: {
+            "log_beta_scales": 0.0005,
+            "betas_trans": 0.0005,
+        }
+    )
+    entangled_loss_weights: Dict[str, float] = field(
+        default_factory=lambda: {
+            "betas": 0.0005,
+            "log_beta_scales": 0.01,
+            "betas_trans": 0.01,
+        }
+    )
     separate_trans_scale_factor: float = 0.01
 
     def get_mode_loss_weights(self) -> Dict[str, float]:
         """Get loss weight overrides for the current mode."""
-        if self.mode == 'ignore':
+        if self.mode == "ignore":
             return self.ignore_loss_weights
-        elif self.mode == 'separate':
+        elif self.mode == "separate":
             return self.separate_loss_weights
-        elif self.mode == 'entangled_with_betas':
+        elif self.mode == "entangled_with_betas":
             return self.entangled_loss_weights
         return {}
 
     def validate(self):
-        if self.mode not in ('ignore', 'separate', 'entangled_with_betas'):
+        if self.mode not in ("ignore", "separate", "entangled_with_betas"):
             raise ValueError(f"Invalid scale_trans_beta mode '{self.mode}'")
 
 
 @dataclass
 class MeshScalingConfig:
     """Global mesh scaling configuration."""
+
     allow_mesh_scaling: bool = True
     init_mesh_scale: float = 1.0
     use_log_scale: bool = True
@@ -359,6 +378,7 @@ class AugmentationConfig:
     creating a mismatch. To enable crop jitter, the camera pipeline would need
     to switch to PerspectiveCameras (which accepts full K).
     """
+
     enabled: bool = False
     geometric_enabled: bool = False  # Scale jitter (updates K); off by default to avoid multi-view inconsistency
 
@@ -384,6 +404,7 @@ class IgnoredJointLocationsConfig:
     Unlike IgnoredJointsConfig (data preprocessing), this operates during loss
     computation so joints remain in the dataset but are simply not supervised.
     """
+
     enabled: bool = True
     ignored_joint_names: List[str] = field(default_factory=list)
 
@@ -391,19 +412,19 @@ class IgnoredJointLocationsConfig:
 @dataclass
 class JointImportanceConfig:
     """Per-joint importance weighting for keypoint losses."""
+
     enabled: bool = True
     important_joint_names: List[str] = field(default_factory=lambda: [])
     weight_multiplier: float = 10.0
 
     def is_active(self) -> bool:
-        return (self.enabled
-                and len(self.important_joint_names) > 0
-                and self.weight_multiplier != 1.0)
+        return self.enabled and len(self.important_joint_names) > 0 and self.weight_multiplier != 1.0
 
 
 @dataclass
 class IgnoredJointsConfig:
     """Joints to ignore during training due to mesh vs data misalignment."""
+
     ignored_joint_names: List[str] = field(default_factory=list)
     verbose: bool = True
 
@@ -411,34 +432,47 @@ class IgnoredJointsConfig:
 @dataclass
 class MultiDatasetEntry:
     """Configuration for a single dataset in multi-dataset training."""
-    name: str = ''
-    path: str = ''
-    type: str = 'optimized_hdf5'  # 'replicant', 'sleap', 'optimized_hdf5', 'auto'
+
+    name: str = ""
+    path: str = ""
+    type: str = "optimized_hdf5"  # 'replicant', 'sleap', 'optimized_hdf5', 'auto'
     weight: float = 1.0
     enabled: bool = True
-    available_labels: Dict[str, bool] = field(default_factory=lambda: {
-        'global_rot': True, 'joint_rot': True, 'betas': True,
-        'trans': True, 'fov': True, 'cam_rot': True, 'cam_trans': True,
-        'log_beta_scales': True, 'betas_trans': True,
-        'keypoint_2d': True, 'keypoint_3d': True, 'silhouette': True,
-    })
+    available_labels: Dict[str, bool] = field(
+        default_factory=lambda: {
+            "global_rot": True,
+            "joint_rot": True,
+            "betas": True,
+            "trans": True,
+            "fov": True,
+            "cam_rot": True,
+            "cam_trans": True,
+            "log_beta_scales": True,
+            "betas_trans": True,
+            "keypoint_2d": True,
+            "keypoint_3d": True,
+            "silhouette": True,
+        }
+    )
 
 
 @dataclass
 class MultiDatasetConfig:
     """Multi-dataset training configuration."""
+
     enabled: bool = False
     datasets: List[Dict[str, Any]] = field(default_factory=list)
-    validation_split_strategy: str = 'per_dataset'  # 'per_dataset' or 'combined'
+    validation_split_strategy: str = "per_dataset"  # 'per_dataset' or 'combined'
 
 
 @dataclass
 class OutputConfig:
     """Checkpoint and visualization output settings."""
-    checkpoint_dir: str = 'checkpoints'
-    plots_dir: str = 'plots'
-    visualizations_dir: str = 'visualizations'
-    train_visualizations_dir: str = 'visualizations_train'
+
+    checkpoint_dir: str = "checkpoints"
+    plots_dir: str = "plots"
+    visualizations_dir: str = "visualizations"
+    train_visualizations_dir: str = "visualizations_train"
     save_checkpoint_every: int = 10
     generate_visualizations_every: int = 10
     plot_history_every: int = 10
@@ -448,10 +482,11 @@ class OutputConfig:
 @dataclass
 class TrainingHyperparameters:
     """General training hyperparameters."""
+
     batch_size: int = 8
     num_epochs: int = 1000
     seed: int = 1234
-    rotation_representation: str = '6d'  # '6d' or 'axis_angle'
+    rotation_representation: str = "6d"  # '6d' or 'axis_angle'
     num_workers: int = 8
     pin_memory: bool = True
     prefetch_factor: int = 4
@@ -478,6 +513,7 @@ class SmalModelConfig:
       you must reload `config` for derived fields to update.
     - `shape_family`: the shape family passed into SMAL/SMIL fitter code.
     """
+
     smal_file: Optional[str] = None
     shape_family: Optional[int] = None
 
@@ -490,6 +526,7 @@ class BaseTrainingConfig:
     This is the single source of truth for shared training parameters.
     SingleViewConfig and MultiViewConfig extend this with mode-specific settings.
     """
+
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
@@ -510,10 +547,8 @@ class BaseTrainingConfig:
         self.dataset.validate()
         self.model.validate()
         self.scale_trans_beta.validate()
-        if self.training.rotation_representation not in ('6d', 'axis_angle'):
-            raise ValueError(
-                f"Invalid rotation_representation '{self.training.rotation_representation}'"
-            )
+        if self.training.rotation_representation not in ("6d", "axis_angle"):
+            raise ValueError(f"Invalid rotation_representation '{self.training.rotation_representation}'")
 
     def get_loss_weights_for_epoch(self, epoch: int) -> Dict[str, float]:
         """
@@ -550,100 +585,96 @@ class BaseTrainingConfig:
         legacy_smal_file = self.smal_model.smal_file if self.smal_model is not None else None
 
         return {
-            'data_path': self.dataset.data_path,
+            "data_path": self.dataset.data_path,
             # Legacy overrides (consumed by callers; not part of TrainingConfig.get_all_config())
-            'shape_family': legacy_shape_family,
-            'smal_file': legacy_smal_file,
-            'split_config': {
-                'test_size': self.dataset.test_ratio,
-                'val_size': self.dataset.val_ratio,
-                'dataset_fraction': self.dataset.dataset_fraction,
+            "shape_family": legacy_shape_family,
+            "smal_file": legacy_smal_file,
+            "split_config": {
+                "test_size": self.dataset.test_ratio,
+                "val_size": self.dataset.val_ratio,
+                "dataset_fraction": self.dataset.dataset_fraction,
             },
-            'training_params': {
-                'batch_size': self.training.batch_size,
-                'num_epochs': self.training.num_epochs,
-                'learning_rate': self.optimizer.learning_rate,
-                'weight_decay': self.optimizer.weight_decay,
-                'seed': self.training.seed,
-                'rotation_representation': self.training.rotation_representation,
-                'resume_checkpoint': self.training.resume_checkpoint,
-                'num_workers': self.training.num_workers,
-                'pin_memory': self.training.pin_memory,
-                'prefetch_factor': self.training.prefetch_factor,
+            "training_params": {
+                "batch_size": self.training.batch_size,
+                "num_epochs": self.training.num_epochs,
+                "learning_rate": self.optimizer.learning_rate,
+                "weight_decay": self.optimizer.weight_decay,
+                "seed": self.training.seed,
+                "rotation_representation": self.training.rotation_representation,
+                "resume_checkpoint": self.training.resume_checkpoint,
+                "num_workers": self.training.num_workers,
+                "pin_memory": self.training.pin_memory,
+                "prefetch_factor": self.training.prefetch_factor,
             },
-            'model_config': {
-                'backbone_name': self.model.backbone_name,
-                'freeze_backbone': self.model.freeze_backbone,
-                'backbone_unfreeze_epoch': self.model.backbone_unfreeze_epoch,
-                'backbone_lr_multiplier': self.model.backbone_lr_multiplier,
-                'hidden_dim': hidden_dim,
-                'input_resolution': self.model.get_input_resolution(),
-                'rgb_only': self.model.rgb_only,
-                'use_unity_prior': self.model.use_unity_prior,
-                'head_type': self.model.head_type,
-                'transformer_config': {
-                    'hidden_dim': hidden_dim,
-                    'depth': self.model.transformer_depth,
-                    'heads': self.model.transformer_heads,
-                    'dim_head': self.model.transformer_dim_head,
-                    'mlp_dim': self.model.transformer_mlp_dim,
-                    'dropout': self.model.transformer_dropout,
-                    'ief_iters': self.model.transformer_ief_iters,
-                    'trans_scale_factor': self.model.transformer_trans_scale_factor,
+            "model_config": {
+                "backbone_name": self.model.backbone_name,
+                "freeze_backbone": self.model.freeze_backbone,
+                "backbone_unfreeze_epoch": self.model.backbone_unfreeze_epoch,
+                "backbone_lr_multiplier": self.model.backbone_lr_multiplier,
+                "hidden_dim": hidden_dim,
+                "input_resolution": self.model.get_input_resolution(),
+                "rgb_only": self.model.rgb_only,
+                "use_unity_prior": self.model.use_unity_prior,
+                "head_type": self.model.head_type,
+                "transformer_config": {
+                    "hidden_dim": hidden_dim,
+                    "depth": self.model.transformer_depth,
+                    "heads": self.model.transformer_heads,
+                    "dim_head": self.model.transformer_dim_head,
+                    "mlp_dim": self.model.transformer_mlp_dim,
+                    "dropout": self.model.transformer_dropout,
+                    "ief_iters": self.model.transformer_ief_iters,
+                    "trans_scale_factor": self.model.transformer_trans_scale_factor,
                 },
             },
-            'ignored_joints_config': {
-                'ignored_joint_names': self.ignored_joints.ignored_joint_names,
-                'verbose_ignored_joints': self.ignored_joints.verbose,
+            "ignored_joints_config": {
+                "ignored_joint_names": self.ignored_joints.ignored_joint_names,
+                "verbose_ignored_joints": self.ignored_joints.verbose,
             },
-            'loss_curriculum': {
-                'base_weights': dict(self.loss_curriculum.base_weights),
-                'curriculum_stages': [
-                    (epoch, dict(updates))
-                    for epoch, updates in sorted(self.loss_curriculum.curriculum_stages.items())
+            "loss_curriculum": {
+                "base_weights": dict(self.loss_curriculum.base_weights),
+                "curriculum_stages": [
+                    (epoch, dict(updates)) for epoch, updates in sorted(self.loss_curriculum.curriculum_stages.items())
                 ],
             },
-            'learning_rate_curriculum': {
-                'base_learning_rate': self.optimizer.learning_rate,
-                'lr_stages': [
-                    (epoch, lr)
-                    for epoch, lr in sorted(self.optimizer.lr_schedule.items())
-                ],
+            "learning_rate_curriculum": {
+                "base_learning_rate": self.optimizer.learning_rate,
+                "lr_stages": [(epoch, lr) for epoch, lr in sorted(self.optimizer.lr_schedule.items())],
             },
-            'output_config': {
-                'checkpoint_dir': self.output.checkpoint_dir,
-                'plots_dir': self.output.plots_dir,
-                'visualizations_dir': self.output.visualizations_dir,
-                'train_visualizations_dir': self.output.train_visualizations_dir,
-                'save_checkpoint_every': self.output.save_checkpoint_every,
-                'generate_visualizations_every': self.output.generate_visualizations_every,
-                'plot_history_every': self.output.plot_history_every,
-                'num_visualization_samples': self.output.num_visualization_samples,
+            "output_config": {
+                "checkpoint_dir": self.output.checkpoint_dir,
+                "plots_dir": self.output.plots_dir,
+                "visualizations_dir": self.output.visualizations_dir,
+                "train_visualizations_dir": self.output.train_visualizations_dir,
+                "save_checkpoint_every": self.output.save_checkpoint_every,
+                "generate_visualizations_every": self.output.generate_visualizations_every,
+                "plot_history_every": self.output.plot_history_every,
+                "num_visualization_samples": self.output.num_visualization_samples,
             },
-            'scale_trans_beta': {
-                'mode': self.scale_trans_beta.mode,
+            "scale_trans_beta": {
+                "mode": self.scale_trans_beta.mode,
             },
-            'joint_importance': {
-                'enabled': self.joint_importance.enabled,
-                'important_joint_names': list(self.joint_importance.important_joint_names),
-                'weight_multiplier': self.joint_importance.weight_multiplier,
+            "joint_importance": {
+                "enabled": self.joint_importance.enabled,
+                "important_joint_names": list(self.joint_importance.important_joint_names),
+                "weight_multiplier": self.joint_importance.weight_multiplier,
             },
-            'ignored_joint_locations': {
-                'enabled': self.ignored_joint_locations.enabled,
-                'ignored_joint_names': list(self.ignored_joint_locations.ignored_joint_names),
+            "ignored_joint_locations": {
+                "enabled": self.ignored_joint_locations.enabled,
+                "ignored_joint_names": list(self.ignored_joint_locations.ignored_joint_names),
             },
-            'augmentation': {
-                'enabled': self.augmentation.enabled,
-                'geometric_enabled': self.augmentation.geometric_enabled,
-                'color_jitter_brightness': self.augmentation.color_jitter_brightness,
-                'color_jitter_contrast': self.augmentation.color_jitter_contrast,
-                'color_jitter_saturation': self.augmentation.color_jitter_saturation,
-                'gaussian_noise_std': self.augmentation.gaussian_noise_std,
-                'gaussian_blur_prob': self.augmentation.gaussian_blur_prob,
-                'gaussian_blur_kernel_range': list(self.augmentation.gaussian_blur_kernel_range),
-                'random_erasing_prob': self.augmentation.random_erasing_prob,
-                'random_erasing_scale_range': list(self.augmentation.random_erasing_scale_range),
-                'crop_jitter_fraction': self.augmentation.crop_jitter_fraction,
-                'scale_jitter_range': list(self.augmentation.scale_jitter_range),
+            "augmentation": {
+                "enabled": self.augmentation.enabled,
+                "geometric_enabled": self.augmentation.geometric_enabled,
+                "color_jitter_brightness": self.augmentation.color_jitter_brightness,
+                "color_jitter_contrast": self.augmentation.color_jitter_contrast,
+                "color_jitter_saturation": self.augmentation.color_jitter_saturation,
+                "gaussian_noise_std": self.augmentation.gaussian_noise_std,
+                "gaussian_blur_prob": self.augmentation.gaussian_blur_prob,
+                "gaussian_blur_kernel_range": list(self.augmentation.gaussian_blur_kernel_range),
+                "random_erasing_prob": self.augmentation.random_erasing_prob,
+                "random_erasing_scale_range": list(self.augmentation.random_erasing_scale_range),
+                "crop_jitter_fraction": self.augmentation.crop_jitter_fraction,
+                "scale_jitter_range": list(self.augmentation.scale_jitter_range),
             },
         }

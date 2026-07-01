@@ -7,8 +7,6 @@ schema and tensor values are preserved.
 
 import json
 import os
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -82,15 +80,9 @@ def test_round_trip_axis_angle(tmp_path):
 
     # poses[f, 0] must equal global_rot; poses[f, 1:] must equal joint_rot.
     for f_idx, params in enumerate(frames):
-        np.testing.assert_allclose(
-            data["poses"][f_idx, 0], params["global_rot"][0].numpy(), atol=1e-6
-        )
-        np.testing.assert_allclose(
-            data["poses"][f_idx, 1:], params["joint_rot"][0].numpy(), atol=1e-6
-        )
-        np.testing.assert_allclose(
-            data["betas_per_frame"][f_idx], params["betas"][0].numpy(), atol=1e-6
-        )
+        np.testing.assert_allclose(data["poses"][f_idx, 0], params["global_rot"][0].numpy(), atol=1e-6)
+        np.testing.assert_allclose(data["poses"][f_idx, 1:], params["joint_rot"][0].numpy(), atol=1e-6)
+        np.testing.assert_allclose(data["betas_per_frame"][f_idx], params["betas"][0].numpy(), atol=1e-6)
 
     # Clip-averaged betas equal numpy mean of the per-frame betas.
     expected_avg = np.stack([p["betas"][0].numpy() for p in frames]).mean(axis=0)

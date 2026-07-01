@@ -17,11 +17,9 @@ from scipy.spatial import KDTree
 from mathutils import Vector
 from sklearn.decomposition import PCA
 from sklearn.covariance import EmpiricalCovariance
-import matplotlib.pyplot as plt
 import tempfile
 import csv
 import bmesh
-import time
 
 
 # TODO if you are very bored, implement package installation with subprocesses
@@ -47,9 +45,10 @@ pip.main(['install', 'scikit-learn', 'matplotlib' '--target', (sys.exec_prefix) 
 # global, so the model is not re-loaded
 pkl_data = None
 
-# Global variables to store computed Transformation PCA components from 
+# Global variables to store computed Transformation PCA components from
 computed_scaledirs = None
 computed_transdirs = None
+
 
 def clear_morph_pca_globals():
     """Clear the global morph PCA variables"""
@@ -58,6 +57,7 @@ def clear_morph_pca_globals():
     computed_transdirs = None
     print("Cleared global morph PCA variables")
 
+
 def get_morph_pca_status():
     """Check if Transformation PCA components are available"""
     global computed_scaledirs, computed_transdirs
@@ -65,6 +65,7 @@ def get_morph_pca_status():
         return True, f"Available - scaledirs: {computed_scaledirs.shape}, transdirs: {computed_transdirs.shape}"
     else:
         return False, "Not available - run 'Load all unposed registered meshes' first"
+
 
 """
 SMIL-ify
@@ -105,9 +106,7 @@ class CustomUnpickler(pickle.Unpickler):
                 self.data = np.array(state.get("x", []))
             else:
                 # Handle both tuple/list format and direct data format
-                self.data = np.array(
-                    state[0] if isinstance(state, (tuple, list)) else state
-                )
+                self.data = np.array(state[0] if isinstance(state, (tuple, list)) else state)
             return self
 
         @property
@@ -276,11 +275,7 @@ def export_y_axis_vertices_to_npy(obj, filepath):
     # retruns all vertex indices that lie on the y-axis (within some tolerance) for symmetry axis
     mesh = obj.data
     y_axis_vertices = np.array(
-        [
-            i
-            for i, vert in enumerate(mesh.vertices)
-            if np.isclose(vert.co.y, 0.0, atol=1e-3)
-        ],
+        [i for i, vert in enumerate(mesh.vertices) if np.isclose(vert.co.y, 0.0, atol=1e-3)],
         dtype=int,
     )
     np.save(filepath, y_axis_vertices)
@@ -361,9 +356,7 @@ def J_regressor_from_boundary_weights(
         print("kintree_table: ", kintree_table)
 
     # compute the nearest neighbors so we can default to using them, when conditions are not met for bounadry weights
-    nearest_indices, nearest_weights = find_nearest_neighbors(
-        vertices, joint_locations, n
-    )
+    nearest_indices, nearest_weights = find_nearest_neighbors(vertices, joint_locations, n)
     # Small epsilon to avoid division by zero
     epsilon = 1e-8
 
@@ -385,9 +378,7 @@ def J_regressor_from_boundary_weights(
         # If nn_for_leaf_bones is True and this joint has no children, use nearest neighbor approach
         if nn_for_leaf_bones and not has_children:
             if debug:
-                print(
-                    f"Joint {i}: Leaf joint with no children, using nearest neighbor approach"
-                )
+                print(f"Joint {i}: Leaf joint with no children, using nearest neighbor approach")
             J_regressor[i, nearest_indices[i]] = nearest_weights[i]
             continue
 
@@ -437,9 +428,7 @@ def J_regressor_from_boundary_weights(
                 normalized_weights = inverse_weights / weight_sum
             else:
                 if debug:
-                    print(
-                        f"Joint {i}: Warning - all boundary weights are zero, using nearest neighbor approach"
-                    )
+                    print(f"Joint {i}: Warning - all boundary weights are zero, using nearest neighbor approach")
                 J_regressor[i, nearest_indices[i]] = nearest_weights[i]
                 continue
 
@@ -490,30 +479,20 @@ def check_J_regressor_alignment(J_regressor, joints, vertices, joint_names=None)
     mean_relative_discrepancy = np.mean(relative_discrepancies)
 
     # Print detailed information
-    print(f"\nJ_regressor alignment check:")
+    print("\nJ_regressor alignment check:")
     print(f"  Original joints shape: {joints.shape}")
     print(f"  Regressed joints shape: {regressed_joints.shape}")
     print(f"  Model size: {model_size}")
     print(f"  Longest model axis: {longest_axis:.6f}")
     print(f"  Mean absolute discrepancy: {mean_discrepancy:.6f}")
-    print(
-        f"  Mean relative discrepancy: {mean_relative_discrepancy:.3f}% of model size"
-    )
-    print(
-        f"  Max relative discrepancy: {np.max(relative_discrepancies):.3f}% of model size"
-    )
-    print(
-        f"  Min relative discrepancy: {np.min(relative_discrepancies):.3f}% of model size"
-    )
+    print(f"  Mean relative discrepancy: {mean_relative_discrepancy:.3f}% of model size")
+    print(f"  Max relative discrepancy: {np.max(relative_discrepancies):.3f}% of model size")
+    print(f"  Min relative discrepancy: {np.min(relative_discrepancies):.3f}% of model size")
 
     # Print individual joint discrepancies
     for i in range(len(joints)):
-        joint_name = (
-            joint_names[i] if joint_names and i < len(joint_names) else f"Joint_{i}"
-        )
-        print(
-            f"  {joint_name}: absolute = {discrepancies[i]:.6f}, relative = {relative_discrepancies[i]:.3f}%"
-        )
+        joint_name = joint_names[i] if joint_names and i < len(joint_names) else f"Joint_{i}"
+        print(f"  {joint_name}: absolute = {discrepancies[i]:.6f}, relative = {relative_discrepancies[i]:.3f}%")
 
     return regressed_joints, discrepancies, mean_discrepancy
 
@@ -545,10 +524,8 @@ def export_J_regressor_to_npy(
     vertices, _ = mesh_to_numpy(mesh_obj)
     joints = armature_obj.data.bones
     joint_locations = np.array([bone.head_local for bone in joints], dtype=np.float32)
-    if influence_type == "inverse_distance" or influence_type == None:
-        nearest_indices, nearest_weights = find_nearest_neighbors(
-            vertices, joint_locations, n
-        )
+    if influence_type == "inverse_distance" or influence_type is None:
+        nearest_indices, nearest_weights = find_nearest_neighbors(vertices, joint_locations, n)
         J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
 
         for i in range(len(joints)):
@@ -560,16 +537,12 @@ def export_J_regressor_to_npy(
             print("Warning: boundary_weights method requires kintree_table and weights parameters.")
             print("Falling back to inverse_distance method.")
             # Fall back to inverse_distance method
-            nearest_indices, nearest_weights = find_nearest_neighbors(
-                vertices, joint_locations, n
-            )
+            nearest_indices, nearest_weights = find_nearest_neighbors(vertices, joint_locations, n)
             J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
             for i in range(len(joints)):
                 J_regressor[i, nearest_indices[i]] = nearest_weights[i]
         else:
-            J_regressor = J_regressor_from_boundary_weights(
-                vertices, joint_locations, n, kintree_table, weights
-            )
+            J_regressor = J_regressor_from_boundary_weights(vertices, joint_locations, n, kintree_table, weights)
     else:
         J_regressor = np.zeros((len(joints), len(vertices)), dtype=np.float32)
         raise ValueError(f"Invalid influence type: {influence_type}")
@@ -582,7 +555,7 @@ def export_J_regressor_to_npy(
         np.save(filepath, J_regressor)
 
     if export_as_csv:
-        #np.savetxt(filepath.replace(".npy", ".csv"), J_regressor, delimiter=",")
+        # np.savetxt(filepath.replace(".npy", ".csv"), J_regressor, delimiter=",")
         np.savetxt("test_J_reg.csv", J_regressor, delimiter=",", fmt="%1.8f")
 
     return J_regressor
@@ -620,8 +593,7 @@ def load_pkl_file(filepath):
             print("\nReading in contents of SMPL file...")
             data = CustomUnpickler(f).load()
             data_de_chumpied = {
-                k: np.array(v) if isinstance(v, CustomUnpickler.ChumpyWrapper) else v
-                for k, v in data.items()
+                k: np.array(v) if isinstance(v, CustomUnpickler.ChumpyWrapper) else v for k, v in data.items()
             }
             print("\nContents of loaded SMPL file:")
             for key in data_de_chumpied:
@@ -629,21 +601,21 @@ def load_pkl_file(filepath):
                 try:
                     if type(data_de_chumpied[key]) is not str:
                         print(data_de_chumpied[key].shape)
-                except:
+                except Exception:
                     try:
                         print(len(data_de_chumpied[key]))
-                    except:
+                    except Exception:
                         # if it's not a numpy array or a list, just print the type
                         print(type(data_de_chumpied[key]))
         print("Loaded .pkl file successfully.")
-        
+
         try:
             # Check for new morph PCA entries
             if "scaledirs" in data_de_chumpied:
                 print(f"Found scaledirs with shape: {data_de_chumpied['scaledirs'].shape}")
             if "transdirs" in data_de_chumpied:
                 print(f"Found transdirs with shape: {data_de_chumpied['transdirs'].shape}")
-        except:
+        except Exception:
             print("No valid scaledirs or transdirs found.")
 
         return data_de_chumpied
@@ -695,9 +667,7 @@ def apply_pose_correctives(obj, posedirs, base_vertices):
         # Get current deformed vertex positions (from regular skinning)
         world_matrix = np.array(obj.matrix_world)
         world_matrix_inv = np.array(obj.matrix_world.inverted())
-        base_skinned_positions = np.array(
-            [np.array(obj.matrix_world @ v.co) for v in obj.data.vertices]
-        )
+        base_skinned_positions = np.array([np.array(obj.matrix_world @ v.co) for v in obj.data.vertices])
         # Store these positions for future resets
         obj["base_skinned_positions"] = base_skinned_positions.tobytes()
         obj["world_matrix"] = world_matrix.tobytes()
@@ -750,7 +720,7 @@ def apply_pose_correctives(obj, posedirs, base_vertices):
 
         # Print debug info for first vertex
         if idx == 0:
-            print(f"First vertex:")
+            print("First vertex:")
             print(f"  Base position: {base_vertices[idx]}")
             print(f"  Base skinned position: {skinned_pos}")
             print(f"  Pose offset: {offset}")
@@ -817,9 +787,7 @@ def create_armature_and_weights(data, obj, base_name="SMPL"):
 
     # Add bones based on hierarchy
     bones = []
-    for i, (parent_idx, child_idx, bone_name) in enumerate(
-        zip(kintree_table[0], kintree_table[1], joint_names)
-    ):
+    for i, (parent_idx, child_idx, bone_name) in enumerate(zip(kintree_table[0], kintree_table[1], joint_names)):
         bone = armature.data.edit_bones.new(bone_name)
         bone.head = joints[child_idx]
         bone.tail = joints[child_idx] + np.array([0, 0, 0.1])
@@ -894,44 +862,44 @@ def create_shapekeys(data, obj):
 def create_shapekeys_from_pkl_shapedirs(data, obj):
     """
     Create shapekeys from shapedirs stored in pkl data.
-    
+
     Args:
     - data (dict): Dictionary containing pkl data with 'shapedirs'
     - obj (bpy.types.Object): The mesh object
-    
+
     Returns:
     - tuple: (cov, mean_betas) covariance matrix and mean betas
     """
     if "shapedirs" not in data:
         print("No 'shapedirs' key found in the pkl file.")
         return None, None
-    
+
     shapedirs = data["shapedirs"]
-    
+
     # shapedirs has shape (num_vertices, 3, num_shapekeys)
     # Check if shapedirs is not empty
     if shapedirs.size == 0:
         print("shapedirs is empty.")
         return None, None
-    
+
     if len(shapedirs.shape) != 3:
         print(f"Unexpected shapedirs shape: {shapedirs.shape}. Expected (V, 3, K).")
         return None, None
-    
+
     num_vertices, _, num_shapekeys = shapedirs.shape
-    
+
     # Get base vertex positions
     base_vertices = np.array([np.array(v.co) for v in obj.data.vertices])
-    
+
     # Verify vertex count matches
     if base_vertices.shape[0] != num_vertices:
         print(f"Vertex count mismatch: mesh has {base_vertices.shape[0]} vertices, shapedirs expects {num_vertices}.")
         return None, None
-    
+
     # Create basis shape key if it doesn't exist
     if not obj.data.shape_keys:
         obj.shape_key_add(name="Basis")
-    
+
     # PCA-derived betas can fall well outside Blender's default 0..1 slider range.
     # Widen the range so animation imports load weights verbatim instead of clipping.
     pkl_shape_key_slider_min = -10.0
@@ -950,12 +918,12 @@ def create_shapekeys_from_pkl_shapedirs(data, obj):
         shape_key.slider_min = pkl_shape_key_slider_min
         shape_key.slider_max = pkl_shape_key_slider_max
         shape_key.value = 0.0
-    
+
     # Create covariance matrix and mean betas
     # For independent shapekeys, use identity matrix
     cov = np.eye(num_shapekeys)
     mean_betas = np.ones(num_shapekeys) / num_shapekeys
-    
+
     print(f"Created {num_shapekeys} shapekeys from pkl shapedirs.")
     return cov, mean_betas
 
@@ -1023,9 +991,7 @@ def apply_pca_and_create_shapekeys(
         shape_key.slider_min = min_range
         shape_key.slider_max = max_range
 
-    print(
-        f"Created {num_components} PCA shapekeys with custom min and max ranges based on standard deviations."
-    )
+    print(f"Created {num_components} PCA shapekeys with custom min and max ranges based on standard deviations.")
     # Optional: export XY (PC1, PC2) scatter data and PCA stats
     try:
         if output_dir is not None:
@@ -1035,7 +1001,7 @@ def apply_pca_and_create_shapekeys(
             pc_xy_path = os.path.join(output_dir, "smil_shape_PC_xy.csv")
             with open(pc_xy_path, "w", newline="") as csvfile:
                 writer = csv.writer(csvfile)
-                writer.writerow(["label", "PC1", "PC2"]) 
+                writer.writerow(["label", "PC1", "PC2"])
                 for i, lab in enumerate(labels):
                     pc1 = transformed_betas[i, 0] if transformed_betas.shape[1] > 0 else 0.0
                     pc2 = transformed_betas[i, 1] if transformed_betas.shape[1] > 1 else 0.0
@@ -1054,10 +1020,12 @@ def apply_pca_and_create_shapekeys(
                 f.write(f"mean_l2_norm: {float(np.linalg.norm(pca.mean_))}\n")
                 # Add per-shape PC weights (scores) needed to reproduce each input shape
                 f.write("\npc_weights_per_shape (scores):\n")
-                header = ",".join(["label"] + [f"PC{i+1}" for i in range(min(num_components, transformed_betas.shape[1]))])
+                header = ",".join(
+                    ["label"] + [f"PC{i + 1}" for i in range(min(num_components, transformed_betas.shape[1]))]
+                )
                 f.write(header + "\n")
                 for i, lab in enumerate(labels):
-                    weights = transformed_betas[i, : num_components]
+                    weights = transformed_betas[i, :num_components]
                     weights_str = ",".join([f"{w}" for w in weights.tolist()])
                     f.write(f"{lab},{weights_str}\n")
             print(f"Shape PCA XY exported to {pc_xy_path}; stats to {stats_path}")
@@ -1078,6 +1046,7 @@ def apply_entangled_pca_and_create_shapekeys(
     output_dir=None,
 ):
     import csv
+
     """
     Apply PCA to combined shape, scale, and translation features, then create shape keys.
     
@@ -1097,63 +1066,63 @@ def apply_entangled_pca_and_create_shapekeys(
     """
     n, v, _ = scans.shape
     n_joints = scale_data.shape[1]
-    
+
     # Reshape vertex data to (n, v*3)
     vertex_features = scans.reshape(n, v * 3)
-    
+
     # Reshape translation data to (n, j*3)
     translation_features = translation_data.reshape(n, n_joints * 3)
-    
+
     # Combine all features: [vertex_features, scale_features, translation_features]
     combined_features = np.concatenate([vertex_features, scale_data, translation_features], axis=1)
-    
+
     # Debug: Check each feature type separately with detailed statistics
-    print(f"=== FEATURE RANGES BEFORE NORMALIZATION ===")
-    print(f"Vertex features:")
+    print("=== FEATURE RANGES BEFORE NORMALIZATION ===")
+    print("Vertex features:")
     print(f"  Shape: {vertex_features.shape}")
     print(f"  Range: {np.min(vertex_features):.6f} to {np.max(vertex_features):.6f}")
     print(f"  Mean: {np.mean(vertex_features):.6f}, Std: {np.std(vertex_features):.6f}")
     print(f"  Min abs: {np.min(np.abs(vertex_features)):.6f}, Max abs: {np.max(np.abs(vertex_features)):.6f}")
-    
-    print(f"Scale data:")
+
+    print("Scale data:")
     print(f"  Shape: {scale_data.shape}")
     print(f"  Range: {np.min(scale_data):.6f} to {np.max(scale_data):.6f}")
     print(f"  Mean: {np.mean(scale_data):.6f}, Std: {np.std(scale_data):.6f}")
     print(f"  Min abs: {np.min(np.abs(scale_data)):.6f}, Max abs: {np.max(np.abs(scale_data)):.6f}")
-    
-    print(f"Translation features:")
+
+    print("Translation features:")
     print(f"  Shape: {translation_features.shape}")
     print(f"  Range: {np.min(translation_features):.6f} to {np.max(translation_features):.6f}")
     print(f"  Mean: {np.mean(translation_features):.6f}, Std: {np.std(translation_features):.6f}")
     print(f"  Min abs: {np.min(np.abs(translation_features)):.6f}, Max abs: {np.max(np.abs(translation_features)):.6f}")
-    
+
     # Check for extreme values in each feature type
     vertex_extreme = np.sum(np.abs(vertex_features) > 1e6)
     scale_extreme = np.sum(np.abs(scale_data) > 1e6)
     translation_extreme = np.sum(np.abs(translation_features) > 1e6)
-    
+
     if vertex_extreme > 0:
         print(f"Warning: Extreme vertex values found: {vertex_extreme} values")
     if scale_extreme > 0:
         print(f"Warning: Extreme scale values found: {scale_extreme} values")
     if translation_extreme > 0:
         print(f"Warning: Extreme translation values found: {translation_extreme} values")
-    
+
     # Check if normalization is needed by comparing feature magnitudes
     vertex_magnitude = np.std(vertex_features)
     scale_magnitude = np.std(scale_data)
     translation_magnitude = np.std(translation_features)
-    
-    print(f"=== NORMALIZATION ASSESSMENT ===")
-    print(f"Feature standard deviations:")
+
+    print("=== NORMALIZATION ASSESSMENT ===")
+    print("Feature standard deviations:")
     print(f"  Vertex: {vertex_magnitude:.6f}")
     print(f"  Scale: {scale_magnitude:.6f}")
     print(f"  Translation: {translation_magnitude:.6f}")
-    
+
     max_magnitude = max(vertex_magnitude, scale_magnitude, translation_magnitude)
     min_magnitude = min(vertex_magnitude, scale_magnitude, translation_magnitude)
-    magnitude_ratio = max_magnitude / min_magnitude if min_magnitude > 0 else float('inf')
-    
+    magnitude_ratio = max_magnitude / min_magnitude if min_magnitude > 0 else float("inf")
+
     print(f"Magnitude ratio (max/min): {magnitude_ratio:.2f}")
     if magnitude_ratio > 100:
         print("Normalization is RECOMMENDED - large magnitude differences detected")
@@ -1161,8 +1130,8 @@ def apply_entangled_pca_and_create_shapekeys(
         print("Normalization is ADVISABLE - moderate magnitude differences detected")
     else:
         print("Normalization may not be necessary - similar magnitudes")
-    print(f"=== END FEATURE ANALYSIS ===")
-    
+    print("=== END FEATURE ANALYSIS ===")
+
     # Check for NaN values and handle them
     nan_mask = np.isnan(combined_features)
     if np.any(nan_mask):
@@ -1171,43 +1140,47 @@ def apply_entangled_pca_and_create_shapekeys(
         # Replace NaN values with 0 (or could use mean imputation)
         combined_features = np.nan_to_num(combined_features, nan=0.0)
         print("Replaced NaN values with 0.0")
-    
+
     # Skip normalization since feature magnitudes are similar (ratio: 5.60)
     print(f"Combined features shape: {combined_features.shape}")
     print(f"Combined features range: {np.min(combined_features):.6f} to {np.max(combined_features):.6f}")
     print("Skipping normalization - feature magnitudes are similar")
-    
+
     # Perform PCA on normalized features
     pca = PCA(n_components=num_components)
     pca.fit(combined_features)
-    
+
     # Since we didn't normalize, the PCA components are already in the original scale
     original_mean = pca.mean_  # This is the mean of the original data
-    
+
     # Components are already in the correct scale since no normalization was applied
     pca_components_denorm = pca.components_
-    
+
     # Debug: Check the magnitude of components
-    print(f"PCA components magnitude range: {np.min(np.abs(pca_components_denorm)):.6f} to {np.max(np.abs(pca_components_denorm)):.6f}")
-    
+    print(
+        f"PCA components magnitude range: {np.min(np.abs(pca_components_denorm)):.6f} to {np.max(np.abs(pca_components_denorm)):.6f}"
+    )
+
     # Separate the original mean into shape, scale, and translation parts
-    vertex_mean = original_mean[:v*3].reshape(v, 3)
+    vertex_mean = original_mean[: v * 3].reshape(v, 3)
     # the scale and translation mean are already used to compute the mean mesh so they don't get re-applied.
-    scale_mean = original_mean[v*3:v*3+n_joints]
-    translation_mean = original_mean[v*3+n_joints:].reshape(n_joints, 3)
-    
+    original_mean[v * 3 : v * 3 + n_joints]
+    original_mean[v * 3 + n_joints :].reshape(n_joints, 3)
+
     # Get covariance matrix from transformed data
     transformed_betas = pca.transform(combined_features)
-    
+
     # Debug: Check transformed_betas
     print(f"transformed_betas shape: {transformed_betas.shape}")
     print(f"transformed_betas range: {np.min(transformed_betas):.6f} to {np.max(transformed_betas):.6f}")
-    print(f"transformed_betas sample values: {transformed_betas[0, :5] if transformed_betas.shape[1] > 5 else transformed_betas[0, :]}")
-    
+    print(
+        f"transformed_betas sample values: {transformed_betas[0, :5] if transformed_betas.shape[1] > 5 else transformed_betas[0, :]}"
+    )
+
     COV = EmpiricalCovariance(assume_centered=False).fit(transformed_betas)
     cov_out = COV.covariance_
     mean_betas = COV.location_
-    
+
     # Update mesh with mean shape
     if overwrite_mesh:
         for vert_index, vert in enumerate(vertex_mean):
@@ -1220,60 +1193,62 @@ def apply_entangled_pca_and_create_shapekeys(
         shape_key = obj.data.shape_keys.key_blocks["Basis"]
         for vert_index, vert in enumerate(vertex_mean):
             shape_key.data[vert_index].co = vert
-    
+
     # Separate PCA components into shape, scale, and translation parts
-    shape_components = pca_components_denorm[:, :v*3].reshape(num_components, v, 3)
-    scale_components = pca_components_denorm[:, v*3:v*3+n_joints]  # (num_components, n_joints)
-    translation_components = pca_components_denorm[:, v*3+n_joints:].reshape(num_components, n_joints, 3)
-    
+    shape_components = pca_components_denorm[:, : v * 3].reshape(num_components, v, 3)
+    scale_components = pca_components_denorm[:, v * 3 : v * 3 + n_joints]  # (num_components, n_joints)
+    translation_components = pca_components_denorm[:, v * 3 + n_joints :].reshape(num_components, n_joints, 3)
+
     # Create shape keys from shape components
     std_devs = np.sqrt(pca.explained_variance_)
-    
+
     for i, (shapekey, std_dev) in enumerate(zip(shape_components, std_devs)):
         shape_key_name = f"PC_{i + 1}"
         shape_key = obj.shape_key_add(name=shape_key_name)
-        
+
         min_range = -std_range * std_dev
         max_range = std_range * std_dev
-        
+
         for j, vertex in enumerate(shapekey):
             shape_key.data[j].co = vertex_mean[j] + vertex
-        
+
         shape_key.slider_min = min_range
         shape_key.slider_max = max_range
-    
-    print(f"Created {num_components} entangled PCA shapekeys with custom min and max ranges based on standard deviations.")
-    
+
+    print(
+        f"Created {num_components} entangled PCA shapekeys with custom min and max ranges based on standard deviations."
+    )
+
     # Prepare scaledirs and transdirs for export
     # Scale components: tile single values to 3D for compatibility
     scaledirs = np.tile(scale_components[:, :, np.newaxis], (1, 1, 3))  # (num_components, n_joints, 3)
     transdirs = translation_components  # (num_components, n_joints, 3)
-    
+
     # Export XY coordinates and PCA stats if output_dir is provided
     try:
         if output_dir is not None:
             if labels is None or len(labels) != scans.shape[0]:
                 labels = [f"sample_{i}" for i in range(scans.shape[0])]
-            
+
             # XY coordinates for first two PCs
             pc_xy_path = os.path.join(output_dir, "smil_entangled_PC_xy.csv")
-            
+
             # Debug: Check what we're about to write
-            print(f"About to write PC XY data:")
+            print("About to write PC XY data:")
             print(f"  Number of labels: {len(labels)}")
             print(f"  transformed_betas shape: {transformed_betas.shape}")
             print(f"  First few PC1 values: {transformed_betas[:3, 0] if transformed_betas.shape[1] > 0 else 'No PC1'}")
             print(f"  First few PC2 values: {transformed_betas[:3, 1] if transformed_betas.shape[1] > 1 else 'No PC2'}")
-            
+
             with open(pc_xy_path, "w", newline="") as csvfile:
                 writer = csv.writer(csvfile)
-                writer.writerow(["label", "PC1", "PC2"]) 
+                writer.writerow(["label", "PC1", "PC2"])
                 for i, lab in enumerate(labels):
                     pc1 = transformed_betas[i, 0] if transformed_betas.shape[1] > 0 else 0.0
                     pc2 = transformed_betas[i, 1] if transformed_betas.shape[1] > 1 else 0.0
                     writer.writerow([lab, pc1, pc2])
                     print(f"  Writing: {lab}, {pc1}, {pc2}")
-            
+
             # PCA stats
             stats_path = os.path.join(output_dir, "smil_entangled_PCA_stats.txt")
             with open(stats_path, "w") as f:
@@ -1286,64 +1261,68 @@ def apply_entangled_pca_and_create_shapekeys(
                 f.write(f"singular_values: {pca.singular_values_.tolist()}\n")
                 f.write(f"mean_l2_norm: {float(np.linalg.norm(original_mean))}\n")
                 f.write("\npc_weights_per_shape (scores):\n")
-                header = ",".join(["label"] + [f"PC{i+1}" for i in range(min(num_components, transformed_betas.shape[1]))])
+                header = ",".join(
+                    ["label"] + [f"PC{i + 1}" for i in range(min(num_components, transformed_betas.shape[1]))]
+                )
                 f.write(header + "\n")
                 for i, lab in enumerate(labels):
-                    weights = transformed_betas[i, : num_components]
+                    weights = transformed_betas[i, :num_components]
                     weights_str = ",".join([f"{w}" for w in weights.tolist()])
                     f.write(f"{lab},{weights_str}\n")
             print(f"Entangled PCA XY exported to {pc_xy_path}; stats to {stats_path}")
     except Exception as e:
         print(f"Failed exporting entangled PCA XY/stats: {e}")
-    
+
     # --- Export entangled morph data to CSV ---
     try:
         entangled_output_path = os.path.join(output_dir, "smil_morph_PC_data_entangled.csv")
-        
+
         # Get joint names from the object's stored data
         joint_names = None
-        
+
         # Try multiple methods to get joint names
         try:
             # Method 1: Check if object has J_names stored as custom property
-            if hasattr(obj, 'get') and 'J_names' in obj:
-                joint_names = obj['J_names']
+            if hasattr(obj, "get") and "J_names" in obj:
+                joint_names = obj["J_names"]
                 print(f"Retrieved joint names from object custom property: {len(joint_names)} names")
-            
+
             # Method 2: Try to get from armature
             if joint_names is None:
                 armature = obj.find_armature()
-                if armature and hasattr(armature, 'data') and hasattr(armature.data, 'bones'):
+                if armature and hasattr(armature, "data") and hasattr(armature.data, "bones"):
                     joint_names = [bone.name for bone in armature.data.bones]
                     print(f"Retrieved joint names from armature: {len(joint_names)} names")
-            
+
             # Method 3: Try to get from stored SMIL data
-            if joint_names is None and hasattr(obj, 'get') and 'smpl_data' in obj:
-                smpl_data = obj['smpl_data']
-                if hasattr(smpl_data, 'get') and 'J_names' in smpl_data:
-                    joint_names = smpl_data['J_names']
+            if joint_names is None and hasattr(obj, "get") and "smpl_data" in obj:
+                smpl_data = obj["smpl_data"]
+                if hasattr(smpl_data, "get") and "J_names" in smpl_data:
+                    joint_names = smpl_data["J_names"]
                     print(f"Retrieved joint names from SMIL data: {len(joint_names)} names")
-        
+
         except Exception as e:
             print(f"Error retrieving joint names: {e}")
-        
+
         # Fallback to generic names if we can't get proper joint names
         if joint_names is None or len(joint_names) != n_joints:
             joint_names = [f"joint_{j}" for j in range(n_joints)]
-            print(f"Warning: Using generic joint names for entangled morph data export (expected {n_joints}, got {len(joint_names) if joint_names else 0})")
+            print(
+                f"Warning: Using generic joint names for entangled morph data export (expected {n_joints}, got {len(joint_names) if joint_names else 0})"
+            )
         else:
             print(f"Successfully retrieved {len(joint_names)} joint names for entangled morph data export")
-        
+
         with open(entangled_output_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
             # Header: joint_name, then for each PC six columns matching the original naming pattern
             header_entangled = ["joint_name"]
             for k in range(num_components):
-                pc_label = f"PC_{k+1}"
+                pc_label = f"PC_{k + 1}"
                 header_entangled.extend(
                     [
                         f"{pc_label}_scale_x",
-                        f"{pc_label}_scale_y", 
+                        f"{pc_label}_scale_y",
                         f"{pc_label}_scale_z",
                         f"{pc_label}_translation_x",
                         f"{pc_label}_translation_y",
@@ -1351,21 +1330,21 @@ def apply_entangled_pca_and_create_shapekeys(
                     ]
                 )
             writer.writerow(header_entangled)
-            
+
             # Data rows: one per joint, with PCA component values
             for j in range(n_joints):
                 row = [joint_names[j]]
                 for k in range(num_components):
                     # Add scale components (3 values)
                     row.extend(scaledirs[k, j, :].tolist())
-                    # Add translation components (3 values)  
+                    # Add translation components (3 values)
                     row.extend(transdirs[k, j, :].tolist())
                 writer.writerow(row)
-        
+
         print(f"Entangled morph data exported to {entangled_output_path}")
     except Exception as e:
         print(f"Failed exporting entangled morph data: {e}")
-    
+
     return cov_out, mean_betas, scaledirs, transdirs
 
 
@@ -1382,9 +1361,7 @@ def recalculate_joint_positions(vertex_positions, J_regressor):
     """
 
     j, n = J_regressor.shape
-    assert (
-        vertex_positions.shape[0] == n
-    ), "Number of vertices in vertex positions and weights must match."
+    assert vertex_positions.shape[0] == n, "Number of vertices in vertex positions and weights must match."
 
     # Calculate joint positions using matrix multiplication: J_regressor @ vertex_positions
     # J_regressor shape: (j, n), vertex_positions shape: (n, 3)
@@ -1453,9 +1430,7 @@ def compute_symmetric_pairs(vertices, axis="y", tolerance=0.01):
     return np.array(sym_pairs)
 
 
-def rebuild_symmetry_array(
-    vertices_on_symmetry_axis, all_vertices, axis="y", tolerance=0.001
-):
+def rebuild_symmetry_array(vertices_on_symmetry_axis, all_vertices, axis="y", tolerance=0.001):
     # Initialize the symmetry array
     symIdx = np.arange(len(all_vertices))
 
@@ -1505,12 +1480,10 @@ def make_symmetrical(obj, pkl_data, center_tolerance=0.005):
         print(
             f"Error enforcing symmetry: Unequal number of vertices on left ({len(left_inds)})",
             f"and right ({len(right_inds)}) sides. This may indicate an asymmetric mesh or",
-            f"incorrect symmetry axis.",
+            "incorrect symmetry axis.",
         )
 
-    symIdx = rebuild_symmetry_array(
-        vertices_on_symmetry_axis=I, all_vertices=v, axis="y", tolerance=0.001
-    )
+    symIdx = rebuild_symmetry_array(vertices_on_symmetry_axis=I, all_vertices=v, axis="y", tolerance=0.001)
 
     # Check if the object has shape keys
     if obj.data.shape_keys:
@@ -1545,9 +1518,7 @@ def make_symmetrical(obj, pkl_data, center_tolerance=0.005):
                 if center[i]:
                     shape_vertex.co = Vector([shape_vertex.co.x, 0, shape_vertex.co.z])
                 elif left[i]:
-                    corresponding_shape_vertex = shape_keys[shape_key.name].data[
-                        symIdx[i]
-                    ]
+                    corresponding_shape_vertex = shape_keys[shape_key.name].data[symIdx[i]]
                     shape_vertex.co = Vector(
                         [
                             corresponding_shape_vertex.co.x,
@@ -1622,9 +1593,7 @@ def export_smpl_model(obj, export_path, pkl_data=None):
             "J": [],
             "bs_style": "lbs",
             "weights": [],
-            "posedirs": np.empty(
-                0
-            ),  # ignore for now as we currently don't have corrective shapekeys in our models
+            "posedirs": np.empty(0),  # ignore for now as we currently don't have corrective shapekeys in our models
             "v_template": [],
             "shapedirs": [],
             "bs_type": "lrotmin",
@@ -1663,13 +1632,9 @@ def export_smpl_model(obj, export_path, pkl_data=None):
 
     pkl_data["f"] = export_faces_to_npy(obj, faces_npy_path)[1]
     print(pkl_data["f"].shape)
-    pkl_data["weights"] = export_vertex_groups_to_npy(
-        obj, vertex_groups_npy_path, clean_weights=clean_weights
-    )[1]
+    pkl_data["weights"] = export_vertex_groups_to_npy(obj, vertex_groups_npy_path, clean_weights=clean_weights)[1]
     print(pkl_data["weights"].shape)
-    pkl_data["sym_verts"] = export_y_axis_vertices_to_npy(
-        obj, y_axis_vertices_npy_path
-    )[1]
+    pkl_data["sym_verts"] = export_y_axis_vertices_to_npy(obj, y_axis_vertices_npy_path)[1]
     print(pkl_data["sym_verts"].shape)
 
     armature_obj = obj.find_armature()
@@ -1679,13 +1644,9 @@ def export_smpl_model(obj, export_path, pkl_data=None):
 
     print("Found armature object:", armature_obj.name)
 
-    pkl_data["kintree_table"] = export_joint_hierarchy_to_npy(
-        armature_obj, joint_hierarchy_npy_path
-    )[1]
-    pkl_data["J"], pkl_data["J_names"] = export_joint_locations_to_npy(
-        armature_obj, joint_locations_npy_path
-    )[1:]
-    
+    pkl_data["kintree_table"] = export_joint_hierarchy_to_npy(armature_obj, joint_hierarchy_npy_path)[1]
+    pkl_data["J"], pkl_data["J_names"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1:]
+
     # Check if model has static joint locations
     if obj.get("static_joint_locs", False) or bpy.context.scene.smpl_tool.force_static_joint_locs:
         # Keep J_regressor as all zeroes for static joint models
@@ -1710,15 +1671,9 @@ def export_smpl_model(obj, export_path, pkl_data=None):
     # Update "shapedirs" with the content of the shapekeys
     num_vertices = len(updated_vertices)
     try:
-        num_shapekeys = (
-            len(obj.data.shape_keys.key_blocks) - 1
-        )  # Exclude the "Basis" shape key
-        shapedirs = np.zeros(
-            (num_vertices, 3, num_shapekeys)
-        )  # add 1 for one base shapekey
-        for i, shape_key in enumerate(
-            obj.data.shape_keys.key_blocks[1:], start=0
-        ):  # Exclude the "Basis" shape key
+        num_shapekeys = len(obj.data.shape_keys.key_blocks) - 1  # Exclude the "Basis" shape key
+        shapedirs = np.zeros((num_vertices, 3, num_shapekeys))  # add 1 for one base shapekey
+        for i, shape_key in enumerate(obj.data.shape_keys.key_blocks[1:], start=0):  # Exclude the "Basis" shape key
             for j, vert in enumerate(shape_key.data):
                 shapedirs[j, :, i] = np.array(vert.co) - updated_vertices[j]
     except AttributeError:
@@ -1735,14 +1690,11 @@ def export_smpl_model(obj, export_path, pkl_data=None):
             print(f"Including scaledirs in export with shape: {pkl_data['scaledirs'].shape}")
         if "transdirs" in pkl_data:
             print(f"Including transdirs in export with shape: {pkl_data['transdirs'].shape}")
-    except:
+    except Exception:
         print("No scaledirs or transdirs found.")
-        
 
     # Write out the new pkl file to the same location as the input pkl file with the user-specified name
-    output_path = os.path.join(
-        os.path.dirname(export_path), bpy.context.scene.smpl_tool.output_filename
-    )
+    output_path = os.path.join(os.path.dirname(export_path), bpy.context.scene.smpl_tool.output_filename)
     try:
         with open(output_path, "wb") as f:
             pickle.dump(pkl_data, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -1788,7 +1740,7 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.operator("smpl.load_all_unposed_meshes", text="Load all unposed registered meshes")
         layout.prop(smpl_tool, "separate_pcas")
         layout.operator("smpl.generate_from_unposed", text="Generate SMIL model from unposed meshes")
-        
+
         # Add morph PCA status indicator
         morph_available, morph_status = get_morph_pca_status()
         if morph_available:
@@ -1799,11 +1751,11 @@ class SMPL_PT_Panel(bpy.types.Panel):
             status_box = layout.box()
             status_box.label(text="Transformation PCA components:", icon="INFO")
             status_box.label(text=morph_status)
-        
+
         # Add clear button if components are available
         if morph_available:
             layout.operator("smpl.clear_morph_pca", text="Clear Transformation PCA components")
-        
+
         layout.separator()
         layout.prop(smpl_tool, "output_filename")
         layout.operator("smpl.export_model", text="Export SMIL Model")
@@ -1823,9 +1775,7 @@ class SMPL_PT_Panel(bpy.types.Panel):
         layout.operator("smpl.import_animation", text="Import SMIL Animation (.npz)")
         # Stays greyed out until SMPL_OT_ExportAnimationGLTF.poll() finds
         # SMIL_Animation_Root in the scene.
-        layout.operator(
-            "smpl.export_animation_gltf", text="Export animated model as glTF"
-        )
+        layout.operator("smpl.export_animation_gltf", text="Export animated model as glTF")
 
 
 # Key under which the full SMPL/SMIL data dict is embedded on the mesh object as
@@ -1837,9 +1787,7 @@ SMPL_DATA_PROP = "smpl_data_b64"
 
 def _encode_smpl_data(data):
     """Serialize a SMPL/SMIL data dict for storage in a Blender string property."""
-    return base64.b64encode(
-        pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
-    ).decode("ascii")
+    return base64.b64encode(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)).decode("ascii")
 
 
 def _decode_smpl_data(encoded):
@@ -1935,12 +1883,7 @@ def export_joint_distances(context, filepath):
     # Uses the 10 nearest vertices, consider exposing this as a parameter
     smpl_tool = context.scene.smpl_tool
     if mesh_obj.get("static_joint_locs", False):
-        J_regressor = export_J_regressor_to_npy(
-            mesh_obj, 
-            armature, 
-            10, 
-            influence_type=smpl_tool.j_regressor_method
-        )
+        J_regressor = export_J_regressor_to_npy(mesh_obj, armature, 10, influence_type=smpl_tool.j_regressor_method)
 
     # Check if reference measurements are available
     reference_measurements = {}
@@ -2048,9 +1991,7 @@ def export_joint_distances(context, filepath):
             eval_obj = mesh_obj.evaluated_get(depsgraph)
 
             # Get vertex positions from evaluated mesh
-            vertex_positions = np.array(
-                [np.array(v.co) for v in eval_obj.data.vertices]
-            )
+            vertex_positions = np.array([np.array(v.co) for v in eval_obj.data.vertices])
 
             # Calculate joint positions using J_regressor
             if mesh_obj.get("static_joint_locs", False):
@@ -2070,29 +2011,18 @@ def export_joint_distances(context, filepath):
             # Clean the key name as it may contain file endings
             key_name = key.name.split(".")[0]
 
-            if (
-                reference_joint_pair
-                and reference_measurements
-                and key_name in reference_measurements
-            ):
+            if reference_joint_pair and reference_measurements and key_name in reference_measurements:
                 # Find the distance between reference joints for this shape key
                 ref_joint_idx1 = (
-                    joint_names.index(reference_joint_pair[0])
-                    if reference_joint_pair[0] in joint_names
-                    else -1
+                    joint_names.index(reference_joint_pair[0]) if reference_joint_pair[0] in joint_names else -1
                 )
                 ref_joint_idx2 = (
-                    joint_names.index(reference_joint_pair[1])
-                    if reference_joint_pair[1] in joint_names
-                    else -1
+                    joint_names.index(reference_joint_pair[1]) if reference_joint_pair[1] in joint_names else -1
                 )
 
                 if ref_joint_idx1 >= 0 and ref_joint_idx2 >= 0:
                     # Calculate the current distance between reference joints
-                    current_dist = np.linalg.norm(
-                        joint_positions[ref_joint_idx1]
-                        - joint_positions[ref_joint_idx2]
-                    )
+                    current_dist = np.linalg.norm(joint_positions[ref_joint_idx1] - joint_positions[ref_joint_idx2])
 
                     # Get the reference distance
                     reference_dist = reference_measurements.get(key_name, 0.0)
@@ -2108,9 +2038,7 @@ def export_joint_distances(context, filepath):
             for dist_data in key_distances:
                 if reference_joint_pair and reference_measurements:
                     scaled_distance = dist_data[2] * scaling_factor
-                    all_data.append(
-                        [key.name] + dist_data + [scaling_factor, scaled_distance]
-                    )
+                    all_data.append([key.name] + dist_data + [scaling_factor, scaled_distance])
                 else:
                     all_data.append([key.name] + dist_data)
 
@@ -2189,9 +2117,7 @@ def export_mesh_measurements(context, filepath):
 
         # Add header row with scaling info if reference data is available
         if reference_joint_pair and reference_measurements:
-            all_data.append(
-                ["Shape", "Measurement", "Value", "Scaling Factor", "Scaled Value"]
-            )
+            all_data.append(["Shape", "Measurement", "Value", "Scaling Factor", "Scaled Value"])
         else:
             all_data.append(["Shape", "Measurement", "Value"])
 
@@ -2228,24 +2154,15 @@ def export_mesh_measurements(context, filepath):
             if reference_joint_pair and reference_measurements and armature:
                 # Recalculate J_regressor for current mesh state using selected method
                 smpl_tool = context.scene.smpl_tool
-                J_regressor = export_J_regressor_to_npy(
-                    obj, 
-                    armature, 
-                    10, 
-                    influence_type=smpl_tool.j_regressor_method
-                )
+                J_regressor = export_J_regressor_to_npy(obj, armature, 10, influence_type=smpl_tool.j_regressor_method)
                 joint_names = [bone.name for bone in armature.data.bones]
 
                 # Get indices of reference joints
                 ref_joint_idx1 = (
-                    joint_names.index(reference_joint_pair[0])
-                    if reference_joint_pair[0] in joint_names
-                    else -1
+                    joint_names.index(reference_joint_pair[0]) if reference_joint_pair[0] in joint_names else -1
                 )
                 ref_joint_idx2 = (
-                    joint_names.index(reference_joint_pair[1])
-                    if reference_joint_pair[1] in joint_names
-                    else -1
+                    joint_names.index(reference_joint_pair[1]) if reference_joint_pair[1] in joint_names else -1
                 )
 
                 if ref_joint_idx1 >= 0 and ref_joint_idx2 >= 0:
@@ -2260,20 +2177,13 @@ def export_mesh_measurements(context, filepath):
                         obj.data.update()
 
                         # Get vertex positions with this shape key applied
-                        vertex_positions = np.array(
-                            [np.array(v.co) for v in obj.data.vertices]
-                        )
+                        vertex_positions = np.array([np.array(v.co) for v in obj.data.vertices])
 
                         # Calculate joint positions using J_regressor
-                        joint_positions = recalculate_joint_positions(
-                            vertex_positions, J_regressor
-                        )
+                        joint_positions = recalculate_joint_positions(vertex_positions, J_regressor)
 
                         # Calculate distance between reference joints
-                        current_dist = np.linalg.norm(
-                            joint_positions[ref_joint_idx1]
-                            - joint_positions[ref_joint_idx2]
-                        )
+                        current_dist = np.linalg.norm(joint_positions[ref_joint_idx1] - joint_positions[ref_joint_idx2])
                         joint_distances[key.name] = current_dist
 
                         # Reset this shape key
@@ -2320,7 +2230,6 @@ def export_mesh_measurements(context, filepath):
                     and key_name in reference_measurements
                     and key.name in joint_distances
                 ):
-
                     # Get the reference distance
                     reference_dist = reference_measurements.get(key_name, 0.0)
                     current_dist = joint_distances[key.name]
@@ -2328,9 +2237,7 @@ def export_mesh_measurements(context, filepath):
                     if current_dist > 0 and reference_dist > 0:
                         # Calculate linear scaling factor
                         scaling_factor = reference_dist / current_dist
-                        print(
-                            f"Shape key {key.name}: Scaling factor = {scaling_factor}"
-                        )
+                        print(f"Shape key {key.name}: Scaling factor = {scaling_factor}")
 
                         # Scale surface area (s²) and volume (s³)
                         scaled_surface_area = key_surface_area * (scaling_factor**2)
@@ -2357,16 +2264,12 @@ def export_mesh_measurements(context, filepath):
                         )
                     else:
                         # Add unscaled values if we can't calculate scaling
-                        all_data.append(
-                            [key.name, "Surface Area", key_surface_area, "N/A", "N/A"]
-                        )
+                        all_data.append([key.name, "Surface Area", key_surface_area, "N/A", "N/A"])
                         all_data.append([key.name, "Volume", key_volume, "N/A", "N/A"])
                 else:
                     # Add to data without scaling
                     if reference_joint_pair and reference_measurements:
-                        all_data.append(
-                            [key.name, "Surface Area", key_surface_area, "N/A", "N/A"]
-                        )
+                        all_data.append([key.name, "Surface Area", key_surface_area, "N/A", "N/A"])
                         all_data.append([key.name, "Volume", key_volume, "N/A", "N/A"])
                     else:
                         all_data.append([key.name, "Surface Area", key_surface_area])
@@ -2464,9 +2367,7 @@ def load_reference_measurements(filepath):
                         measurement = float(row[1])
                         measurements[shape_name] = measurement
                     except ValueError:
-                        print(
-                            f"Warning: Could not convert measurement for {shape_name} to float"
-                        )
+                        print(f"Warning: Could not convert measurement for {shape_name} to float")
 
         return joint_pair, measurements
     except Exception as e:
@@ -2510,11 +2411,11 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                     store_smpl_data(context, data, obj=obj)
 
                     create_armature_and_weights(data, obj, base_name=base_name)
-                    
+
                     # Check if npz file is provided and exists
                     npz_filepath = bpy.path.abspath(smpl_tool.npz_filepath) if smpl_tool.npz_filepath else None
                     npz_exists = npz_filepath and os.path.exists(npz_filepath)
-                    
+
                     if npz_exists:
                         # Load from npz file (existing behavior with PCA option)
                         npz_data = load_npz_file(npz_filepath)
@@ -2526,9 +2427,7 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
 
                         if smpl_tool.shapekeys_from_PCA:
                             output_dir = os.path.dirname(pkl_filepath)
-                            labels = (
-                                list(npz_data["labels"]) if "labels" in npz_data else None
-                            )
+                            labels = list(npz_data["labels"]) if "labels" in npz_data else None
                             cov, mean_betas = apply_pca_and_create_shapekeys(
                                 verts_data,
                                 obj,
@@ -2574,7 +2473,7 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
 
                     data["shape_cov"] = cov
                     data["shape_mean_betas"] = mean_betas
-                    
+
                     # Handle static joint locations
                     if smpl_tool.force_static_joint_locs:
                         # Set J_regressor to all zeroes for static joint locations
@@ -2583,8 +2482,8 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                         data["J_regressor"] = np.zeros((num_joints, num_vertices), dtype=np.float32)
                         obj["static_joint_locs"] = True
                         data["static_joint_locs"] = True
-                        print(f"Static joint locations enabled - J_regressor set to zeroes")
-                    
+                        print("Static joint locations enabled - J_regressor set to zeroes")
+
                     # Update the stored data with the new shape info
                     store_smpl_data(context, data, obj=obj)
 
@@ -2624,18 +2523,12 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
         smpl_tool = scene.smpl_tool
 
         # 1. Find all tagged objects
-        unposed_meshes = [
-            obj
-            for obj in bpy.data.objects
-            if obj.get("SMIL_TYPE") == "unposed_registered_mesh"
-        ]
+        unposed_meshes = [obj for obj in bpy.data.objects if obj.get("SMIL_TYPE") == "unposed_registered_mesh"]
         if not unposed_meshes:
             self.report({"ERROR"}, "No unposed registered meshes found in the scene.")
             return {"CANCELLED"}
 
-        self.report(
-            {"INFO"}, f"Found {len(unposed_meshes)} unposed meshes to use as shapekeys."
-        )
+        self.report({"INFO"}, f"Found {len(unposed_meshes)} unposed meshes to use as shapekeys.")
 
         try:
             # 2. Load base pkl file to create the new model on
@@ -2662,9 +2555,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                 # Ensure vertex counts match before proceeding
                 if len(eval_obj.data.vertices) != len(obj.data.vertices):
                     self.report(
-                        {
-                            "ERROR"
-                        },
+                        {"ERROR"},
                         f"Vertex count mismatch between base model and '{unposed_obj.name}'. Skipping.",
                     )
                     continue
@@ -2674,9 +2565,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                 labels_list.append(unposed_obj.name)
 
             if not verts_list:
-                self.report(
-                    {"ERROR"}, "No valid unposed meshes found with matching vertex counts."
-                )
+                self.report({"ERROR"}, "No valid unposed meshes found with matching vertex counts.")
                 bpy.data.objects.remove(obj)
                 return {"CANCELLED"}
 
@@ -2687,12 +2576,12 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
 
             # The rest is similar to SMPL_OT_ImportModel
             obj["SMIL_TYPE"] = "SMIL_model_from_unposed_meshes"
-            
+
             # Check if the base pkl has static_joint_locs set
             if data.get("static_joint_locs", False):
                 obj["static_joint_locs"] = True
                 print("Using base model with static joint locations")
-            
+
             store_smpl_data(context, data, obj=obj)
 
             create_armature_and_weights(data, obj, base_name=base_name)
@@ -2704,7 +2593,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
 
             if smpl_tool.shapekeys_from_PCA:
                 output_dir = os.path.dirname(pkl_filepath)
-                
+
                 if smpl_tool.separate_pcas:
                     # Use separate PCAs (original behavior)
                     cov, mean_betas = apply_pca_and_create_shapekeys(
@@ -2720,50 +2609,61 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                     # Collect scale and translation data from unposed meshes
                     scale_data_list = []
                     translation_data_list = []
-                    
+
                     for unposed_obj in unposed_meshes:
                         if "scale_data" in unposed_obj and "translation_data" in unposed_obj:
                             # Reconstruct scale data
                             scale_data = np.array(unposed_obj["scale_data"], dtype=np.float32)
-                            
+
                             # Debug: Check scale data
-                            print(f"Scale data for {unposed_obj.name}: shape={scale_data.shape}, values={scale_data[:10]}...")
-                            
+                            print(
+                                f"Scale data for {unposed_obj.name}: shape={scale_data.shape}, values={scale_data[:10]}..."
+                            )
+
                             # Validate scale data shape
                             if len(scale_data) != 55:
-                                print(f"ERROR: Expected 55 joints but got {len(scale_data)} scale values for {unposed_obj.name}")
+                                print(
+                                    f"ERROR: Expected 55 joints but got {len(scale_data)} scale values for {unposed_obj.name}"
+                                )
                                 print("This suggests the scale data was stored incorrectly.")
                                 # Skip this mesh
                                 continue
-                            
+
                             # Reconstruct translation data
                             translation_data = np.array(unposed_obj["translation_data"], dtype=np.float32)
                             num_joints = len(scale_data)
-                            
+
                             # Debug: Check what we retrieved
                             print(f"Retrieved translation data length: {len(translation_data)} for {unposed_obj.name}")
                             print(f"Expected length: {num_joints * 3} = {num_joints * 3}")
-                            
+
                             # Validate translation data shape
                             expected_translation_size = num_joints * 3
                             if len(translation_data) != expected_translation_size:
-                                print(f"ERROR: Expected {expected_translation_size} translation values but got {len(translation_data)} for {unposed_obj.name}")
+                                print(
+                                    f"ERROR: Expected {expected_translation_size} translation values but got {len(translation_data)} for {unposed_obj.name}"
+                                )
                                 print("This suggests the translation data was stored incorrectly.")
                                 # Skip this mesh
                                 continue
-                                
+
                             translation_data = translation_data.reshape(num_joints, 3)
-                            
+
                             # Debug: Check translation data
                             print(f"Translation data for {unposed_obj.name}: shape={translation_data.shape}")
                             if np.any(np.isnan(translation_data)) or np.any(np.isinf(translation_data)):
                                 print(f"Warning: NaN or Inf values in translation data for {unposed_obj.name}")
-                                print(f"Translation data range: {np.min(translation_data)} to {np.max(translation_data)}")
-                            
+                                print(
+                                    f"Translation data range: {np.min(translation_data)} to {np.max(translation_data)}"
+                                )
+
                             scale_data_list.append(scale_data)
                             translation_data_list.append(translation_data)
                         else:
-                            self.report({"WARNING"}, f"No scale/translation data found for {unposed_obj.name}. Using separate PCAs instead.")
+                            self.report(
+                                {"WARNING"},
+                                f"No scale/translation data found for {unposed_obj.name}. Using separate PCAs instead.",
+                            )
                             # Fall back to separate PCAs
                             cov, mean_betas = apply_pca_and_create_shapekeys(
                                 verts_data,
@@ -2778,15 +2678,15 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                         # All meshes have scale/translation data, proceed with entangled PCA
                         scale_data = np.array(scale_data_list)
                         translation_data = np.array(translation_data_list)
-                        
+
                         # Debug: Check for NaN values in scale data
                         if np.any(np.isnan(scale_data)):
-                            print(f"Warning: NaN values found in scale_data array")
+                            print("Warning: NaN values found in scale_data array")
                         if np.any(np.isnan(translation_data)):
-                            print(f"Warning: NaN values found in translation_data array")
+                            print("Warning: NaN values found in translation_data array")
                         if np.any(np.isnan(verts_data)):
-                            print(f"Warning: NaN values found in verts_data array")
-                        
+                            print("Warning: NaN values found in verts_data array")
+
                         cov, mean_betas, scaledirs, transdirs = apply_entangled_pca_and_create_shapekeys(
                             verts_data,
                             scale_data,
@@ -2797,7 +2697,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                             labels=labels_list,
                             output_dir=output_dir,
                         )
-                        
+
                         # Store the entangled PCA components
                         data["scaledirs"] = scaledirs
                         data["transdirs"] = transdirs
@@ -2806,7 +2706,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
 
             data["shape_cov"] = cov
             data["shape_mean_betas"] = mean_betas
-            
+
             # Handle static joint locations
             if smpl_tool.force_static_joint_locs:
                 # Set J_regressor to all zeroes for static joint locations
@@ -2815,8 +2715,8 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                 data["J_regressor"] = np.zeros((num_joints, num_vertices), dtype=np.float32)
                 obj["static_joint_locs"] = True
                 data["static_joint_locs"] = True
-                print(f"Static joint locations enabled - J_regressor set to zeroes")
-            
+                print("Static joint locations enabled - J_regressor set to zeroes")
+
             # Update the stored data with the new shape info
             store_smpl_data(context, data, obj=obj)
 
@@ -2826,22 +2726,27 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                 global computed_scaledirs, computed_transdirs
                 if computed_scaledirs is not None and computed_transdirs is not None:
                     # Additional safety check for array shapes
-                    if (isinstance(computed_scaledirs, np.ndarray) and 
-                        isinstance(computed_transdirs, np.ndarray) and
-                        len(computed_scaledirs.shape) == 3 and 
-                        len(computed_transdirs.shape) == 3):
-                        
+                    if (
+                        isinstance(computed_scaledirs, np.ndarray)
+                        and isinstance(computed_transdirs, np.ndarray)
+                        and len(computed_scaledirs.shape) == 3
+                        and len(computed_transdirs.shape) == 3
+                    ):
                         data["scaledirs"] = computed_scaledirs
                         data["transdirs"] = computed_transdirs
-                        print(f"Added Transformation PCA components to generated model:")
+                        print("Added Transformation PCA components to generated model:")
                         print(f"  scaledirs shape: {computed_scaledirs.shape}")
                         print(f"  transdirs shape: {computed_transdirs.shape}")
                         # Update the stored data with the morph PCA info
                         store_smpl_data(context, data, obj=obj)
                     else:
-                        print("Transformation PCA components found but with invalid shapes. Run 'Load all unposed registered meshes' again.")
+                        print(
+                            "Transformation PCA components found but with invalid shapes. Run 'Load all unposed registered meshes' again."
+                        )
                 else:
-                    print("No Transformation PCA components found. Run 'Load all unposed registered meshes' first to compute them.")
+                    print(
+                        "No Transformation PCA components found. Run 'Load all unposed registered meshes' first to compute them."
+                    )
 
             if smpl_tool.symmetrise:
                 make_symmetrical(obj, data)
@@ -2856,9 +2761,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
             if smpl_tool.clean_mesh:
                 cleanup_mesh(obj, center_tolerance=smpl_tool.merging_threshold)
 
-            self.report(
-                {"INFO"}, "SMIL Model generated from unposed meshes successfully."
-            )
+            self.report({"INFO"}, "SMIL Model generated from unposed meshes successfully.")
             return {"FINISHED"}
 
         except Exception as e:
@@ -2888,9 +2791,7 @@ class SMPL_OT_ExportModel(bpy.types.Operator):
                 self.report({"ERROR"}, "No valid mesh object selected.")
                 return {"CANCELLED"}
 
-            export_smpl_model(
-                obj, pkl_data=data, export_path=bpy.path.abspath(smpl_tool.pkl_filepath)
-            )
+            export_smpl_model(obj, pkl_data=data, export_path=bpy.path.abspath(smpl_tool.pkl_filepath))
 
             self.report({"INFO"}, "SMPL Model exported successfully.")
             return {"FINISHED"}
@@ -2914,17 +2815,17 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         pkl_data = load_pkl_file(pkl_filepath)
         if not pkl_data:
             self.report({"ERROR"}, "Failed to load .pkl file.")
-            return {'CANCELLED'}
+            return {"CANCELLED"}
 
         # Load NPZ data (for registered meshes)
         npz_filepath = bpy.path.abspath(smpl_tool.npz_filepath)
         if not os.path.exists(npz_filepath):
             self.report({"ERROR"}, "Could not find .npz file.")
-            return {'CANCELLED'}
+            return {"CANCELLED"}
         npz_data = load_npz_file(npz_filepath)
         if npz_data is None or "verts" not in npz_data:
             self.report({"ERROR"}, "No 'verts' key found in .npz file.")
-            return {'CANCELLED'}
+            return {"CANCELLED"}
 
         verts_array = npz_data["verts"]  # shape (N, V, 3)
         labels = npz_data["labels"] if "labels" in npz_data else [f"mesh_{i}" for i in range(len(verts_array))]
@@ -2934,9 +2835,9 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
         kintree_table = pkl_data["kintree_table"]
         joint_names = pkl_data["J_names"] if "J_names" in pkl_data else [f"J_{i}" for i in range(joints.shape[0])]
         J_regressor = np.copy(pkl_data["J_regressor"]) if "J_regressor" in pkl_data else None
-        global_rots = npz_data["global_rot"] if "global_rot" in npz_data else None  # (N, 3)
-        joint_rots = npz_data["joint_rot"] if "joint_rot" in npz_data else None    # (N, J-1, 3)
-        translations = npz_data["trans"] if "trans" in npz_data else None          # (N, 3)
+        npz_data["global_rot"] if "global_rot" in npz_data else None  # (N, 3)
+        npz_data["joint_rot"] if "joint_rot" in npz_data else None  # (N, J-1, 3)
+        translations = npz_data["trans"] if "trans" in npz_data else None  # (N, 3)
 
         n_meshes = len(verts_array)
         # --- Compute mean shape and mean joint locations ---
@@ -2992,7 +2893,7 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     # Parent for IK controls, shaped as a sphere
                     controls_parent_name = f"IK_Controls_{armature.name}"
                     controls_parent = bpy.data.objects.new(controls_parent_name, None)
-                    controls_parent.empty_display_type = 'SPHERE'
+                    controls_parent.empty_display_type = "SPHERE"
                     controls_parent.empty_display_size = 0.8
                     controls_parent.parent = snap_controls_parent
                     controls_parent.location = (0, 0, 0)  # Relative to snap_controls_parent
@@ -3001,10 +2902,10 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     # Parent armature to the main control and reset its location
                     armature.parent = snap_controls_parent
                     armature.location = (0, 0, 0)
-                    
+
                     # Store offset for world space calculations
                     armature_offset = snap_controls_parent.location
-                    
+
                     # Move the mesh to the origin relative to the armature
                     obj.location = (0, 0, 0)
                 # Update joint locations using J_reg and current mesh vertices
@@ -3065,7 +2966,9 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     # Now compute hierarchical scales
                     final_scales = np.ones(num_joints)
                     # Build parent lookup for each joint
-                    parent_lookup = {child: parent for parent, child in zip(kintree_table[0], kintree_table[1]) if parent >= 0}
+                    parent_lookup = {
+                        child: parent for parent, child in zip(kintree_table[0], kintree_table[1]) if parent >= 0
+                    }
                     for j in range(1, num_joints):  # skip root
                         # Compute cumulative product of all ancestor scales
                         cumulative = 1.0
@@ -3085,39 +2988,43 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     transform_data[:, scale_col_start : scale_col_start + 3] = np.tile(
                         final_scales.reshape(-1, 1), (1, 3)
                     )
-                    
+
                     # Store scale data in mesh object for later use in entangled PCA
                     # Handle zero scales by setting them to 1.0
                     final_scales_clean = final_scales.copy()
                     zero_mask = (final_scales_clean == 0) | np.isnan(final_scales_clean) | np.isinf(final_scales_clean)
                     if np.any(zero_mask):
-                        print(f"Warning: Found {np.sum(zero_mask)} zero/invalid scale values for {labels[i]}, setting to 1.0")
+                        print(
+                            f"Warning: Found {np.sum(zero_mask)} zero/invalid scale values for {labels[i]}, setting to 1.0"
+                        )
                         final_scales_clean[zero_mask] = 1.0
-                    
+
                     # Debug: Check what we're about to store
-                    print(f"About to store scale data for {labels[i]}: shape={final_scales_clean.shape}, values={final_scales_clean[:10]}...")
+                    print(
+                        f"About to store scale data for {labels[i]}: shape={final_scales_clean.shape}, values={final_scales_clean[:10]}..."
+                    )
                     print(f"final_scales range: {np.min(final_scales_clean)} to {np.max(final_scales_clean)}")
                     print(f"final_scales has NaN: {np.any(np.isnan(final_scales_clean))}")
                     print(f"final_scales has Inf: {np.any(np.isinf(final_scales_clean))}")
-                    
+
                     # Store scale data as a list to avoid byte conversion issues
                     obj["scale_data"] = final_scales_clean.tolist()
-                    
+
                     # Verify what was stored
                     stored_data = np.array(obj["scale_data"], dtype=np.float32)
                     print(f"Verification - stored data shape: {stored_data.shape}, values: {stored_data[:10]}...")
                     print(f"Stored data matches original: {np.array_equal(stored_data, final_scales_clean)}")
-                    
+
                     bpy.ops.object.mode_set(mode="POSE")
-                    
+
                 # --- END PER-BONE LENGTH NORMALIZATION (HIERARCHICAL) ---
                 bpy.context.view_layer.update()
 
                 # --- IK Rig Setup ---
 
                 # 1. Get armature and bone data
-                kintree_table = pkl_data['kintree_table']
-                joint_names = pkl_data['J_names']
+                kintree_table = pkl_data["kintree_table"]
+                joint_names = pkl_data["J_names"]
                 num_joints = len(joint_names)
 
                 # 2. Identify leaf bones
@@ -3126,7 +3033,7 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
 
                 # 3. Batch-calculate all IK target positions in Pose Mode
                 bpy.context.view_layer.objects.active = armature
-                
+
                 target_positions = {}
                 for bone_idx in range(num_joints):
                     # Do not create targets for leaf bones
@@ -3137,8 +3044,8 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     target_positions[pose_bone.name] = world_tail_pos
 
                 # 4. Batch-create all IK target empties in Object Mode
-                bpy.ops.object.mode_set(mode='OBJECT')
-                
+                bpy.ops.object.mode_set(mode="OBJECT")
+
                 ik_targets = {}
                 for bone_name, pos in target_positions.items():
                     ik_target = bpy.data.objects.new(f"IK_Target_{armature.name}_{bone_name}", None)
@@ -3151,7 +3058,7 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
 
                 # 5. Batch-apply all constraints in Pose Mode
                 bpy.context.view_layer.objects.active = armature
-                bpy.ops.object.mode_set(mode='POSE')
+                bpy.ops.object.mode_set(mode="POSE")
 
                 for bone_idx in range(num_joints):
                     pose_bone = armature.pose.bones[bone_idx]
@@ -3160,13 +3067,13 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     if not ik_target:
                         continue
 
-                    ik_constraint = pose_bone.constraints.new('IK')
+                    ik_constraint = pose_bone.constraints.new("IK")
                     ik_constraint.target = ik_target
                     ik_constraint.chain_count = 1
                     ik_constraint.influence = 1.0
 
                 # 6. Return to Object Mode
-                bpy.ops.object.mode_set(mode='OBJECT')
+                bpy.ops.object.mode_set(mode="OBJECT")
 
                 # --- Hierarchical Joint Alignment to Mean Shape ---
                 # This aligns the posed rig to the mean shape's proportions.
@@ -3196,9 +3103,11 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                         ik_empty.location = mean_shape_tail_targets[bone_name] - armature_offset
 
                 # C. For bones with siblings, prepare to snap their heads to the mean shape's head position
-                parent_lookup = {child: parent for parent, child in zip(kintree_table[0], kintree_table[1]) if parent >= 0}
-                snap_target_data = {} # {bone_name: target_world_pos}
-                
+                parent_lookup = {
+                    child: parent for parent, child in zip(kintree_table[0], kintree_table[1]) if parent >= 0
+                }
+                snap_target_data = {}  # {bone_name: target_world_pos}
+
                 # Manually align the root bone's head to the mean shape's root joint position
                 root_bone_name = joint_names[0]
                 snap_target_data[root_bone_name] = Vector(mean_joints[0]) + armature_offset
@@ -3207,24 +3116,24 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 translation = mean_joints[0] - mesh_joints[0]
                 trans_col_start = i * 6 + 3
                 transform_data[0, trans_col_start : trans_col_start + 3] = translation
-                
+
                 # Initialize translation data array for this mesh
                 mesh_translation_data = np.zeros((num_joints, 3))
                 mesh_translation_data[0] = translation
-                
-                for j in range(1, num_joints): # Skip root bone
+
+                for j in range(1, num_joints):  # Skip root bone
                     parent_idx = parent_lookup.get(j)
                     # Calculate translation for all joints, not just those with siblings
                     translation = mean_joints[j] - mesh_joints[j]
                     mesh_translation_data[j] = translation
-                    
+
                     # Only create snap targets for joints with siblings
                     if parent_idx is not None and len(children[parent_idx]) > 1:
                         bone_name = joint_names[j]
                         snap_target_data[bone_name] = Vector(mean_joints[j]) + armature_offset
                         trans_col_start = i * 6 + 3
                         transform_data[j, trans_col_start : trans_col_start + 3] = translation
-                
+
                 # Store translation data in mesh object for later use in entangled PCA
                 # Debug: Check for NaN values in translation data
                 if np.any(np.isnan(mesh_translation_data)):
@@ -3233,18 +3142,18 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     print(f"Translation data: {mesh_translation_data}")
                     # Replace NaN with 0.0 (no translation)
                     mesh_translation_data = np.nan_to_num(mesh_translation_data, nan=0.0)
-                
+
                 print(f"About to store translation data for {labels[i]}: shape={mesh_translation_data.shape}")
                 print(f"Translation data range: {np.min(mesh_translation_data)} to {np.max(mesh_translation_data)}")
-                
+
                 # Store translation data as a flat list to avoid reshaping issues
                 flat_translation_data = mesh_translation_data.flatten()
                 obj["translation_data"] = flat_translation_data.tolist()
-                
+
                 # Debug: Verify the storage
                 print(f"Stored translation data length: {len(obj['translation_data'])} (should be {55 * 3} = 165)")
                 print(f"Original shape: {mesh_translation_data.shape}, Flattened length: {len(flat_translation_data)}")
-                        
+
                 # D. Batch-create snap targets and constraints
                 if snap_target_data:
                     snap_targets = {}
@@ -3258,21 +3167,19 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
 
                     # Apply constraints
                     bpy.context.view_layer.objects.active = armature
-                    bpy.ops.object.mode_set(mode='POSE')
+                    bpy.ops.object.mode_set(mode="POSE")
                     for bone_name, snap_target_empty in snap_targets.items():
                         pose_bone = armature.pose.bones.get(bone_name)
                         if pose_bone:
-                            copy_loc_constraint = pose_bone.constraints.new('COPY_LOCATION')
+                            copy_loc_constraint = pose_bone.constraints.new("COPY_LOCATION")
                             copy_loc_constraint.target = snap_target_empty
-                    bpy.ops.object.mode_set(mode='OBJECT')
+                    bpy.ops.object.mode_set(mode="OBJECT")
         finally:
             wm.progress_end()
-            
+
         # --- Export morph data to CSV ---
         try:
-            output_path = os.path.join(
-                os.path.dirname(pkl_filepath), "smil_morph_data.csv"
-            )
+            output_path = os.path.join(os.path.dirname(pkl_filepath), "smil_morph_data.csv")
             with open(output_path, "w", newline="") as csvfile:
                 writer = csv.writer(csvfile)
                 # Header
@@ -3321,36 +3228,34 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 # Reshape components to separate scale and translation data
                 # components shape: (k, num_joints*6) -> reshape to (k, num_joints, 6)
                 components_reshaped = components.reshape(n_components, num_joints, 6)
-                
+
                 # Extract scale and translation components
                 # Scale data: components[:, :, 0:3] (first 3 columns)
                 # Translation data: components[:, :, 3:6] (last 3 columns)
                 scaledirs = components_reshaped[:, :, 0:3]  # (k, num_joints, 3)
                 transdirs = components_reshaped[:, :, 3:6]  # (k, num_joints, 3)
-                
+
                 # Store in pkl_data for later export
                 pkl_data["scaledirs"] = scaledirs
                 pkl_data["transdirs"] = transdirs
-                
+
                 # Also store in global variables for use by other operators
                 global computed_scaledirs, computed_transdirs
                 computed_scaledirs = scaledirs
                 computed_transdirs = transdirs
-                
-                print(f"Stored PCA components in pkl_data:")
+
+                print("Stored PCA components in pkl_data:")
                 print(f"  scaledirs shape: {scaledirs.shape}")
                 print(f"  transdirs shape: {transdirs.shape}")
-                print(f"Also stored in global variables for use by other operators")
+                print("Also stored in global variables for use by other operators")
 
-                pc_output_path = os.path.join(
-                    os.path.dirname(pkl_filepath), "smil_morph_PC_data.csv"
-                )
+                pc_output_path = os.path.join(os.path.dirname(pkl_filepath), "smil_morph_PC_data.csv")
                 with open(pc_output_path, "w", newline="") as csvfile:
                     writer = csv.writer(csvfile)
                     # Header: joint_name, then for each PC six columns matching the original naming pattern
                     header_pc = ["joint_name"]
                     for k in range(n_components):
-                        pc_label = f"PC_{k+1}"
+                        pc_label = f"PC_{k + 1}"
                         header_pc.extend(
                             [
                                 f"{pc_label}_scale_x",
@@ -3383,7 +3288,7 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                     pc_xy_path = os.path.join(os.path.dirname(pkl_filepath), "smil_morph_PC_xy.csv")
                     with open(pc_xy_path, "w", newline="") as csvfile:
                         writer = csv.writer(csvfile)
-                        writer.writerow(["label", "PC1", "PC2"]) 
+                        writer.writerow(["label", "PC1", "PC2"])
                         for i, lab in enumerate(labels):
                             pc1 = scores[i, 0] if scores.shape[1] > 0 else 0.0
                             pc2 = scores[i, 1] if scores.shape[1] > 1 else 0.0
@@ -3407,9 +3312,9 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 print(f"Failed to export morph PCA data: {e}")
         except Exception as e:
             print(f"Failed to export morph data: {e}")
-            
+
         self.report({"INFO"}, f"Loaded and rigged {n_meshes} meshes.")
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 
 class SMPL_OT_RecomputeJointPositions(bpy.types.Operator):
@@ -3419,40 +3324,37 @@ class SMPL_OT_RecomputeJointPositions(bpy.types.Operator):
 
     def execute(self, context):
         obj = context.active_object
-        if not obj or obj.type != 'MESH':
-            self.report({'ERROR'}, 'Select a mesh object with an armature.')
-            return {'CANCELLED'}
+        if not obj or obj.type != "MESH":
+            self.report({"ERROR"}, "Select a mesh object with an armature.")
+            return {"CANCELLED"}
         armature = obj.find_armature()
         if not armature:
-            self.report({'ERROR'}, 'Selected mesh has no armature.')
-            return {'CANCELLED'}
-        
+            self.report({"ERROR"}, "Selected mesh has no armature.")
+            return {"CANCELLED"}
+
         # Check if joint locations are set to be static
         if obj.get("static_joint_locs", False):
-            self.report({'WARNING'}, 'Joint locations are set to be static for this model. Joint recomputation is disabled.')
-            return {'CANCELLED'}
-        
+            self.report(
+                {"WARNING"}, "Joint locations are set to be static for this model. Joint recomputation is disabled."
+            )
+            return {"CANCELLED"}
+
         # Recompute J_regressor for this mesh+armature using selected method
         smpl_tool = context.scene.smpl_tool
-        
+
         # For boundary_weights method, try to get required data
         kintree_table = None
         weights = None
         if smpl_tool.j_regressor_method == "boundary_weights":
             # Try to get kintree_table and weights from stored data
-            if hasattr(obj, 'get'):
-                if 'kintree_table' in obj:
-                    kintree_table = obj['kintree_table']
-                if 'weights' in obj:
-                    weights = obj['weights']
-        
+            if hasattr(obj, "get"):
+                if "kintree_table" in obj:
+                    kintree_table = obj["kintree_table"]
+                if "weights" in obj:
+                    weights = obj["weights"]
+
         J_regressor = export_J_regressor_to_npy(
-            obj, 
-            armature, 
-            10, 
-            influence_type=smpl_tool.j_regressor_method,
-            weights=weights,
-            kintree_table=kintree_table
+            obj, armature, 10, influence_type=smpl_tool.j_regressor_method, weights=weights, kintree_table=kintree_table
         )
         vertex_positions = np.array([np.array(v.co) for v in obj.data.vertices])
         joint_positions = np.matmul(J_regressor, vertex_positions)
@@ -3462,8 +3364,8 @@ class SMPL_OT_RecomputeJointPositions(bpy.types.Operator):
             bone.head = joint_positions[j]
             bone.tail = joint_positions[j] + [0, 0, 0.1]
         bpy.ops.object.mode_set(mode="OBJECT")
-        self.report({'INFO'}, 'Joint positions updated for selected armature.')
-        return {'FINISHED'}
+        self.report({"INFO"}, "Joint positions updated for selected armature.")
+        return {"FINISHED"}
 
 
 class SMPL_OT_ClearMorphPCA(bpy.types.Operator):
@@ -3473,8 +3375,8 @@ class SMPL_OT_ClearMorphPCA(bpy.types.Operator):
 
     def execute(self, context):
         clear_morph_pca_globals()
-        self.report({'INFO'}, 'Transformation PCA components cleared.')
-        return {'FINISHED'}
+        self.report({"INFO"}, "Transformation PCA components cleared.")
+        return {"FINISHED"}
 
 
 def _resolve_shape_key_for_beta(obj, beta_index):
@@ -3510,6 +3412,7 @@ def _apply_betas_to_shape_keys(obj, betas, frame=None):
 def _load_animation_files(npz_path):
     """Load .npz + sidecar .json from a path (sidecar path derived by suffix swap)."""
     import json
+
     npz_data = np.load(npz_path)
     json_path = os.path.splitext(npz_path)[0] + ".json"
     if not os.path.exists(json_path):
@@ -3591,9 +3494,9 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
             self.report({"ERROR"}, "Select a SMIL mesh or its armature before importing.")
             return {"CANCELLED"}
 
-        poses = npz_data["poses"]           # (F, N_JOINTS, 3)
-        trans = npz_data["trans"]           # (F, 3)
-        betas_avg = npz_data["betas"]       # (N_BETAS,)
+        poses = npz_data["poses"]  # (F, N_JOINTS, 3)
+        trans = npz_data["trans"]  # (F, 3)
+        betas_avg = npz_data["betas"]  # (N_BETAS,)
         betas_per_frame = npz_data["betas_per_frame"] if "betas_per_frame" in npz_data.files else None
         log_beta_scales = npz_data["log_beta_scales"] if "log_beta_scales" in npz_data.files else None
         # Optional global mesh scale (root-centered). When present, the inference
@@ -3677,16 +3580,14 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
         # armature.scale = s and armature.location = L, the visible vertex
         # becomes L + s * v, which equals (v - J0) * s + trans iff
         # L = trans - s * J0.
-        root_joint_rest = np.array(
-            armature.pose.bones[joint_names[0]].bone.head_local, dtype=np.float64
-        )
+        root_joint_rest = np.array(armature.pose.bones[joint_names[0]].bone.head_local, dtype=np.float64)
 
         for f in range(n_frames):
             scene.frame_set(f)
 
             # Per-joint axis-angle rotation.
             for j, bone_name in enumerate(joint_names):
-                aa = poses[f, j]                    # (3,) world-aligned axis-angle
+                aa = poses[f, j]  # (3,) world-aligned axis-angle
                 angle = float(np.linalg.norm(aa))
                 if angle > 1e-8:
                     axis_world = aa / angle
@@ -3750,8 +3651,7 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
         scene.frame_set(0)
         self.report(
             {"INFO"},
-            f"Imported {n_frames} frames at {fps:.2f} fps "
-            f"(static_shape={'on' if effective_static_shape else 'off'}).",
+            f"Imported {n_frames} frames at {fps:.2f} fps (static_shape={'on' if effective_static_shape else 'off'}).",
         )
         return {"FINISHED"}
 
@@ -3760,6 +3660,7 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
     def _create_cameras(self, cameras):
         import math
         from mathutils import Matrix
+
         created = []
         for cam in cameras:
             name = str(cam.get("view_name", "smil_cam"))
@@ -3803,9 +3704,7 @@ class SMPL_OT_ExportAnimationGLTF(bpy.types.Operator):
     )
 
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")
-    filter_glob: bpy.props.StringProperty(
-        default="*.glb;*.gltf", options={"HIDDEN"}
-    )
+    filter_glob: bpy.props.StringProperty(default="*.glb;*.gltf", options={"HIDDEN"})
 
     @classmethod
     def poll(cls, context):
@@ -3893,9 +3792,7 @@ class SMPLProperties(bpy.types.PropertyGroup):
         default=20,
     )
 
-    regress_joints: bpy.props.BoolProperty(
-        name="Regress Joints", description="Regress joint positions", default=True
-    )
+    regress_joints: bpy.props.BoolProperty(name="Regress Joints", description="Regress joint positions", default=True)
 
     clean_mesh: bpy.props.BoolProperty(
         name="Auto Clean-up Mesh",
@@ -3909,9 +3806,7 @@ class SMPLProperties(bpy.types.PropertyGroup):
         default=0.001,
     )
 
-    symmetrise: bpy.props.BoolProperty(
-        name="Symmetrise", description="Symmetrise the model", default=True
-    )
+    symmetrise: bpy.props.BoolProperty(name="Symmetrise", description="Symmetrise the model", default=True)
 
     # Add property for separate PCAs
     separate_pcas: bpy.props.BoolProperty(
@@ -3919,7 +3814,7 @@ class SMPLProperties(bpy.types.PropertyGroup):
         description="When enabled, performs separate PCAs for shape, scale, and translation. When disabled, performs entangled PCA combining all three.",
         default=True,
     )
-    
+
     # Add property for J_regressor computation method
     j_regressor_method: bpy.props.EnumProperty(
         name="J_regressor Computation Method",
@@ -3934,9 +3829,7 @@ class SMPLProperties(bpy.types.PropertyGroup):
     # Add properties to store SMPL data
     has_smpl_data: bpy.props.BoolProperty(default=False)
     v_template: bpy.props.FloatVectorProperty(size=3)  # This will store the shape
-    posedirs: bpy.props.FloatVectorProperty(
-        size=3
-    )  # This will store the pose correctives
+    posedirs: bpy.props.FloatVectorProperty(size=3)  # This will store the pose correctives
 
     # Add to SMPLProperties class:
     output_filename: bpy.props.StringProperty(
@@ -3973,20 +3866,14 @@ class SMPLProperties(bpy.types.PropertyGroup):
 class SMPL_OT_ApplyPoseCorrectivesOperator(bpy.types.Operator):
     bl_idname = "smpl.apply_pose_correctives"
     bl_label = "Apply Pose Correctives"
-    bl_description = (
-        "Apply pose-dependent corrective shape keys based on current armature pose"
-    )
+    bl_description = "Apply pose-dependent corrective shape keys based on current armature pose"
 
     @classmethod
     def poll(cls, context):
         # Only enable if we have an active mesh object with an armature
         obj = context.active_object
         if not (
-            obj
-            and obj.type == "MESH"
-            and obj.find_armature()
-            and "has_smpl_data" in obj
-            and "smpl_data_path" in obj
+            obj and obj.type == "MESH" and obj.find_armature() and "has_smpl_data" in obj and "smpl_data_path" in obj
         ):
             return False
 
@@ -4005,9 +3892,7 @@ class SMPL_OT_ApplyPoseCorrectivesOperator(bpy.types.Operator):
             # Get the original data
             data = get_smpl_data(context)
             if not data or "posedirs" not in data or "v_template" not in data:
-                self.report(
-                    {"ERROR"}, "No SMPL data found. Please import a SMPL model first."
-                )
+                self.report({"ERROR"}, "No SMPL data found. Please import a SMPL model first.")
                 return {"CANCELLED"}
 
             apply_pose_correctives(obj, data["posedirs"], data["v_template"])
@@ -4189,7 +4074,7 @@ def unregister():
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
-                except:
+                except Exception:
                     pass
 
     # Clean up reference measurements file
@@ -4198,7 +4083,7 @@ def unregister():
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-            except:
+            except Exception:
                 pass
 
     for cls in classes:

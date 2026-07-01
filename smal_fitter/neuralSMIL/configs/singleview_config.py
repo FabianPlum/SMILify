@@ -5,10 +5,9 @@ Extends BaseTrainingConfig with parameters specific to single-view
 SMIL image regression training.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
 
-from .base_config import BaseTrainingConfig, MultiDatasetConfig
+from .base_config import BaseTrainingConfig
 
 
 @dataclass

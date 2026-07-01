@@ -8,65 +8,61 @@ and iterative error feedback capabilities.
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 import config
-from pytorch3d.transforms import rotation_6d_to_matrix, matrix_to_rotation_6d
+from pytorch3d.transforms import rotation_6d_to_matrix
 
 
 class CrossAttention(nn.Module):
     """Cross-attention module for attending to spatial features."""
-    
-    def __init__(self, dim: int, context_dim: Optional[int] = None, heads: int = 8, 
-                 dim_head: int = 64, dropout: float = 0.0):
+
+    def __init__(
+        self, dim: int, context_dim: Optional[int] = None, heads: int = 8, dim_head: int = 64, dropout: float = 0.0
+    ):
         super().__init__()
         inner_dim = dim_head * heads
         project_out = not (heads == 1 and dim_head == dim)
-        
+
         self.heads = heads
-        self.scale = dim_head ** -0.5
-        
+        self.scale = dim_head**-0.5
+
         self.attend = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(dropout)
-        
+
         context_dim = context_dim if context_dim is not None else dim
         self.to_kv = nn.Linear(context_dim, inner_dim * 2, bias=False)
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
-        
-        self.to_out = (
-            nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout))
-            if project_out
-            else nn.Identity()
-        )
-    
+
+        self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
+
     def forward(self, x: torch.Tensor, context: Optional[torch.Tensor] = None) -> torch.Tensor:
         context = context if context is not None else x
-        
+
         # Get query, key, value
         q = self.to_q(x)
         k, v = self.to_kv(context).chunk(2, dim=-1)
-        
+
         # Reshape for multi-head attention
         q = q.view(q.shape[0], q.shape[1], self.heads, -1).transpose(1, 2)
         k = k.view(k.shape[0], k.shape[1], self.heads, -1).transpose(1, 2)
         v = v.view(v.shape[0], v.shape[1], self.heads, -1).transpose(1, 2)
-        
+
         # Compute attention
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
         attn = self.attend(dots)
         attn = self.dropout(attn)
-        
+
         # Apply attention to values
         out = torch.matmul(attn, v)
         out = out.transpose(1, 2).contiguous().view(out.shape[0], out.shape[2], -1)
-        
+
         return self.to_out(out)
 
 
 class FeedForward(nn.Module):
     """Feed-forward network with GELU activation."""
-    
+
     def __init__(self, dim: int, hidden_dim: int, dropout: float = 0.0):
         super().__init__()
         self.net = nn.Sequential(
@@ -76,18 +72,25 @@ class FeedForward(nn.Module):
             nn.Linear(hidden_dim, dim),
             nn.Dropout(dropout),
         )
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
 
 class TransformerDecoderLayer(nn.Module):
     """Single transformer decoder layer with cross-attention."""
-    
-    def __init__(self, dim: int, context_dim: Optional[int] = None, heads: int = 8,
-                 dim_head: int = 64, mlp_dim: int = 1024, dropout: float = 0.0):
+
+    def __init__(
+        self,
+        dim: int,
+        context_dim: Optional[int] = None,
+        heads: int = 8,
+        dim_head: int = 64,
+        mlp_dim: int = 1024,
+        dropout: float = 0.0,
+    ):
         super().__init__()
-        
+
         self.norm1 = nn.LayerNorm(dim)
         self.norm_context = nn.LayerNorm(context_dim if context_dim else dim)
         self.cross_attn = CrossAttention(dim, context_dim, heads, dim_head, dropout)
@@ -98,31 +101,41 @@ class TransformerDecoderLayer(nn.Module):
     def forward(self, x: torch.Tensor, context: Optional[torch.Tensor] = None) -> torch.Tensor:
         # Cross-attention (normalize both query and context for stability)
         x = x + self.cross_attn(self.norm1(x), self.norm_context(context) if context is not None else None)
-        
+
         # Feed-forward
         x = x + self.ff(self.norm2(x))
-        
+
         return x
 
 
 class SMILTransformerDecoderHead(nn.Module):
     """
     Transformer decoder head for SMIL parameter regression.
-    
+
     This head uses cross-attention to attend to spatial features from the backbone
     and implements iterative error feedback for progressive refinement of predictions.
     """
-    
-    def __init__(self, feature_dim: int, context_dim: int, hidden_dim: int = 1024,
-                 depth: int = 6, heads: int = 8, dim_head: int = 64, 
-                 mlp_dim: int = 1024, dropout: float = 0.0, 
-                 ief_iters: int = 3, rotation_representation: str = 'axis_angle',
-                 scales_scale_factor: float = 0.01, trans_scale_factor: float = 0.01,
-                 scale_trans_mode: str = 'separate',
-                 allow_mesh_scaling: bool = False,
-                 mesh_scale_init: float = 1.0):
+
+    def __init__(
+        self,
+        feature_dim: int,
+        context_dim: int,
+        hidden_dim: int = 1024,
+        depth: int = 6,
+        heads: int = 8,
+        dim_head: int = 64,
+        mlp_dim: int = 1024,
+        dropout: float = 0.0,
+        ief_iters: int = 3,
+        rotation_representation: str = "axis_angle",
+        scales_scale_factor: float = 0.01,
+        trans_scale_factor: float = 0.01,
+        scale_trans_mode: str = "separate",
+        allow_mesh_scaling: bool = False,
+        mesh_scale_init: float = 1.0,
+    ):
         super().__init__()
-        
+
         self.feature_dim = feature_dim
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim
@@ -133,16 +146,21 @@ class SMILTransformerDecoderHead(nn.Module):
         self.scale_trans_mode = scale_trans_mode
         self.allow_mesh_scaling = allow_mesh_scaling
         self.mesh_scale_init = mesh_scale_init
-        
+
         # Calculate output dimensions for SMIL parameters
         self._calculate_output_dims()
 
         # Compute total parameter dimension for IEF feedback token
         self._param_feedback_dim = (
-            self.global_rot_dim + self.joint_rot_dim +  # pose
-            self.betas_dim + self.trans_dim +            # body
-            self.fov_dim + self.cam_rot_dim + self.cam_trans_dim +  # camera
-            self.scales_dim + self.joint_trans_dim       # optional scales/trans
+            self.global_rot_dim
+            + self.joint_rot_dim  # pose
+            + self.betas_dim
+            + self.trans_dim  # body
+            + self.fov_dim
+            + self.cam_rot_dim
+            + self.cam_trans_dim  # camera
+            + self.scales_dim
+            + self.joint_trans_dim  # optional scales/trans
         )
 
         # LayerNorm on concatenated parameter feedback — adaptive normalisation
@@ -158,18 +176,20 @@ class SMILTransformerDecoderHead(nn.Module):
         self.pos_embedding = nn.Parameter(torch.randn(1, 1, hidden_dim))
 
         # Transformer decoder layers
-        self.layers = nn.ModuleList([
-            TransformerDecoderLayer(
-                dim=hidden_dim,
-                context_dim=context_dim,
-                heads=heads,
-                dim_head=dim_head,
-                mlp_dim=mlp_dim,
-                dropout=dropout
-            )
-            for _ in range(depth)
-        ])
-        
+        self.layers = nn.ModuleList(
+            [
+                TransformerDecoderLayer(
+                    dim=hidden_dim,
+                    context_dim=context_dim,
+                    heads=heads,
+                    dim_head=dim_head,
+                    mlp_dim=mlp_dim,
+                    dropout=dropout,
+                )
+                for _ in range(depth)
+            ]
+        )
+
         # Output heads for different parameter types
         # Note: pose includes both global and joint rotations
         total_pose_dim = self.global_rot_dim + self.joint_rot_dim
@@ -179,53 +199,54 @@ class SMILTransformerDecoderHead(nn.Module):
         self.fov_head = nn.Linear(hidden_dim, self.fov_dim)
         self.cam_rot_head = nn.Linear(hidden_dim, self.cam_rot_dim)
         self.cam_trans_head = nn.Linear(hidden_dim, self.cam_trans_dim)
-        
+
         # Optional joint scales and translations
         if self.scales_dim > 0:
             self.scales_head = nn.Linear(hidden_dim, self.scales_dim)
         if self.joint_trans_dim > 0:
             self.joint_trans_head = nn.Linear(hidden_dim, self.joint_trans_dim)
-        
+
         # Optional global mesh scale (predicts log(scale) for numerical stability)
         if self.allow_mesh_scaling:
             self.mesh_scale_head = nn.Linear(hidden_dim, 1)
-        
+
         # Initialize parameters
         self._initialize_parameters()
-        
+
         # Initialize prediction buffers
         self._initialize_prediction_buffers()
-    
+
     def _calculate_output_dims(self):
         """Calculate output dimensions for SMIL parameters."""
-        if self.rotation_representation == '6d':
+        if self.rotation_representation == "6d":
             self.global_rot_dim = 6
             self.joint_rot_dim = config.N_POSE * 6
         else:  # axis_angle
             self.global_rot_dim = 3
             self.joint_rot_dim = config.N_POSE * 3
-        
+
         self.betas_dim = config.N_BETAS
         self.trans_dim = 3
         self.fov_dim = 1
         self.cam_rot_dim = 6  # 6D continuous rotation representation (Zhou et al. 2019)
         self.cam_trans_dim = 3
-        
+
         # Handle scale and translation dimensions based on mode
         self.scales_dim = 0
         self.joint_trans_dim = 0
-        
-        if self.scale_trans_mode == 'entangled_with_betas':
+
+        if self.scale_trans_mode == "entangled_with_betas":
             # In entangled mode, scales and trans are derived from betas via PCA
             # No separate prediction heads needed
             self.scales_dim = 0
             self.joint_trans_dim = 0
-        elif self.scale_trans_mode == 'separate':
+        elif self.scale_trans_mode == "separate":
             # In separate mode, check if we should use PCA or per-joint values
             from smal_fitter.neuralSMIL.training_config import TrainingConfig
+
             scale_trans_config = TrainingConfig.get_scale_trans_config()
-            use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
-            
+            use_pca_transformation = scale_trans_config.get("separate", {}).get("use_pca_transformation", True)
+
             if use_pca_transformation:
                 # Use PCA weights (same dimension as betas)
                 self.scales_dim = config.N_BETAS  # PCA weights for scaling
@@ -235,7 +256,7 @@ class SMILTransformerDecoderHead(nn.Module):
                 n_joints = len(config.dd["J_names"])
                 self.scales_dim = n_joints * 3
                 self.joint_trans_dim = n_joints * 3
-        elif self.scale_trans_mode == 'ignore':
+        elif self.scale_trans_mode == "ignore":
             # In ignore mode, no scales or translations
             self.scales_dim = 0
             self.joint_trans_dim = 0
@@ -245,7 +266,7 @@ class SMILTransformerDecoderHead(nn.Module):
                 n_joints = config.N_POSE + 1
                 self.scales_dim = n_joints * 3
                 self.joint_trans_dim = n_joints * 3
-    
+
     def _initialize_parameters(self):
         """Initialize transformer decoder parameters."""
         # Initialize token embedding with very small weights so that when
@@ -260,8 +281,14 @@ class SMILTransformerDecoderHead(nn.Module):
         nn.init.normal_(self.pos_embedding, std=0.02)
 
         # Output head init — matches HMR2's INIT_DECODER_XAVIER gain (0.01).
-        for head in [self.pose_head, self.betas_head, self.trans_head,
-                    self.fov_head, self.cam_rot_head, self.cam_trans_head]:
+        for head in [
+            self.pose_head,
+            self.betas_head,
+            self.trans_head,
+            self.fov_head,
+            self.cam_rot_head,
+            self.cam_trans_head,
+        ]:
             nn.init.xavier_uniform_(head.weight, gain=0.01)
             nn.init.constant_(head.bias, 0)
 
@@ -276,44 +303,46 @@ class SMILTransformerDecoderHead(nn.Module):
         if self.allow_mesh_scaling:
             nn.init.xavier_uniform_(self.mesh_scale_head.weight, gain=0.01)
             nn.init.constant_(self.mesh_scale_head.bias, 0)  # log(1.0) = 0
-    
+
     def _initialize_prediction_buffers(self):
         """Initialize prediction buffers for IEF."""
         # Note: pose includes both global and joint rotations
         total_pose_dim = self.global_rot_dim + self.joint_rot_dim
 
-        if self.rotation_representation == '6d':
+        if self.rotation_representation == "6d":
             # For 6D representation, identity rotation = [1,0,0,1,0,0] (first two columns of I3).
             # Initialising to zeros would give an invalid/degenerate rotation, making the
             # regularisation gradient numerically unstable and forcing the network to learn a
             # constant [1,0,0,1,0,0] offset per joint just to represent "no rotation".
-            identity_6d = torch.tensor([1., 0., 0., 1., 0., 0.])
+            identity_6d = torch.tensor([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
             n_rotations = total_pose_dim // 6  # global (1) + joints (N_POSE)
-            self.register_buffer('init_pose', identity_6d.repeat(n_rotations).unsqueeze(0))
+            self.register_buffer("init_pose", identity_6d.repeat(n_rotations).unsqueeze(0))
         else:
             # For axis-angle, zeros = identity (zero rotation vector).
-            self.register_buffer('init_pose', torch.zeros(1, total_pose_dim))
-        self.register_buffer('init_betas', torch.zeros(1, self.betas_dim))
-        self.register_buffer('init_trans', torch.zeros(1, self.trans_dim))
+            self.register_buffer("init_pose", torch.zeros(1, total_pose_dim))
+        self.register_buffer("init_betas", torch.zeros(1, self.betas_dim))
+        self.register_buffer("init_trans", torch.zeros(1, self.trans_dim))
         # Initialize FOV with reasonable value based on ground truth (typically around 8 degrees)
-        self.register_buffer('init_fov', torch.tensor([[8.0]]))
+        self.register_buffer("init_fov", torch.tensor([[8.0]]))
         # 6D rotation: first two columns of identity rotation matrix
-        self.register_buffer('init_cam_rot', torch.tensor([[1., 0., 0., 0., 1., 0.]]))
+        self.register_buffer("init_cam_rot", torch.tensor([[1.0, 0.0, 0.0, 0.0, 1.0, 0.0]]))
         # Initialize camera translation with reasonable values based on ground truth range
         # Ground truth camera translation is typically around [0, 0, 100-150]
-        self.register_buffer('init_cam_trans', torch.tensor([[0.0, 0.0, 100.0]]))
-        
+        self.register_buffer("init_cam_trans", torch.tensor([[0.0, 0.0, 100.0]]))
+
         if self.scales_dim > 0:
-            self.register_buffer('init_scales', torch.zeros(1, self.scales_dim))
+            self.register_buffer("init_scales", torch.zeros(1, self.scales_dim))
         if self.joint_trans_dim > 0:
-            self.register_buffer('init_joint_trans', torch.zeros(1, self.joint_trans_dim))
-        
+            self.register_buffer("init_joint_trans", torch.zeros(1, self.joint_trans_dim))
+
         # Initialize mesh scale to log(init_value) since we predict in log space
         if self.allow_mesh_scaling:
             init_log_scale = np.log(self.mesh_scale_init) if self.mesh_scale_init > 0 else 0.0
-            self.register_buffer('init_mesh_scale', torch.tensor([[init_log_scale]]))
+            self.register_buffer("init_mesh_scale", torch.tensor([[init_log_scale]]))
 
-    def forward(self, features: torch.Tensor, spatial_features: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+    def forward(
+        self, features: torch.Tensor, spatial_features: Optional[torch.Tensor] = None
+    ) -> Dict[str, torch.Tensor]:
         """
         Forward pass through transformer decoder head.
 
@@ -344,7 +373,9 @@ class SMILTransformerDecoderHead(nn.Module):
                 spatial_features = spatial_features.float()
             return self._forward_impl(features, spatial_features)
 
-    def _forward_impl(self, features: torch.Tensor, spatial_features: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+    def _forward_impl(
+        self, features: torch.Tensor, spatial_features: Optional[torch.Tensor] = None
+    ) -> Dict[str, torch.Tensor]:
         """Inner forward running in FP32 (called from forward with autocast disabled)."""
         batch_size = features.shape[0]
         device = features.device
@@ -356,14 +387,14 @@ class SMILTransformerDecoderHead(nn.Module):
         pred_fov = self.init_fov.expand(batch_size, -1).to(device)
         pred_cam_rot = self.init_cam_rot.expand(batch_size, -1).to(device)
         pred_cam_trans = self.init_cam_trans.expand(batch_size, -1).to(device)
-        
+
         if self.scales_dim > 0:
             pred_scales = self.init_scales.expand(batch_size, -1).to(device)
         if self.joint_trans_dim > 0:
             pred_joint_trans = self.init_joint_trans.expand(batch_size, -1).to(device)
         if self.allow_mesh_scaling:
             pred_mesh_scale = self.init_mesh_scale.expand(batch_size, -1).to(device)
-        
+
         # Store predictions for each iteration
         pred_pose_list = []
         pred_betas_list = []
@@ -371,14 +402,14 @@ class SMILTransformerDecoderHead(nn.Module):
         pred_fov_list = []
         pred_cam_rot_list = []
         pred_cam_trans_list = []
-        
+
         if self.scales_dim > 0:
             pred_scales_list = []
         if self.joint_trans_dim > 0:
             pred_joint_trans_list = []
         if self.allow_mesh_scaling:
             pred_mesh_scale_list = []
-        
+
         # Iterative Error Feedback (IEF).
         # Visual signal enters the decoder ONLY through cross-attention to
         # spatial_features (HMR2-style). The decoder query token carries the
@@ -427,8 +458,7 @@ class SMILTransformerDecoderHead(nn.Module):
 
             # Sanitise non-finite values with nan_to_num (preserves autograd
             # graph for finite elements, unlike replacing with new tensors).
-            all_preds = [pred_pose, pred_betas, pred_trans, pred_fov,
-                         pred_cam_rot, pred_cam_trans]
+            all_preds = [pred_pose, pred_betas, pred_trans, pred_fov, pred_cam_rot, pred_cam_trans]
             if self.scales_dim > 0:
                 all_preds.append(pred_scales)
             if self.joint_trans_dim > 0:
@@ -438,20 +468,19 @@ class SMILTransformerDecoderHead(nn.Module):
 
             has_nonfinite = any(not torch.isfinite(t).all() for t in all_preds)
             if has_nonfinite:
-                if not hasattr(self, '_nan_warn_count'):
+                if not hasattr(self, "_nan_warn_count"):
                     self._nan_warn_count = 0
                 self._nan_warn_count += 1
                 if self._nan_warn_count <= 5:
-                    names = ['pose', 'betas', 'trans', 'fov', 'cam_rot', 'cam_trans']
+                    names = ["pose", "betas", "trans", "fov", "cam_rot", "cam_trans"]
                     if self.scales_dim > 0:
-                        names.append('scales')
+                        names.append("scales")
                     if self.joint_trans_dim > 0:
-                        names.append('joint_trans')
+                        names.append("joint_trans")
                     if self.allow_mesh_scaling:
-                        names.append('mesh_scale')
+                        names.append("mesh_scale")
                     bad = [n for n, t in zip(names, all_preds) if not torch.isfinite(t).all()]
-                    print(f"Warning: non-finite values in IEF iter {i}: {bad} "
-                          f"(occurrence {self._nan_warn_count})")
+                    print(f"Warning: non-finite values in IEF iter {i}: {bad} (occurrence {self._nan_warn_count})")
 
                 pred_pose = torch.nan_to_num(pred_pose)
                 pred_betas = torch.nan_to_num(pred_betas)
@@ -465,7 +494,7 @@ class SMILTransformerDecoderHead(nn.Module):
                     pred_joint_trans = torch.nan_to_num(pred_joint_trans)
                 if self.allow_mesh_scaling:
                     pred_mesh_scale = torch.nan_to_num(pred_mesh_scale)
-            
+
             # Store predictions for this iteration
             pred_pose_list.append(pred_pose.clone())
             pred_betas_list.append(pred_betas.clone())
@@ -473,123 +502,135 @@ class SMILTransformerDecoderHead(nn.Module):
             pred_fov_list.append(pred_fov.clone())
             pred_cam_rot_list.append(pred_cam_rot.clone())
             pred_cam_trans_list.append(pred_cam_trans.clone())
-            
+
             if self.scales_dim > 0:
                 pred_scales_list.append(pred_scales.clone())
             if self.joint_trans_dim > 0:
                 pred_joint_trans_list.append(pred_joint_trans.clone())
             if self.allow_mesh_scaling:
                 pred_mesh_scale_list.append(pred_mesh_scale.clone())
-        
+
         # Convert pose predictions to proper format
-        if self.rotation_representation == '6d':
+        if self.rotation_representation == "6d":
             # For 6D representation, keep as 6D vectors (don't convert to matrices)
-            global_rot_6d = pred_pose[:, :self.global_rot_dim]
-            joint_rot_6d = pred_pose[:, self.global_rot_dim:]
-            
+            global_rot_6d = pred_pose[:, : self.global_rot_dim]
+            joint_rot_6d = pred_pose[:, self.global_rot_dim :]
+
             pred_global_rot = global_rot_6d
             pred_joint_rot = joint_rot_6d.view(batch_size, config.N_POSE, 6)
         else:
             # Axis-angle format
-            global_rot_aa = pred_pose[:, :self.global_rot_dim]
-            joint_rot_aa = pred_pose[:, self.global_rot_dim:].view(batch_size, config.N_POSE, 3)
-            
+            global_rot_aa = pred_pose[:, : self.global_rot_dim]
+            joint_rot_aa = pred_pose[:, self.global_rot_dim :].view(batch_size, config.N_POSE, 3)
+
             pred_global_rot = global_rot_aa
             pred_joint_rot = joint_rot_aa
-        
+
         # Convert 6D camera rotation (Zhou et al. 2019) to 3x3 matrix via
         # Gram-Schmidt. The IEF accumulates raw 6D residuals; the rotation
         # only needs to live on SO(3) at the output boundary.
         pred_cam_rot_mat = rotation_6d_to_matrix(pred_cam_rot)
-        
+
         # Prepare output dictionary
         output = {
-            'global_rot': pred_global_rot,
-            'joint_rot': pred_joint_rot,
-            'betas': pred_betas,
-            'trans': pred_trans,
-            'fov': pred_fov,
-            'cam_rot': pred_cam_rot_mat,
-            'cam_trans': pred_cam_trans,
+            "global_rot": pred_global_rot,
+            "joint_rot": pred_joint_rot,
+            "betas": pred_betas,
+            "trans": pred_trans,
+            "fov": pred_fov,
+            "cam_rot": pred_cam_rot_mat,
+            "cam_trans": pred_cam_trans,
         }
-        
+
         # Debug: Print tensor shapes and values occasionally
-        if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:
-            print(f"DEBUG - Transformer decoder output shapes:")
+        if hasattr(self, "_debug_shapes") and torch.rand(1).item() < 0.01:
+            print("DEBUG - Transformer decoder output shapes:")
             for key, value in output.items():
                 if isinstance(value, torch.Tensor):
                     print(f"  {key}: {value.shape}")
-                    if key in ['log_beta_scales', 'betas_trans']:
-                        print(f"    {key} values: min={value.min().item():.6f}, max={value.max().item():.6f}, mean={value.mean().item():.6f}")
-                        print(f"    {key} scale factor: {self.scales_scale_factor if key == 'log_beta_scales' else self.trans_scale_factor}")
-        
+                    if key in ["log_beta_scales", "betas_trans"]:
+                        print(
+                            f"    {key} values: min={value.min().item():.6f}, max={value.max().item():.6f}, mean={value.mean().item():.6f}"
+                        )
+                        print(
+                            f"    {key} scale factor: {self.scales_scale_factor if key == 'log_beta_scales' else self.trans_scale_factor}"
+                        )
+
         if self.scales_dim > 0:
-            if self.scale_trans_mode == 'separate':
+            if self.scale_trans_mode == "separate":
                 # Check if using PCA or per-joint
                 from smal_fitter.neuralSMIL.training_config import TrainingConfig
+
                 scale_trans_config = TrainingConfig.get_scale_trans_config()
-                use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+                use_pca_transformation = scale_trans_config.get("separate", {}).get("use_pca_transformation", True)
                 if use_pca_transformation:
                     # PCA weights - keep as 1D (batch_size, N_BETAS)
-                    output['log_beta_scales'] = pred_scales  # Already (batch_size, N_BETAS)
+                    output["log_beta_scales"] = pred_scales  # Already (batch_size, N_BETAS)
                 else:
                     # Per-joint values - reshape to (batch_size, n_joints, 3)
-                    output['log_beta_scales'] = pred_scales.view(batch_size, -1, 3)
+                    output["log_beta_scales"] = pred_scales.view(batch_size, -1, 3)
             else:
                 # Other modes - reshape to per-joint
-                output['log_beta_scales'] = pred_scales.view(batch_size, -1, 3)
+                output["log_beta_scales"] = pred_scales.view(batch_size, -1, 3)
         if self.joint_trans_dim > 0:
-            if self.scale_trans_mode == 'separate':
+            if self.scale_trans_mode == "separate":
                 # Check if using PCA or per-joint
                 from smal_fitter.neuralSMIL.training_config import TrainingConfig
+
                 scale_trans_config = TrainingConfig.get_scale_trans_config()
-                use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
+                use_pca_transformation = scale_trans_config.get("separate", {}).get("use_pca_transformation", True)
                 if use_pca_transformation:
                     # PCA weights - keep as 1D (batch_size, N_BETAS)
-                    output['betas_trans'] = pred_joint_trans  # Already (batch_size, N_BETAS)
+                    output["betas_trans"] = pred_joint_trans  # Already (batch_size, N_BETAS)
                 else:
                     # Per-joint values - reshape to (batch_size, n_joints, 3)
-                    output['betas_trans'] = pred_joint_trans.view(batch_size, -1, 3)
+                    output["betas_trans"] = pred_joint_trans.view(batch_size, -1, 3)
             else:
                 # Other modes - reshape to per-joint
-                output['betas_trans'] = pred_joint_trans.view(batch_size, -1, 3)
-        
+                output["betas_trans"] = pred_joint_trans.view(batch_size, -1, 3)
+
         # Global mesh scale (convert from log space to linear)
         if self.allow_mesh_scaling:
             # pred_mesh_scale is in log space, convert to linear: exp(log_scale)
-            output['mesh_scale'] = torch.exp(pred_mesh_scale)  # (batch_size, 1)
-        
+            output["mesh_scale"] = torch.exp(pred_mesh_scale)  # (batch_size, 1)
+
         # Store iteration history for analysis
-        output['iteration_history'] = {
-            'pose': pred_pose_list,
-            'betas': pred_betas_list,
-            'trans': pred_trans_list,
-            'fov': pred_fov_list,
-            'cam_rot': pred_cam_rot_list,
-            'cam_trans': pred_cam_trans_list,
+        output["iteration_history"] = {
+            "pose": pred_pose_list,
+            "betas": pred_betas_list,
+            "trans": pred_trans_list,
+            "fov": pred_fov_list,
+            "cam_rot": pred_cam_rot_list,
+            "cam_trans": pred_cam_trans_list,
         }
-        
+
         if self.scales_dim > 0:
-            output['iteration_history']['scales'] = pred_scales_list
+            output["iteration_history"]["scales"] = pred_scales_list
         if self.joint_trans_dim > 0:
-            output['iteration_history']['joint_trans'] = pred_joint_trans_list
+            output["iteration_history"]["joint_trans"] = pred_joint_trans_list
         if self.allow_mesh_scaling:
-            output['iteration_history']['mesh_scale'] = pred_mesh_scale_list
-        
+            output["iteration_history"]["mesh_scale"] = pred_mesh_scale_list
+
         return output
 
 
-def build_smil_transformer_decoder_head(feature_dim: int, context_dim: int, 
-                                       hidden_dim: int = 1024, depth: int = 6,
-                                       heads: int = 8, dim_head: int = 64,
-                                       mlp_dim: int = 1024, dropout: float = 0.0,
-                                       ief_iters: int = 3, 
-                                       rotation_representation: str = 'axis_angle',
-                                       scales_scale_factor: float = 0.01,
-                                       trans_scale_factor: float = 0.01,
-                                       scale_trans_mode: str = 'separate',
-                                       allow_mesh_scaling: bool = False,
-                                       mesh_scale_init: float = 1.0) -> SMILTransformerDecoderHead:
+def build_smil_transformer_decoder_head(
+    feature_dim: int,
+    context_dim: int,
+    hidden_dim: int = 1024,
+    depth: int = 6,
+    heads: int = 8,
+    dim_head: int = 64,
+    mlp_dim: int = 1024,
+    dropout: float = 0.0,
+    ief_iters: int = 3,
+    rotation_representation: str = "axis_angle",
+    scales_scale_factor: float = 0.01,
+    trans_scale_factor: float = 0.01,
+    scale_trans_mode: str = "separate",
+    allow_mesh_scaling: bool = False,
+    mesh_scale_init: float = 1.0,
+) -> SMILTransformerDecoderHead:
     """
     Build a SMIL transformer decoder head.
 
@@ -628,5 +669,5 @@ def build_smil_transformer_decoder_head(feature_dim: int, context_dim: int,
         trans_scale_factor=trans_scale_factor,
         scale_trans_mode=scale_trans_mode,
         allow_mesh_scaling=allow_mesh_scaling,
-        mesh_scale_init=mesh_scale_init
+        mesh_scale_init=mesh_scale_init,
     )

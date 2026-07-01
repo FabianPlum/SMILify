@@ -12,7 +12,7 @@ from pytorch3d.structures import Meshes
 from tqdm import tqdm
 import torch
 import matplotlib.pyplot as plt
-from fitter_3d.utils import plot_pointclouds, plot_meshes, SDF_distance, sample_points_from_meshes_and_SDF, try_mkdir
+from fitter_3d.utils import plot_meshes, SDF_distance, sample_points_from_meshes_and_SDF, try_mkdir
 import numpy as np
 import os
 import config
@@ -23,39 +23,36 @@ from smal_fitter.utils import eul_to_axis
 
 nn = torch.nn
 
-default_weights = dict(w_chamfer=1.0, 
-                       w_edge=1.0, 
-                       w_normal=0.01, 
-                       w_laplacian=0.1,
-                       w_sdf=0.5)  # Added SDF distance weight
+default_weights = dict(
+    w_chamfer=1.0, w_edge=1.0, w_normal=0.01, w_laplacian=0.1, w_sdf=0.5
+)  # Added SDF distance weight
 # Want to vary learning ratios between parameters,
 default_lr_ratios = []
 
 
-def get_meshes(verts, faces, device='cuda'):
+def get_meshes(verts, faces, device="cuda"):
     """Returns Meshes object of all SMAL meshes."""
     meshes = Meshes(verts=verts, faces=faces).to(device)
     return meshes
 
 
 class SMAL3DFitter(nn.Module):
-    def __init__(self, batch_size=1, device='cuda', shape_family=-1):
+    def __init__(self, batch_size=1, device="cuda", shape_family=-1):
         super(SMAL3DFitter, self).__init__()
 
         self.device = device
         self.batch_size = batch_size
         self.n_betas = config.N_BETAS
 
-
-        with open(config.SMAL_FILE, 'rb') as f:
+        with open(config.SMAL_FILE, "rb") as f:
             u = pkl._Unpickler(f)
-            u.encoding = 'latin1'
+            u.encoding = "latin1"
             dd = u.load()
-        
+
         if config.ignore_hardcoded_body:
             try:
-                model_covs = dd['shape_cov']
-                self.mean_betas = torch.FloatTensor(dd['shape_mean_betas']).to(device)
+                model_covs = dd["shape_cov"]
+                self.mean_betas = torch.FloatTensor(dd["shape_mean_betas"]).to(device)
             except KeyError:
                 print(
                     "No shape_cov or shape_mean_betas found in SMAL_FILE; "
@@ -65,15 +62,17 @@ class SMAL3DFitter(nn.Module):
                 model_covs = np.eye(config.N_BETAS)
 
         else:
-            with open(config.SMAL_DATA_FILE, 'rb') as f:
+            with open(config.SMAL_DATA_FILE, "rb") as f:
                 u = pkl._Unpickler(f)
-                u.encoding = 'latin1'
+                u.encoding = "latin1"
                 smal_data = u.load()
 
                 self.shape_family_list = np.array(shape_family)
 
-                model_covs = np.array(smal_data['cluster_cov'])[[shape_family]][0]
-                self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(device)
+                model_covs = np.array(smal_data["cluster_cov"])[[shape_family]][0]
+                self.mean_betas = torch.FloatTensor(smal_data["cluster_means"][[shape_family]][0])[: config.N_BETAS].to(
+                    device
+                )
 
         if config.DEBUG:
             print("MODEL COVS", model_covs)
@@ -81,37 +80,35 @@ class SMAL3DFitter(nn.Module):
         invcov = np.linalg.inv(model_covs + 1e-5 * np.eye(model_covs.shape[0]))
         prec = np.linalg.cholesky(invcov)
 
-        self.betas_prec = torch.FloatTensor(prec)[:config.N_BETAS, :config.N_BETAS].to(device)
+        self.betas_prec = torch.FloatTensor(prec)[: config.N_BETAS, : config.N_BETAS].to(device)
 
         if config.DEBUG:
             print("MEAN BETAS", self.mean_betas)
 
-        self.betas = nn.Parameter(
-            self.mean_betas.unsqueeze(0).repeat(batch_size, 1))
+        self.betas = nn.Parameter(self.mean_betas.unsqueeze(0).repeat(batch_size, 1))
 
         # Load the kinematic tree from SMAL model data
-        with open(config.SMAL_FILE, 'rb') as f:
+        with open(config.SMAL_FILE, "rb") as f:
             u = pkl._Unpickler(f)
-            u.encoding = 'latin1'
+            u.encoding = "latin1"
             dd = u.load()
-            self.kintree_table = torch.tensor(dd['kintree_table']).to(device)
-        
+            self.kintree_table = torch.tensor(dd["kintree_table"]).to(device)
+
         # Get number of joints from kintree
         self.n_joints = self.kintree_table.shape[1]
-        
+
         # Initialize log_beta_scales with proper shape: batch_size x n_joints x 3
         # Starting with ones means no scaling initially (since exp(0) = 1)
-        self.log_beta_scales = nn.Parameter(
-            torch.zeros(self.batch_size, self.n_joints, 3).to(device))
+        self.log_beta_scales = nn.Parameter(torch.zeros(self.batch_size, self.n_joints, 3).to(device))
 
         # Initialize betas_trans with proper shape: batch_size x n_joints x 3
         # Starting with zeros means no translation offsets initially
-        self.betas_trans = nn.Parameter(
-            torch.zeros(self.batch_size, self.n_joints, 3).to(device))
+        self.betas_trans = nn.Parameter(torch.zeros(self.batch_size, self.n_joints, 3).to(device))
 
         global_rotation_np = eul_to_axis(np.array([0, 0, 0]))
-        global_rotation = torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0).repeat(batch_size,
-                                                                                                      1)  # Global Init (Head-On)
+        global_rotation = (
+            torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0).repeat(batch_size, 1)
+        )  # Global Init (Head-On)
         self.global_rot = nn.Parameter(global_rotation)
 
         trans = torch.FloatTensor([0.0, 0.0, 0.0])[None, :].to(device).repeat(batch_size, 1)  # Trans Init
@@ -126,7 +123,7 @@ class SMAL3DFitter(nn.Module):
 
         # Can be used to prevent certain joints rotating.
         # Can be useful depending on sequence.
-        self.rotation_mask = torch.ones(config.N_POSE, 3).to(device) # by default all joints are free to rotate
+        self.rotation_mask = torch.ones(config.N_POSE, 3).to(device)  # by default all joints are free to rotate
         # self.rotation_mask[25:32] = 0.0 # e.g. stop the tail moving
 
         # setup SMAL skinning & differentiable renderer
@@ -139,36 +136,46 @@ class SMAL3DFitter(nn.Module):
         """
 
         # Initialize deform_verts as a leaf tensor
-        self.deform_verts = nn.Parameter(torch.zeros(batch_size, *self.smal_model.v_template.shape).to(device),
-                                         requires_grad=True)
+        self.deform_verts = nn.Parameter(
+            torch.zeros(batch_size, *self.smal_model.v_template.shape).to(device), requires_grad=True
+        )
 
     def get_joint_scales(self, log_beta_scales_arg=None):
         """
         Compute the final scale for each joint taking into account the kinematic chain.
         A joint's scale is influenced by its own scale parameters and all its parents.
-        
+
         Args:
-            log_beta_scales_arg (optional): Tensor of shape (batch_size, n_joints, 3) 
+            log_beta_scales_arg (optional): Tensor of shape (batch_size, n_joints, 3)
                                             to use instead of self.log_beta_scales.
         """
         current_log_beta_scales = log_beta_scales_arg if log_beta_scales_arg is not None else self.log_beta_scales
         # Start with base scales from log_beta_scales
         joint_scales = torch.exp(current_log_beta_scales)  # Convert from log space
-        
+
         # For each joint
         for joint_idx in range(self.n_joints):
             parent_idx = self.kintree_table[0, joint_idx]
-            
+
             # If this joint has a parent (parent_idx != joint_idx)
             # and the parent_idx is valid (within bounds of joint_scales)
             if parent_idx != joint_idx and parent_idx < joint_scales.shape[1]:
                 # Accumulate parent's scale
                 joint_scales[:, joint_idx] = joint_scales[:, joint_idx] * joint_scales[:, parent_idx]
-        
+
         return joint_scales
 
-    def forward(self, betas=None, global_rot=None, joint_rot=None, trans=None, 
-                log_beta_scales=None, betas_trans=None, deform_verts=None, return_joints=False):
+    def forward(
+        self,
+        betas=None,
+        global_rot=None,
+        joint_rot=None,
+        trans=None,
+        log_beta_scales=None,
+        betas_trans=None,
+        deform_verts=None,
+        return_joints=False,
+    ):
         """
         Forward pass for the SMAL model.
         Can accept optional parameters to override the internal nn.Parameter attributes.
@@ -187,7 +194,7 @@ class SMAL3DFitter(nn.Module):
             verts: Predicted vertices, tensor of shape (batch_size, n_verts, 3).
             joints: Predicted joints, tensor of shape (batch_size, n_joints, 3), if return_joints is True.
         """
-        
+
         # Determine which parameters to use (passed argument or self.attribute)
         _betas = betas if betas is not None else self.betas
         _global_rot = global_rot if global_rot is not None else self.global_rot
@@ -206,7 +213,7 @@ class SMAL3DFitter(nn.Module):
         # but it's good practice to make it consistent if it were to be used externally
         # or if smal_model's interface changes.
         # For the current self.smal_model call, we pass _log_beta_scales_to_use directly.
-        
+
         # The SMAL model expects betas_logscale to be of shape (batch_size, n_joints, 3).
         # self.log_beta_scales is already initialized with this shape.
         # If log_beta_scales is passed as an argument, it should also conform to this shape.
@@ -216,16 +223,21 @@ class SMAL3DFitter(nn.Module):
 
         verts, joints, Rs, v_shaped = self.smal_model(
             _betas,
-            torch.cat([
-                _global_rot.unsqueeze(1), # _global_rot is (bs, 3) -> (bs, 1, 3)
-                _joint_rot], dim=1),      # _joint_rot is (bs, N_POSE, 3)
+            torch.cat(
+                [
+                    _global_rot.unsqueeze(1),  # _global_rot is (bs, 3) -> (bs, 1, 3)
+                    _joint_rot,
+                ],
+                dim=1,
+            ),  # _joint_rot is (bs, N_POSE, 3)
             betas_logscale=_log_beta_scales_to_use,  # Pass the determined log_beta_scales
-            betas_trans=_betas_trans)  # Pass the joint translation offsets
+            betas_trans=_betas_trans,
+        )  # Pass the joint translation offsets
 
-        verts = verts + _trans.unsqueeze(1) # _trans is (bs, 3) -> (bs, 1, 3)
+        verts = verts + _trans.unsqueeze(1)  # _trans is (bs, 3) -> (bs, 1, 3)
         joints = joints + _trans.unsqueeze(1)
 
-        verts = verts + _deform_verts # _deform_verts is (bs, n_template_verts, 3)
+        verts = verts + _deform_verts  # _deform_verts is (bs, n_template_verts, 3)
 
         if return_joints:
             return verts, joints
@@ -235,6 +247,7 @@ class SMAL3DFitter(nn.Module):
 
 class SMALParamGroup:
     """Object building on model.parameters, with modifications such as variable learning rate"""
+
     param_map = {
         "init": ["global_rot", "trans"],
         "init_rot_lock": ["trans", "log_beta_scales"],
@@ -245,7 +258,7 @@ class SMALParamGroup:
         "shape": ["global_rot", "trans", "betas", "log_beta_scales", "betas_trans"],
         "pose": ["global_rot", "trans", "joint_rot", "betas", "log_beta_scales", "betas_trans"],
         "deform": ["deform_verts"],
-        "all": ["global_rot", "trans", "joint_rot", "betas", "log_beta_scales", "betas_trans", "deform_verts"]
+        "all": ["global_rot", "trans", "joint_rot", "betas", "log_beta_scales", "betas_trans", "deform_verts"],
     }  # map of param_type : all attributes in SMAL used in optim
 
     def __init__(self, model, group="smbld", lrs=None):
@@ -281,12 +294,26 @@ class SMALParamGroup:
 class Stage:
     """Defines a stage of optimisation, the optimisation parameters for the stage, ..."""
 
-    def __init__(self, nits: int, scheme: str, smal_3d_fitter: SMAL3DFitter, target_meshes: Meshes, mesh_names=[],
-                 name="optimise",
-                 loss_weights=None, lr=1e-3, out_dir="static_fits_output",
-                 custom_lrs=None, device='cuda', plot_normals=False,
-                 sample_size=1000, sdf_values=None, source_sdf_values=None,
-                 visualize_sdf_loss=False, sdf_vis_frequency=10):
+    def __init__(
+        self,
+        nits: int,
+        scheme: str,
+        smal_3d_fitter: SMAL3DFitter,
+        target_meshes: Meshes,
+        mesh_names=[],
+        name="optimise",
+        loss_weights=None,
+        lr=1e-3,
+        out_dir="static_fits_output",
+        custom_lrs=None,
+        device="cuda",
+        plot_normals=False,
+        sample_size=1000,
+        sdf_values=None,
+        source_sdf_values=None,
+        visualize_sdf_loss=False,
+        sdf_vis_frequency=10,
+    ):
         """
         nits = integer, number of iterations in stage
         parameters = list of items over which to be optimised
@@ -309,14 +336,14 @@ class Stage:
         if loss_weights is not None:
             for k, v in loss_weights.items():
                 self.loss_weights[k] = v
-        
+
         # Parameter for vertex sampling
         self.sample_size = sample_size
 
         # Store SDF values if provided
         self.sdf_values = sdf_values
         self.source_sdf_values = source_sdf_values
-        
+
         # SDF loss visualization parameters
         self.visualize_sdf_loss = visualize_sdf_loss
         self.sdf_vis_frequency = sdf_vis_frequency
@@ -337,8 +364,9 @@ class Stage:
         self.src_mesh = get_meshes(self.src_verts, self.faces, device=device)
         self.n_verts = self.src_verts.shape[1]
 
-        self.consider_loss = lambda loss_name: self.loss_weights[
-                                                   f"w_{loss_name}"] > 0  # function to check if loss is non-zero
+        self.consider_loss = lambda loss_name: (
+            self.loss_weights[f"w_{loss_name}"] > 0
+        )  # function to check if loss is non-zero
 
     def forward(self, src_mesh, iteration=0):
         loss = 0
@@ -372,18 +400,19 @@ class Stage:
             # Sample points from source mesh for SDF calculation
             src_verts, src_sdf = sample_points_from_meshes_and_SDF(src_mesh, self.source_sdf_values, 10000)
             target_verts, target_sdf = sample_points_from_meshes_and_SDF(self.target_meshes, self.sdf_values, 10000)
-            
+
             # Determine if we should visualize on this iteration
-            visualize_now = (self.visualize_sdf_loss and 
-                            (iteration % self.sdf_vis_frequency == 0 or iteration == self.n_it - 1))
-            
+            visualize_now = self.visualize_sdf_loss and (
+                iteration % self.sdf_vis_frequency == 0 or iteration == self.n_it - 1
+            )
+
             # Create visualization directory if needed
             if visualize_now:
                 vis_dir = os.path.join(self.out_dir, "sdf_visualization", self.name)
                 try_mkdir(vis_dir)
             else:
                 vis_dir = "sdf_visualization"
-                
+
             # Calculate SDF distance
             loss_sdf = SDF_distance(
                 src_verts,  # source points
@@ -398,7 +427,7 @@ class Stage:
                 visualize=visualize_now,
                 output_dir=vis_dir,
                 title=f"{self.name}_iteration{iteration}",
-                mesh_names=self.mesh_names  # Pass mesh names for better file naming
+                mesh_names=self.mesh_names,  # Pass mesh names for better file naming
             )
             loss_components["sdf"] = loss_sdf
             loss += self.loss_weights["w_sdf"] * loss_sdf
@@ -427,10 +456,15 @@ class Stage:
         new_src_mesh = self.src_mesh.offset_verts(offsets.view(-1, 3))
 
         figtitle = f"{self.name}, its = {self.n_it}"
-        plot_meshes(self.target_meshes, new_src_mesh, self.mesh_names, title=self.name,
-                    figtitle=figtitle,
-                    out_dir=os.path.join(self.out_dir, "meshes"),
-                    plot_normals=self.plot_normals)
+        plot_meshes(
+            self.target_meshes,
+            new_src_mesh,
+            self.mesh_names,
+            title=self.name,
+            figtitle=figtitle,
+            out_dir=os.path.join(self.out_dir, "meshes"),
+            plot_normals=self.plot_normals,
+        )
 
     def run(self, plot=False):
         """Run the entire Stage"""
@@ -441,7 +475,7 @@ class Stage:
                 loss, loss_components = self.step(i)
 
                 self.losses_to_plot.append(loss)
-                if not hasattr(self, 'loss_components_to_plot'):
+                if not hasattr(self, "loss_components_to_plot"):
                     self.loss_components_to_plot = {k: [] for k in loss_components.keys()}
                 for k, v in loss_components.items():
                     self.loss_components_to_plot[k].append(v)
@@ -452,8 +486,7 @@ class Stage:
                     for k, v in loss_components.items():
                         print(f"{k}: {v.item():.6f}")
 
-                tqdm_iterator.set_description(
-                    f"STAGE = {self.name}, TOT_LOSS = {loss:.6f}")
+                tqdm_iterator.set_description(f"STAGE = {self.name}, TOT_LOSS = {loss:.6f}")
 
         if plot:
             self.plot()
@@ -504,8 +537,8 @@ class StageManager:
             ax.semilogy(np.arange(it_start, it_start + n_it), out_losses, label=stage.name)
             it_start += n_it
 
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Total loss')
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Total loss")
         ax.legend()
         out_src = os.path.join(self.out_dir, out_src + ".png")
         plt.tight_layout()
@@ -514,30 +547,29 @@ class StageManager:
 
     def plot_loss_components(self, out_src="loss_components"):
         """Plot individual loss components for all stages."""
-        
+
         # Get all unique loss component names across all stages
         all_components = set()
         for stage in self.stages:
-            if hasattr(stage, 'loss_components_to_plot'):
+            if hasattr(stage, "loss_components_to_plot"):
                 all_components.update(stage.loss_components_to_plot.keys())
-        
+
         # Create a subplot for each loss component
         n_components = len(all_components)
-        fig, axes = plt.subplots(n_components, 1, figsize=(10, 4*n_components))
+        fig, axes = plt.subplots(n_components, 1, figsize=(10, 4 * n_components))
         if n_components == 1:
             axes = [axes]
-        
+
         it_start = 0
         for stage in self.stages:
-            if hasattr(stage, 'loss_components_to_plot'):
+            if hasattr(stage, "loss_components_to_plot"):
                 for i, component in enumerate(all_components):
                     if component in stage.loss_components_to_plot:
                         values = [v.cpu().detach().numpy() for v in stage.loss_components_to_plot[component]]
-                        axes[i].semilogy(np.arange(it_start, it_start + len(values)), 
-                                       values, label=f"{stage.name}")
+                        axes[i].semilogy(np.arange(it_start, it_start + len(values)), values, label=f"{stage.name}")
                         axes[i].set_title(f"{component} loss")
-                        axes[i].set_xlabel('Epoch')
-                        axes[i].set_ylabel('Loss value')
+                        axes[i].set_xlabel("Epoch")
+                        axes[i].set_ylabel("Loss value")
                         axes[i].legend()
             it_start += stage.n_it
 
@@ -548,4 +580,3 @@ class StageManager:
 
     def add_stage(self, stage):
         self.stages.append(stage)
-
