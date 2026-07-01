@@ -43,9 +43,6 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "smal_fitter"))
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "smal_fitter", "neuralSMIL"))
 
 
 # Parse --smal_file first so we can apply the override *before* importing
@@ -60,11 +57,11 @@ def _early_parse():
 
 _early = _early_parse()
 if _early.smal_file:
-    from configs.config_utils import apply_smal_file_override  # noqa: E402
+    from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override  # noqa: E402
     apply_smal_file_override(_early.smal_file, shape_family=_early.shape_family)
 
 import config  # noqa: E402
-from Unreal2Pytorch3D import (  # noqa: E402
+from smal_fitter.Unreal2Pytorch3D import (  # noqa: E402
     load_SMIL_Unreal_multiview_sample,
     parse_camera_intrinsics,
     parse_projection_components,
@@ -85,8 +82,8 @@ def _lazy_render_imports():
     if _TORCH is not None:
         return
     import torch as _t  # noqa: F401
-    from smal_fitter import SMALFitter as _SF  # noqa: F401
-    from optimize_to_joints import ImageExporter as _IE  # noqa: F401
+    from smal_fitter.fitter import SMALFitter as _SF  # noqa: F401
+    from smal_fitter.optimize_to_joints import ImageExporter as _IE  # noqa: F401
     from scipy.spatial.transform import Rotation as _R  # noqa: F401
     _TORCH = _t
     _SMALFitter = _SF
@@ -307,7 +304,7 @@ def render_per_view(dataset_path, frame_index, output_dir,
             y_v["keypoint_visibility"] = y_mv["keypoint_visibility_per_view"][v]
 
             print(f"  CAM{cam_id}: rendering ...", flush=True)
-            from Unreal2Pytorch3D import Render_SMAL_Model_from_Unreal_data
+            from smal_fitter.Unreal2Pytorch3D import Render_SMAL_Model_from_Unreal_data
             try:
                 Render_SMAL_Model_from_Unreal_data(x_v, y_v, device, verbose=False)
             except Exception as e:

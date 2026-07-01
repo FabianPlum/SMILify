@@ -10,11 +10,9 @@ import os
 
 import pytest
 
-# Add paths
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'smal_fitter', 'neuralSMIL'))
 
-from training_config import TrainingConfig
-from configs import load_config
+from smal_fitter.neuralSMIL.training_config import TrainingConfig
+from smal_fitter.neuralSMIL.configs import load_config
 
 CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), '..',
