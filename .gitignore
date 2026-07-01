@@ -159,6 +159,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+# HPC venv pip cache (hpc_files/sc_venv_pytorch3d/setup.sh)
+.pip_cache/
 
 # Spyder project settings
 .spyderproject

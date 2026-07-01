@@ -1,0 +1,15 @@
+# Add here the pip packages you would like to install on this virtual environment / kernel
+pip
+numpy<2.0
+torch==2.3.1
+torchrun_jsc
+torchvision 
+torchaudio 
+iopath 
+ninja 
+imageio 
+scikit-image
+yacs 
+pycocotools
+ipykernel
+pandas
