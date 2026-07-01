@@ -44,14 +44,14 @@ Download these two files into the **repo root**:
 | File | Download | Save as |
 |---|---|---|
 | Example **dataset** — preprocessed multi-view stick-insect HDF5 (~21 GB) | [⬇ Google Drive](https://drive.google.com/file/d/1wlVPe1ZwGmFkS9KhLODpIzvfi3DsqgQL/view?usp=drive_link) | `SMILySTICKS_centred_reprojected_FIXED.h5` |
-| Example **checkpoint** — a trained multi-view stick model (ViT-Large) | [⬇ Google Drive](https://drive.google.com/file/d/17y3EnUb4MnaczM863nFm5eD0bp0ZYr6N/view?usp=drive_link) | `SMILySTICKS_ViT_model.pth` |
+| Example **checkpoint** — a trained multi-view stick model (ViT-Large) | [⬇ Google Drive](https://drive.google.com/file/d/1d3obPnXHG2WD19WRg4kyqt6LFx5kcbf8/view?usp=drive_link) | `SMILySTICKS_ViT_model.pth` |
 
 These are large files, and Google Drive serves big files through a "can't scan for viruses" page — a plain `wget`/`curl` won't fetch the actual file. Download them in the browser, or grab them from the command line with [`gdown`](https://github.com/wkentaro/gdown) (handy on a headless machine), run from the repo root:
 
 ```bash
 pip install gdown
 gdown 1wlVPe1ZwGmFkS9KhLODpIzvfi3DsqgQL -O SMILySTICKS_centred_reprojected_FIXED.h5   # dataset
-gdown 17y3EnUb4MnaczM863nFm5eD0bp0ZYr6N -O SMILySTICKS_ViT_model.pth                    # checkpoint
+gdown 1d3obPnXHG2WD19WRg4kyqt6LFx5kcbf8 -O SMILySTICKS_ViT_model.pth                    # checkpoint
 ```
 
 The SMIL stick model — [`3D_model_prep/SMILy_STICK.pkl`](3D_model_prep/SMILy_STICK.pkl) — is already in the repo, so there's nothing else to download.
