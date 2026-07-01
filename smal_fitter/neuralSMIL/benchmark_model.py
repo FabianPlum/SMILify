@@ -22,6 +22,17 @@ import argparse
 import json
 import os
 import sys
+
+# Set CUDA_VISIBLE_DEVICES BEFORE importing torch: torch >= 2.3 raises an INTERNAL
+# ASSERT ("device >= 0 && device < num_gpus") if CUDA is initialized before CVD is set.
+# config.py imports no torch, so importing it here is safe. setdefault lets an explicit
+# external CUDA_VISIBLE_DEVICES (e.g. for a specific/multi GPU with --device) still win.
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import config
+os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", config.GPU_IDS)
+
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 

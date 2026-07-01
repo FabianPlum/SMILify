@@ -1,3 +1,12 @@
+import os as _os, sys as _sys
+if __name__ == "__main__":
+    # Set CUDA_VISIBLE_DEVICES BEFORE torch is imported below: torch >= 2.3 raises an
+    # INTERNAL ASSERT if it changes after CUDA init. Guarded so importers are unaffected.
+    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    import config as _config
+    _os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    _os.environ["CUDA_VISIBLE_DEVICES"] = _config.GPU_IDS
+
 import json
 import numpy as np
 import matplotlib.pyplot as plt
@@ -2028,9 +2037,7 @@ if __name__ == "__main__":
     IMPORTANT: Verify the data has been generated with the same SMIL model that is referenced in the config.py file
     """
     # set the device to use (first available GPU by default)
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
-
+    # CUDA_VISIBLE_DEVICES is set at the top of this file (guarded __main__ block), before torch.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     # Read the JSON file

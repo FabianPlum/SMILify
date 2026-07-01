@@ -2,6 +2,8 @@
 
 # Multi-View SLEAP Dataset Implementation Plan
 
+> ⚠️ **HISTORICAL PLAN** — the as-built multi-view system is driven by the config system and the inference entrypoint, not the speculative CLI/flags sketched in the body (e.g. `--multiview_enabled`, `--feature_fusion` were never adopted). For current usage see [configs/README.md](../../configs/README.md) and [run_multiview_inference.py](../../run_multiview_inference.py).
+
 ## Executive Summary
 
 This document outlines the implementation plan for adding multi-view support to the SMILify pipeline. The goal is to leverage multiple synchronized camera views to predict a single set of SMIL body parameters (pose and shape) while predicting separate camera parameters for each view. This approach is theoretically sound because all cameras observe the same animal at the same instant, so a single set of body parameters should minimize the 2D keypoint loss across all perspectives when camera parameters are correctly estimated.

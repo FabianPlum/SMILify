@@ -2,6 +2,13 @@
 
 # Multiview Transformer Decoder — Architecture Issues
 
+> ⚠️ **HISTORICAL** — implementation-history record (early 2026), **partly superseded**:
+>
+> - **IEF is no longer disabled.** This doc states "IEF disabled (`ief_iters=1`, `ief_intermediate=0.0`)"; current configs run `transformer_ief_iters=3` with intermediate supervision (`ief_intermediate` > 0). See [configs/README.md](../../configs/README.md).
+> - **The "#10 `global_feat_proj`" fix described below does not exist in the current code** — there is no `global_feat_proj` symbol; `global_feats` is still passed positionally into the decoder. Treat that section as *not landed* (tracked as a code-investigation item, C2).
+>
+> For the current decoder, read the code under `smal_fitter/neuralSMIL/` and [configs/README.md](../../configs/README.md).
+
 Identified during deep review of `multiview_baseline.json` config and the
 `MultiViewSMILImageRegressor` / `SMILTransformerDecoderHead` code paths.
 

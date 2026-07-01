@@ -1,0 +1,72 @@
+# SMILify conda environment.
+#
+# Reproduce with:
+#   conda env create -f environment.yml
+#   conda activate pytorch3d
+#
+# RECOMMENDED stack (CUDA 11.8): Python 3.10 / PyTorch 2.3.1 / PyTorch3D 0.7.8.
+# Confirmed working on Windows 11 (dev) and the run.ai Linux cluster. PyTorch3D ships a
+# `cu118_pyt231` build, so `conda install -c pytorch3d pytorch3d` resolves cleanly against
+# torch 2.3.1 on Linux — no manual build needed.
+#
+# A local Linux box also runs an older PyTorch 2.1.1 / PyTorch3D 0.7.7 stack and works
+# equally well; to reproduce that instead, set pytorch=2.1.1, torchvision=0.16.1,
+# pytorch3d=0.7.7 below.
+#
+# Only the core deep-learning stack is pinned (PyTorch3D must match the torch/CUDA build);
+# the scientific/IO packages float to whatever recent build conda resolves. Optional tooling
+# (dataset viewer, AntScan scraper, SDF tests, legacy quadruped pose-prior viz) is listed
+# commented-out at the bottom — install only if needed.
+
+name: pytorch3d
+
+channels:
+  - pytorch
+  - nvidia
+  - pytorch3d
+  - conda-forge
+
+dependencies:
+  # --- core deep-learning stack (CUDA 11.8) — pinned ---
+  - python=3.10
+  - pytorch=2.3.1
+  - pytorch-cuda=11.8
+  - torchvision=0.18.1
+  - pytorch3d=0.7.8        # cu118_pyt231 build; pulls fvcore / iopath automatically
+
+  # --- scientific / IO stack (versions float) ---
+  - scipy
+  - h5py
+  - pandas
+  - pillow
+  - imageio
+  - scikit-image
+  - trimesh
+  - tqdm
+  - psutil
+  - pyyaml
+  - pytest
+
+  - pip
+  - pip:
+    - numpy
+    - matplotlib
+    - timm
+    - opencv-python
+    - nibabel
+    - pycocotools
+    - toml
+
+# --- optional extras (uncomment what you need) ------------------------------
+#   Interactive multi-view dataset viewer (smal_fitter/multiview_common/dataset_viewer.py):
+#     - streamlit
+#     - plotly
+#   AntScan scraper (custom_processing/antscan_scraper.py):
+#     - requests
+#     - beautifulsoup4
+#     - selenium
+#     - webdriver-manager        # (pip)
+#   SDF registration test harness (fitter_3d/SDF_tests.py):
+#     - gputil                   # (pip: GPUtil)
+#   Legacy quadruped pose-prior visualization (smal_fitter/priors/pose_prior_35.py):
+#     # requires psbody-mesh, which has no conda/pip wheel — build from source if needed.

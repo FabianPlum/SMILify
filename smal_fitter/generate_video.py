@@ -6,6 +6,13 @@
 import sys, os
 sys.path.append(os.path.dirname(sys.path[0]))
 
+# Set CUDA_VISIBLE_DEVICES before importing torch: torch >= 2.3 raises an INTERNAL
+# ASSERT if CUDA_VISIBLE_DEVICES changes after CUDA has been initialized. config.py
+# imports no torch, so this is safe here.
+import config
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
+
 import numpy as np
 import cv2
 import argparse
@@ -35,9 +42,7 @@ class ImageExporter():
 def main():
     OUTPUT_DIR = os.path.join("exported", config.CHECKPOINT_NAME, config.EPOCH_NAME)
 
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
-
+    # CUDA_VISIBLE_DEVICES is set at the top of this file, before torch is imported.
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     dataset, name = config.SEQUENCE_OR_IMAGE_NAME.split(":")
