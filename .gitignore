@@ -217,6 +217,14 @@ multiview_plots*/
 multiview_singleview_renders*/
 multiview_visualizations*/
 
+# Single-view / getting-started training run outputs (checkpoints, plots,
+# visualizations). Regenerable; covers getting_started_* and
+# getting_started_singleview_* run dirs.
+getting_started*checkpoints/
+getting_started*plots/
+getting_started*visualizations*/
+benchmark_singleview_*/
+
 # Scratch parametric-model exports from Blender prep. The tracked .pkl
 # models carry no _TEST suffix, so they are unaffected.
 3D_model_prep/*_TEST*.pkl
