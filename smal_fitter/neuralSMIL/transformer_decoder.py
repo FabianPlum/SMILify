@@ -515,7 +515,7 @@ class SMILTransformerDecoderHead(nn.Module):
         
         # Debug: Print tensor shapes and values occasionally
         if hasattr(self, '_debug_shapes') and torch.rand(1).item() < 0.01:
-            print(f"DEBUG - Transformer decoder output shapes:")
+            print("DEBUG - Transformer decoder output shapes:")
             for key, value in output.items():
                 if isinstance(value, torch.Tensor):
                     print(f"  {key}: {value.shape}")

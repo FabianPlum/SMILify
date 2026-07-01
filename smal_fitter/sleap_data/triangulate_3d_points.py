@@ -412,7 +412,7 @@ def reprojection_analysis(
     print(f"REPROJECTION ANALYSIS — {label} 3D vs undistorted 2D SLEAP")
     print(f"{'='*70}")
     print(f"  3D source: {label} ({valid_3d.sum()} valid 3D keypoints across {n_frames} frames)")
-    print(f"  Comparison space: undistorted (ideal pinhole) pixel coordinates")
+    print("  Comparison space: undistorted (ideal pinhole) pixel coordinates")
     print(f"  Confidence threshold for 2D: {confidence_threshold}")
 
     if len(all_errors) == 0:
@@ -532,7 +532,7 @@ def validate_against_reference(tracks_3d: np.ndarray,
         print(f"  Frames compared: {n_compare}")
         print(f"  Keypoints compared: {n_both} "
               f"(ref valid: {ref_valid.sum()}, tri valid: {tri_valid.sum()})")
-        print(f"\n  3D Euclidean Error (mm):")
+        print("\n  3D Euclidean Error (mm):")
         print(f"    Mean:   {result['mean_error_mm']:.2f}")
         print(f"    Median: {result['median_error_mm']:.2f}")
         print(f"    Std:    {result['std_error_mm']:.2f}")
@@ -540,7 +540,7 @@ def validate_against_reference(tracks_3d: np.ndarray,
         print(f"    P95:    {result['p95_error_mm']:.2f}")
         print(f"    P99:    {result['p99_error_mm']:.2f}")
         print(f"    Max:    {result['max_error_mm']:.2f}")
-        print(f"\n  Accuracy:")
+        print("\n  Accuracy:")
         print(f"    < 5mm:  {result['pct_under_5mm']:.1f}%")
         print(f"    < 10mm: {result['pct_under_10mm']:.1f}%")
         print(f"    < 20mm: {result['pct_under_20mm']:.1f}%")
@@ -615,7 +615,7 @@ def generate_reprojections_h5(
             proj_2d = proj_2d[:, np.newaxis, :, :]
 
             ds = f.create_dataset(cam_name, data=proj_2d, dtype=np.float64)
-            ds.attrs["Description"] = f"Shape: (n_frames, n_tracks, n_nodes, 2)."
+            ds.attrs["Description"] = "Shape: (n_frames, n_tracks, n_nodes, 2)."
 
     if verbose:
         n_valid = valid.sum()
@@ -624,7 +624,7 @@ def generate_reprojections_h5(
         print(f"  Shape per camera: ({n_frames}, 1, {n_keypoints}, 2)")
         print(f"  Valid projections: {n_valid} / {n_frames * n_keypoints} "
               f"({100 * n_valid / max(1, n_frames * n_keypoints):.1f}%)")
-        print(f"  Projection model: ideal pinhole (K @ [R|t], no distortion)")
+        print("  Projection model: ideal pinhole (K @ [R|t], no distortion)")
 
     return output_path
 

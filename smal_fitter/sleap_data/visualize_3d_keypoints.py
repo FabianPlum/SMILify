@@ -199,10 +199,10 @@ def create_3d_animation(keypoints_3d: np.ndarray,
         repeat=True
     )
     
-    print(f"\nStarting animation...")
+    print("\nStarting animation...")
     print(f"  Samples: {num_samples}")
     print(f"  FPS: {fps}")
-    print(f"  Close the window to stop")
+    print("  Close the window to stop")
     
     plt.show()
     

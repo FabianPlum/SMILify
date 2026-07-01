@@ -292,7 +292,7 @@ def visualize_keypoints_comparison(model, predicted_params, y_data, x_data, back
     print(f"Keypoint visualization saved to: {output_path}")
     
     # Print coordinate comparison for first few keypoints
-    print(f"\nKeypoint coordinate comparison (normalized [0,1]):")
+    print("\nKeypoint coordinate comparison (normalized [0,1]):")
     print(f"{'Joint':<5} {'GT Y':<8} {'GT X':<8} {'Rend Y':<8} {'Rend X':<8} {'Diff Y':<8} {'Diff X':<8} {'Magnitude':<10}")
     print("-" * 75)
     for i in range(min(5, len(target_keypoints))):
@@ -430,7 +430,7 @@ def test_3d_keypoint_alignment(model, predicted_params, y_data, device, toleranc
     passed_joints = sum(1 for err in joint_errors if err < tolerance)
     pass_rate = passed_joints / len(joint_errors) if joint_errors else 0
     
-    print(f"\n3D Keypoint Alignment Statistics:")
+    print("\n3D Keypoint Alignment Statistics:")
     print(f"Valid joints compared: {valid_joints}")
     print(f"Mean error: {mean_error:.4f}")
     print(f"Max error: {max_error:.4f}")
@@ -442,11 +442,11 @@ def test_3d_keypoint_alignment(model, predicted_params, y_data, device, toleranc
     success = pass_rate >= 0.8  # 80% of joints should be within tolerance
     
     if success:
-        print(f"✓ 3D keypoint alignment test: PASSED")
+        print("✓ 3D keypoint alignment test: PASSED")
     else:
-        print(f"✗ 3D keypoint alignment test: FAILED")
-        print(f"Note: Some misalignment is expected due to different joint computation methods")
-        print(f"      in the parametric model vs. ground truth keypoints")
+        print("✗ 3D keypoint alignment test: FAILED")
+        print("Note: Some misalignment is expected due to different joint computation methods")
+        print("      in the parametric model vs. ground truth keypoints")
     
     return {   
         'success': success,
@@ -558,7 +558,7 @@ def visualize_3d_keypoint_alignment(gt_keypoints_3d, model_joints_3d, joint_erro
     ax2.set_xlabel('X')
     ax2.set_ylabel('Y')
     ax2.set_zlabel('Z')
-    ax2.set_title(f'Ground Truth Keypoints\n(Color = Error, Size = Error Magnitude)')
+    ax2.set_title('Ground Truth Keypoints\n(Color = Error, Size = Error Magnitude)')
     
     # Set equal aspect ratio for second plot
     ax2.set_xlim(mid_x - max_range, mid_x + max_range)
@@ -704,7 +704,7 @@ def visualize_silhouette_comparison(model, predicted_params, x_data, output_dir=
     union = np.sum(target_binary | rendered_binary)
     iou = intersection / (union + 1e-8)
     
-    print(f"\nSilhouette statistics:")
+    print("\nSilhouette statistics:")
     print(f"Ground truth area: {target_area:.4f} ({target_area*100:.2f}% of image)")
     print(f"Rendered area: {rendered_area:.4f} ({rendered_area*100:.2f}% of image)")
     print(f"IoU (Intersection over Union): {iou:.4f}")
@@ -824,7 +824,7 @@ def test_ground_truth_loss(data_path: str = None, sample_idx: int = 0,
         print(f"Extracted target parameters: {list(target_params.keys())}")
         
         # Print shapes for debugging
-        print(f"Target parameter shapes:")
+        print("Target parameter shapes:")
         for key, value in target_params.items():
             print(f"  {key}: {value.shape}")
         

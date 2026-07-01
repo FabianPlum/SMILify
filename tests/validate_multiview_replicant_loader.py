@@ -383,7 +383,7 @@ def compare_frames_test(dataset_path, frame_index, output_dir, per_camera, cam_i
     print(f"  canonical_cam_id: {y_can['canonical_cam_id']}")
     print(f"  max |kp3d_world - (kp3d_can - t_0) @ R_0.T| = {rt_diff:.3e}")
     if rt_diff > 1e-3:
-        print(f"  WARN: round-trip residual above 1e-3 — math suspect.")
+        print("  WARN: round-trip residual above 1e-3 — math suspect.")
     # Also check raw == canonical-world-recovery on the camera extrinsics
     R_v0_raw = y_raw["cam_rot_per_view"][0].numpy()
     R_v0_can = y_can["cam_rot_per_view"][0].numpy()

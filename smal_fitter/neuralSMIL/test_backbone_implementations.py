@@ -51,7 +51,7 @@ def test_backbone_creation():
             
             # Create backbone
             backbone = BackboneFactory.create_backbone(backbone_name, freeze=True)
-            print(f"  ✓ Created successfully")
+            print("  ✓ Created successfully")
             print(f"  ✓ Feature dimension: {backbone.get_feature_dim()}")
             print(f"  ✓ Frozen: {backbone.freeze_weights_flag}")
             
@@ -105,15 +105,15 @@ def test_forward_pass():
                 print(f"    Actual output shape: {actual_shape}")
                 
                 if actual_shape == expected_shape:
-                    print(f"    ✓ Shape correct")
+                    print("    ✓ Shape correct")
                 else:
-                    print(f"    ✗ Shape mismatch!")
+                    print("    ✗ Shape mismatch!")
                 
                 # Check for NaN or inf
                 if torch.isfinite(features).all():
-                    print(f"    ✓ Output is finite")
+                    print("    ✓ Output is finite")
                 else:
-                    print(f"    ✗ Output contains NaN or inf!")
+                    print("    ✗ Output contains NaN or inf!")
                 
                 # Print feature statistics
                 print(f"    Feature range: [{features.min():.3f}, {features.max():.3f}]")
@@ -229,7 +229,7 @@ def test_smil_integration():
                 backbone_name=backbone_name
             ).to(device)
             
-            print(f"  ✓ Model created successfully")
+            print("  ✓ Model created successfully")
             print(f"  ✓ Backbone: {model.backbone_name}")
             print(f"  ✓ Feature dimension: {model.feature_dim}")
             
@@ -243,7 +243,7 @@ def test_smil_integration():
             with torch.no_grad():
                 params = model(dummy_input)
             
-            print(f"  ✓ Forward pass successful")
+            print("  ✓ Forward pass successful")
             print(f"  ✓ Output parameters: {list(params.keys())}")
             
             # Check parameter shapes
@@ -345,7 +345,7 @@ def test_training_compatibility():
                 predicted_params, dummy_target, return_components=True
             )
             
-            print(f"  ✓ Loss computation successful")
+            print("  ✓ Loss computation successful")
             print(f"  ✓ Total loss: {loss.item():.6f}")
             print(f"  ✓ Loss components: {list(loss_components.keys())}")
             
@@ -354,7 +354,7 @@ def test_training_compatibility():
             loss.backward()
             optimizer.step()
             
-            print(f"  ✓ Backward pass successful")
+            print("  ✓ Backward pass successful")
             
             # Clean up
             del model, optimizer, dummy_input, dummy_target, predicted_params, loss

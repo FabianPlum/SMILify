@@ -438,7 +438,7 @@ class OptimizedSLEAPDatasetPreprocessor:
         
         if verbose:
             print(f"Dataset saved to: {output_path}")
-            print(f"Performance statistics:")
+            print("Performance statistics:")
             print(f"  Video files opened: {self.stats['video_files_opened']}")
             print(f"  Video files closed: {self.stats['video_files_closed']}")
             print(f"  Camera data loads: {self.stats['camera_data_loads']}")
@@ -506,7 +506,7 @@ def main():
     
     if not args.quiet:
         print(f"\nOptimized preprocessing completed in {processing_time:.1f} seconds")
-        print(f"Performance improvements:")
+        print("Performance improvements:")
         print(f"  Video files opened: {stats['video_files_opened']} (vs {stats['total_samples']} in original)")
         print(f"  Camera data loads: {stats['camera_data_loads']} (vs {stats['total_samples']} in original)")
         print(f"  I/O operations reduced by ~{((stats['total_samples'] - stats['video_files_opened']) / stats['total_samples'] * 100):.1f}%")

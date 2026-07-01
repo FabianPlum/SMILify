@@ -305,7 +305,7 @@ Examples:
         else:
             create_interactive_plot(df, title, output_dir)
         
-        print(f"\nPlotting completed successfully!")
+        print("\nPlotting completed successfully!")
         print(f"Data points: {len(df)}")
         print(f"PC1 range: {df['PC1'].min():.3f} to {df['PC1'].max():.3f}")
         print(f"PC2 range: {df['PC2'].min():.3f} to {df['PC2'].max():.3f}")

@@ -450,7 +450,7 @@ def main():
 
         # Step 3: Optimize each camera
         if verbose:
-            print(f"\n  Step 2: Optimizing camera parameters...")
+            print("\n  Step 2: Optimizing camera parameters...")
 
         cam_rng = np.random.default_rng(42 + iteration)
         for cam_name in sorted(current_cameras.keys()):
@@ -478,7 +478,7 @@ def main():
 
         # Step 4: Evaluate post-optimization (re-triangulate with updated params)
         if verbose:
-            print(f"\n  Step 3: Re-triangulating to evaluate...")
+            print("\n  Step 3: Re-triangulating to evaluate...")
 
         tracks_3d_post, _ = triangulate_all(
             current_cameras, all_coords, all_scores,
@@ -523,7 +523,7 @@ def main():
         print("REFINEMENT COMPLETE")
         print(f"{'='*70}")
 
-        print(f"\n  Parameter changes (original -> refined):")
+        print("\n  Parameter changes (original -> refined):")
         header = f"  {'Camera':<12} {'dR (deg)':>10} {'dt (mm)':>10}"
         if optimize_intrinsics:
             header += f" {'dfx':>10} {'dfy':>10} {'dcx':>10} {'dcy':>10}"
@@ -583,7 +583,7 @@ def main():
             )
 
     if verbose:
-        print(f"\nDone.")
+        print("\nDone.")
         print(f"  Refined calibration: {args.output}")
         if args.full_triangulation:
             print(f"  Refined 3D points:   {args.output_points3d}")

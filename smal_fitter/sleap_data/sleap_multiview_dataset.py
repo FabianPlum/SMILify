@@ -982,15 +982,15 @@ if __name__ == "__main__":
     
     # Test loading samples
     if len(dataset) > 0:
-        print(f"\nTesting sample loading...")
+        print("\nTesting sample loading...")
         x_data, y_data = dataset[0]
         
         if args.single_view:
-            print(f"Single-view sample 0:")
+            print("Single-view sample 0:")
             print(f"  Image shape: {x_data['input_image_data'].shape}")
             print(f"  Keypoints 2D shape: {y_data['keypoints_2d'].shape}")
         else:
-            print(f"Multi-view sample 0:")
+            print("Multi-view sample 0:")
             print(f"  Number of views: {x_data['num_active_views']}")
             print(f"  Image shapes: {[img.shape for img in x_data['images']]}")
             print(f"  Keypoints 2D shape: {y_data['keypoints_2d'].shape}")

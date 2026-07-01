@@ -53,7 +53,7 @@ def demonstrate_smil_regressor():
         hidden_dim=512
     ).to(device)
     
-    print(f"Model initialized successfully!")
+    print("Model initialized successfully!")
     print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     
@@ -82,7 +82,7 @@ def demonstrate_smil_regressor():
                     print(f"  {key}: {type(value)}")
             
             # Show some parameter values
-            print(f"\nSample parameter values:")
+            print("\nSample parameter values:")
             print(f"  Global rotation: {predicted_params['global_rot'][0].cpu().numpy()}")
             print(f"  Shape betas (first 5): {predicted_params['betas'][0, :5].cpu().numpy()}")
             print(f"  Translation: {predicted_params['trans'][0].cpu().numpy()}")

@@ -786,8 +786,8 @@ class SMILImageRegressor(SMALFitter):
                         if torch.rand(1).item() < 0.01:
                             print(f"⚠️  WARNING: Dataset configuration mismatch detected for '{param_name}':")
                             print(f"   {num_mismatches} sample(s) marked as available in 'available_labels' but have None ground truth")
-                            print(f"   These samples will be PROTECTED from loss computation (using AND logic)")
-                            print(f"   Please fix the dataset's 'available_labels' to match actual ground truth availability")
+                            print("   These samples will be PROTECTED from loss computation (using AND logic)")
+                            print("   Please fix the dataset's 'available_labels' to match actual ground truth availability")
                 else:
                     # No implicit mask for this param (e.g., keypoint_2d, silhouette), use explicit only
                     availability_masks[param_name] = explicit_masks[param_name]
@@ -895,10 +895,10 @@ class SMILImageRegressor(SMALFitter):
                 )
                 # Check for NaN or infinite values in PCA results
                 if not np.isfinite(scale_out).all():
-                    print(f"Warning: Non-finite values in scale_out, replacing with ones")
+                    print("Warning: Non-finite values in scale_out, replacing with ones")
                     scale_out = np.nan_to_num(scale_out, nan=1.0, posinf=1.0, neginf=1.0)
                 if not np.isfinite(translation_out).all():
-                    print(f"Warning: Non-finite values in translation_out, replacing with zeros")
+                    print("Warning: Non-finite values in translation_out, replacing with zeros")
                     translation_out = np.nan_to_num(translation_out, nan=0.0, posinf=0.0, neginf=0.0)
                 targets['log_beta_scales'] = torch.from_numpy(np.log(np.maximum(scale_out, 1e-8))).float().to(self.device)
                 targets['betas_trans'] = torch.from_numpy(translation_out * y_data['translation_factor']).float().to(self.device)
@@ -1156,10 +1156,10 @@ class SMILImageRegressor(SMALFitter):
         
         # Check for non-finite values and warn (but keep gradients flowing)
         if not torch.isfinite(log_beta_scales).all():
-            print(f"Warning: Non-finite values in log_beta_scales, clamping")
+            print("Warning: Non-finite values in log_beta_scales, clamping")
             log_beta_scales = torch.nan_to_num(log_beta_scales, nan=0.0, posinf=0.0, neginf=-10.0)
         if trans_weights is not None and not torch.isfinite(betas_trans).all():
-            print(f"Warning: Non-finite values in betas_trans, clamping")
+            print("Warning: Non-finite values in betas_trans, clamping")
             betas_trans = torch.nan_to_num(betas_trans, nan=0.0, posinf=0.0, neginf=0.0)
         
         return log_beta_scales, betas_trans
@@ -1876,7 +1876,7 @@ class SMILImageRegressor(SMALFitter):
             print(f"  Availability masks present: {'_availability_masks' in target_params_batch}")
             if '_availability_masks' in target_params_batch:
                 avail_masks = target_params_batch['_availability_masks']
-                print(f"  Availability summary:")
+                print("  Availability summary:")
                 for key, mask in avail_masks.items():
                     if isinstance(mask, torch.Tensor):
                         num_avail = mask.sum().item()
@@ -1885,7 +1885,7 @@ class SMILImageRegressor(SMALFitter):
             print(f"  Loss weights: keypoint_2d={loss_weights.get('keypoint_2d', 0)}, betas={loss_weights.get('betas', 0)}")
             print(f"  need_keypoint_loss={need_keypoint_loss}, need_silhouette_loss={need_silhouette_loss}")
             
-            print(f"  Loss components (non-zero only):")
+            print("  Loss components (non-zero only):")
             for key, val in loss_components.items():
                 if isinstance(val, torch.Tensor) and val.item() > 1e-8:
                     print(f"    {key}: {val.item():.6f} (weight={loss_weights.get(key, 0)})")

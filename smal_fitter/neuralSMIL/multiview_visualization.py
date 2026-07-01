@@ -347,7 +347,7 @@ def print_joint_scale_diagnostics(model, predicted_params: dict, label: str = ""
                       f"{scale_xyz[2]:>10.4f} {scale_xyz.mean():>12.4f}")
 
         all_scales = scales_joint.cpu().numpy()
-        print(f"\nSummary Statistics:")
+        print("\nSummary Statistics:")
         print(f"  Mean scale (all joints, all axes): {all_scales.mean():.4f}")
         print(f"  Std scale (all joints, all axes): {all_scales.std():.4f}")
         print(f"  Min scale: {all_scales.min():.4f}")

@@ -60,7 +60,7 @@ def test_preprocessing(sessions_dir: str, output_path: str,
         return False
     
     # Process dataset
-    print(f"\nProcessing sessions...")
+    print("\nProcessing sessions...")
     try:
         stats = preprocessor.process_dataset(
             sessions_dir=sessions_dir,
@@ -69,7 +69,7 @@ def test_preprocessing(sessions_dir: str, output_path: str,
             verbose=True
         )
         
-        print(f"\nPreprocessing completed successfully!")
+        print("\nPreprocessing completed successfully!")
         print(f"Statistics: {stats}")
         return True
         
@@ -99,10 +99,10 @@ def test_dataset_loading(hdf5_path: str):
         
         # Test sample loading
         if len(dataset) > 0:
-            print(f"\nTesting sample loading...")
+            print("\nTesting sample loading...")
             x_data, y_data = dataset[0]
             
-            print(f"Sample 0:")
+            print("Sample 0:")
             print(f"  Image shape: {x_data['input_image_data'].shape}")
             print(f"  Image range: [{x_data['input_image_data'].min():.3f}, {x_data['input_image_data'].max():.3f}]")
             print(f"  Mask shape: {x_data['input_image_mask'].shape}")
@@ -115,7 +115,7 @@ def test_dataset_loading(hdf5_path: str):
             print(f"  Frame: {x_data['frame_idx']}")
             
             # Test multiple samples
-            print(f"\nTesting multiple samples...")
+            print("\nTesting multiple samples...")
             for i in range(min(3, len(dataset))):
                 x_data, y_data = dataset[i]
                 print(f"  Sample {i}: {x_data['camera_name']}/{x_data['frame_idx']} - {y_data['visible_keypoints_count']} visible keypoints")
@@ -153,10 +153,10 @@ def test_unified_dataset_compatibility(hdf5_path: str):
         
         # Test sample loading
         if len(dataset) > 0:
-            print(f"\nTesting sample loading via UnifiedSMILDataset...")
+            print("\nTesting sample loading via UnifiedSMILDataset...")
             x_data, y_data = dataset[0]
             
-            print(f"Sample 0:")
+            print("Sample 0:")
             print(f"  Image shape: {x_data['input_image_data'].shape}")
             print(f"  Keypoints 2D shape: {y_data['keypoints_2d'].shape}")
             print(f"  Keypoint visibility shape: {y_data['keypoint_visibility'].shape}")

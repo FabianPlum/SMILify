@@ -313,10 +313,10 @@ def extract_target_parameters(y_data, device, scale_trans_mode='separate'):
             )
             # Check for NaN or infinite values in PCA results
             if not np.isfinite(scale_out).all():
-                print(f"Warning: Non-finite values in scale_out, replacing with ones")
+                print("Warning: Non-finite values in scale_out, replacing with ones")
                 scale_out = np.nan_to_num(scale_out, nan=1.0, posinf=1.0, neginf=1.0)
             if not np.isfinite(translation_out).all():
-                print(f"Warning: Non-finite values in translation_out, replacing with zeros")
+                print("Warning: Non-finite values in translation_out, replacing with zeros")
                 translation_out = np.nan_to_num(translation_out, nan=0.0, posinf=0.0, neginf=0.0)
             targets['log_beta_scales'] = torch.from_numpy(np.log(np.maximum(scale_out, 1e-8))).unsqueeze(0).float().to(device)
             targets['betas_trans'] = torch.from_numpy(translation_out * y_data['translation_factor']).unsqueeze(0).float().to(device)
@@ -648,7 +648,7 @@ def visualize_training_progress(model, val_loader, device, epoch, model_config, 
         num_datasets = len(samples_by_dataset)
         
         if num_datasets == 0:
-            print(f"Warning: No samples collected for visualization")
+            print("Warning: No samples collected for visualization")
             return
         
         # Calculate samples per dataset (aim for equal representation)
@@ -1028,7 +1028,7 @@ def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=Fa
                 current_param_groups = optimizer.param_groups
                 checkpoint_param_groups = checkpoint_optimizer_state.get('param_groups', [])
                 
-                log(f"\nOptimizer parameter group comparison:")
+                log("\nOptimizer parameter group comparison:")
                 log(f"  Current optimizer has {len(current_param_groups)} parameter group(s)")
                 log(f"  Checkpoint has {len(checkpoint_param_groups)} parameter group(s)")
                 
@@ -1044,7 +1044,7 @@ def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=Fa
                     log(f"    Checkpoint: {ckpt_num_params} parameters, lr={ckpt_lr}")
                     
                     if curr_num_params != ckpt_num_params:
-                        log(f"    ⚠️  MISMATCH: Parameter count differs!")
+                        log("    ⚠️  MISMATCH: Parameter count differs!")
                         
                         # Get parameter names from model state dict to identify the differences
                         # We'll compare the parameter names from both state dicts
@@ -1084,9 +1084,9 @@ def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=Fa
                 
                 # If group counts differ, show that too
                 if len(current_param_groups) != len(checkpoint_param_groups):
-                    log(f"  ⚠️  MISMATCH: Number of parameter groups differs!")
-                    log(f"     This usually happens when the model architecture or optimizer")
-                    log(f"     configuration has changed between checkpoint save and resume.")
+                    log("  ⚠️  MISMATCH: Number of parameter groups differs!")
+                    log("     This usually happens when the model architecture or optimizer")
+                    log("     configuration has changed between checkpoint save and resume.")
                 
                 # Try to load anyway
                 optimizer.load_state_dict(checkpoint_optimizer_state)
@@ -1431,7 +1431,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     
     
     if not is_distributed or rank == 0:
-        print(f"Data loading configuration:")
+        print("Data loading configuration:")
         print(f"  Workers: {num_workers}")
         print(f"  Pin memory: {pin_memory}")
         print(f"  Prefetch factor: {prefetch_factor}")
@@ -1657,7 +1657,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         trainable_params = backbone_params + transformer_params
         
         if not is_distributed or rank == 0:
-            print(f"Optimizer parameter groups created:")
+            print("Optimizer parameter groups created:")
             print(f"  Backbone/other groups: {len(backbone_params)}")
             for i, g in enumerate(backbone_params):
                 print(f"    - {g.get('name', 'unnamed')} (lr={g['lr']})")
@@ -1687,8 +1687,8 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     
     # Show optimizer configuration
     if not is_distributed or rank == 0:
-        print(f"\nOptimizer configuration:")
-        print(f"  Type: AdamW")
+        print("\nOptimizer configuration:")
+        print("  Type: AdamW")
         print(f"  Initial learning rate: {initial_lr}")
         print(f"  Weight decay: {weight_decay}")
         print(f"  Number of parameter groups: {len(optimizer.param_groups)}")
@@ -2023,7 +2023,7 @@ if __name__ == "__main__":
         # Only print from rank 0 to avoid duplicate output
         if rank == 0:
             local_rank = int(os.environ['LOCAL_RANK'])
-            print(f"Detected torchrun/HPC launch environment:")
+            print("Detected torchrun/HPC launch environment:")
             print(f"  Global rank: {rank}")
             print(f"  Local rank (GPU): {local_rank}")
             print(f"  World size: {world_size}")
