@@ -11,7 +11,7 @@ BADJA_PATH = "data/BADJA"
 STANFORD_EXTRA_PATH = "data/StanfordExtra"
 REPLICANT_PATH = "data/replicAnt_trials/SMIL_COCO"
 OUTPUT_DIR = "checkpoints/{0}".format(time.strftime("%Y%m%d-%H%M%S"))
-# Basename of a completed fit under checkpoints/; used by smal_fitter/generate_video.py (or pass --checkpoint-name).
+# Basename of a completed fit under checkpoints/; used by smal_fitter/generate_video.py (or pass --checkpoint_name).
 CHECKPOINT_NAME = None
 
 CROP_SIZE = 512  # image resolution for output
