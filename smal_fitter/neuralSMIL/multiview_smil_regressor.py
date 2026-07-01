@@ -663,7 +663,16 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             if features.dim() == 3:
                 # Multiview: features is (B, V, D) — fused CLS tokens
 
-                # Pool fused CLS tokens for the global feature vector
+                # Pool fused CLS tokens for the global feature vector.
+                # NOTE: `global_feats` is passed to the decoder head below but
+                # its *content* is not consumed there — the head uses it only as
+                # a batch-size/device carrier; the decoder's sole visual input is
+                # cross-attention over `spatial_feats`. A pooled global feature
+                # was previously fed into the decoder token but removed (it gave
+                # the head a memorisable image-level fingerprint and drove
+                # train/val divergence on betas). The pooling is kept here as a
+                # documented hook for potential future reuse — see
+                # SMILTransformerDecoderHead.forward.
                 if view_mask is not None:
                     mask_exp = view_mask.unsqueeze(-1).float()  # (B, V, 1)
                     global_feats = (features * mask_exp).sum(dim=1) / (mask_exp.sum(dim=1) + 1e-8)

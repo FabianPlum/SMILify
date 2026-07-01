@@ -316,11 +316,21 @@ class SMILTransformerDecoderHead(nn.Module):
     def forward(self, features: torch.Tensor, spatial_features: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """
         Forward pass through transformer decoder head.
-        
+
         Args:
-            features: Global features from backbone (batch_size, feature_dim)
+            features: Pooled global features from the backbone
+                (batch_size, feature_dim). Used ONLY as a batch-size/device
+                carrier — its *content* is NOT consumed by the decoder. The
+                visual signal enters exclusively via cross-attention to
+                ``spatial_features`` (HMR2-style). A pooled global feature was
+                previously added to the decoder token but removed (it gave the
+                head a memorisable image-level fingerprint and drove train/val
+                divergence on betas), so do not wire this argument into the
+                decoder here. It is kept as a separate argument because it stays
+                non-None when ``spatial_features`` is None (e.g. ResNet
+                backbones).
             spatial_features: Spatial features from backbone (batch_size, seq_len, context_dim)
-            
+
         Returns:
             Dictionary containing predicted SMIL parameters
         """
