@@ -305,12 +305,14 @@ python -m smal_fitter.neuralSMIL.benchmark_model \
 
 > **Set `--orig_width` / `--orig_height` to the dataset's original capture resolution** (both required together) so PCK@Npx is scored in original-image pixels rather than the preprocessed size. E.g. the stick-insect dataset is 1530 px square → `--orig_width 1530 --orig_height 1530`; use your own dataset's resolution otherwise.
 
+> **PCK is reported at two resolutions.** Because `PCK@Npx` is resolution-dependent, every run prints PCK at both the **native** resolution (the `--orig_*` override if given, else the dataset's stored per-view sizes / `target_resolution`) **and** the model's square **input** resolution (224 for ViT, 512 for UNet/ResNet). The two share the same valid-joint set, so they are directly comparable.
+
 **Metrics reported:**
 
 | Metric | Single-view | Multi-view |
 |---|---|---|
-| PCK@5px | yes | yes |
-| PCK curve (1–50 px) | yes | yes |
+| PCK@5px (native + input res) | yes | yes |
+| PCK curve (1–50 px, native + input res) | yes | yes |
 | MPJPE (mm) | — | yes (when 3D GT available) |
 | MPJPE percentiles (P50–P99) | — | yes |
 
@@ -319,11 +321,11 @@ python -m smal_fitter.neuralSMIL.benchmark_model \
 | File | Description |
 |---|---|
 | `benchmark_report.txt` | Full text log of all metrics |
-| `pck_curve.png` | PCK vs pixel-threshold plot |
-| `error_histogram.png` | 2D keypoint error distribution |
+| `pck_curve_native.png` / `pck_curve_input.png` | PCK vs pixel-threshold plot, one per resolution (native, input) |
+| `error_histogram_native.png` / `error_histogram_input.png` | 2D keypoint error distribution, one per resolution |
 | `mpjpe_histogram.png` | 3D joint error distribution (multi-view) |
 | `sample_XX_3d_keypoints_percentiles.png` | GT vs predicted 3D joints coloured by error percentile (multi-view) |
-| `errors_2d_px.npy` / `errors_3d_mm.npy` | Raw error arrays for custom analysis |
+| `errors_2d_px_native.npy` / `errors_2d_px_input.npy` / `errors_3d_mm.npy` | Raw error arrays for custom analysis |
 
 **Key arguments:**
 
@@ -373,12 +375,12 @@ The disentangled components are exported as part of the `.pkl` model file and ar
 ____________________________________
 ## Code refactor TODOs 
 - [X] Move all legcay funcitonality and documentation to it's own sub-directory to clean up the repo and make its purpose more apparent.
-- [ ] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules.
-- [ ] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable.
-- [ ] At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.
+- [ ] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules. ([#51](https://github.com/FabianPlum/SMILify/issues/51))
+- [ ] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable. ([#52](https://github.com/FabianPlum/SMILify/issues/52))
+- [ ] At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file. ([#53](https://github.com/FabianPlum/SMILify/issues/53))
 - [X] Get rid of the numpy/chumpy dependency mess.
 - [X] Allow importing legacy SMAL models with chumpy variables WITHOUT requiring chumpy to be installed through custom unpickler.
-- [ ] Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.
+- [ ] Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable. ([#54](https://github.com/FabianPlum/SMILify/issues/54))
 - [X] The code is poorly tested. That needs to be fixed. Write integration tests for main functionality.
 
 ## Functionality / broader project TODOs
