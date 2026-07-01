@@ -173,9 +173,20 @@ def _compute_pck_errors(
     y_data_batch: List[Dict],
     default_resolution: int,
     override_size: Optional[Tuple[int, int]],
+    input_resolution: int,
     device: torch.device,
-) -> List[float]:
-    errors_px = []
+) -> Tuple[List[float], List[float]]:
+    """Per-joint 2D pixel errors at two scales.
+
+    Returns ``(errors_native, errors_input)``:
+      - ``errors_native``: normalized joints scaled to the native/original image
+        size (per-view ``image_sizes``, or ``override_size`` if provided).
+      - ``errors_input``: normalized joints scaled to the model's square input
+        resolution (``input_resolution`` x ``input_resolution``).
+    The valid-joint set is identical for both, so the two PCKs are comparable.
+    """
+    errors_native = []
+    errors_input = []
     num_views = len(predicted_params.get("fov_per_view", []))
     for v in range(num_views):
         fov_v = predicted_params["fov_per_view"][v]
@@ -218,12 +229,17 @@ def _compute_pck_errors(
             if not np.any(valid):
                 continue
 
+            # Native-resolution error (per-view original size)
             dy = pred_y[valid] - gt_y[valid]
             dx = pred_x[valid] - gt_x[valid]
-            dist = np.sqrt(dy * dy + dx * dx)
-            errors_px.extend(dist.tolist())
+            errors_native.extend(np.sqrt(dy * dy + dx * dx).tolist())
 
-    return errors_px
+            # Input-resolution error (square input_resolution)
+            dy_in = (pred[:, 0][valid] - gt[:, 0][valid]) * input_resolution
+            dx_in = (pred[:, 1][valid] - gt[:, 1][valid]) * input_resolution
+            errors_input.extend(np.sqrt(dy_in * dy_in + dx_in * dx_in).tolist())
+
+    return errors_native, errors_input
 
 
 def _compute_mpjpe_mm(
@@ -472,17 +488,22 @@ def _compute_pck_errors_singleview(
     y_data_batch: list,
     default_resolution: int,
     override_size: Optional[Tuple[int, int]],
-) -> List[float]:
-    """Compute per-joint 2D pixel errors for a single-view batch.
+    input_resolution: int,
+) -> Tuple[List[float], List[float]]:
+    """Compute per-joint 2D pixel errors for a single-view batch, at two scales.
 
     Uses the model's own ``predict_from_batch`` and ``_compute_rendered_outputs``
     to obtain normalised predicted joint positions, then compares against the
     ground-truth ``keypoints_2d`` and ``keypoint_visibility`` stored in
     *y_data_batch*.
+
+    Returns ``(errors_native, errors_input)``: native uses ``override_size`` if
+    given, else the square ``default_resolution``; input uses the model's square
+    ``input_resolution``. The valid-joint set is identical for both.
     """
     result = model.predict_from_batch(x_data_batch, y_data_batch)
     if result[0] is None:
-        return []
+        return [], []
 
     predicted_params, _, _ = result
 
@@ -491,11 +512,12 @@ def _compute_pck_errors_singleview(
         predicted_params, compute_joints=True, compute_silhouette=False, compute_joints_3d=False,
     )
     if rendered_joints is None:
-        return []
+        return [], []
 
     rendered_np = rendered_joints.detach().cpu().numpy()  # (B, J, 2)
 
-    errors_px: List[float] = []
+    errors_native: List[float] = []
+    errors_input: List[float] = []
     for b_idx, y_data in enumerate(y_data_batch):
         gt = y_data.get("keypoints_2d")
         vis = y_data.get("keypoint_visibility")
@@ -530,12 +552,17 @@ def _compute_pck_errors_singleview(
         if not np.any(valid):
             continue
 
+        # Native-resolution error (override or square default_resolution)
         dy = pred_y[valid] - gt_y[valid]
         dx = pred_x[valid] - gt_x[valid]
-        dist = np.sqrt(dy * dy + dx * dx)
-        errors_px.extend(dist.tolist())
+        errors_native.extend(np.sqrt(dy * dy + dx * dx).tolist())
 
-    return errors_px
+        # Input-resolution error (square input_resolution)
+        dy_in = (pred[:, 0][valid] - gt[:, 0][valid]) * input_resolution
+        dx_in = (pred[:, 1][valid] - gt[:, 1][valid]) * input_resolution
+        errors_input.extend(np.sqrt(dy_in * dy_in + dx_in * dx_in).tolist())
+
+    return errors_native, errors_input
 
 
 def _run_singleview_benchmark(
@@ -604,60 +631,64 @@ def _run_singleview_benchmark(
         collate_fn=custom_collate_fn,
     )
 
-    pixel_scale = target_resolution
+    input_resolution = sv_config["input_resolution"]
     if override_size is not None:
-        pixel_scale = max(override_size)
-    log_fn(f"\nPCK pixel scale: {pixel_scale}px (resolution used for error → pixel conversion)")
+        native_label = f"native override {override_size[1]}x{override_size[0]}"
+    else:
+        native_label = f"native {target_resolution}px"
+    input_label = f"input res {input_resolution}px"
+    log_fn(
+        f"\nPCK reported at TWO resolutions: [{native_label}] and [{input_label}]. "
+        "PCK@Npx is resolution-dependent, so both are shown."
+    )
 
-    # Benchmark loop
-    all_2d_errors_px: List[float] = []
+    # Benchmark loop (accumulate errors at both scales)
+    all_errors_native: List[float] = []
+    all_errors_input: List[float] = []
     with torch.no_grad():
         for batch_idx, (x_data_batch, y_data_batch) in enumerate(test_loader):
             if args.max_batches is not None and batch_idx >= args.max_batches:
                 break
-            batch_errors = _compute_pck_errors_singleview(
+            batch_native, batch_input = _compute_pck_errors_singleview(
                 model, x_data_batch, y_data_batch,
                 default_resolution=target_resolution,
                 override_size=override_size,
+                input_resolution=input_resolution,
             )
-            all_2d_errors_px.extend(batch_errors)
+            all_errors_native.extend(batch_native)
+            all_errors_input.extend(batch_input)
 
-    # Compute PCK metrics
-    errors_px = np.array(all_2d_errors_px, dtype=np.float32)
-    pck_thresholds = np.array([1, 2, 5, 10, 20, 30, 40, 50], dtype=np.float32)
-    if errors_px.size > 0:
-        pck_values = [(errors_px <= t).mean() for t in pck_thresholds]
-        pck_at_5 = float((errors_px <= 5.0).mean())
-        mean_2d_error = float(np.mean(errors_px))
-        median_2d_error = float(np.median(errors_px))
-    else:
-        pck_values = [0.0 for _ in pck_thresholds]
-        pck_at_5 = 0.0
-        mean_2d_error = 0.0
-        median_2d_error = 0.0
+    # Compute PCK metrics at both resolutions
+    native = _summarize_pck(all_errors_native)
+    inp = _summarize_pck(all_errors_input)
 
     log_fn("\n==== BENCHMARK RESULTS (TEST SPLIT) ====")
-    log_fn(f"PCK@5px: {pck_at_5:.4f}")
-    log_fn(f"Mean 2D error (px): {mean_2d_error:.4f}")
-    log_fn(f"Median 2D error (px): {median_2d_error:.4f}")
-    log_fn(f"2D joint errors count: {errors_px.size}")
+    _log_pck_block(log_fn, native_label, native)
+    _log_pck_block(log_fn, input_label, inp)
 
-    log_fn("\nPCK curve:")
-    for t, v in zip(pck_thresholds, pck_values):
-        log_fn(f"  PCK@{int(t)}px: {v:.4f}")
-
-    # Plots
-    _save_pck_plot(pck_thresholds, pck_values, output_dir)
-    _save_error_histogram(errors_px, output_dir)
+    # Separate plot per resolution (single curve each) + per-resolution histograms
+    _save_pck_plot(native["pck_values"], output_dir,
+                   filename="pck_curve_native.png",
+                   title=f"PCK vs Pixel Threshold ({native_label})")
+    _save_pck_plot(inp["pck_values"], output_dir,
+                   filename="pck_curve_input.png",
+                   title=f"PCK vs Pixel Threshold ({input_label})")
+    _save_error_histogram(native["errors_px"], output_dir,
+                          filename="error_histogram_native.png",
+                          title=f"2D Keypoint Error Histogram ({native_label})")
+    _save_error_histogram(inp["errors_px"], output_dir,
+                          filename="error_histogram_input.png",
+                          title=f"2D Keypoint Error Histogram ({input_label})")
 
     # Save raw errors
-    np.save(os.path.join(output_dir, "errors_2d_px.npy"), errors_px)
+    np.save(os.path.join(output_dir, "errors_2d_px_native.npy"), native["errors_px"])
+    np.save(os.path.join(output_dir, "errors_2d_px_input.npy"), inp["errors_px"])
 
     log_fn(f"\nSaved outputs to: {output_dir}")
-    log_fn(f"  PCK plot: {os.path.join(output_dir, 'pck_curve.png')}")
-    log_fn(f"  Error histogram: {os.path.join(output_dir, 'error_histogram.png')}")
+    log_fn(f"  PCK plots: pck_curve_native.png, pck_curve_input.png")
+    log_fn(f"  Error histograms: error_histogram_native.png, error_histogram_input.png")
 
-    return errors_px
+    return native["errors_px"]
 
 
 def _log_keypoint_rescaling_info_sv(log_fn, target_resolution: int, override_size: Optional[Tuple[int, int]]):
@@ -671,30 +702,81 @@ def _log_keypoint_rescaling_info_sv(log_fn, target_resolution: int, override_siz
 
 
 # ---------------------------------------------------------------------------
-# Shared plotting helpers
+# Shared metric + plotting helpers
 # ---------------------------------------------------------------------------
 
-def _save_pck_plot(pck_thresholds, pck_values, output_dir: str):
-    pck_plot_path = os.path.join(output_dir, "pck_curve.png")
+# PCK is resolution-dependent, so the benchmark reports it at two scales:
+# the model's input resolution and the native/original image resolution.
+PCK_THRESHOLDS = np.array([1, 2, 5, 10, 20, 30, 40, 50], dtype=np.float32)
+
+
+def _summarize_pck(errors_list: List[float]) -> dict:
+    """Compute the PCK curve + summary stats from a flat list of px errors."""
+    errors_px = np.array(errors_list, dtype=np.float32)
+    if errors_px.size > 0:
+        pck_values = [float((errors_px <= t).mean()) for t in PCK_THRESHOLDS]
+        pck_at_5 = float((errors_px <= 5.0).mean())
+        mean_2d = float(np.mean(errors_px))
+        median_2d = float(np.median(errors_px))
+    else:
+        pck_values = [0.0 for _ in PCK_THRESHOLDS]
+        pck_at_5 = 0.0
+        mean_2d = 0.0
+        median_2d = 0.0
+    return {
+        "errors_px": errors_px,
+        "pck_values": pck_values,
+        "pck_at_5": pck_at_5,
+        "mean_2d": mean_2d,
+        "median_2d": median_2d,
+    }
+
+
+def _log_pck_block(log_fn, label: str, summary: dict):
+    """Log one PCK block (@5, mean/median, full curve) for a given resolution."""
+    log_fn(f"\n-- PCK @ {label} --")
+    log_fn(f"PCK@5px: {summary['pck_at_5']:.4f}")
+    log_fn(f"Mean 2D error (px): {summary['mean_2d']:.4f}")
+    log_fn(f"Median 2D error (px): {summary['median_2d']:.4f}")
+    log_fn(f"2D joint errors count: {summary['errors_px'].size}")
+    log_fn("PCK curve:")
+    for t, v in zip(PCK_THRESHOLDS, summary["pck_values"]):
+        log_fn(f"  PCK@{int(t)}px: {v:.4f}")
+
+
+def _save_pck_plot(
+    pck_values: List[float],
+    output_dir: str,
+    filename: str = "pck_curve.png",
+    title: str = "PCK vs Pixel Threshold",
+):
+    """Save a single PCK curve (one resolution) to *filename* in *output_dir*."""
+    pck_plot_path = os.path.join(output_dir, filename)
     plt.figure(figsize=(8, 5))
-    plt.plot(pck_thresholds, pck_values, marker="o")
-    plt.title("PCK vs Pixel Threshold")
+    plt.plot(PCK_THRESHOLDS, pck_values, marker="o")
+    plt.title(title)
     plt.xlabel("Threshold (px)")
     plt.ylabel("PCK")
+    plt.ylim(0, 1)
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.savefig(pck_plot_path, dpi=150, bbox_inches="tight")
     plt.close()
 
 
-def _save_error_histogram(errors_px: np.ndarray, output_dir: str):
-    hist_plot_path = os.path.join(output_dir, "error_histogram.png")
+def _save_error_histogram(
+    errors_px: np.ndarray,
+    output_dir: str,
+    filename: str = "error_histogram.png",
+    title: str = "2D Keypoint Error Histogram (px)",
+):
+    hist_plot_path = os.path.join(output_dir, filename)
     plt.figure(figsize=(8, 5))
     if errors_px.size > 0:
         max_err = max(50.0, float(np.max(errors_px)))
         bins = np.logspace(np.log10(max(0.1, float(errors_px[errors_px > 0].min()))), np.log10(max_err), 50)
         plt.hist(errors_px, bins=bins, color="#4C72B0", alpha=0.8)
     plt.xscale("log")
-    plt.title("2D Keypoint Error Histogram (px)")
+    plt.title(title)
     plt.xlabel("Error (px)")
     plt.ylabel("Count")
     plt.grid(True, linestyle="--", alpha=0.5)
@@ -932,6 +1014,15 @@ def _run_multiview_benchmark(
     input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
     log_fn(f"\nUsing input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
 
+    # PCK is reported at two scales (see _compute_pck_errors): the native/original
+    # image resolution and the model's square input resolution.
+    if override_size is not None:
+        native_label = f"native override {override_size[1]}x{override_size[0]}"
+    else:
+        native_label = "native (per-view image sizes)"
+    input_label = f"input res {input_resolution}px"
+    log_fn(f"PCK reported at TWO resolutions: [{native_label}] and [{input_label}].")
+
     allow_mesh_scaling = config_from_ckpt.get("allow_mesh_scaling", False)
     mesh_scale_init = config_from_ckpt.get("mesh_scale_init", 1.0)
     use_gt_camera_init = config_from_ckpt.get("use_gt_camera_init", False)
@@ -969,7 +1060,8 @@ def _run_multiview_benchmark(
     model.eval()
 
     # Benchmark loop
-    all_2d_errors_px = []
+    all_errors_native = []
+    all_errors_input = []
     all_3d_errors_mm = []
     samples_with_3d = 0
     samples_3d_for_plot = []
@@ -984,15 +1076,17 @@ def _run_multiview_benchmark(
             )
             pred_joints_np = model._predict_canonical_joints_3d(predicted_params).detach().cpu().numpy()
 
-            batch_errors_px = _compute_pck_errors(
+            batch_native, batch_input = _compute_pck_errors(
                 model=model,
                 predicted_params=predicted_params,
                 y_data_batch=y_data_batch,
                 default_resolution=dataset.target_resolution,
                 override_size=override_size,
+                input_resolution=input_resolution,
                 device=device,
             )
-            all_2d_errors_px.extend(batch_errors_px)
+            all_errors_native.extend(batch_native)
+            all_errors_input.extend(batch_input)
 
             batch_errors_mm, batch_samples_with_3d = _compute_mpjpe_mm(
                 model=model,
@@ -1035,19 +1129,9 @@ def _run_multiview_benchmark(
                         "errors_mm": dist_mm,
                     })
 
-    # Compute PCK metrics
-    errors_px = np.array(all_2d_errors_px, dtype=np.float32)
-    pck_thresholds = np.array([1, 2, 5, 10, 20, 30, 40, 50], dtype=np.float32)
-    if errors_px.size > 0:
-        pck_values = [(errors_px <= t).mean() for t in pck_thresholds]
-        pck_at_5 = float((errors_px <= 5.0).mean())
-        mean_2d_error = float(np.mean(errors_px))
-        median_2d_error = float(np.median(errors_px))
-    else:
-        pck_values = [0.0 for _ in pck_thresholds]
-        pck_at_5 = 0.0
-        mean_2d_error = 0.0
-        median_2d_error = 0.0
+    # Compute PCK metrics at both resolutions
+    native = _summarize_pck(all_errors_native)
+    inp = _summarize_pck(all_errors_input)
 
     # Compute MPJPE
     errors_mm = np.array(all_3d_errors_mm, dtype=np.float32)
@@ -1059,9 +1143,10 @@ def _run_multiview_benchmark(
         median_mpjpe_mm = 0.0
 
     log_fn("\n==== BENCHMARK RESULTS (TEST SPLIT) ====")
-    log_fn(f"PCK@5px: {pck_at_5:.4f}")
-    log_fn(f"Mean 2D error (px): {mean_2d_error:.4f}")
-    log_fn(f"Median 2D error (px): {median_2d_error:.4f}")
+    _log_pck_block(log_fn, native_label, native)
+    _log_pck_block(log_fn, input_label, inp)
+
+    log_fn("")
     log_fn(f"MPJPE (mm): {mpjpe_mm:.4f}")
     log_fn(f"Median MPJPE (mm): {median_mpjpe_mm:.4f}")
     if errors_mm.size > 0:
@@ -1071,12 +1156,7 @@ def _run_multiview_benchmark(
         for p, v in zip(percentiles, pct_values):
             log_fn(f"  P{p}: {v:.4f}")
     log_fn(f"3D samples with GT: {samples_with_3d}")
-    log_fn(f"2D joint errors count: {errors_px.size}")
     log_fn(f"3D joint errors count: {errors_mm.size}")
-
-    log_fn("\nPCK curve:")
-    for t, v in zip(pck_thresholds, pck_values):
-        log_fn(f"  PCK@{int(t)}px: {v:.4f}")
 
     # 3D percentile plots
     if errors_mm.size > 0 and samples_3d_for_plot:
@@ -1087,9 +1167,19 @@ def _run_multiview_benchmark(
             output_dir=output_dir,
         )
 
-    # Shared plots
-    _save_pck_plot(pck_thresholds, pck_values, output_dir)
-    _save_error_histogram(errors_px, output_dir)
+    # Separate plot per resolution (single curve each) + per-resolution histograms
+    _save_pck_plot(native["pck_values"], output_dir,
+                   filename="pck_curve_native.png",
+                   title=f"PCK vs Pixel Threshold ({native_label})")
+    _save_pck_plot(inp["pck_values"], output_dir,
+                   filename="pck_curve_input.png",
+                   title=f"PCK vs Pixel Threshold ({input_label})")
+    _save_error_histogram(native["errors_px"], output_dir,
+                          filename="error_histogram_native.png",
+                          title=f"2D Keypoint Error Histogram ({native_label})")
+    _save_error_histogram(inp["errors_px"], output_dir,
+                          filename="error_histogram_input.png",
+                          title=f"2D Keypoint Error Histogram ({input_label})")
 
     # MPJPE histogram (multi-view only)
     mpjpe_hist_path = os.path.join(output_dir, "mpjpe_histogram.png")
@@ -1107,12 +1197,13 @@ def _run_multiview_benchmark(
     plt.close()
 
     # Save raw error arrays
-    np.save(os.path.join(output_dir, "errors_2d_px.npy"), errors_px)
+    np.save(os.path.join(output_dir, "errors_2d_px_native.npy"), native["errors_px"])
+    np.save(os.path.join(output_dir, "errors_2d_px_input.npy"), inp["errors_px"])
     np.save(os.path.join(output_dir, "errors_3d_mm.npy"), errors_mm)
 
     log_fn(f"\nSaved outputs to: {output_dir}")
-    log_fn(f"  PCK plot: {os.path.join(output_dir, 'pck_curve.png')}")
-    log_fn(f"  Error histogram: {os.path.join(output_dir, 'error_histogram.png')}")
+    log_fn(f"  PCK plots: pck_curve_native.png, pck_curve_input.png")
+    log_fn(f"  Error histograms: error_histogram_native.png, error_histogram_input.png")
     log_fn(f"  MPJPE histogram: {mpjpe_hist_path}")
     if errors_mm.size > 0 and samples_3d_for_plot:
         log_fn(f"  3D percentile plots: {os.path.join(output_dir, 'sample_00_3d_keypoints_percentiles.png')} (and next 4)")
