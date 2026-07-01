@@ -75,8 +75,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -89,7 +87,6 @@ from tqdm import tqdm
 # Shared geometry helpers (see canonical_frame.py for the conventions doc).
 _THIS_DIR = Path(__file__).resolve().parent
 from smal_fitter.multiview_common.canonical_frame import (  # noqa: E402
-    RZ_180,
     align_to_pytorch3d_reader_convention,
     canonicalize_sample,
     infer_world_scale,
@@ -104,8 +101,9 @@ from smal_fitter.multiview_common.canonical_frame import (  # noqa: E402
 @dataclass
 class InputInfo:
     """Per-input metadata gathered in the validate pass."""
+
     path: Path
-    dataset_type: str           # 'sleap_multiview', 'replicant_multiview', 'merged_multiview'
+    dataset_type: str  # 'sleap_multiview', 'replicant_multiview', 'merged_multiview'
     num_samples: int
     max_views: int
     n_joints: int
@@ -113,8 +111,8 @@ class InputInfo:
     n_betas: int
     world_scale: float
     target_resolution: int
-    needs_canonicalization: bool   # True iff cameras are not already in replicAnt-storage form
-    decoded_jpeg_hw: Tuple[int, int]   # (H, W) of the stored JPEG for view 0 sample 0
+    needs_canonicalization: bool  # True iff cameras are not already in replicAnt-storage form
+    decoded_jpeg_hw: Tuple[int, int]  # (H, W) of the stored JPEG for view 0 sample 0
 
 
 def _infer_per_input_world_scale(hf: h5py.File) -> float:
@@ -197,19 +195,21 @@ def validate_inputs(input_paths: List[Path]) -> List[InputInfo]:
 
             jpeg_hw = _peek_jpeg_hw(hf)
 
-            infos.append(InputInfo(
-                path=p,
-                dataset_type=dtype_attr,
-                num_samples=int(md["num_samples"]),
-                max_views=int(md["max_views"]),
-                n_joints=this_nj,
-                n_pose=this_np,
-                n_betas=this_nb,
-                world_scale=_infer_per_input_world_scale(hf),
-                target_resolution=int(md.get("target_resolution", jpeg_hw[0])),
-                needs_canonicalization=needs_canon,
-                decoded_jpeg_hw=jpeg_hw,
-            ))
+            infos.append(
+                InputInfo(
+                    path=p,
+                    dataset_type=dtype_attr,
+                    num_samples=int(md["num_samples"]),
+                    max_views=int(md["max_views"]),
+                    n_joints=this_nj,
+                    n_pose=this_np,
+                    n_betas=this_nb,
+                    world_scale=_infer_per_input_world_scale(hf),
+                    target_resolution=int(md.get("target_resolution", jpeg_hw[0])),
+                    needs_canonicalization=needs_canon,
+                    decoded_jpeg_hw=jpeg_hw,
+                )
+            )
     return infos
 
 
@@ -302,82 +302,118 @@ def _create_output_layout(
         "metadata": md,
         "image_jpeg_datasets": image_jpeg_datasets,
         "view_mask": images_g.create_dataset(
-            "view_mask", shape=(num_samples, max_views), dtype=np.bool_,
-            chunks=(chunk_size, max_views), **common_kw),
+            "view_mask", shape=(num_samples, max_views), dtype=np.bool_, chunks=(chunk_size, max_views), **common_kw
+        ),
         "keypoints_2d": kps_g.create_dataset(
-            "keypoints_2d", shape=(num_samples, max_views, n_joints, 2), dtype=np.float32,
-            chunks=(chunk_size, max_views, n_joints, 2), **common_kw),
+            "keypoints_2d",
+            shape=(num_samples, max_views, n_joints, 2),
+            dtype=np.float32,
+            chunks=(chunk_size, max_views, n_joints, 2),
+            **common_kw,
+        ),
         "keypoint_visibility": kps_g.create_dataset(
-            "keypoint_visibility", shape=(num_samples, max_views, n_joints), dtype=np.float32,
-            chunks=(chunk_size, max_views, n_joints), **common_kw),
+            "keypoint_visibility",
+            shape=(num_samples, max_views, n_joints),
+            dtype=np.float32,
+            chunks=(chunk_size, max_views, n_joints),
+            **common_kw,
+        ),
         "camera_indices": kps_g.create_dataset(
-            "camera_indices", shape=(num_samples, max_views), dtype=np.int32,
-            chunks=(chunk_size, max_views), **common_kw),
+            "camera_indices",
+            shape=(num_samples, max_views),
+            dtype=np.int32,
+            chunks=(chunk_size, max_views),
+            **common_kw,
+        ),
         "camera_intrinsics": kps_g.create_dataset(
-            "camera_intrinsics", shape=(num_samples, max_views, 3, 3), dtype=np.float32,
-            chunks=(chunk_size, max_views, 3, 3), **common_kw),
+            "camera_intrinsics",
+            shape=(num_samples, max_views, 3, 3),
+            dtype=np.float32,
+            chunks=(chunk_size, max_views, 3, 3),
+            **common_kw,
+        ),
         "camera_extrinsics_R": kps_g.create_dataset(
-            "camera_extrinsics_R", shape=(num_samples, max_views, 3, 3), dtype=np.float32,
-            chunks=(chunk_size, max_views, 3, 3), **common_kw),
+            "camera_extrinsics_R",
+            shape=(num_samples, max_views, 3, 3),
+            dtype=np.float32,
+            chunks=(chunk_size, max_views, 3, 3),
+            **common_kw,
+        ),
         "camera_extrinsics_t": kps_g.create_dataset(
-            "camera_extrinsics_t", shape=(num_samples, max_views, 3), dtype=np.float32,
-            chunks=(chunk_size, max_views, 3), **common_kw),
+            "camera_extrinsics_t",
+            shape=(num_samples, max_views, 3),
+            dtype=np.float32,
+            chunks=(chunk_size, max_views, 3),
+            **common_kw,
+        ),
         "image_sizes": kps_g.create_dataset(
-            "image_sizes", shape=(num_samples, max_views, 2), dtype=np.int32,
-            chunks=(chunk_size, max_views, 2), **common_kw),
+            "image_sizes",
+            shape=(num_samples, max_views, 2),
+            dtype=np.int32,
+            chunks=(chunk_size, max_views, 2),
+            **common_kw,
+        ),
         "keypoints_3d": kps_g.create_dataset(
-            "keypoints_3d", shape=(num_samples, n_joints, 3), dtype=np.float32,
-            chunks=(chunk_size, n_joints, 3), **common_kw),
+            "keypoints_3d",
+            shape=(num_samples, n_joints, 3),
+            dtype=np.float32,
+            chunks=(chunk_size, n_joints, 3),
+            **common_kw,
+        ),
         "global_rot": params_g.create_dataset(
-            "global_rot", shape=(num_samples, 3), dtype=np.float32,
-            chunks=(chunk_size, 3), **common_kw),
+            "global_rot", shape=(num_samples, 3), dtype=np.float32, chunks=(chunk_size, 3), **common_kw
+        ),
         "joint_rot": params_g.create_dataset(
-            "joint_rot", shape=(num_samples, n_pose + 1, 3), dtype=np.float32,
-            chunks=(chunk_size, n_pose + 1, 3), **common_kw),
+            "joint_rot",
+            shape=(num_samples, n_pose + 1, 3),
+            dtype=np.float32,
+            chunks=(chunk_size, n_pose + 1, 3),
+            **common_kw,
+        ),
         "betas": params_g.create_dataset(
-            "betas", shape=(num_samples, n_betas), dtype=np.float32,
-            chunks=(chunk_size, n_betas), **common_kw),
+            "betas", shape=(num_samples, n_betas), dtype=np.float32, chunks=(chunk_size, n_betas), **common_kw
+        ),
         "trans": params_g.create_dataset(
-            "trans", shape=(num_samples, 3), dtype=np.float32,
-            chunks=(chunk_size, 3), **common_kw),
+            "trans", shape=(num_samples, 3), dtype=np.float32, chunks=(chunk_size, 3), **common_kw
+        ),
         # Auxiliary — including new provenance fields the merger emits.
         "has_3d_data": aux_g.create_dataset(
-            "has_3d_data", shape=(num_samples,), dtype=np.bool_,
-            chunks=(chunk_size,), **common_kw),
+            "has_3d_data", shape=(num_samples,), dtype=np.bool_, chunks=(chunk_size,), **common_kw
+        ),
         "has_ground_truth_betas": aux_g.create_dataset(
-            "has_ground_truth_betas", shape=(num_samples,), dtype=np.bool_,
-            chunks=(chunk_size,), **common_kw),
+            "has_ground_truth_betas", shape=(num_samples,), dtype=np.bool_, chunks=(chunk_size,), **common_kw
+        ),
         "num_views": aux_g.create_dataset(
-            "num_views", shape=(num_samples,), dtype=np.int32,
-            chunks=(chunk_size,), **common_kw),
+            "num_views", shape=(num_samples,), dtype=np.int32, chunks=(chunk_size,), **common_kw
+        ),
         "frame_idx": aux_g.create_dataset(
-            "frame_idx", shape=(num_samples,), dtype=np.int32,
-            chunks=(chunk_size,), **common_kw),
+            "frame_idx", shape=(num_samples,), dtype=np.int32, chunks=(chunk_size,), **common_kw
+        ),
         "session_name": aux_g.create_dataset(
-            "session_name", shape=(num_samples,), dtype=h5py.string_dtype("utf-8"),
-            chunks=(chunk_size,)),
+            "session_name", shape=(num_samples,), dtype=h5py.string_dtype("utf-8"), chunks=(chunk_size,)
+        ),
         "camera_names": aux_g.create_dataset(
-            "camera_names", shape=(num_samples,), dtype=h5py.string_dtype("utf-8"),
-            chunks=(chunk_size,)),
+            "camera_names", shape=(num_samples,), dtype=h5py.string_dtype("utf-8"), chunks=(chunk_size,)
+        ),
         "canonical_to_world_R": aux_g.create_dataset(
-            "canonical_to_world_R", shape=(num_samples, 3, 3), dtype=np.float32,
-            chunks=(chunk_size, 3, 3), **common_kw),
+            "canonical_to_world_R", shape=(num_samples, 3, 3), dtype=np.float32, chunks=(chunk_size, 3, 3), **common_kw
+        ),
         "canonical_to_world_t": aux_g.create_dataset(
-            "canonical_to_world_t", shape=(num_samples, 3), dtype=np.float32,
-            chunks=(chunk_size, 3), **common_kw),
+            "canonical_to_world_t", shape=(num_samples, 3), dtype=np.float32, chunks=(chunk_size, 3), **common_kw
+        ),
         "canonical_cam_id": aux_g.create_dataset(
-            "canonical_cam_id", shape=(num_samples,), dtype=np.int32,
-            chunks=(chunk_size,), **common_kw),
+            "canonical_cam_id", shape=(num_samples,), dtype=np.int32, chunks=(chunk_size,), **common_kw
+        ),
         # Provenance — new fields, the reader ignores them.
         "origin_dataset": aux_g.create_dataset(
-            "origin_dataset", shape=(num_samples,), dtype=h5py.string_dtype("utf-8"),
-            chunks=(chunk_size,)),
+            "origin_dataset", shape=(num_samples,), dtype=h5py.string_dtype("utf-8"), chunks=(chunk_size,)
+        ),
         "origin_source_file": aux_g.create_dataset(
-            "origin_source_file", shape=(num_samples,), dtype=h5py.string_dtype("utf-8"),
-            chunks=(chunk_size,)),
+            "origin_source_file", shape=(num_samples,), dtype=h5py.string_dtype("utf-8"), chunks=(chunk_size,)
+        ),
         "origin_sample_idx": aux_g.create_dataset(
-            "origin_sample_idx", shape=(num_samples,), dtype=np.int32,
-            chunks=(chunk_size,), **common_kw),
+            "origin_sample_idx", shape=(num_samples,), dtype=np.int32, chunks=(chunk_size,), **common_kw
+        ),
     }
     return handles
 
@@ -438,9 +474,7 @@ def _copy_one_sample(
         R_can, t_can, kp3d_can, R_0, t_0, canonical_v = canonicalize_sample(
             R_scaled := R_in, t_scaled, kp3d_scaled, view_mask_in
         )
-        R_out_v, t_out_v, kp3d_out_v = align_to_pytorch3d_reader_convention(
-            R_can, t_can, kp3d_can, view_mask_in
-        )
+        R_out_v, t_out_v, kp3d_out_v = align_to_pytorch3d_reader_convention(R_can, t_can, kp3d_can, view_mask_in)
         # canonical_to_world for round-trip back to the *scaled but un-canonicalised*
         # input frame. Down-stream consumers that want the raw rig-world frame
         # also need to divide by `world_scale` (recorded in the source attr).
@@ -496,7 +530,7 @@ def _copy_one_sample(
         # meaning is already lost on a heterogeneous merge.
         slot = v
         handles["image_jpeg_datasets"][slot][out_idx] = np.frombuffer(new_blob, dtype=np.uint8)
-        kp2d_out[slot] = kp2d_in[v]            # [y/H, x/W] normalised — same numerically
+        kp2d_out[slot] = kp2d_in[v]  # [y/H, x/W] normalised — same numerically
         vis_out[slot] = vis_in[v]
         K_out[slot] = K_rescaled.astype(np.float32)
         R_out[slot] = R_out_v[v].astype(np.float32)
@@ -568,8 +602,9 @@ def _copy_one_sample(
 # ---------------------------------------------------------------------------
 
 
-def _apply_match_scale(infos: List["InputInfo"], input_paths: List[Path],
-                       reference: Optional[Path], verbose: bool) -> Optional[float]:
+def _apply_match_scale(
+    infos: List["InputInfo"], input_paths: List[Path], reference: Optional[Path], verbose: bool
+) -> Optional[float]:
     """Fold a per-input scale-match factor into each input's `world_scale`
     so all sources land at one common physical scale (median subject extent).
 
@@ -609,8 +644,10 @@ def _apply_match_scale(infos: List["InputInfo"], input_paths: List[Path],
             factor = target / ext
             info.world_scale = float(info.world_scale * factor)
             if verbose:
-                print(f"  match_scale: {info.path.name} extent {ext:.4f} -> {target:.4f} "
-                      f"(x{factor:.4f}); combined world_scale={info.world_scale:g}")
+                print(
+                    f"  match_scale: {info.path.name} extent {ext:.4f} -> {target:.4f} "
+                    f"(x{factor:.4f}); combined world_scale={info.world_scale:g}"
+                )
         elif verbose:
             print(f"  match_scale: {info.path.name} has no 3D keypoints; world_scale unchanged.")
     return float(target)
@@ -647,8 +684,7 @@ def merge(
     if match_scale or match_scale_reference is not None:
         if verbose:
             print("Co-scaling inputs to a common physical scale:")
-        match_target_extent = _apply_match_scale(
-            infos, input_paths, match_scale_reference, verbose)
+        match_target_extent = _apply_match_scale(infos, input_paths, match_scale_reference, verbose)
         if verbose:
             print()
 
@@ -661,20 +697,28 @@ def merge(
     if verbose:
         print(f"Merging {len(infos)} inputs:")
         for i in infos:
-            print(f"  - {i.path.name}: dtype={i.dataset_type}, samples={i.num_samples}, "
-                  f"max_views={i.max_views}, world_scale={i.world_scale:g}, "
-                  f"jpeg={i.decoded_jpeg_hw[1]}x{i.decoded_jpeg_hw[0]}, "
-                  f"needs_canon={i.needs_canonicalization}")
-        print(f"Output: {merged_num_samples} samples, max_views={merged_max_views}, "
-              f"jpeg_resolution={jpeg_resolution}")
+            print(
+                f"  - {i.path.name}: dtype={i.dataset_type}, samples={i.num_samples}, "
+                f"max_views={i.max_views}, world_scale={i.world_scale:g}, "
+                f"jpeg={i.decoded_jpeg_hw[1]}x{i.decoded_jpeg_hw[0]}, "
+                f"needs_canon={i.needs_canonicalization}"
+            )
+        print(f"Output: {merged_num_samples} samples, max_views={merged_max_views}, jpeg_resolution={jpeg_resolution}")
         print()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(output_path, "w") as out_hf:
         handles = _create_output_layout(
-            out_hf, merged_num_samples, merged_max_views,
-            n_joints, n_pose, n_betas, jpeg_resolution,
-            chunk_size, compression, compression_level,
+            out_hf,
+            merged_num_samples,
+            merged_max_views,
+            n_joints,
+            n_pose,
+            n_betas,
+            jpeg_resolution,
+            chunk_size,
+            compression,
+            compression_level,
         )
 
         out_idx = 0
@@ -684,9 +728,14 @@ def merge(
                 pbar = tqdm(range(info.num_samples), desc=info.path.name, disable=not verbose)
                 for src_idx in pbar:
                     _copy_one_sample(
-                        src=src, src_idx=src_idx, info=info, handles=handles,
-                        out_idx=out_idx, merged_max_views=merged_max_views,
-                        jpeg_resolution=jpeg_resolution, jpeg_quality=jpeg_quality,
+                        src=src,
+                        src_idx=src_idx,
+                        info=info,
+                        handles=handles,
+                        out_idx=out_idx,
+                        merged_max_views=merged_max_views,
+                        jpeg_resolution=jpeg_resolution,
+                        jpeg_quality=jpeg_quality,
                     )
                     out_idx += 1
                 per_input_written[str(info.path)] = info.num_samples
@@ -715,20 +764,26 @@ def merge(
             md.attrs["match_scale_target_extent"] = float(match_target_extent)
             md.attrs["match_scale_reference"] = (
                 str(Path(match_scale_reference).resolve())
-                if match_scale_reference is not None else str(input_paths[0].resolve()))
+                if match_scale_reference is not None
+                else str(input_paths[0].resolve())
+            )
         # Per-slot canonical-camera-order is meaningless cross-source; the reader
         # has a default fallback so this is mostly cosmetic.
-        md.attrs["canonical_camera_order"] = json.dumps(
-            [f"slot_{v}" for v in range(merged_max_views)]
-        )
+        md.attrs["canonical_camera_order"] = json.dumps([f"slot_{v}" for v in range(merged_max_views)])
         # Provenance manifest.
-        md.attrs["source_files"] = json.dumps([
-            {"path": str(i.path), "dataset_type": i.dataset_type,
-             "num_samples": i.num_samples, "max_views": i.max_views,
-             "world_scale": i.world_scale,
-             "jpeg_resolution_input": [i.decoded_jpeg_hw[1], i.decoded_jpeg_hw[0]]}
-            for i in infos
-        ])
+        md.attrs["source_files"] = json.dumps(
+            [
+                {
+                    "path": str(i.path),
+                    "dataset_type": i.dataset_type,
+                    "num_samples": i.num_samples,
+                    "max_views": i.max_views,
+                    "world_scale": i.world_scale,
+                    "jpeg_resolution_input": [i.decoded_jpeg_hw[1], i.decoded_jpeg_hw[0]],
+                }
+                for i in infos
+            ]
+        )
 
     if verbose:
         print(f"\nDone. Wrote {out_idx} samples to {output_path}")
@@ -745,29 +800,48 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--inputs", nargs="+", required=True,
-                   help="Input multi-view HDF5 paths. Order is preserved in the output sample axis.")
+    p.add_argument(
+        "--inputs",
+        nargs="+",
+        required=True,
+        help="Input multi-view HDF5 paths. Order is preserved in the output sample axis.",
+    )
     p.add_argument("--output", required=True, help="Output merged HDF5 path.")
-    p.add_argument("--jpeg_resolution", type=int, required=True,
-                   help="Target JPEG resolution (square). All inputs are decoded, "
-                        "resized to this resolution, and re-encoded; K is rescaled to match.")
+    p.add_argument(
+        "--jpeg_resolution",
+        type=int,
+        required=True,
+        help="Target JPEG resolution (square). All inputs are decoded, "
+        "resized to this resolution, and re-encoded; K is rescaled to match.",
+    )
     p.add_argument("--jpeg_quality", type=int, default=95)
     p.add_argument("--chunk_size", type=int, default=8)
     p.add_argument("--compression", type=str, default="gzip")
     p.add_argument("--compression_level", type=int, default=6)
     p.add_argument("--backbone_name", type=str, default="vit_large_patch16_224")
     p.add_argument("--min_views_per_sample", type=int, default=2)
-    p.add_argument("--max_samples_per_input", type=int, default=None,
-                   help="Cap each input to its first N samples (smoke testing only).")
-    p.add_argument("--match_scale", action="store_true",
-                   help="Co-scale all inputs to one physical scale (median subject "
-                        "extent) before merging, so trans/mesh-scale/3D targets do not "
-                        "span source-dependent magnitudes. Reference is the first input "
-                        "unless --match_scale_reference is given. Projection-invariant.")
-    p.add_argument("--match_scale_reference", type=str, default=None,
-                   help="HDF5 whose subject scale defines the common target (e.g. the "
-                        "real dataset). Implies --match_scale. May be one of --inputs or "
-                        "an external file.")
+    p.add_argument(
+        "--max_samples_per_input",
+        type=int,
+        default=None,
+        help="Cap each input to its first N samples (smoke testing only).",
+    )
+    p.add_argument(
+        "--match_scale",
+        action="store_true",
+        help="Co-scale all inputs to one physical scale (median subject "
+        "extent) before merging, so trans/mesh-scale/3D targets do not "
+        "span source-dependent magnitudes. Reference is the first input "
+        "unless --match_scale_reference is given. Projection-invariant.",
+    )
+    p.add_argument(
+        "--match_scale_reference",
+        type=str,
+        default=None,
+        help="HDF5 whose subject scale defines the common target (e.g. the "
+        "real dataset). Implies --match_scale. May be one of --inputs or "
+        "an external file.",
+    )
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args()
 
@@ -786,8 +860,7 @@ def main() -> None:
         min_views_per_sample=int(args.min_views_per_sample),
         max_samples_per_input=args.max_samples_per_input,
         match_scale=bool(args.match_scale or args.match_scale_reference is not None),
-        match_scale_reference=Path(args.match_scale_reference).resolve()
-            if args.match_scale_reference else None,
+        match_scale_reference=Path(args.match_scale_reference).resolve() if args.match_scale_reference else None,
         verbose=not args.quiet,
     )
 

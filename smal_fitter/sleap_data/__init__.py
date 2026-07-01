@@ -14,4 +14,4 @@ Main components:
 from .sleap_dataset import SLEAPDataset
 from .preprocess_sleap_dataset import SLEAPDatasetPreprocessor
 
-__all__ = ['SLEAPDataset', 'SLEAPDatasetPreprocessor']
+__all__ = ["SLEAPDataset", "SLEAPDatasetPreprocessor"]

@@ -49,25 +49,27 @@ def plot_histograms(metrics, output_dir):
     """
     for metric, values in metrics.items():
         plt.figure(figsize=(12, 7))
-        
+
         # Calculate statistics
         mean = np.mean(values)
         std = np.std(values)
         percentile_80 = np.percentile(values, 80)
-        
+
         # Plot histogram
         plt.hist(values, bins=30, edgecolor="black", alpha=0.7)
-        
+
         # Add vertical lines for mean, std, and 80th percentile
-        plt.axvline(mean, color='r', linestyle='dashed', linewidth=2, label=f'Mean: {mean:.2f}')
-        plt.axvline(mean + std, color='g', linestyle='dashed', linewidth=2, label=f'Mean + Std: {mean+std:.2f}')
-        plt.axvline(mean - std, color='g', linestyle='dashed', linewidth=2, label=f'Mean - Std: {mean-std:.2f}')
-        plt.axvline(percentile_80, color='b', linestyle='dashed', linewidth=2, label=f'80th Percentile: {percentile_80:.2f}')
-        
+        plt.axvline(mean, color="r", linestyle="dashed", linewidth=2, label=f"Mean: {mean:.2f}")
+        plt.axvline(mean + std, color="g", linestyle="dashed", linewidth=2, label=f"Mean + Std: {mean + std:.2f}")
+        plt.axvline(mean - std, color="g", linestyle="dashed", linewidth=2, label=f"Mean - Std: {mean - std:.2f}")
+        plt.axvline(
+            percentile_80, color="b", linestyle="dashed", linewidth=2, label=f"80th Percentile: {percentile_80:.2f}"
+        )
+
         plt.title(f"Distribution of {metric}")
         plt.xlabel(metric)
         plt.ylabel("Frequency")
-        plt.legend() 
+        plt.legend()
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, f"{metric}_histogram.png"))
         plt.close()
@@ -108,11 +110,7 @@ def get_high_quality_scans(metrics, file_paths, thresholds):
 
     for metric, threshold in thresholds.items():
         high_quality_scans &= set(
-            [
-                path
-                for path, value in zip(file_paths[metric], metrics[metric])
-                if value <= threshold
-            ]
+            [path for path, value in zip(file_paths[metric], metrics[metric]) if value <= threshold]
         )
 
     return list(high_quality_scans)
@@ -122,9 +120,7 @@ def main():
     """
     Main function to run the mesh quality analysis.
     """
-    parser = argparse.ArgumentParser(
-        description="Analyze mesh quality metrics from JSON files."
-    )
+    parser = argparse.ArgumentParser(description="Analyze mesh quality metrics from JSON files.")
     parser.add_argument(
         "--input_folder",
         type=str,

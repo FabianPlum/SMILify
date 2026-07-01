@@ -159,9 +159,7 @@ def canonicalize_sample(
     return R_new, t_new, kp3d_new, R_0, t_0, canonical_v
 
 
-def project_world_to_pixel(
-    X_world: np.ndarray, R: np.ndarray, t: np.ndarray, K: np.ndarray
-) -> np.ndarray:
+def project_world_to_pixel(X_world: np.ndarray, R: np.ndarray, t: np.ndarray, K: np.ndarray) -> np.ndarray:
     """Project 3D world-frame points through an OpenCV column-vector camera.
 
     Args:
@@ -225,9 +223,7 @@ def kp2d_norm_yx_to_pixel_xy(kp2d_norm_yx: np.ndarray, img_W: int, img_H: int) -
 # (I, 0) in PyTorch3D at the trainer. The merger needs SLEAP cam-0 to land
 # at the SAME (I, 0) PyTorch3D point, otherwise the trainer's trans head
 # trains against two contradictory world frames across sources.
-RZ_180 = np.array([[-1.0, 0.0, 0.0],
-                   [0.0, -1.0, 0.0],
-                   [0.0, 0.0, 1.0]], dtype=np.float64)
+RZ_180 = np.array([[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
 
 
 def align_to_pytorch3d_reader_convention(

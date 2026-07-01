@@ -35,7 +35,6 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import List
 
 import h5py
 import numpy as np
@@ -87,10 +86,7 @@ def _check_sample(
         )
         return False
     if n_views < int(x_mv["num_views"]):
-        print(
-            f"  NOTE: {int(x_mv['num_views']) - n_views} view(s) masked out "
-            f"(view_valid={view_valid})"
-        )
+        print(f"  NOTE: {int(x_mv['num_views']) - n_views} view(s) masked out (view_valid={view_valid})")
 
     max_R = 0.0
     max_T = 0.0
@@ -111,11 +107,25 @@ def _check_sample(
     for v_ds, v_loader in enumerate(valid_loader_idx):
         max_kp = max(
             max_kp,
-            float(np.max(np.abs(y_mv["keypoints_2d_per_view"][v_loader].astype(np.float32) - y_data["keypoints_2d"][v_ds].astype(np.float32)))),
+            float(
+                np.max(
+                    np.abs(
+                        y_mv["keypoints_2d_per_view"][v_loader].astype(np.float32)
+                        - y_data["keypoints_2d"][v_ds].astype(np.float32)
+                    )
+                )
+            ),
         )
         max_vis = max(
             max_vis,
-            float(np.max(np.abs(y_mv["keypoint_visibility_per_view"][v_loader].astype(np.float32) - y_data["keypoint_visibility"][v_ds].astype(np.float32)))),
+            float(
+                np.max(
+                    np.abs(
+                        y_mv["keypoint_visibility_per_view"][v_loader].astype(np.float32)
+                        - y_data["keypoint_visibility"][v_ds].astype(np.float32)
+                    )
+                )
+            ),
         )
 
     kp3d_loader = np.asarray(y_mv["keypoints_3d"], dtype=np.float32)
@@ -145,16 +155,16 @@ def _check_sample(
     max_betas = float(np.max(np.abs(np.asarray(y_mv["shape_betas"], dtype=np.float32) - betas_h5)))
 
     checks = {
-        "R_per_view":          (max_R, tol),
-        "T_per_view":          (max_T, tol),
-        "fov_per_view":        (max_fov, fov_tol_deg),
-        "keypoints_2d":        (max_kp, tol),
-        "keypoint_vis":        (max_vis, tol),
-        "keypoints_3d":        (max_kp3d, tol),
-        "canonical_inverse":   (max_world, tol),
-        "parameters/trans":    (max_trans, tol),
-        "parameters/rot":      (max_rot, tol),
-        "parameters/betas":    (max_betas, tol),
+        "R_per_view": (max_R, tol),
+        "T_per_view": (max_T, tol),
+        "fov_per_view": (max_fov, fov_tol_deg),
+        "keypoints_2d": (max_kp, tol),
+        "keypoint_vis": (max_vis, tol),
+        "keypoints_3d": (max_kp3d, tol),
+        "canonical_inverse": (max_world, tol),
+        "parameters/trans": (max_trans, tol),
+        "parameters/rot": (max_rot, tol),
+        "parameters/betas": (max_betas, tol),
     }
     all_ok = True
     for name, (val, this_tol) in checks.items():
@@ -170,8 +180,9 @@ def main() -> None:
     p.add_argument("--dataset_dir", required=True, help="Source flat-directory replicAnt dataset")
     p.add_argument("--smal_file", required=True, help="SMAL/SMIL .pkl used at preprocess time")
     p.add_argument("--shape_family", type=int, default=None)
-    p.add_argument("--sample_indices", type=int, nargs="+", default=[0],
-                   help="HDF5 sample indices to verify (default: just 0)")
+    p.add_argument(
+        "--sample_indices", type=int, nargs="+", default=[0], help="HDF5 sample indices to verify (default: just 0)"
+    )
     p.add_argument("--tol", type=float, default=1e-5)
     args = p.parse_args()
 
@@ -187,6 +198,7 @@ def main() -> None:
 
     # Apply override BEFORE any module touches config.dd.
     from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override  # noqa: E402
+
     apply_smal_file_override(args.smal_file, shape_family=args.shape_family)
 
     print(f"HDF5:         {args.hdf5}")

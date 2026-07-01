@@ -1,20 +1,21 @@
 # Data structures and functions for rendering
 import torch
-import torch.nn.functional as F
-from scipy.io import loadmat
 import numpy as np
 import config
-import cv2
 
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import (
-    OpenGLPerspectiveCameras, look_at_view_transform, look_at_rotation,
-    RasterizationSettings, MeshRenderer, MeshRasterizer, BlendParams,
-    PointLights, HardPhongShader, SoftSilhouetteShader, Materials, Textures,
-    FoVPerspectiveCameras
+    look_at_view_transform,
+    RasterizationSettings,
+    MeshRenderer,
+    MeshRasterizer,
+    BlendParams,
+    PointLights,
+    HardPhongShader,
+    SoftSilhouetteShader,
+    Textures,
+    FoVPerspectiveCameras,
 )
-from pytorch3d.io import load_objs_as_meshes
-from smal_fitter.utils import perspective_proj_withz
 
 
 class Renderer(torch.nn.Module):
@@ -22,7 +23,7 @@ class Renderer(torch.nn.Module):
     # (SLEAP data can be in meters with objects at 0.1-10m from camera)
     DEFAULT_ZNEAR = 0.001  # Very close (1mm)
     DEFAULT_ZFAR = 1000.0  # Very far (1km)
-    
+
     def __init__(self, image_size, device):
         super(Renderer, self).__init__()
 
@@ -31,26 +32,23 @@ class Renderer(torch.nn.Module):
 
         # Initialize with default camera parameters
         R, T = look_at_view_transform(2.7, 0, 0, device=device)
-        #self.cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T, fov=60)
+        # self.cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T, fov=60)
         self.cameras = FoVPerspectiveCameras(
-            R=R, T=T, device=device, fov=60,
-            znear=self.DEFAULT_ZNEAR, zfar=self.DEFAULT_ZFAR
+            R=R, T=T, device=device, fov=60, znear=self.DEFAULT_ZNEAR, zfar=self.DEFAULT_ZFAR
         )
         self.mesh_color = torch.FloatTensor(config.MESH_COLOR).to(device)[None, None, :] / 255.0
 
         blend_params = BlendParams(sigma=1e-4, gamma=1e-4)
         raster_settings = RasterizationSettings(
             image_size=self.image_size,
-            blur_radius=np.log(1. / 1e-4 - 1.) * blend_params.sigma,
-            faces_per_pixel=100, bin_size=0
+            blur_radius=np.log(1.0 / 1e-4 - 1.0) * blend_params.sigma,
+            faces_per_pixel=100,
+            bin_size=0,
         )
 
         self.silhouette_renderer = MeshRenderer(
-            rasterizer=MeshRasterizer(
-                cameras=self.cameras,
-                raster_settings=raster_settings
-            ),
-            shader=SoftSilhouetteShader(blend_params=blend_params)
+            rasterizer=MeshRasterizer(cameras=self.cameras, raster_settings=raster_settings),
+            shader=SoftSilhouetteShader(blend_params=blend_params),
         )
 
         raster_settings_color = RasterizationSettings(
@@ -63,15 +61,12 @@ class Renderer(torch.nn.Module):
         lights = PointLights(device=device, location=[[0.0, 0.0, 3.0]])
 
         self.color_renderer = MeshRenderer(
-            rasterizer=MeshRasterizer(
-                cameras=self.cameras,
-                raster_settings=raster_settings_color
-            ),
+            rasterizer=MeshRasterizer(cameras=self.cameras, raster_settings=raster_settings_color),
             shader=HardPhongShader(
                 device=device,
                 cameras=self.cameras,
                 lights=lights,
-            )
+            ),
         )
 
     def set_camera_parameters(self, R, T, fov, aspect_ratio=None):
@@ -90,7 +85,7 @@ class Renderer(torch.nn.Module):
         R = R.to(device=self.device, dtype=torch.float32)
         T = T.to(device=self.device, dtype=torch.float32)
         fov = fov.to(device=self.device, dtype=torch.float32)
-        
+
         # Ensure FOV has the correct shape for FoVPerspectiveCameras
         # FoVPerspectiveCameras expects fov to be 1D tensor of shape (batch_size,)
         if fov.dim() > 1:
@@ -113,15 +108,20 @@ class Renderer(torch.nn.Module):
             # Broadcast scalar aspect ratio to batch if needed
             if aspect_ratio.numel() == 1 and fov.numel() > 1:
                 aspect_ratio = aspect_ratio.expand_as(fov)
-        
+
         self.cameras = FoVPerspectiveCameras(
-            device=self.device, R=R, T=T, fov=fov, aspect_ratio=aspect_ratio,
-            znear=self.DEFAULT_ZNEAR, zfar=self.DEFAULT_ZFAR
+            device=self.device,
+            R=R,
+            T=T,
+            fov=fov,
+            aspect_ratio=aspect_ratio,
+            znear=self.DEFAULT_ZNEAR,
+            zfar=self.DEFAULT_ZFAR,
         )
         self.silhouette_renderer.rasterizer.cameras = self.cameras
         self.color_renderer.rasterizer.cameras = self.cameras
         # Also update shader cameras if they have a cameras attribute
-        if hasattr(self.color_renderer.shader, 'cameras'):
+        if hasattr(self.color_renderer.shader, "cameras"):
             self.color_renderer.shader.cameras = self.cameras
 
     def forward(self, vertices, points, faces, render_texture=False, joints_only=False):

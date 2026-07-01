@@ -1,0 +1,44 @@
+name: lint
+
+on:
+  push:
+    branches: [master]
+    paths: ['**.py', 'ruff.toml', '.github/workflows/lint.yml']
+  pull_request:
+    branches: [master]
+    paths: ['**.py', 'ruff.toml', '.github/workflows/lint.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ruff:
+    name: ruff (check + format)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # Pin ruff so `ruff format` output stays stable across releases — the
+      # version must match what the repo was formatted with (see ruff.toml).
+      - name: Install ruff
+        run: pip install ruff==0.15.20
+
+      # Lint. Config (rules, ignores, per-file-ignores) lives in ruff.toml.
+      # Known undefined-name bugs are `# noqa`'d with issue refs (#61-#65), so a
+      # failure here means a NEW lint regression.
+      - name: ruff check
+        run: ruff check --output-format=github .
+
+      # Formatting gate — runs even if `ruff check` failed, so a PR sees both.
+      - name: ruff format --check
+        if: always()
+        run: ruff format --check .
