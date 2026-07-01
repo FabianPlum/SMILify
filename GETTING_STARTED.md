@@ -107,15 +107,15 @@ python smal_fitter/neuralSMIL/run_multiview_inference.py \
 
 > ⚠️ **Flag spelling differs from benchmarking:** inference uses `--dataset` and `--smal_file` (underscore); benchmarking uses `--dataset_path` and `--smal-file` (hyphen). Easy to trip on when copy-pasting between the two.
 
-Two videos are written to the working directory (with a frame-range suffix when `--max_frames` is set):
+The **primary outputs** are two rendered videos, written to the working directory (with a frame-range suffix when `--max_frames` is set):
 - `..._multiview_inference.avi` — a side-by-side grid of every camera view with the predicted mesh overlaid (AVI / MJPG).
 - `..._singleview_inference.mp4` — a full mesh render for the view(s) chosen with `--view_indices` (default `"0"`).
 
 Handy flags: `--view_indices 0,2,4`, `--render_resolution 512`, `--smoothing_window 5` (temporal smoothing), `--fps 30`, `--max_frames N` (quick preview).
 
-### Export the animation to Blender
+### Optional: use the predicted scene parameters downstream
 
-Add `--export_animation <name>` to also write the predicted sequence as an animation clip (`<name>.npz` + `<name>.json`):
+The two videos above are the inference script's main artifacts. If you also want the raw **estimated scene parameters** themselves (per-frame pose, shape, and per-view cameras) for your own downstream use, add `--export_animation <name>` to write an animation clip (`<name>.npz` + `<name>.json`):
 
 ```bash
 python smal_fitter/neuralSMIL/run_multiview_inference.py \
@@ -125,7 +125,7 @@ python smal_fitter/neuralSMIL/run_multiview_inference.py \
     --export_animation stick_clip
 ```
 
-You can load the exported clip into the Blender SMIL addon ([`3D_model_prep/SMIL_processing_addon.py`](3D_model_prep/SMIL_processing_addon.py)) and render it with your own materials. The example below was made this way — the predicted stick-insect sequence with a simple Voronoi texture applied to the mesh:
+One example of what you can do downstream with those parameters: load the exported clip into the Blender SMIL addon ([`3D_model_prep/SMIL_processing_addon.py`](3D_model_prep/SMIL_processing_addon.py)) and render the mesh with your own materials. The clip below is the predicted stick-insect sequence with a simple Voronoi texture — purely illustrative, not part of the pipeline:
 
 <img src="docs/stick_blender_render.gif" width="480">
 
