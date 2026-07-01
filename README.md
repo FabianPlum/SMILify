@@ -305,12 +305,14 @@ python -m smal_fitter.neuralSMIL.benchmark_model \
 
 > **Set `--orig_width` / `--orig_height` to the dataset's original capture resolution** (both required together) so PCK@Npx is scored in original-image pixels rather than the preprocessed size. E.g. the stick-insect dataset is 1530 px square → `--orig_width 1530 --orig_height 1530`; use your own dataset's resolution otherwise.
 
+> **PCK is reported at two resolutions.** Because `PCK@Npx` is resolution-dependent, every run prints PCK at both the **native** resolution (the `--orig_*` override if given, else the dataset's stored per-view sizes / `target_resolution`) **and** the model's square **input** resolution (224 for ViT, 512 for UNet/ResNet). The two share the same valid-joint set, so they are directly comparable.
+
 **Metrics reported:**
 
 | Metric | Single-view | Multi-view |
 |---|---|---|
-| PCK@5px | yes | yes |
-| PCK curve (1–50 px) | yes | yes |
+| PCK@5px (native + input res) | yes | yes |
+| PCK curve (1–50 px, native + input res) | yes | yes |
 | MPJPE (mm) | — | yes (when 3D GT available) |
 | MPJPE percentiles (P50–P99) | — | yes |
 
@@ -319,11 +321,11 @@ python -m smal_fitter.neuralSMIL.benchmark_model \
 | File | Description |
 |---|---|
 | `benchmark_report.txt` | Full text log of all metrics |
-| `pck_curve.png` | PCK vs pixel-threshold plot |
-| `error_histogram.png` | 2D keypoint error distribution |
+| `pck_curve_native.png` / `pck_curve_input.png` | PCK vs pixel-threshold plot, one per resolution (native, input) |
+| `error_histogram_native.png` / `error_histogram_input.png` | 2D keypoint error distribution, one per resolution |
 | `mpjpe_histogram.png` | 3D joint error distribution (multi-view) |
 | `sample_XX_3d_keypoints_percentiles.png` | GT vs predicted 3D joints coloured by error percentile (multi-view) |
-| `errors_2d_px.npy` / `errors_3d_mm.npy` | Raw error arrays for custom analysis |
+| `errors_2d_px_native.npy` / `errors_2d_px_input.npy` / `errors_3d_mm.npy` | Raw error arrays for custom analysis |
 
 **Key arguments:**
 

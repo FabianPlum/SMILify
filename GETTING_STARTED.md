@@ -78,11 +78,11 @@ This evaluates the model on the dataset's held-out **test split** and writes a f
 | File | What |
 |---|---|
 | `benchmark_report.txt` | every metric, as text |
-| `pck_curve.png` | PCK vs pixel-threshold curve |
-| `error_histogram.png` | 2D keypoint-error distribution |
+| `pck_curve_native.png` / `pck_curve_input.png` | PCK vs pixel-threshold curve, at native and input resolution |
+| `error_histogram_native.png` / `error_histogram_input.png` | 2D keypoint-error distribution, at native and input resolution |
 | `mpjpe_histogram.png` | 3D joint-error distribution (mm) |
 
-On the console you'll see **PCK@5px** (2D accuracy) and — because this dataset carries 3D ground truth — **MPJPE in mm** (3D accuracy).
+On the console you'll see **PCK@5px** (2D accuracy) — reported at **two** resolutions, the native `1530×1530` capture size and the model's `224` input size (`PCK@Npx` is resolution-dependent, so both are shown) — and, because this dataset carries 3D ground truth, **MPJPE in mm** (3D accuracy).
 
 > **Notes:**
 > - The script **auto-detects** single- vs multi-view from the checkpoint — there is no mode flag.
