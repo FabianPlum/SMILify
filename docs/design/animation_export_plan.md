@@ -313,7 +313,7 @@ constructor fails with `LocalEntryNotFoundError`.
 Workarounds tried:
 
 - **Download once, run offline.** Run
-  `python hpc_files/download_backbone_weights.py` on a machine with internet
+  `python -m hpc_files.download_backbone_weights` on a machine with internet
   access (populates `$HF_HOME/hub`), then on the inference host
   `export HF_HUB_OFFLINE=1` before running inference.
 - **WSL ↔ Windows cache share.** Downloads on Windows land at
@@ -345,12 +345,12 @@ When resuming elsewhere:
    `augmentation-robustness`; 5 commits ahead of that base — see list above).
 2. Ensure conda env `pytorch3d` is active (Python 3.10, PyTorch 2.3.1,
    CUDA 11.8).
-3. Populate HF cache (`python hpc_files/download_backbone_weights.py`) and
+3. Populate HF cache (`python -m hpc_files.download_backbone_weights`) and
    `export HF_HUB_OFFLINE=1` if the inference host lacks reliable HF access.
 4. Use a dataset whose view count ≤ checkpoint's `max_views`.
 5. Integration test:
    ```bash
-   python smal_fitter/neuralSMIL/run_multiview_inference.py \
+   python -m smal_fitter.neuralSMIL.run_multiview_inference \
        --dataset <h5> --smal_file <pkl> \
        --checkpoint <ckpt.pth> \
        --max_frames 20 \

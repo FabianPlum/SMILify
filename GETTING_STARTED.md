@@ -31,7 +31,7 @@ On an HPC cluster, run [`hpc_files/install.sh`](hpc_files/install.sh) instead (s
 pytest tests/test_pipeline.py::test_neural_smil_config_validation -v -s   # expect: 1 passed
 ```
 
-> Don't run a bare `pytest` yet — a couple of test modules currently fail to import (a known, tracked issue). The single test above sidesteps that and confirms your install is sound. See [tests/README.md](tests/README.md).
+> The single test above confirms your install is sound quickly. To run the whole suite from the repo root, use `pytest` (or `pytest tests/`) — it's clean. See [tests/README.md](tests/README.md).
 
 More detail: [Installation](README.md#installation) · [environment.yml](environment.yml) · [tests/README.md](tests/README.md).
 
@@ -65,7 +65,7 @@ The SMIL stick model — [`3D_model_prep/SMILy_STICK.pkl`](3D_model_prep/SMILy_S
 The example model is a **ViT-Large** multi-view stick model. Run from the repo root — note we pass `--smal-file` explicitly so you can see how a SMIL model is supplied to the run:
 
 ```bash
-python smal_fitter/neuralSMIL/benchmark_model.py \
+python -m smal_fitter.neuralSMIL.benchmark_model \
     --checkpoint SMILySTICKS_ViT_model.pth \
     --dataset_path SMILySTICKS_centred_reprojected_FIXED.h5 \
     --smal-file 3D_model_prep/SMILy_STICK.pkl \
@@ -100,7 +100,7 @@ On the console you'll see **PCK@5px** (2D accuracy) and — because this dataset
 Inference runs the trained model over the dataset and renders its predicted meshes back onto the frames — no extra data needed, it reuses the **same preprocessed dataset**:
 
 ```bash
-python smal_fitter/neuralSMIL/run_multiview_inference.py \
+python -m smal_fitter.neuralSMIL.run_multiview_inference \
     --dataset SMILySTICKS_centred_reprojected_FIXED.h5 \
     --checkpoint SMILySTICKS_ViT_model.pth \
     --smal_file 3D_model_prep/SMILy_STICK.pkl \
@@ -120,7 +120,7 @@ Handy flags: `--view_indices 0,2,4`, `--render_resolution 512`, `--smoothing_win
 The two videos above are the inference script's main artifacts. If you also want the raw **estimated scene parameters** themselves (per-frame pose, shape, and per-view cameras) for your own downstream use, add `--export_animation <name>` to write an animation clip (`<name>.npz` + `<name>.json`):
 
 ```bash
-python smal_fitter/neuralSMIL/run_multiview_inference.py \
+python -m smal_fitter.neuralSMIL.run_multiview_inference \
     --dataset SMILySTICKS_centred_reprojected_FIXED.h5 \
     --checkpoint SMILySTICKS_ViT_model.pth \
     --smal_file 3D_model_prep/SMILy_STICK.pkl \
@@ -140,7 +140,7 @@ One example of what you can do downstream with those parameters: load the export
 The bundled [`getting_started.json`](smal_fitter/neuralSMIL/configs/examples/getting_started.json) config is set up for exactly this: multi-view with a **ViT-Large** backbone (the same architecture as the example checkpoint), pointed at the stick model, and — crucially — `"resume_checkpoint": null` so it genuinely starts fresh. It mirrors the production recipe in [`multiview_SMILySTICKS_3D_ViT_Large_AUG_FIXED.json`](smal_fitter/neuralSMIL/configs/examples/multiview_SMILySTICKS_3D_ViT_Large_AUG_FIXED.json), with resume cleared and isolated output dirs.
 
 ```bash
-python smal_fitter/neuralSMIL/train_multiview_regressor.py \
+python -m smal_fitter.neuralSMIL.train_multiview_regressor \
     --config smal_fitter/neuralSMIL/configs/examples/getting_started.json \
     --dataset_path SMILySTICKS_centred_reprojected_FIXED.h5
 ```
@@ -175,7 +175,7 @@ What happens:
 | Symptom | Fix |
 |---|---|
 | `conda activate pytorch3d` — env not found | The env is named **`pytorch3d`** (not `smilify`), regardless of the `environment.yml` filename. |
-| Bare `pytest` shows import errors | Known and tracked — two modules fail to collect. Use `pytest tests/ -m "not slow" --continue-on-collection-errors`, or the single smoke test in Step 1. See [tests/README.md](tests/README.md). |
+| `pytest` shows import/collection errors | Run it from the **repo root** (`pytest`, or `pytest tests/`) — the suite is clean there. No `PYTHONPATH=...` prefix or `--continue-on-collection-errors` is needed. See [tests/README.md](tests/README.md). |
 | Benchmark exits with a SMAL-file error | Pass `--smal-file 3D_model_prep/SMILy_STICK.pkl` — older checkpoints don't embed the model path. |
 | `unrecognized arguments` on a flag | Flag spelling differs by script: benchmark uses `--dataset_path` / `--smal-file`; multi-view inference uses `--dataset` / `--smal_file`. |
 | "Dataset path does not exist" when training | Pass `--dataset_path` to your `.h5`, or save the download as `SMILySTICKS_centred_reprojected_FIXED.h5` at the repo root. |

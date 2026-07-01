@@ -98,11 +98,11 @@ pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psut
 if [[ "$SKIP_TESTS" -eq 1 ]]; then
     echo "==> Skipping tests (--skip-tests)"
 else
-    echo "==> Running tests: pytest tests/ -m 'not slow' --continue-on-collection-errors"
-    # Non-fatal: the env build above is what matters; the suite currently has known
-    # import-path collection errors (see tests/README.md), so don't abort the install.
-    pytest tests/ -m "not slow" --continue-on-collection-errors || \
-        echo "WARN: test step had failures — see tests/README.md (harness import-path fix is pending)"
+    echo "==> Running tests: pytest tests/ -m 'not slow'"
+    # Non-fatal: the env build above is what matters, so don't abort the install if a
+    # test fails (e.g. a data-dependent test with datasets absent on this machine).
+    pytest tests/ -m "not slow" || \
+        echo "WARN: test step had failures — see tests/README.md"
 fi
 
 echo
