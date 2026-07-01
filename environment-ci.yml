@@ -41,3 +41,4 @@ dependencies:
   - pycocotools
   - toml
   - pytest
+  - pytest-timeout      # per-test wall-clock cap so a hang fails fast in CI
