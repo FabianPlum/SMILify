@@ -1471,7 +1471,9 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
     parser.add_argument('--export_animation', type=str, default=None,
                        help='Optional output path stem for SMIL animation export. '
                             'Writes <stem>.npz + <stem>.json alongside the MP4. '
-                            'Only active when --input_video is used.')
+                            'Only active when --input_video is used. '
+                            'NOTE: any string is accepted as-is (e.g. "True" writes True.npz) — '
+                            'no validation is performed, so pass a real path/filename stem.')
 
     args = parser.parse_args()
     
