@@ -11,22 +11,32 @@
 
 > **🛠 RESOLVED (2026-07-01) — import-structure refactor (branch `refactor/import-structure`):** **C8–C12 and the umbrella C16 are fixed.** Approach: make the tree a proper package (empty `__init__.py` in `smal_fitter/`, `smal_fitter/neuralSMIL/`, `smal_fitter/priors/`, `fitter_3d/`, `fitter_3d/pointcloud2smil/`, `custom_processing/`), rename `smal_fitter/smal_fitter.py` → `smal_fitter/fitter.py`, rewrite **all** cross-module imports to the absolute repo-root form, **remove all 47 `sys.path` hacks**, and launch entrypoints as `python -m <module>` from the repo root. **Deliberately NOT pip-installable** (rejected as bloat) — the goal was one consistent import convention, not packaging. Verified: `pytest` green (**83 passed** via `pytest` / `pytest tests/` / `python -m pytest`, no `PYTHONPATH`), 69/69 modules + 175 internal import targets resolve, and the benchmark / inference (incl. `mp.spawn`) / training / legacy `optimize_to_joints` flows all run under `-m`.
 
+> **🛠 RESOLVED (2026-07-01) — post-refactor cleanup + CI:**
+> - **C1** (#29) & **C3** (#31): fixed in code (`CHECKPOINT_NAME` defined + CLI; triangulation docstring corrected). Issues closed.
+> - **C7** (#35): resolved doc-only (behaviour documented, community PR). Issue closed.
+> - **C2** (#30), **C19** (#47), **C20** (#48): resolved in **PR #58** — C2 verified intentional (the pooled `global_feats` is deliberately not consumed by the decoder) and documented; C19/C20 dead modules deleted. Issues closed.
+> - **CI groundwork for C17:** GitHub Actions added in **PR #59** (`.github/workflows/tests.yml`, CPU, `pytest -m "not slow"`).
+> - **Still open:** **C4** (#32), **C5** (#33 — verdict: not-a-bug/doc), **C6** (#34), **C13** (#41 — partially addressed), **C17** (#15 — next), and new **C21** (dead `scipy.misc` import).
+
 ---
 
 ## Seeded from the README audit (2026-06-30)
 
-### C1 — `config.CHECKPOINT_NAME` is undefined but read by `generate_video.py` 🔍  · [#29](https://github.com/FabianPlum/SMILify/issues/29)
+### C1 — `config.CHECKPOINT_NAME` is undefined but read by `generate_video.py` 🛠 FIXED  · [#29](https://github.com/FabianPlum/SMILify/issues/29)
+- **DONE (2026-07-01):** `config.py` now defines `CHECKPOINT_NAME = None`, and `generate_video.py` requires the checkpoint via CLI (`--checkpoint_name`) or config, erroring clearly if unset (commit 926d433). Issue closed.
 - **Source:** legacy/README.md audit (major).
 - **Symptom:** [smal_fitter/generate_video.py](smal_fitter/generate_video.py) reads `config.CHECKPOINT_NAME` (lines ~36, ~70), but [config.py](config.py) never defines it (only `OUTPUT_DIR = "checkpoints/{timestamp}"`). Running `generate_video.py` as shipped → `AttributeError`.
 - **Decision needed:** add `CHECKPOINT_NAME` to config.py, OR refactor generate_video.py to take a CLI arg / read `OUTPUT_DIR`.
 - **Note:** legacy/optimization path — confirm it's still meant to work before fixing.
 
-### C2 — `global_feats` may be computed but unused by the multi-view decoder 🔍  · [#30](https://github.com/FabianPlum/SMILify/issues/30)
+### C2 — `global_feats` may be computed but unused by the multi-view decoder ❎ NOT-A-BUG (documented)  · [#30](https://github.com/FabianPlum/SMILify/issues/30)
+- **DONE (2026-07-01, PR #58):** traced `transformer_head.forward` — the pooled `global_feats` is passed only as a **batch-size/device carrier**; its content is **deliberately not consumed** (an earlier pooled-global input into the decoder token gave the head a memorisable image-level fingerprint and drove train/val divergence on betas, so it was removed). No `global_feat_proj` ever existed (the doc's claimed fix was stale). Not dead-compute-worth-removing; documented at the call site + head docstring so it isn't re-wired in. Issue closed.
 - **Source:** implementation_history/decoder_architecture_issues.md audit (major).
 - **Symptom:** The doc claims issue #10 ("global_feats computed but never used") was FIXED via a `global_feat_proj` Linear — but no `global_feat_proj` symbol exists. `global_feats` is still computed and passed as the first positional arg to `self.transformer_head(global_feats, spatial_feats)` in [smal_fitter/neuralSMIL/multiview_smil_regressor.py](smal_fitter/neuralSMIL/multiview_smil_regressor.py) (~671-692). **Open question: does the transformer head actually consume `global_feats`, or is it dead compute?**
 - **Action:** trace `transformer_head.forward` to confirm whether `global_feats` is used. If unused → either wire it in or drop the computation. Potential latent issue, not just a stale doc.
 
-### C3 — Solver docstring says "via SVD" but code uses normal equations 🔍  · [#31](https://github.com/FabianPlum/SMILify/issues/31)
+### C3 — Solver docstring says "via SVD" but code uses normal equations 🛠 FIXED  · [#31](https://github.com/FabianPlum/SMILify/issues/31)
+- **DONE (2026-07-01):** docstring corrected to "damped normal equations (Tikhonov-regularized least squares)" (commit f2b4a42). Issue closed.
 - **Source:** implementation_history/triangulation_consistency_loss.md audit (minor).
 - **Symptom:** Triangulation solver docstring at [multiview_smil_regressor.py:1682](smal_fitter/neuralSMIL/multiview_smil_regressor.py#L1682) says "via SVD" while the implementation uses normal equations + `torch.linalg.solve`.
 - **Fix:** correct the in-code docstring (pure comment fix).
@@ -61,7 +71,8 @@
 
 - **Fix (proposed):** standardize on underscores (the neuralSMIL majority); register the other spelling as an argparse alias per flag for back-compat; give the dataset input ONE name (`--dataset_path`) across benchmark/inference/train; and rename `train_smil_regressor.py`'s legacy `--dataset` selector to something unambiguous (e.g. `--builtin_dataset`).
 
-### C5 — `multiview_mouse_UNET_long.json` sets `use_mixed_precision: false` 🔍  · [#33](https://github.com/FabianPlum/SMILify/issues/33)
+### C5 — `multiview_mouse_UNET_long.json` sets `use_mixed_precision: false` ✅ VERDICT: not-a-bug (doc)  · [#33](https://github.com/FabianPlum/SMILify/issues/33)
+- **VERDICT (2026-07-01):** `use_mixed_precision: false` is the **majority** across the example configs (7 of 10 set it false), so it is intentional/normal — **not** a config bug, just a doc mismatch. #33 kept open pending a doc fix + close as not-a-bug (deferred closing note).
 - **Source:** configs/examples/README.md audit (major).
 - **Symptom:** The "long/optimized" example config disables mixed precision ([configs/examples/multiview_mouse_UNET_long.json:194](smal_fitter/neuralSMIL/configs/examples/multiview_mouse_UNET_long.json#L194)). Doc described it as using mixed precision.
 - **Decision needed:** is MP intentionally off here? If it was meant to be on, this is a config bug; otherwise just a doc fix.
@@ -71,7 +82,8 @@
 - **Symptom:** In `SMALParamGroup.param_map` ([fitter_3d/trainer.py:238-249](fitter_3d/trainer.py#L238-L249)): `pose` includes `betas`/`log_beta_scales` (shape params) and adds `betas_trans`; `shape` drops `joint_rot` but also adds `betas_trans`. The names mislead ("pose" ≠ no-shape).
 - **Decision needed:** rename/redefine schemes to match contents, or accept and document. (Low priority — mostly a clarity wart.)
 
-### C7 — `--export_animation` silently treats any string as a path 🔍  · [#35](https://github.com/FabianPlum/SMILify/issues/35)
+### C7 — `--export_animation` silently treats any string as a path 🛠 RESOLVED (doc-only)  · [#35](https://github.com/FabianPlum/SMILify/issues/35)
+- **DONE (2026-07-01):** resolved doc-only — the flag's behaviour is now documented in the inference scripts (commit e92aeaf, via a community PR); the decision was to document rather than add validation. Issue closed.
 - **Source:** docs/design/animation_export_plan.md audit (minor UX).
 - **Symptom:** `--export_animation` is `type=str` and used as an output path; `--export_animation True` creates `True.npz`/`True.json` instead of erroring. Easy footgun.
 - **Decision needed:** validate/normalize, or leave as-is and only document (likely just doc).
@@ -107,7 +119,8 @@
 - **Symptom:** `smal_fitter/sleap_data/test_sleap_preprocessing.py` is picked up by bare `pytest` (no `testpaths`) and errors: `from preprocess_sleap_dataset import ...` (cwd-relative).
 - **Fix:** add `testpaths = tests` to `pytest.ini` (and/or move/repair this file).
 
-### C13 — Inference uses a strict state_dict load; benchmark is tolerant ✅  · [#41](https://github.com/FabianPlum/SMILify/issues/41)
+### C13 — Inference uses a strict state_dict load; benchmark is tolerant ✅ (partially addressed)  · [#41](https://github.com/FabianPlum/SMILify/issues/41)
+- **UPDATE (2026-07-01):** `run_multiview_inference.py` now loads with `strict=False` and re-derives `rotation_representation` from the checkpoint config ([run_multiview_inference.py:350](smal_fitter/neuralSMIL/run_multiview_inference.py#L350)), so **current-code checkpoints load fine**. Remaining gap: pre-6D-rotation (deprecated 9-dim cam-rot) checkpoints still hit a size mismatch — `strict=False` does **not** silence shape mismatches on matched keys. Low urgency (deprecated arch); #41 kept open for the tolerant-load / clear-error work.
 - **Found:** verifying the Getting Started inference command (2026-07-01).
 - **Symptom:** `run_multiview_inference.py` → `load_multiview_model_from_checkpoint` (~L430) does a **strict** `load_state_dict`, so it raises `RuntimeError: size mismatch` when the checkpoint's head dims differ from the reconstructed model — e.g. an older ViT stick checkpoint with a 9-dim camera-rotation head (`transformer_head.cam_rot_head` [9], `init_cam_rot` [1,9]) vs the current 6D-rotation model ([6] / [1,6]); `param_norm` / `token_embedding` differ by 3 accordingly. `benchmark_model.py` loads the **same** checkpoint fine (it re-infers dims from tensor shapes).
 - **Note:** observed with an OLD substitute checkpoint (pre-6D-rotation refactor, `ViT_Large_Full_Stick_3D_post_decoder_fix`); a current-code checkpoint likely loads. But the asymmetry (benchmark tolerant, inference strict) is real and will bite anyone loading a slightly-older checkpoint for inference.
@@ -133,7 +146,8 @@
 - **Umbrella / root cause for:** C8 (no `conftest.py` / `testpaths`), C9 (`smal_fitter` not a package), C10 (`utils` name collision), C11 (`test_animation_export` import style), C12 (stray collected test), and the import-order pieces of C14 / C15.
 - **Fix direction:** make the repo a proper installable package — add `__init__.py` files + a `pyproject.toml`/setup so it can be `pip install -e .`; replace the ad-hoc `sys.path.append` hacks with package-qualified imports; resolve the `utils` and `smal_fitter` name collisions. Then a single `pytest` — and every entrypoint — works regardless of CWD. This is the foundational cleanup the other import-related items build on; do it before C17.
 
-### C17 — Run `ruff` across the repo — SEPARATE PR, do LAST 📌  · [#15](https://github.com/FabianPlum/SMILify/issues/15)
+### C17 — Run `ruff` across the repo — SEPARATE PR, do LAST 📌 NEXT  · [#15](https://github.com/FabianPlum/SMILify/issues/15)
+- **STATUS (2026-07-01):** the prerequisites are done — import/packaging (C16) landed, and CI is now in place (**PR #59**) to catch regressions from the ruff churn. This is the next task. Fold in **C21** (dead `scipy.misc` import, an F401) while here.
 - Once the functional fixes above (especially **C16** import/packaging) are done, let `ruff` loose on the repo (lint + format + autofix) to clean up unused imports, dead code, style, etc.
 - **Separate PR**, tracked by issue [#15](https://github.com/FabianPlum/SMILify/issues/15). Deliberately last, so `ruff` operates on the unified package structure rather than churning code that is about to be restructured by C16.
 
@@ -143,14 +157,21 @@
 - **Symptom:** `PCK@Npx` is resolution-dependent, but [benchmark_model.py](smal_fitter/neuralSMIL/benchmark_model.py) reports it at a **single** scale — `target_resolution`/`max(override_size)` for single-view ([_compute_pck_errors_singleview](smal_fitter/neuralSMIL/benchmark_model.py#L517-L536)), per-view native `image_sizes`/override for multi-view ([_get_original_image_size](smal_fitter/neuralSMIL/benchmark_model.py#L108-L121)). `input_resolution` (224 ViT / 512 UNet) is derived in both paths ([SV](smal_fitter/neuralSMIL/benchmark_model.py#L397), [MV](smal_fitter/neuralSMIL/benchmark_model.py#L932)) but only **logged**, never used for PCK. `PCK@5px` at 224 vs at a native 2048-frame are wildly different, so one number is ambiguous.
 - **Fix:** report **two** PCKs (@5 + full curve, both paths, plots + `.npy`): (1) at the model **input resolution** (H=W=`input_resolution`), (2) at **native** resolution (`--orig_width`/`--orig_height` override if given, else dataset). If the override flag is passed, native = override — **no** redundant third PCK for the dataset's stored sizes. Exactly two reports.
 
-### C19 — `smal_fitter/priors/shape_prior.py` imports nonexistent `global_utils` (dead module) 🔍  · [#47](https://github.com/FabianPlum/SMILify/issues/47)
+### C19 — `smal_fitter/priors/shape_prior.py` imports nonexistent `global_utils` (dead module) 🛠 FIXED  · [#47](https://github.com/FabianPlum/SMILify/issues/47)
+- **DONE (2026-07-01, PR #58):** deleted the dead module — imported by nothing, broken on import, and its shape-prior loading is already reimplemented inline in the live code (`smal_fitter/fitter.py`, `fitter_3d/trainer.py`). Issue closed.
 - **Found:** import-health sweep during the import-structure refactor (2026-07-01).
 - **Symptom:** [smal_fitter/priors/shape_prior.py](smal_fitter/priors/shape_prior.py) starts with `from global_utils import config`, but no `global_utils` module exists anywhere in the repo → `ModuleNotFoundError`.
 - **Scope:** `shape_prior` is **imported by nothing** in the active tree (dead legacy module from upstream SMALify); **pre-existing** on `master`, not caused by the import refactor — so nothing currently breaks.
 - **Fix:** delete the dead module, or (if the quadruped shape prior is still wanted) repair the import (`import config`) and wire it back in.
 
-### C20 — `smal_fitter/outputs_imgs_to_video.py` runs file I/O at import time (no `__main__` guard) 🔍  · [#48](https://github.com/FabianPlum/SMILify/issues/48)
+### C20 — `smal_fitter/outputs_imgs_to_video.py` runs file I/O at import time (no `__main__` guard) 🛠 FIXED  · [#48](https://github.com/FabianPlum/SMILify/issues/48)
+- **DONE (2026-07-01, PR #58):** deleted — dead standalone scratch script (imported by nothing) that ran video-assembly at module top level against a hardcoded personal path. Issue closed.
 - **Found:** import-health sweep during the import-structure refactor (2026-07-01).
 - **Symptom:** [smal_fitter/outputs_imgs_to_video.py](smal_fitter/outputs_imgs_to_video.py) executes its video-assembly routine at **module top level** (no `if __name__ == "__main__":` guard) against a hardcoded path, so merely *importing* it runs that code and raises `FileNotFoundError`.
 - **Scope:** **imported by nothing** (standalone legacy helper); **pre-existing** on `master`, not caused by the import refactor. Makes the file unsafe to import for reuse/tooling.
 - **Fix:** move the top-level execution into an `if __name__ == "__main__":` block (and/or an `argparse` CLI) so importing only defines `create_video_from_images(...)`.
+
+### C21 — `smal_fitter/fitter.py` imports removed `scipy.misc` (dead import, latent break) 🔍
+- **Found:** surfaced as a `DeprecationWarning` in the first CI run (2026-07-01).
+- **Symptom:** [smal_fitter/fitter.py:8](smal_fitter/fitter.py#L8) does `import scipy.misc`, which is deprecated and **removed in SciPy 2.0**. It is the module's **only** reference to `scipy.misc` (unused import), so it works today on SciPy 1.x but will hard-break with `ImportError` on a SciPy 2.0 bump.
+- **Fix:** delete the unused `import scipy.misc`. Trivial — `ruff` (F401 unused-import) will catch it, so fold it into the **C17** pass rather than a standalone change. No GitHub issue yet.
