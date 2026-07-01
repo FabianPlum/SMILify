@@ -129,7 +129,7 @@ def create_3d_animation(
     ax = fig.add_subplot(111, projection="3d")
 
     # Initialize scatter plot
-    scatter = ax.scatter([], [], [], s=point_size, c="blue", alpha=0.7)
+    ax.scatter([], [], [], s=point_size, c="blue", alpha=0.7)
 
     # Set equal aspect ratio and limits
     ax.set_xlim(xlim)

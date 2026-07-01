@@ -116,7 +116,7 @@ def batch_global_rigid_transformation(
     # Initialize scaling factors as identity
     scaling_factors = torch.ones(N, parent.shape[0], 3).to(Rs.device)
 
-    if config.ALLOW_LIMB_SCALING == False:
+    if not config.ALLOW_LIMB_SCALING:
         betas_logscale = None
         # not sure where this broke, but if left unchecked this causes the optimise_to_joints code to fail
         # previously: torch.sum(betas_logscale) == 0 or config.ALLOW_LIMB_SCALING == False

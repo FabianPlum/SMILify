@@ -35,7 +35,7 @@ class PerformanceMonitor:
         try:
             gpu = GPUtil.getGPUs()[0]  # Get first GPU
             return {"gpu_util": gpu.load * 100, "gpu_memory": gpu.memoryUtil * 100}
-        except:
+        except Exception:
             return {"gpu_util": 0, "gpu_memory": 0}
 
     def get_cpu_stats(self):
@@ -838,7 +838,7 @@ def visualize_vertex_sdf(mesh: Meshes, vertex_sdf: torch.Tensor, output_path: st
 
     # Convert to numpy for plotting
     verts_np = verts.cpu().numpy()
-    faces_np = faces.cpu().numpy()
+    faces.cpu().numpy()
     sdf_np = vertex_sdf.cpu().numpy()
 
     # Create scatter plot with custom colormap

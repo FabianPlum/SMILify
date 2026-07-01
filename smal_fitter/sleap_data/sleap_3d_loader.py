@@ -321,7 +321,7 @@ class SLEAP3DDataLoader:
                                     self.camera_name_to_dir[calib_name] = dir_name
                                     matched = True
                                     break
-                            except:
+                            except Exception:
                                 pass
 
                         if not matched:
@@ -347,7 +347,7 @@ class SLEAP3DDataLoader:
                                         if nums and int(nums[0]) == idx:
                                             self.camera_name_to_dir[calib_name] = item.name
                                             break
-                    except:
+                    except Exception:
                         pass
 
         elif data_structure == "session_dirs":
@@ -410,7 +410,7 @@ class SLEAP3DDataLoader:
         for camera_name, camera_data in self.cameras.items():
             K = camera_data["intrinsic"]["K"]
             R = camera_data["extrinsic"]["R"]
-            t = camera_data["extrinsic"]["t"]
+            camera_data["extrinsic"]["t"]
 
             # Check K matrix is valid (upper triangular, positive diagonal)
             if K[0, 0] <= 0 or K[1, 1] <= 0:
@@ -1523,12 +1523,10 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
                         # Use the convention with lower error
                         if mean_error_alternative < mean_error_standard:
                             print("  Using ALTERNATIVE convention (R^T, -R^T*t)")
-                            reprojected_2d = reprojected_2d_alternative
                             errors = errors_alternative
                             all_errors_alternative.extend(errors.tolist())
                         else:
                             print("  Using STANDARD convention (R, t)")
-                            reprojected_2d = reprojected_2d_standard
                             errors = errors_standard
                             all_errors_standard.extend(errors.tolist())
 
@@ -1544,13 +1542,11 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
                         print(f"    Std: {std_error:.2f} px")
                     else:
                         print("  Warning: No visible keypoints to compare")
-                        reprojected_2d = reprojected_2d_standard
                 else:
                     print(
                         f"  Warning: Mismatch in number of keypoints "
                         f"(original: {len(original_2d)}, reprojected: {len(reprojected_2d_standard)})"
                     )
-                    reprojected_2d = reprojected_2d_standard
 
                 # Create visualization if requested
                 if plot_examples:

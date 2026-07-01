@@ -615,7 +615,7 @@ def plot_mesh_normals_high_res(
     W = W * normal_length
 
     # Plot the quivers with colors
-    quiver = ax.quiver(X, Y, Z, U, V, W, colors=colors, length=normal_length, normalize=True)
+    ax.quiver(X, Y, Z, U, V, W, colors=colors, length=normal_length, normalize=True)
 
     # Add a colorbar if coloring by thinness
     if color_by_thinness:

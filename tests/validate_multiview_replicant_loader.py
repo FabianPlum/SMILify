@@ -273,7 +273,7 @@ def render_per_view(dataset_path, frame_index, output_dir, canonical_frame=True,
     # duration of the renders. Critical: absolutise any relative paths in
     # config that the renderer will try to open (e.g. SMAL_FILE) before chdir.
     if not os.path.isabs(config.SMAL_FILE):
-        config.SMAL_FILE = str((Path(prev_cwd_root := os.getcwd()) / config.SMAL_FILE).resolve())
+        config.SMAL_FILE = str((Path(_prev_cwd_root := os.getcwd()) / config.SMAL_FILE).resolve())
     prev_cwd = os.getcwd()
     os.chdir(render_root)
     rendered_paths = []
@@ -384,7 +384,7 @@ def compare_frames_test(dataset_path, frame_index, output_dir, per_camera, cam_i
     if rt_diff > 1e-3:
         print("  WARN: round-trip residual above 1e-3 — math suspect.")
     # Also check raw == canonical-world-recovery on the camera extrinsics
-    R_v0_raw = y_raw["cam_rot_per_view"][0].numpy()
+    y_raw["cam_rot_per_view"][0].numpy()
     R_v0_can = y_can["cam_rot_per_view"][0].numpy()
     print(
         f"  cam[0] R should be identity in canonical frame: "

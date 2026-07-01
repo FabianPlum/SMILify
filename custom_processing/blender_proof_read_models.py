@@ -180,7 +180,7 @@ def load_model(context, direction):
     model_path = os.path.join(scene.input_folder, model_files[scene.current_model_index])
     try:
         bpy.ops.wm.obj_import(filepath=model_path)
-    except Exception as e:
+    except Exception:
         return {"CANCELLED"}
 
     scene.current_model_name = model_files[scene.current_model_index]

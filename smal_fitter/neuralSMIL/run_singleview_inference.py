@@ -719,7 +719,7 @@ def run_inference_on_image(
             image_tensor = image_tensor.to(device)
 
             # Get batch size from tensor
-            batch_size = image_tensor.shape[0]
+            image_tensor.shape[0]
 
             # Run inference through the model's forward pass
             # The model's forward() method handles batches correctly

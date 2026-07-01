@@ -143,15 +143,6 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.data_json_paths)
 
-    def get_ue_scaling_flag(self):
-        """
-        Get the UE scaling flag for this dataset.
-
-        Returns:
-            bool: Whether this dataset expects UE scaling
-        """
-        return self.use_ue_scaling
-
 
 class UnifiedSMILDataset:
     """

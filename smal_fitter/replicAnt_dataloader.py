@@ -108,7 +108,6 @@ def get_iteration_data(json_file_path):
         subject_data = data["iterationData"]["subject Data"][0]["1"]
         subject_3d_locations = {}
         subject_rotations = {}
-        subject_global_rotations = {}
 
         for key, value in subject_data["keypoints"].items():
             subject_3d_locations[key] = value["3DPos"]

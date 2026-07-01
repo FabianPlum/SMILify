@@ -97,7 +97,7 @@ class SMAL(nn.Module):
                 print(key)
                 try:
                     print(value.shape)
-                except:
+                except Exception:
                     pass
                 print(value)
 
@@ -167,7 +167,7 @@ class SMAL(nn.Module):
         # Regressor for joint locations given shape
         try:
             self.J_regressor = Variable(torch.Tensor(dd["J_regressor"].T.todense()), requires_grad=False).to(device)
-        except:
+        except Exception:
             # in custom Blender exporter the J_regressor is stored in dense matrix form
             self.J_regressor = Variable(torch.Tensor(dd["J_regressor"].T), requires_grad=False).to(device)
 

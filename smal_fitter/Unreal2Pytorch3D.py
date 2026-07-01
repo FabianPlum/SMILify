@@ -467,7 +467,7 @@ def plot_3D_points(pose_data, input_image):
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
 
-    display_points_names = [key for key in pose_data.keys()]
+    [key for key in pose_data.keys()]
     display_points_3D = [
         [
             pose_data[key]["3DPos"]["x"],
@@ -508,7 +508,7 @@ def plot_3D_projected_points(pose_data, input_image, cam_rot, cam_trans, fx, fy,
     # Display the image as background
     ax.imshow(cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB))
 
-    display_points_names = [key for key in pose_data.keys()]
+    [key for key in pose_data.keys()]
     display_points_3D = [
         [
             pose_data[key]["3DPos"]["x"],

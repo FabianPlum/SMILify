@@ -238,7 +238,7 @@ def align_smal_template_to_symmetry_axis(v, sym_file=None, I=None):
 
     try:
         assert len(left_inds) == len(right_inds)
-    except:
+    except Exception:
         import pdb
 
         pdb.set_trace()

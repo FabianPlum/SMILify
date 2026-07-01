@@ -541,7 +541,7 @@ class DatasetPreprocessor:
             chunk_shape = (self.chunk_size,)
 
             # Images (variable length JPEG data)
-            max_jpeg_size = max(len(sample["image_jpeg"]) for sample in samples)
+            max(len(sample["image_jpeg"]) for sample in samples)
             images_group.create_dataset(
                 "rgb_jpeg",
                 shape=(num_samples,),

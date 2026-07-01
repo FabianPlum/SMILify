@@ -1363,7 +1363,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     # Dataset parameters
     batch_size = training_params["batch_size"]
     num_epochs = training_params["num_epochs"]
-    learning_rate = training_params["learning_rate"]
+    training_params["learning_rate"]
     rotation_representation = training_params["rotation_representation"]
 
     # Create dataset (multi-dataset or single dataset)

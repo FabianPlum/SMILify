@@ -276,13 +276,13 @@ def main():
 
     try:
         # Test MLP head
-        mlp_model = test_mlp_head()
+        test_mlp_head()
 
         # Test Transformer Decoder head
-        transformer_model = test_transformer_decoder_head()
+        test_transformer_decoder_head()
 
         # Test with training config
-        config_model = test_with_training_config()
+        test_with_training_config()
 
         # Compare heads
         mlp_comp, transformer_comp = compare_heads()

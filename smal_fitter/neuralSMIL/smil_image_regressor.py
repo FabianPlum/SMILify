@@ -971,7 +971,7 @@ class SMILImageRegressor(SMALFitter):
         if not target_params_list:
             return {}
 
-        batch_size = len(target_params_list)
+        len(target_params_list)
         batch_targets = {}
         batch_availability = {}  # Track which samples have real data for each parameter
 
@@ -2569,7 +2569,7 @@ class SMILImageRegressor(SMALFitter):
             return None, None, None
 
         # Create batch parameters for SMAL model
-        batch_size = predicted_params["global_rot"].shape[0]
+        predicted_params["global_rot"].shape[0]
 
         # Convert rotations to axis-angle format for SMAL model (which expects axis-angle)
         if self.rotation_representation == "6d":
@@ -2824,7 +2824,7 @@ class SMILImageRegressor(SMALFitter):
                     coverage_percentage = animal_pixels / total_pixels if total_pixels > 0 else 0.0
                     pixel_coverage_valid = coverage_percentage >= min_pixel_coverage
 
-            except Exception as e:
+            except Exception:
                 # If silhouette processing fails, assume invalid
                 pixel_coverage_valid = False
 
