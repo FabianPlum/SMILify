@@ -22,6 +22,7 @@ those trajectories first-class, shareable outputs.
 1. **Phase 1 — Lossless Python export.** ✅ Done — AMASS-compatible `.npz`
    + human-readable `.json` sidecar, written from both inference scripts behind
    a `--export_animation PATH` flag.
+   *(Note: The flag takes any string as a literal path stem with no type/format checking — so passing something like `True` or `test` will silently create `True.npz`/`test.npz` rather than erroring.)*
 2. **Phase 2 — Blender addon importer.** ✅ Operator implemented and
    registered; awaiting end-to-end test in Blender 4.2 with a real `.npz`.
 3. **Phase 3 — Addon-side export to shareable formats.** ⏳ Not started —
