@@ -409,6 +409,15 @@ def _create_singleview_model(
         scale_trans_mode = TrainingConfig.get_scale_trans_mode()
         shape_family = config.SHAPE_FAMILY
 
+    # Frame convention + camera flags (persisted at the TOP level of
+    # checkpoint["config"] by the trainer). camera_centric checkpoints use a
+    # fixed identity camera and were trained without 10x UE scaling.
+    frame_convention = ckpt_config.get("frame_convention", "model_centric")
+    camera_centric = frame_convention == "camera_centric"
+    from_multiview = bool(ckpt_config.get("from_multiview", False))
+    fixed_camera = bool(ckpt_config.get("fixed_camera", camera_centric))
+    use_ue_scaling = bool(ckpt_config.get("use_ue_scaling", not fixed_camera))
+
     # CLI overrides
     smal_file = smal_file_override or ckpt_config.get("smal_file")
     if shape_family_override is not None:
@@ -453,13 +462,14 @@ def _create_singleview_model(
         rgb_only=model_config.get("rgb_only", True),
         freeze_backbone=model_config.get("freeze_backbone", True),
         hidden_dim=model_config.get("hidden_dim", 1024),
-        use_ue_scaling=True,
+        use_ue_scaling=use_ue_scaling,
         rotation_representation=rotation_representation,
         input_resolution=input_resolution,
         backbone_name=backbone_name,
         head_type=model_config.get("head_type", "mlp"),
         transformer_config=model_config.get("transformer_config", {}),
         scale_trans_mode=scale_trans_mode,
+        fixed_camera=fixed_camera,
     ).to(device)
 
     # Load weights (filter out SMAL optimization params, same as inference script)
@@ -489,6 +499,7 @@ def _create_singleview_model(
     log_fn(f"Loaded singleview model ({sum(p.numel() for p in model.parameters()):,} params)")
 
     # Build a flat resolved config dict for the benchmark loop
+    ckpt_tp = ckpt_config.get("training_params", {}) if ckpt_config else {}
     resolved = {
         "model_config": model_config,
         "rotation_representation": rotation_representation,
@@ -496,15 +507,26 @@ def _create_singleview_model(
         "shape_family": shape_family,
         "backbone_name": backbone_name,
         "input_resolution": input_resolution,
-        "batch_size": ckpt_config.get("training_params", {}).get("batch_size", fallback_params.get("batch_size", 4)),
-        "seed": ckpt_config.get("training_params", {}).get("seed", fallback_params.get("seed", 0)),
-        "train_ratio": training_config_fallback.get("split_config", {}).get(
-            "train_size",
-            1.0
-            - training_config_fallback.get("split_config", {}).get("val_size", 0.1)
-            - training_config_fallback.get("split_config", {}).get("test_size", 0.1),
+        "batch_size": ckpt_tp.get("batch_size", fallback_params.get("batch_size", 4)),
+        # Split determinants: prefer the values the trainer persisted so the
+        # benchmark reproduces the exact sample-grouped test split.
+        "seed": ckpt_tp.get("seed", fallback_params.get("seed", 0)),
+        "train_ratio": ckpt_tp.get(
+            "train_ratio",
+            training_config_fallback.get("split_config", {}).get(
+                "train_size",
+                1.0
+                - training_config_fallback.get("split_config", {}).get("val_size", 0.1)
+                - training_config_fallback.get("split_config", {}).get("test_size", 0.1),
+            ),
         ),
-        "val_ratio": training_config_fallback.get("split_config", {}).get("val_size", 0.1),
+        "val_ratio": ckpt_tp.get("val_ratio", training_config_fallback.get("split_config", {}).get("val_size", 0.1)),
+        # Single-view-from-multiview / camera-centric flags.
+        "frame_convention": frame_convention,
+        "camera_centric": camera_centric,
+        "from_multiview": from_multiview,
+        "use_ue_scaling": use_ue_scaling,
+        "fixed_camera": fixed_camera,
     }
     return model, resolved
 
@@ -625,10 +647,17 @@ def _run_singleview_benchmark(
 
     backbone_name = sv_config["backbone_name"]
     rotation_representation = sv_config["rotation_representation"]
+    # Camera-centric checkpoints benchmark on single-view items drawn from the
+    # multi-view HDF5, in the same camera-centric frame they were trained in.
+    camera_centric = bool(sv_config.get("camera_centric", False)) and bool(sv_config.get("from_multiview", False))
+    sv_from_mv_kwargs = (
+        dict(return_single_view=True, camera_centric=True, expand_all_views=True) if camera_centric else {}
+    )
     dataset = UnifiedSMILDataset.from_path(
         args.dataset_path,
         rotation_representation=rotation_representation,
         backbone_name=backbone_name,
+        **sv_from_mv_kwargs,
     )
     target_resolution = dataset.get_target_resolution()
     log_fn(f"\nDataset size: {len(dataset)}")
@@ -636,23 +665,46 @@ def _run_singleview_benchmark(
 
     _log_keypoint_rescaling_info_sv(log_fn, target_resolution, override_size)
 
-    # Split (mirror training script)
-    total_size = len(dataset)
-    train_ratio = sv_config["train_ratio"]
-    val_ratio = sv_config["val_ratio"]
-    train_size = int(total_size * train_ratio)
-    val_size = int(total_size * val_ratio)
-    test_size = total_size - train_size - val_size
+    # Split (mirror the training script).
+    if camera_centric and getattr(dataset, "item_sample_indices", None) is not None:
+        # Sample-grouped split reproducing the trainer's split (same seed +
+        # ratios) so the benchmark TEST set == the training / multi-view test set.
+        from torch.utils.data import Subset
 
-    train_set, val_set, test_set = torch.utils.data.random_split(
-        dataset,
-        [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(sv_config["seed"]),
-    )
-    log_fn("\nDataset split sizes:")
-    log_fn(f"  Train: {len(train_set)}")
-    log_fn(f"  Val:   {len(val_set)}")
-    log_fn(f"  Test:  {len(test_set)}")
+        n_samples = int(dataset.num_samples)
+        train_ratio = sv_config["train_ratio"]
+        val_ratio = sv_config["val_ratio"]
+        n_train = int(n_samples * train_ratio)
+        n_val = int(n_samples * val_ratio)
+        n_test = n_samples - n_train - n_val
+        _, _, sample_test = torch.utils.data.random_split(
+            range(n_samples),
+            [n_train, n_val, n_test],
+            generator=torch.Generator().manual_seed(sv_config["seed"]),
+        )
+        test_samples = set(int(s) for s in sample_test)
+        isi = dataset.item_sample_indices
+        test_idx = [i for i, s in enumerate(isi) if int(s) in test_samples]
+        test_set = Subset(dataset, test_idx)
+        log_fn(f"\nDataset split (camera-centric, sample-grouped, seed={sv_config['seed']}):")
+        log_fn(f"  {n_train}/{n_val}/{n_test} samples -> Test: {len(test_set)} view-items")
+    else:
+        total_size = len(dataset)
+        train_ratio = sv_config["train_ratio"]
+        val_ratio = sv_config["val_ratio"]
+        train_size = int(total_size * train_ratio)
+        val_size = int(total_size * val_ratio)
+        test_size = total_size - train_size - val_size
+
+        train_set, val_set, test_set = torch.utils.data.random_split(
+            dataset,
+            [train_size, val_size, test_size],
+            generator=torch.Generator().manual_seed(sv_config["seed"]),
+        )
+        log_fn("\nDataset split sizes:")
+        log_fn(f"  Train: {len(train_set)}")
+        log_fn(f"  Val:   {len(val_set)}")
+        log_fn(f"  Test:  {len(test_set)}")
 
     test_loader = DataLoader(
         test_set,

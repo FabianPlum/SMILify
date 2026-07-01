@@ -30,10 +30,38 @@ class DatasetConfig:
     test_ratio: float = 0.1
     dataset_fraction: float = 0.5  # Fraction of training data used per epoch
 
+    # ── Single-view-from-multiview sampling ──────────────────────────────
+    # Draw single-view training items from a multi-view HDF5. When enabled the
+    # trainer builds a SLEAPMultiViewDataset in single-view mode; the split is
+    # done at the sample level (mirroring the multi-view split) so no camera
+    # view of a sample leaks across train/val/test.
+    from_multiview: bool = False
+    # "model_centric": legacy SMALify convention (model posed in a world frame,
+    #   camera predicted). "camera_centric": re-anchor the sampled camera to the
+    #   world origin (fixed identity camera + known FOV), regress the animal in
+    #   that camera's frame. Persisted to the checkpoint so benchmark/inference
+    #   know how the model was trained.
+    frame_convention: str = "model_centric"
+    # Each valid view of each sample becomes its own single-view item.
+    expand_all_views: bool = True
+    # 10x UE mesh scaling. Legacy single-view replicAnt needs True; multi-view
+    # HDF5s bake scale in at preprocess time (world_scale) so this must be False.
+    use_ue_scaling: bool = True
+
     def validate(self):
         total = self.train_ratio + self.val_ratio + self.test_ratio
         if total > 1.0 + 1e-9:
             raise ValueError(f"Split ratios sum to {total}, must be <= 1.0")
+        if self.frame_convention not in ("model_centric", "camera_centric"):
+            raise ValueError(
+                f"frame_convention must be 'model_centric' or 'camera_centric', got {self.frame_convention!r}"
+            )
+        if self.frame_convention == "camera_centric" and not self.from_multiview:
+            raise ValueError("frame_convention='camera_centric' requires dataset.from_multiview=true")
+
+    @property
+    def camera_centric(self) -> bool:
+        return self.frame_convention == "camera_centric"
 
     def get_split_sizes(self, dataset_size: int) -> Tuple[int, int, int]:
         """Calculate train, val, test sizes from total dataset size."""
@@ -594,6 +622,14 @@ class BaseTrainingConfig:
                 "val_size": self.dataset.val_ratio,
                 "dataset_fraction": self.dataset.dataset_fraction,
             },
+            "dataset": {
+                "from_multiview": self.dataset.from_multiview,
+                "frame_convention": self.dataset.frame_convention,
+                "expand_all_views": self.dataset.expand_all_views,
+                "use_ue_scaling": self.dataset.use_ue_scaling,
+                "train_ratio": self.dataset.train_ratio,
+                "val_ratio": self.dataset.val_ratio,
+            },
             "training_params": {
                 "batch_size": self.training.batch_size,
                 "num_epochs": self.training.num_epochs,
@@ -653,6 +689,10 @@ class BaseTrainingConfig:
             },
             "scale_trans_beta": {
                 "mode": self.scale_trans_beta.mode,
+            },
+            "mesh_scaling": {
+                "allow_mesh_scaling": self.mesh_scaling.allow_mesh_scaling,
+                "init_mesh_scale": self.mesh_scaling.init_mesh_scale,
             },
             "joint_importance": {
                 "enabled": self.joint_importance.enabled,
