@@ -57,12 +57,9 @@ from tqdm import tqdm
 
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent.parent
-sys.path.insert(0, str(_REPO))
-sys.path.insert(0, str(_REPO / "smal_fitter"))
-sys.path.insert(0, str(_REPO / "smal_fitter" / "neuralSMIL"))
 
 import config  # noqa: E402
-from neuralSMIL.configs.config_utils import apply_smal_file_override  # noqa: E402
+from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override  # noqa: E402
 
 
 # Rz_180 = diag(-1, -1, 1). SLEAPMultiViewDataset._sleap_to_pytorch3d_camera
@@ -120,7 +117,7 @@ def _worker_init(smal_file: Optional[str], shape_family: Optional[int]) -> None:
     if smal_file:
         apply_smal_file_override(smal_file, shape_family=shape_family)
     global _WORKER_LOADER
-    from Unreal2Pytorch3D import load_SMIL_Unreal_multiview_sample
+    from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_multiview_sample
     _WORKER_LOADER = load_SMIL_Unreal_multiview_sample
 
 

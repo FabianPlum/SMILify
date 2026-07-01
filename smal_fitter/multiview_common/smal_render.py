@@ -60,23 +60,15 @@ class SMALRendererWrapper:
     def __init__(self, smal_file: str, render_size: int, device: str = "cpu",
                  shape_family: Optional[int] = None) -> None:
         # The SMAL constructor reads `config.SMAL_FILE` (global). Apply the
-        # override BEFORE the import-chain touches config.dd. We also have
-        # to make sure `smal_fitter/` is on sys.path so the import works
-        # when streamlit launches us as `multiview_common.smal_render`.
-        _smal_fitter_dir = Path(__file__).resolve().parent.parent
-        if str(_smal_fitter_dir) not in sys.path:
-            sys.path.insert(0, str(_smal_fitter_dir))
-        _repo_root = _smal_fitter_dir.parent
-        if str(_repo_root) not in sys.path:
-            sys.path.insert(0, str(_repo_root))
+        # override BEFORE the import-chain touches config.dd.
 
         # Defer these until paths are set.
-        from neuralSMIL.configs.config_utils import apply_smal_file_override  # noqa: E402
+        from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override  # noqa: E402
         apply_smal_file_override(smal_file, shape_family=shape_family)
 
         import config  # noqa: E402  — re-imported after override so attrs reflect the pkl
         from smal_model.smal_torch import SMAL  # noqa: E402
-        from p3d_renderer import Renderer  # noqa: E402
+        from smal_fitter.p3d_renderer import Renderer  # noqa: E402
 
         self.device = torch.device(device)
         self.smal = SMAL(self.device, shape_family_id=shape_family if shape_family is not None else -1)
@@ -179,7 +171,7 @@ class SMALRendererWrapper:
         # Imported lazily so module-import doesn't pull in h5py + the
         # whole SLEAPMultiViewDataset class graph when callers only
         # need `forward(...)`.
-        from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+        from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
         R_p3d, T_p3d, fov_y, aspect_ratio = SLEAPMultiViewDataset._sleap_to_pytorch3d_camera(
             R_cv, t_cv, K, image_size_wh
         )

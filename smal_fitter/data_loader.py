@@ -1,13 +1,12 @@
 import sys
 
-sys.path.append('../')
 
 import numpy as np
 import cv2
 import torch
 import imageio
 from tqdm import tqdm
-from utils import crop_to_silhouette
+from smal_fitter.utils import crop_to_silhouette
 import os
 import json
 from pathlib import Path

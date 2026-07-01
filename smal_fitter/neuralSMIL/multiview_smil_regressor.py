@@ -14,12 +14,10 @@ from typing import Dict, Tuple, Optional, List, Any
 # Import from parent modules
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from smil_image_regressor import SMILImageRegressor, safe_to_tensor, rotation_6d_to_axis_angle, axis_angle_to_rotation_6d
+from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor, safe_to_tensor, rotation_6d_to_axis_angle, axis_angle_to_rotation_6d
 import config
-from training_config import TrainingConfig
+from smal_fitter.neuralSMIL.training_config import TrainingConfig
 from pytorch3d.renderer import FoVPerspectiveCameras
 
 
@@ -2464,7 +2462,7 @@ def create_multiview_regressor(device, batch_size, shape_family, use_unity_prior
     # Create placeholder data batch
     # Derive input_resolution from backbone if not explicitly provided
     # This ensures the renderer is initialized with the correct size
-    from backbone_factory import BackboneFactory
+    from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
     _backbone_name = kwargs.get('backbone_name', 'resnet152')
     input_resolution = kwargs.get('input_resolution', BackboneFactory.get_default_input_resolution(_backbone_name))
     data_batch = torch.zeros(batch_size, 3, input_resolution, input_resolution, dtype=torch.float32, device=device)

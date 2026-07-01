@@ -5,7 +5,7 @@ DEPRECATED: This file is maintained for backward compatibility.
 The canonical configuration system is now in configs/ (see configs/README.md).
 
 Use the new system instead:
-    from configs import SingleViewConfig, MultiViewConfig, load_config
+    from smal_fitter.neuralSMIL.configs import SingleViewConfig, MultiViewConfig, load_config
 
 Or load from a JSON config file:
     python train_smil_regressor.py --config configs/examples/singleview_baseline.json

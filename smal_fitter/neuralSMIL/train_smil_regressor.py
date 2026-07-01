@@ -27,19 +27,16 @@ from tqdm import tqdm
 from scipy.spatial.transform import Rotation
 import imageio
 
-# Add the parent directories to the path to import modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
-from smil_datasets import UnifiedSMILDataset
-from optimized_dataset import OptimizedSMILDataset
-from smal_fitter import SMALFitter
-from Unreal2Pytorch3D import return_placeholder_data
+from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
+from smal_fitter.neuralSMIL.smil_datasets import UnifiedSMILDataset
+from smal_fitter.neuralSMIL.optimized_dataset import OptimizedSMILDataset
+from smal_fitter.fitter import SMALFitter
+from smal_fitter.Unreal2Pytorch3D import return_placeholder_data
 import config
-from training_config import TrainingConfig
-from configs import SingleViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
-from memory_optimization import MemoryOptimizer, recommend_training_config, MixedPrecisionTrainer
+from smal_fitter.neuralSMIL.training_config import TrainingConfig
+from smal_fitter.neuralSMIL.configs import SingleViewConfig, load_config, save_config_json, apply_smal_file_override, ConfigurationError
+from smal_fitter.neuralSMIL.memory_optimization import MemoryOptimizer, recommend_training_config, MixedPrecisionTrainer
 
 # UnifiedSMILDataset.from_path now dispatches to SLEAPDataset / SLEAPMultiViewDataset
 # directly based on HDF5 /metadata attrs — no monkey-patch required.
@@ -310,7 +307,7 @@ def extract_target_parameters(y_data, device, scale_trans_mode='separate'):
         # For entangled mode, we still need to compute the per-joint values
         # but we'll use the same betas for all three PCA spaces
         if y_data['scale_weights'] is not None and y_data['trans_weights'] is not None:
-            from Unreal2Pytorch3D import sample_pca_transforms_from_dirs
+            from smal_fitter.Unreal2Pytorch3D import sample_pca_transforms_from_dirs
             translation_out, scale_out = sample_pca_transforms_from_dirs(
                 config.dd, y_data['scale_weights'], y_data['trans_weights']
             )
@@ -1335,7 +1332,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             print("MULTI-DATASET TRAINING MODE ENABLED")
             print("="*70)
         
-        from combined_dataset import CombinedSMILDataset
+        from smal_fitter.neuralSMIL.combined_dataset import CombinedSMILDataset
         
         # Get enabled dataset configurations
         dataset_configs = TrainingConfig.get_enabled_datasets()
@@ -1391,7 +1388,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         
         # Check if SLEAP dataset support is available
         try:
-            from sleap_data.sleap_dataset import SLEAPDataset
+            from smal_fitter.sleap_data.sleap_dataset import SLEAPDataset
             sleap_available = True
         except ImportError:
             sleap_available = False
@@ -1541,7 +1538,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         print(f"Using backbone: {model_config['backbone_name']}")
     
     # Determine appropriate input resolution based on backbone
-    from backbone_factory import BackboneFactory
+    from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
     input_resolution = model_config.get(
         'input_resolution',
         BackboneFactory.get_default_input_resolution(model_config['backbone_name'])

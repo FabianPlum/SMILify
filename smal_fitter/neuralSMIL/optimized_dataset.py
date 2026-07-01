@@ -14,9 +14,6 @@ import cv2
 from typing import Dict, Tuple, Any, Optional
 import threading
 
-# Add paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
 class OptimizedSMILDataset(torch.utils.data.Dataset):

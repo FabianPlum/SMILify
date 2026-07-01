@@ -81,10 +81,10 @@ The `MultiViewSMILImageRegressor` adds:
 
 ## Quick Start
 
-> Run these from `smal_fitter/neuralSMIL/` so the `configs/examples/...` paths resolve. The
+> Run these as modules **from the repo root** (e.g. `python -m smal_fitter.neuralSMIL.train_smil_regressor ...`)
+> so the `smal_fitter/neuralSMIL/configs/examples/...` paths resolve. The
 > dataset / `smal_file` paths *inside* a JSON config are resolved relative to your working
-> directory — use paths that exist from where you launch, or absolute paths. (Module imports
-> work from any directory: the scripts add `smal_fitter/` to `sys.path` via `__file__`.)
+> directory — use paths that exist from where you launch, or absolute paths.
 
 ### 1. Dataset Preprocessing (Recommended)
 
@@ -92,15 +92,15 @@ The `MultiViewSMILImageRegressor` adds:
 
 ```bash
 # Basic preprocessing
-python dataset_preprocessing.py input_dataset/ optimized_dataset.h5
+python -m smal_fitter.neuralSMIL.dataset_preprocessing input_dataset/ optimized_dataset.h5
 
 # With custom SMAL model (required when not using default)
-python dataset_preprocessing.py input_dataset/ output.h5 \
+python -m smal_fitter.neuralSMIL.dataset_preprocessing input_dataset/ output.h5 \
     --smal-file "3D_model_prep/SMILy_Mouse.pkl"
 ```
 
 > **Multi-view (SLEAP) datasets use a different toolchain.** Build a multi-view HDF5 with the
-> SLEAP scripts in `../sleap_data/` (run from `smal_fitter/`): `preprocess_sleap_multiview_dataset.py`,
+> SLEAP scripts in `../sleap_data/` (run as modules from the repo root): `preprocess_sleap_multiview_dataset.py`,
 > then `generate_reprojections.py` / `refine_camera_params.py` as needed. See the root README
 > "Dataset preprocessing" section.
 
@@ -108,32 +108,32 @@ python dataset_preprocessing.py input_dataset/ output.h5 \
 
 ```bash
 # With JSON config (recommended)
-python train_smil_regressor.py --config configs/examples/singleview_baseline.json
+python -m smal_fitter.neuralSMIL.train_smil_regressor --config smal_fitter/neuralSMIL/configs/examples/singleview_baseline.json
 
 # CLI overrides on top of JSON config
-python train_smil_regressor.py \
-    --config configs/examples/singleview_baseline.json \
+python -m smal_fitter.neuralSMIL.train_smil_regressor \
+    --config smal_fitter/neuralSMIL/configs/examples/singleview_baseline.json \
     --batch_size 4 \
     --num_epochs 500
 
 # Legacy (no config file — uses training_config.py defaults)
-python train_smil_regressor.py --data_path optimized_dataset.h5 --batch_size 8
+python -m smal_fitter.neuralSMIL.train_smil_regressor --data_path optimized_dataset.h5 --batch_size 8
 ```
 
 ### 3. Multi-View Training
 
 ```bash
 # With JSON config (recommended)
-python train_multiview_regressor.py --config configs/examples/multiview_sticks.json
+python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/multiview_sticks.json
 
 # JSON config with CLI dataset override
-python train_multiview_regressor.py \
-    --config configs/examples/multiview_sticks.json \
+python -m smal_fitter.neuralSMIL.train_multiview_regressor \
+    --config smal_fitter/neuralSMIL/configs/examples/multiview_sticks.json \
     --dataset_path /path/to/other_dataset.h5
 
 # Distributed training (single node, 4 GPUs)
-torchrun --nproc_per_node=4 train_multiview_regressor.py \
-    --config configs/examples/multiview_sticks.json
+torchrun --nproc_per_node=4 -m smal_fitter.neuralSMIL.train_multiview_regressor \
+    --config smal_fitter/neuralSMIL/configs/examples/multiview_sticks.json
 
 # SLURM / multi-node: set RANK, LOCAL_RANK, WORLD_SIZE, MASTER_ADDR, MASTER_PORT
 # before running — torchrun or the SLURM launcher sets these automatically
@@ -144,7 +144,7 @@ torchrun --nproc_per_node=4 train_multiview_regressor.py \
 **Multi-view** — `--dataset` is **required**; `--checkpoint` defaults to auto-detect from `multiview_checkpoints/`:
 
 ```bash
-python run_multiview_inference.py \
+python -m smal_fitter.neuralSMIL.run_multiview_inference \
     --dataset path/to/sleap_dataset.h5 \
     --checkpoint multiview_checkpoints/best_model.pth
 
@@ -155,7 +155,7 @@ python run_multiview_inference.py \
 **Single-view** — folder of images (`--input_folder`) or a video (`--input_video`):
 
 ```bash
-python run_singleview_inference.py \
+python -m smal_fitter.neuralSMIL.run_singleview_inference \
     --checkpoint checkpoints/best_model.pth \
     --input_folder path/to/images/ \
     --output_folder inference_out/
@@ -165,10 +165,10 @@ python run_singleview_inference.py \
 
 ```bash
 # The 3D-keypoint test runs by default; pass --no-3d-keypoint-test to skip it
-python test_smil_regressor_ground_truth.py
+python -m smal_fitter.neuralSMIL.test_smil_regressor_ground_truth
 
 # With custom SMAL model
-python test_smil_regressor_ground_truth.py --smal-file "3D_model_prep/SMILy_Mouse.pkl"
+python -m smal_fitter.neuralSMIL.test_smil_regressor_ground_truth --smal-file "3D_model_prep/SMILy_Mouse.pkl"
 ```
 
 ## Configuration System
@@ -273,8 +273,8 @@ A CLI override exists only on the non-training entrypoints (note the inconsisten
 
 | Mode | How | Notes |
 |------|-----|-------|
-| **Single GPU** | `python train_multiview_regressor.py ...` | Default; `--num_gpus 1` |
-| **Single-node multi-GPU** | `torchrun --nproc_per_node=N ...` or `--num_gpus N` | `mp.spawn` fallback if torchrun not detected |
+| **Single GPU** | `python -m smal_fitter.neuralSMIL.train_multiview_regressor ...` | Default; `--num_gpus 1` |
+| **Single-node multi-GPU** | `torchrun --nproc_per_node=N -m smal_fitter.neuralSMIL.train_multiview_regressor ...` or `--num_gpus N` | `mp.spawn` fallback if torchrun not detected |
 | **Multi-node** | `torchrun` / SLURM with `RANK`, `LOCAL_RANK`, `WORLD_SIZE`, `MASTER_ADDR` env vars | IPv4-only TCP store to avoid IPv6 issues on HPC |
 
 A DDP barrier is inserted after each epoch's checkpointing and visualization to prevent rank desynchronization.

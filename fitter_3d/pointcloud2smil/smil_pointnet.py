@@ -29,8 +29,6 @@ from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.structures import Meshes
 from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, rotation_6d_to_matrix, matrix_to_rotation_6d
 
-# Add the parent directory to the path to import modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import config
 from fitter_3d.pointcloud2smil.sample_smil_model import load_smil_model, generate_random_parameters

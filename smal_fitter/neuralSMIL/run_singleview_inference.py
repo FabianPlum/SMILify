@@ -46,16 +46,13 @@ import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
-# Add the parent directories to the path to import modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
-from training_config import TrainingConfig
-from smal_fitter import SMALFitter
-from Unreal2Pytorch3D import return_placeholder_data
+from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
+from smal_fitter.neuralSMIL.training_config import TrainingConfig
+from smal_fitter.fitter import SMALFitter
+from smal_fitter.Unreal2Pytorch3D import return_placeholder_data
 import config
-from animation_export import AnimationRecorder, build_recorder_from_config
+from smal_fitter.neuralSMIL.animation_export import AnimationRecorder, build_recorder_from_config
 from sleap_data_loader import SLEAPDataLoader
 import importlib.util
 import importlib
@@ -393,7 +390,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
         # If the checkpoint specifies a SMAL/SMIL model file, re-derive
         # config.dd, N_POSE, N_BETAS, joint_names, etc. from that file.
         if ckpt_config and ckpt_config.get("smal_file"):
-            from configs import apply_smal_file_override
+            from smal_fitter.neuralSMIL.configs import apply_smal_file_override
             apply_smal_file_override(
                 ckpt_config["smal_file"],
                 shape_family=shape_family,
@@ -462,7 +459,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
         placeholder_data = torch.zeros((batch_size, 3, 512, 512))
         
         # Determine input resolution from the centralized backbone factory
-        from backbone_factory import BackboneFactory
+        from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
         input_resolution = BackboneFactory.get_default_input_resolution(model_config['backbone_name'])
         
         print(f"Creating model with input resolution: {input_resolution}")

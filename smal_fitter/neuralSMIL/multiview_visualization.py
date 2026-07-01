@@ -13,7 +13,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-from smil_image_regressor import rotation_6d_to_axis_angle
+from smal_fitter.neuralSMIL.smil_image_regressor import rotation_6d_to_axis_angle
 
 
 def run_forward_multiview_single_sample(model,
@@ -315,7 +315,7 @@ def print_joint_scale_diagnostics(model, predicted_params: dict, label: str = ""
         return
     try:
         import config
-        from training_config import TrainingConfig
+        from smal_fitter.neuralSMIL.training_config import TrainingConfig
 
         scale_trans_config = TrainingConfig.get_scale_trans_config()
         use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)

@@ -17,12 +17,10 @@ warnings.filterwarnings("ignore", message=".*torch.sparse.SparseTensor.*")
 # Add the parent directory to the Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
 
 # add correct paths
 if os.getcwd().endswith('fitter_3d'):  # if starting in fitter_3d dir
 	os.chdir('../')
-	sys.path.append('fitter_3d')
 
 from fitter_3d.utils import load_meshes
 from fitter_3d.trainer import Stage, StageManager, SMALParamGroup, SMAL3DFitter

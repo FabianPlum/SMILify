@@ -5,11 +5,9 @@ import numpy as np
 
 # Add the parent directories to the path to import modules
 # not very pretty, but it works.
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from smil_datasets import replicAntSMILDataset
-from smil_image_regressor import SMILImageRegressor
+from smal_fitter.neuralSMIL.smil_datasets import replicAntSMILDataset
+from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
 import config
 
 

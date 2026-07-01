@@ -18,12 +18,9 @@ import argparse
 import time
 from pathlib import Path
 
-# Add paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from smil_datasets import UnifiedSMILDataset
-from training_config import TrainingConfig
+from smal_fitter.neuralSMIL.smil_datasets import UnifiedSMILDataset
+from smal_fitter.neuralSMIL.training_config import TrainingConfig
 
 
 def validate_input_directory(input_dir: str) -> bool:
@@ -266,7 +263,7 @@ Examples:
         # Validate output if requested
         if args.validate:
             print("\nValidating output dataset...")
-            from optimized_dataset import HDF5DatasetValidator
+            from smal_fitter.neuralSMIL.optimized_dataset import HDF5DatasetValidator
             
             validator = HDF5DatasetValidator(args.output_path)
             validation_summary = validator.validate_dataset(num_samples=min(10, stats['final_samples']))

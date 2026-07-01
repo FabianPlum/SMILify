@@ -60,8 +60,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers 3D projection)
 # Single source of truth for the canonical-frame transform — used by the
 # merger and by future SLEAP-preprocessor refactor work too.
 _THIS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(_THIS_DIR.parent))  # smal_fitter/ on path
-from multiview_common.canonical_frame import (
+from smal_fitter.multiview_common.canonical_frame import (
     canonicalize_sample,
     cam_center_world,
     kp2d_norm_yx_to_pixel_xy,

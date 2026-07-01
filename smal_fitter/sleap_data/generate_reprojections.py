@@ -30,8 +30,7 @@ import h5py
 import numpy as np
 
 # Re-use helpers from the triangulation script
-sys.path.insert(0, os.path.dirname(__file__))
-from triangulate_3d_points import load_calibration, generate_reprojections_h5
+from smal_fitter.sleap_data.triangulate_3d_points import load_calibration, generate_reprojections_h5
 
 
 def main():

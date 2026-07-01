@@ -14,9 +14,6 @@ from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
 import sys
 
-# Add paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
 

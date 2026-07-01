@@ -72,7 +72,7 @@ class ModelConfig:
         """Return input resolution, auto-detecting from backbone if not set."""
         if self.input_resolution is not None:
             return self.input_resolution
-        from backbone_factory import BackboneFactory
+        from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
         return BackboneFactory.get_default_input_resolution(self.backbone_name)
 
     def validate(self):

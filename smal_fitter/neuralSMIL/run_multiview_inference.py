@@ -39,9 +39,6 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import timedelta
 
-# Ensure project root and neuralSMIL dir are on sys.path (needed for mp.spawn)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import numpy as np
 import cv2
@@ -51,14 +48,14 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 
-from multiview_smil_regressor import create_multiview_regressor, MultiViewSMILImageRegressor
-from smil_image_regressor import rotation_6d_to_axis_angle
-from smal_fitter import SMALFitter
-from sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
-from configs import apply_smal_file_override
+from smal_fitter.neuralSMIL.multiview_smil_regressor import create_multiview_regressor, MultiViewSMILImageRegressor
+from smal_fitter.neuralSMIL.smil_image_regressor import rotation_6d_to_axis_angle
+from smal_fitter.fitter import SMALFitter
+from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+from smal_fitter.neuralSMIL.configs import apply_smal_file_override
 import config
-from animation_export import build_recorder_from_config, build_multiview_cameras
-from multiview_visualization import (
+from smal_fitter.neuralSMIL.animation_export import build_recorder_from_config, build_multiview_cameras
+from smal_fitter.neuralSMIL.multiview_visualization import (
     compute_multiview_grid_layout,
     create_multiview_visualization,
 )
@@ -388,7 +385,7 @@ def load_multiview_model_from_checkpoint(checkpoint_path: Path,
     print(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
     print(f"Note: Model can handle samples with fewer views than max_views via view_mask")
 
-    from backbone_factory import BackboneFactory
+    from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
     input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
     model = create_multiview_regressor(
@@ -582,7 +579,7 @@ def render_singleview_collage(model: MultiViewSMILImageRegressor,
             pass
         elif model.scale_trans_mode == "separate":
             # 'separate' mode: check if using PCA or per-joint values
-            from training_config import TrainingConfig
+            from smal_fitter.neuralSMIL.training_config import TrainingConfig
             scale_trans_config = TrainingConfig.get_scale_trans_config()
             use_pca_transformation = scale_trans_config.get('separate', {}).get('use_pca_transformation', True)
             

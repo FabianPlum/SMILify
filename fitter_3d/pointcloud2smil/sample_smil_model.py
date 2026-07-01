@@ -9,8 +9,6 @@ from pytorch3d.structures import Meshes
 from pytorch3d.ops import sample_points_from_meshes
 import argparse
 
-# Add the parent directory to the path to import modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import config
 from fitter_3d.trainer import SMAL3DFitter
