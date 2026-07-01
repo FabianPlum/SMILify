@@ -1436,7 +1436,9 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
 
         # Check if SLEAP dataset support is available
         try:
-            from smal_fitter.sleap_data.sleap_dataset import SLEAPDataset
+            # noqa: F401 — import used only as an availability probe (its success
+            # sets sleap_available); SLEAPDataset itself is intentionally unused here.
+            from smal_fitter.sleap_data.sleap_dataset import SLEAPDataset  # noqa: F401
 
             sleap_available = True
         except ImportError:
