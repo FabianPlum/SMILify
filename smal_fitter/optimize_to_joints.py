@@ -2,6 +2,13 @@
 import sys, os
 sys.path.append(os.path.dirname(sys.path[0]))
 
+# Set CUDA device visibility BEFORE importing torch: torch >= 2.3 raises an INTERNAL
+# ASSERT ("device >= 0 && device < num_gpus") if CUDA_VISIBLE_DEVICES is changed after
+# CUDA has been initialized. config.py imports no torch, so this is safe here.
+import config
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
+
 import numpy as np
 import cv2
 import argparse
@@ -63,8 +70,7 @@ def main():
         from tests import config_test as config
     else:
         import config
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
+    # CUDA_VISIBLE_DEVICES is set at the top of this file, before torch is imported.
 
     if not os.path.exists(config.OUTPUT_DIR):
         os.makedirs(config.OUTPUT_DIR)
