@@ -7,6 +7,8 @@ quadruped model.
 
 For now, I'll focus on insects, hence **SMIL**.
 
+> **New here?** Start with the **[Getting Started guide](GETTING_STARTED.md)** — a step-by-step walkthrough from a fresh clone to (1) installing SMILify, (2) benchmarking a model on an example dataset, and (3) training your own from scratch. The sections below are the full reference.
+
 ## Neural Inference Examples
 
 Multi-view 3D reconstruction using neural inference:
@@ -20,49 +22,71 @@ Example 18 camera inference results, using a newly developed [parametric mouse m
 Example 4-5 camera inference results with a model trained on data collected from an Omni-Directional Treadmill (ODT) using a [parametric multi species stick insect model](3D_model_prep/SMILy_STICK.pkl) configured with the [Blender SMIL Addon](3D_model_prep/SMIL_processing_addon.py).
 
 
+## Repository structure
+
+| Path | What lives here |
+|---|---|
+| [`smal_fitter/neuralSMIL/`](smal_fitter/neuralSMIL/) | **Neural inference** — learned regressors that predict SMIL parameters from images (single- and multi-view). Training, inference and benchmarking entrypoints live here. |
+| [`smal_fitter/smal_fitter.py`](smal_fitter/smal_fitter.py) | **Optimization-based fitting** (`SMALFitter`, an `nn.Module`) — see *Architecture* below. |
+| [`smal_fitter/sleap_data/`](smal_fitter/sleap_data/) | SLEAP multi-view preprocessing toolchain + dataset loaders. |
+| [`smal_model/`](smal_model/) | The SMAL/SMIL parametric model (differentiable linear-blend skinning). |
+| [`fitter_3d/`](fitter_3d/) | 3D **mesh registration** — fits a template model to target `.obj` meshes (used when building new parametric models). |
+| [`3D_model_prep/`](3D_model_prep/) | Blender files + the SMIL addon for creating/editing parametric `.pkl` models. |
+| [`custom_processing/`](custom_processing/) | Model-preprocessing helpers (mesh registration, beta regressors). |
+| [`config.py`](config.py) | Legacy root config — still required by `fitter_3d` and `optimize_to_joints.py`. |
+| [`legacy/`](legacy/) | The deprecated SMALify-derived optimization workflow (see [legacy/README.md](legacy/README.md)). |
+| [`tests/`](tests/) | Pytest suite (see [tests/README.md](tests/README.md)). |
+
+## Architecture: two fitting approaches
+
+SMILify fits the same `smal_model` (SMAL/SMIL parametric model) in two ways:
+
+1. **Neural inference** ([`smal_fitter/neuralSMIL/`](smal_fitter/neuralSMIL/)) — learned regressors predict SMIL parameters (pose, shape, translation, cameras) directly from RGB images, single- or multi-view. This is the primary, actively-developed path; everything from *Dataset preprocessing* onward in this README describes it. See [smal_fitter/neuralSMIL/README.md](smal_fitter/neuralSMIL/README.md).
+2. **Optimization-based fitting** ([`smal_fitter/smal_fitter.py`](smal_fitter/smal_fitter.py), class `SMALFitter`) — an `nn.Module` that optimizes per-frame pose, shape (betas), translation and FOV by gradient descent against 2D-joint reprojection, silhouette and prior losses. Driven by the root [`config.py`](config.py); see [legacy/README.md](legacy/README.md). The related 3D **mesh registration** in [`fitter_3d/`](fitter_3d/) is the optimization pipeline used to author new parametric models.
+
+New parametric models are authored in Blender via the SMIL addon — see *Adding new parametric models* below.
+
+
 ## Installation
-1. Clone the repository **with submodules** and enter directory
-   ```
-   git clone https://github.com/FabianPlum/SMILify
-   ```
-   Note: If you don't clone with submodules you won't get the sample data from BADJA/StanfordExtra/SMALST.
+The conda environment is defined in [environment.yml](environment.yml). The recommended stack is Python 3.10 / **PyTorch 2.3.1** / pytorch-cuda 11.8 / **PyTorch3D 0.7.8** — confirmed on Windows 11 and the run.ai Linux cluster (PyTorch3D ships a `cu118_pyt231` build, so it installs cleanly against torch 2.3.1 on Linux). An older PyTorch 2.1.1 / PyTorch3D 0.7.7 stack also works if you prefer it.
 
-2. install pytorch (and Co.)
+1. **Clone with submodules.** The sample data for the legacy quadruped path (BADJA / StanfordExtra / SMALST) come in as git submodules:
+   ```bash
+   git clone --recurse-submodules https://github.com/FabianPlum/SMILify
+   cd SMILify
    ```
-   conda create -n pytorch3d python=3.10
+   (Already cloned without them? Run `git submodule update --init --recursive`.)
+
+2. **Create the environment** (recommended):
+   ```bash
+   conda env create -f environment.yml
    conda activate pytorch3d
-   conda install pytorch=2.3.1 torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
-   conda install -c conda-forge -c fvcore iopath ninja imageio scikit-image
-   pip install yacs pycocotools
-   pip install --upgrade iopath
    ```
 
-3. clone pytorch3d and install (WINDOWS)
-   
-   **NOTE**: I've never gotten this to work properly on Windows. I'd recommend using [WSL2](https://learn.microsoft.com/en-us/windows/wsl/) or making an Ubuntu partition.
-   If by what ever dark magic you posess you manage to run this on Win11, please open a PR and share your arcane wisdom.
+3. **Test your installation:**
+   ```bash
+   pytest tests/ -m "not slow" --continue-on-collection-errors
    ```
-   git clone https://github.com/facebookresearch/pytorch3d.git
-   cd pytorch3d
-   pip install -e .
-   cd ..
-   ```
-   
-   on LINUX just run
-   ```
-   conda install pytorch3d -c pytorch3d
-   ```
+   (See [tests/README.md](tests/README.md) — a couple of modules currently error on import while the test harness is being repaired.)
 
-4. some more dependencies
-   ```
-   pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psutil pandas toml
-   ```
-   (`pandas` and `toml` are required by `smal_fitter/sleap_data/` — needed whenever you run the multi-view training or inference scripts.)
-   
-5. Test your installation
-   ```
-   pytest tests/ -v -s
-   ```
+> On an HPC cluster you can instead run [`hpc_files/install.sh`](hpc_files/install.sh), which performs the same conda setup end-to-end (supports `--skip-tests` and a configurable `ENV_NAME`).
+
+<details>
+<summary><b>Manual / Windows setup</b> (alternative to <code>environment.yml</code>)</summary>
+
+PyTorch3D has no reliable prebuilt Windows conda package — on Windows I'd recommend using [WSL2](https://learn.microsoft.com/en-us/windows/wsl/) or making an Ubuntu partition. If by whatever dark magic you possess you manage to run this on Win11, please open a PR and share your arcane wisdom.
+
+```bash
+conda create -n pytorch3d python=3.10
+conda activate pytorch3d
+# recommended: torch 2.3.1 (Linux + Windows); 2.1.1 also works
+conda install pytorch=2.3.1 torchvision pytorch-cuda=11.8 -c pytorch -c nvidia
+conda install -c conda-forge -c fvcore iopath ninja imageio scikit-image
+conda install pytorch3d -c pytorch3d          # Linux; on Windows build pytorch3d from source
+pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psutil pandas toml pycocotools
+```
+(`pandas` and `toml` are needed by `smal_fitter/sleap_data/` for the multi-view scripts.)
+</details>
 
 ## Dataset preprocessing
 
@@ -148,8 +172,8 @@ python smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py \
 | `--max_frames_per_session` | all | Cap frames per session (useful for quick tests) |
 | `--frame_skip` | 1 | Use every Nth synchronised frame |
 | `--min_views` | 2 | Minimum camera views required per sample |
-| `--crop_mode` | `default` | `default` · `centred` · `bbox_crop` |
-| `--target_resolution` | 224 | Output image resolution in pixels |
+| `--crop_mode` | `centred` | `default` · `centred` · `bbox_crop` |
+| `--resolution` | _(backbone)_ | Output image resolution; overrides the backbone's default (e.g. 224 for ViT). `--target_resolution` is a deprecated alias. |
 | `--no_3d_data` | False | Skip loading 3D keypoints and camera parameters |
 | `--no_undistort` | False | Skip lens-distortion correction |
 | `--confidence_threshold` | 0.5 | Minimum SLEAP keypoint confidence to mark as visible |
@@ -159,7 +183,7 @@ For the **single-view** case use `preprocess_sleap_dataset.py` with the same `se
 ## Training
 
 Training is driven by [smal_fitter/neuralSMIL/train_multiview_regressor.py](smal_fitter/neuralSMIL/train_multiview_regressor.py).
-Everything — model, dataset, optimiser, loss curriculum, output paths — is configured through a single JSON file (see [smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json](smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json) for an annotated example).
+Everything — model, dataset, optimiser, loss curriculum, output paths — is configured through a single JSON file (see [configs/README.md](smal_fitter/neuralSMIL/configs/README.md) for the documented fields, and [multiview_baseline.json](smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json) for a full example).
 In practice the only CLI argument you usually need is `--num_gpus` to match the hardware available on your system:
 
 ```bash
@@ -183,6 +207,8 @@ torchrun --nproc_per_node=4 smal_fitter/neuralSMIL/train_multiview_regressor.py 
     --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json
 ```
 
+> For **single-view** training use `train_smil_regressor.py` (same JSON-config system); see [smal_fitter/neuralSMIL/README.md](smal_fitter/neuralSMIL/README.md).
+
 ### Config file structure
 
 | Section | Key fields | Purpose |
@@ -197,6 +223,8 @@ torchrun --nproc_per_node=4 smal_fitter/neuralSMIL/train_multiview_regressor.py 
 | `joint_importance` | `important_joint_names`, `weight_multiplier` | Boost loss weight for specific joints |
 
 `loss_curriculum` is the most important section to tune: `base_weights` sets initial loss weights and `curriculum_stages` steps them at given epoch boundaries — e.g. 2D keypoint supervision early on, then gradually introducing 3D supervision once a rough pose is established.
+
+Every config must declare `"mode": "singleview"` or `"mode": "multiview"`. Values resolve by precedence **CLI args > JSON file > built-in defaults**; see [configs/README.md](smal_fitter/neuralSMIL/configs/README.md) for the full schema.
 
 ## Inference
 
@@ -213,7 +241,7 @@ python smal_fitter/neuralSMIL/run_multiview_inference.py \
 ```
 
 The script writes two output videos to the working directory:
-- `<dataset>_multiview_inference.mp4` — side-by-side grid of input frames and predicted mesh overlays for all camera views
+- `<dataset>_multiview_inference.avi` — side-by-side grid of input frames and predicted mesh overlays for all camera views (AVI / MJPG)
 - `<dataset>_singleview_inference.mp4` — full mesh render for the first camera (use `--view_indices` to change or add views)
 
 Key arguments:
@@ -271,8 +299,11 @@ The model type is **auto-detected** from the checkpoint — no flag needed:
 python smal_fitter/neuralSMIL/benchmark_model.py \
     --checkpoint multiview_checkpoints/best_model.pth \
     --dataset_path output_dataset.h5 \
-    --smal-file 3D_model_prep/SMILy_STICK.pkl
+    --smal-file 3D_model_prep/SMILy_STICK.pkl \
+    --orig_width 1530 --orig_height 1530
 ```
+
+> **Set `--orig_width` / `--orig_height` to the dataset's original capture resolution** (both required together) so PCK@Npx is scored in original-image pixels rather than the preprocessed size. E.g. the stick-insect dataset is 1530 px square → `--orig_width 1530 --orig_height 1530`; use your own dataset's resolution otherwise.
 
 **Metrics reported:**
 
@@ -283,7 +314,7 @@ python smal_fitter/neuralSMIL/benchmark_model.py \
 | MPJPE (mm) | — | yes (when 3D GT available) |
 | MPJPE percentiles (P50–P99) | — | yes |
 
-**Output files** are written to `benchmark_{model_type}_{checkpoint}_{dataset}/`:
+**Output files** are written to `benchmark_{model_type}_{checkpoint}_on_{dataset}/`:
 
 | File | Description |
 |---|---|
@@ -302,7 +333,7 @@ python smal_fitter/neuralSMIL/benchmark_model.py \
 | `--dataset_path` | _(required)_ | Path to preprocessed `.h5` dataset |
 | `--smal-file` | _(checkpoint)_ | SMIL/SMAL model `.pkl` (required if not stored in checkpoint) |
 | `--device` | auto | Force device, e.g. `cuda:0` or `cpu` |
-| `--orig_width` / `--orig_height` | _(dataset)_ | Override image size used for pixel-space PCK scaling |
+| `--orig_width` / `--orig_height` | _(dataset)_ | Original capture resolution for pixel-space PCK scaling; **pass both** (e.g. `1530` / `1530` for the stick dataset). |
 
 ## Adding new parametric models
 
@@ -337,7 +368,7 @@ When registered meshes span multiple species or size classes, raw shape PCA conf
 
 <img src="docs/Auto-aligned_ant_shape_vs_scale_variation_disentanglement.png" width="800">
 
-The disentangled components are exported as part of the `.pkl` model file and are automatically picked up by the fitting and neural inference pipelines when present.
+The disentangled components are exported as part of the `.pkl` model file and are picked up by the **neural inference** pipeline when present. (The optimization fitter uses per-joint scale/translation parameters and does not consume `scaledirs`/`transdirs` directly.)
 
 ____________________________________
 ## Code refactor TODOs 
