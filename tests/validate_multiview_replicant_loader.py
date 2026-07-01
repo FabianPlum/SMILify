@@ -58,6 +58,7 @@ def _early_parse():
 _early = _early_parse()
 if _early.smal_file:
     from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override  # noqa: E402
+
     apply_smal_file_override(_early.smal_file, shape_family=_early.shape_family)
 
 import config  # noqa: E402
@@ -85,6 +86,7 @@ def _lazy_render_imports():
     from smal_fitter.fitter import SMALFitter as _SF  # noqa: F401
     from smal_fitter.optimize_to_joints import ImageExporter as _IE  # noqa: F401
     from scipy.spatial.transform import Rotation as _R  # noqa: F401
+
     _TORCH = _t
     _SMALFitter = _SF
     _ImageExporter = _IE
@@ -154,9 +156,7 @@ def load_per_camera(dataset_path: Path, dataset_name: str, frame_index: int, cam
             kp2d[i] = [p2["x"], p2["y"]]
 
     R, t = parse_projection_components(cam_data)
-    cx, cy, fx, fy = parse_camera_intrinsics(
-        batch_data_file=batch_data_file, iteration_data_file=cam_data
-    )
+    cx, cy, fx, fy = parse_camera_intrinsics(batch_data_file=batch_data_file, iteration_data_file=cam_data)
 
     image_path = json_path.with_suffix(".JPG")
     img = imageio.imread(image_path) if image_path.exists() else None
@@ -185,8 +185,9 @@ def report_joint_name_overlap(dataset_names, model_names):
     print("\n--- Joint name overlap (dataset vs. loaded SMAL model J_names) ---")
     print(f"  Dataset joints: {len(ds)}")
     print(f"  Model J_names:  {len(md)}")
-    print(f"  Overlap:        {len(overlap)}/{max(len(ds), len(md))}  "
-          f"(perfect-match needs both numbers to equal overlap)")
+    print(
+        f"  Overlap:        {len(overlap)}/{max(len(ds), len(md))}  (perfect-match needs both numbers to equal overlap)"
+    )
     if ds_only:
         print(f"  Dataset-only ({len(ds_only)}): {ds_only}")
     if md_only:
@@ -203,9 +204,7 @@ def _build_model_world_rotation(pose_data, root_key):
     single-view path at Unreal2Pytorch3D.py:998-1008.
     """
     grot = pose_data[root_key]["globalRotation"]
-    rot_model_ue = _R_scipy.from_quat(
-        [-grot["x"], -grot["y"], -grot["z"], grot["w"]], scalar_first=False
-    )
+    rot_model_ue = _R_scipy.from_quat([-grot["x"], -grot["y"], -grot["z"], grot["w"]], scalar_first=False)
     R_model_ue = rot_model_ue.as_matrix().astype(np.float32)
     return MIRROR_MAT @ R_model_ue @ MIRROR_MAT.T
 
@@ -223,8 +222,7 @@ def _reparameterize_view(R_model_p3d, t_model_p3d, R_v, T_v):
     return R_new, T_new
 
 
-def render_per_view(dataset_path, frame_index, output_dir,
-                    canonical_frame=True, label="canonical"):
+def render_per_view(dataset_path, frame_index, output_dir, canonical_frame=True, label="canonical"):
     """Mirror Render_SMAL_Model_from_Unreal_data for each view, write a grid PNG.
 
     Strategy: load multi-view data, derive the shared model-world transform,
@@ -305,6 +303,7 @@ def render_per_view(dataset_path, frame_index, output_dir,
 
             print(f"  CAM{cam_id}: rendering ...", flush=True)
             from smal_fitter.Unreal2Pytorch3D import Render_SMAL_Model_from_Unreal_data
+
             try:
                 Render_SMAL_Model_from_Unreal_data(x_v, y_v, device, verbose=False)
             except Exception as e:
@@ -387,11 +386,12 @@ def compare_frames_test(dataset_path, frame_index, output_dir, per_camera, cam_i
     # Also check raw == canonical-world-recovery on the camera extrinsics
     R_v0_raw = y_raw["cam_rot_per_view"][0].numpy()
     R_v0_can = y_can["cam_rot_per_view"][0].numpy()
-    print(f"  cam[0] R should be identity in canonical frame: "
-          f"max |R_v0_can - I| = {np.max(np.abs(R_v0_can - np.eye(3))):.3e}")
+    print(
+        f"  cam[0] R should be identity in canonical frame: "
+        f"max |R_v0_can - I| = {np.max(np.abs(R_v0_can - np.eye(3))):.3e}"
+    )
     t_v0_can = y_can["cam_trans_per_view"][0].numpy()
-    print(f"  cam[0] t should be zero in canonical frame:     "
-          f"max |t_v0_can| = {np.max(np.abs(t_v0_can)):.3e}")
+    print(f"  cam[0] t should be zero in canonical frame:     max |t_v0_can| = {np.max(np.abs(t_v0_can)):.3e}")
 
     # 2. Reprojection check in both frames, using the loader's stored
     #    cam_rot_per_view / cam_trans_per_view (row-vector,
@@ -408,8 +408,7 @@ def compare_frames_test(dataset_path, frame_index, output_dir, per_camera, cam_i
         return u, v, depth
 
     print("\n--- Loader-frame reprojection: raw vs canonical ---")
-    print(f"{'CAM':>5}  {'raw_mean':>10}  {'raw_max':>10}  "
-          f"{'can_mean':>10}  {'can_max':>10}")
+    print(f"{'CAM':>5}  {'raw_mean':>10}  {'raw_max':>10}  {'can_mean':>10}  {'can_max':>10}")
     for v, cid in enumerate(cam_ids):
         gt = per_camera[cid]["kp2d_pixels"]
         # Build a 2D-GT array indexed the same way as keypoints_3d (model J_names order).
@@ -426,36 +425,46 @@ def compare_frames_test(dataset_path, frame_index, output_dir, per_camera, cam_i
             y_raw["keypoints_3d_world"],
             y_raw["cam_rot_per_view"][v].numpy(),
             y_raw["cam_trans_per_view"][v].numpy(),
-            fx, fy, cx, cy,
+            fx,
+            fy,
+            cx,
+            cy,
         )
         u_c, v_c, d_c = _project_via_loader(
             y_can["keypoints_3d"],
             y_can["cam_rot_per_view"][v].numpy(),
             y_can["cam_trans_per_view"][v].numpy(),
-            fx, fy, cx, cy,
+            fx,
+            fy,
+            cx,
+            cy,
         )
 
         def _err(u, v, d):
             mask = valid & (d > 0)
             if not mask.any():
                 return float("nan"), float("nan")
-            e = np.sqrt((u[mask] - gt_mapped[mask, 0]) ** 2 +
-                        (v[mask] - gt_mapped[mask, 1]) ** 2)
+            e = np.sqrt((u[mask] - gt_mapped[mask, 0]) ** 2 + (v[mask] - gt_mapped[mask, 1]) ** 2)
             return float(e.mean()), float(e.max())
 
         raw_mean, raw_max = _err(u_r, v_r, d_r)
         can_mean, can_max = _err(u_c, v_c, d_c)
-        print(f"{cid:>5}  {raw_mean:>10.3f}  {raw_max:>10.3f}  "
-              f"{can_mean:>10.3f}  {can_max:>10.3f}")
+        print(f"{cid:>5}  {raw_mean:>10.3f}  {raw_max:>10.3f}  {can_mean:>10.3f}  {can_max:>10.3f}")
 
     # 3. Visual mesh renders, raw and canonical, side by side.
     raw_paths = render_per_view(
-        dataset_path, frame_index, output_dir,
-        canonical_frame=False, label="raw",
+        dataset_path,
+        frame_index,
+        output_dir,
+        canonical_frame=False,
+        label="raw",
     )
     can_paths = render_per_view(
-        dataset_path, frame_index, output_dir,
-        canonical_frame=True, label="canonical",
+        dataset_path,
+        frame_index,
+        output_dir,
+        canonical_frame=True,
+        label="canonical",
     )
 
     if not raw_paths or not can_paths:
@@ -475,8 +484,7 @@ def compare_frames_test(dataset_path, frame_index, output_dir, per_camera, cam_i
         axes[r, 1].set_title(f"CAM{cid}  CANONICAL frame")
         axes[r, 1].axis("off")
     fig.suptitle(
-        f"Frame {frame_index} — raw vs canonical SMAL render "
-        "(should be pixel-identical)",
+        f"Frame {frame_index} — raw vs canonical SMAL render (should be pixel-identical)",
         fontsize=12,
     )
     fig.tight_layout()
@@ -510,31 +518,24 @@ def _compute_posed_smal_joints(x_mv, y_mv, device):
     model = SMALFitter(device, data_json, config.WINDOW_SIZE, config.SHAPE_FAMILY, False)
     model.betas = torch.nn.Parameter(torch.Tensor(y_mv["shape_betas"]).to(device))
 
-    if ("scaledirs" in config.dd and "transdirs" in config.dd
-            and y_mv.get("scale_weights") is not None
-            and y_mv.get("trans_weights") is not None):
-        trans_out, scale_out = sample_pca_transforms_from_dirs(
-            config.dd, y_mv["scale_weights"], y_mv["trans_weights"]
-        )
-        model.log_beta_scales = torch.nn.Parameter(
-            torch.from_numpy(np.log(scale_out))[None, ...].float().to(device)
-        )
+    if (
+        "scaledirs" in config.dd
+        and "transdirs" in config.dd
+        and y_mv.get("scale_weights") is not None
+        and y_mv.get("trans_weights") is not None
+    ):
+        trans_out, scale_out = sample_pca_transforms_from_dirs(config.dd, y_mv["scale_weights"], y_mv["trans_weights"])
+        model.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.log(scale_out))[None, ...].float().to(device))
         model.betas_trans = torch.nn.Parameter(
             torch.from_numpy(trans_out * y_mv["translation_factor"])[None, ...].float().to(device)
         )
         model.propagate_scaling = y_mv["propagate_scaling"]
 
     model.joint_rotations = torch.nn.Parameter(
-        torch.Tensor(y_mv["joint_angles"][1:])
-        .reshape((1, y_mv["joint_angles"][1:].shape[0], 3))
-        .to(device)
+        torch.Tensor(y_mv["joint_angles"][1:]).reshape((1, y_mv["joint_angles"][1:].shape[0], 3)).to(device)
     )
-    model.global_rotation = torch.nn.Parameter(
-        torch.from_numpy(y_mv["root_rot"]).float().to(device).unsqueeze(0)
-    )
-    model.trans = torch.nn.Parameter(
-        torch.Tensor(np.array([y_mv["root_loc"]])).to(device)
-    )
+    model.global_rotation = torch.nn.Parameter(torch.from_numpy(y_mv["root_rot"]).float().to(device).unsqueeze(0))
+    model.trans = torch.nn.Parameter(torch.Tensor(np.array([y_mv["root_loc"]])).to(device))
 
     batch_params = {
         "global_rotation": model.global_rotation * model.global_mask,
@@ -543,22 +544,18 @@ def _compute_posed_smal_joints(x_mv, y_mv, device):
         "trans": model.trans,
     }
     if config.ignore_hardcoded_body:
-        batch_params["log_betascale"] = model.log_beta_scales.expand(
-            1, model.joint_rotations.shape[1] + 1, 3
-        ).to(device)
+        batch_params["log_betascale"] = model.log_beta_scales.expand(1, model.joint_rotations.shape[1] + 1, 3).to(
+            device
+        )
         if hasattr(model, "betas_trans"):
-            batch_params["betas_trans"] = model.betas_trans.expand(
-                1, model.joint_rotations.shape[1] + 1, 3
-            ).to(device)
+            batch_params["betas_trans"] = model.betas_trans.expand(1, model.joint_rotations.shape[1] + 1, 3).to(device)
     else:
         batch_params["log_betascale"] = model.log_beta_scales.expand(1, 6)
 
     with torch.no_grad():
         _, joints, _, _ = model.smal_model(
             batch_params["betas"],
-            torch.cat([
-                batch_params["global_rotation"].unsqueeze(1),
-                batch_params["joint_rotations"]], dim=1),
+            torch.cat([batch_params["global_rotation"].unsqueeze(1), batch_params["joint_rotations"]], dim=1),
             betas_logscale=batch_params.get("log_betascale", None),
             betas_trans=batch_params.get("betas_trans", None),
             propagate_scaling=getattr(model, "propagate_scaling", None),
@@ -614,8 +611,7 @@ def visualize_named_keypoints(dataset_path, frame_index, output_dir, cam_ids):
     n_views = len(cam_ids)
     n_cols = min(4, n_views)
     n_rows = (n_views + n_cols - 1) // n_cols
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(8 * n_cols, 6 * n_rows),
-                             squeeze=False)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(8 * n_cols, 6 * n_rows), squeeze=False)
     axes_flat = axes.flatten()
     gt_present = ~np.all(gt_3d_can == 0, axis=1)  # joints the dataset actually has
 
@@ -635,23 +631,40 @@ def visualize_named_keypoints(dataset_path, frame_index, output_dir, cam_ids):
         cx, cy = y_mv["cx_per_view"][v], y_mv["cy_per_view"][v]
 
         gt_u, gt_v_, gt_d = _project_canonical(gt_3d_can, R_v, t_v, fx, fy, cx, cy)
-        ps_u, ps_v_, ps_d = _project_canonical(posed_3d_can[:n_joints],
-                                               R_v, t_v, fx, fy, cx, cy)
+        ps_u, ps_v_, ps_d = _project_canonical(posed_3d_can[:n_joints], R_v, t_v, fx, fy, cx, cy)
 
         for i in range(n_joints):
             name = j_names[i]
             if gt_present[i] and gt_d[i] > 0:
-                ax.plot(gt_u[i], gt_v_[i], marker="o", color="lime",
-                        markersize=6, markerfacecolor="none", markeredgewidth=1.4)
-                ax.annotate(name, (gt_u[i], gt_v_[i]), color="lime",
-                            xytext=(4, -4), textcoords="offset points",
-                            fontsize=5, alpha=0.9)
+                ax.plot(
+                    gt_u[i],
+                    gt_v_[i],
+                    marker="o",
+                    color="lime",
+                    markersize=6,
+                    markerfacecolor="none",
+                    markeredgewidth=1.4,
+                )
+                ax.annotate(
+                    name,
+                    (gt_u[i], gt_v_[i]),
+                    color="lime",
+                    xytext=(4, -4),
+                    textcoords="offset points",
+                    fontsize=5,
+                    alpha=0.9,
+                )
             if ps_d[i] > 0:
-                ax.plot(ps_u[i], ps_v_[i], marker="+", color="red",
-                        markersize=8, markeredgewidth=1.4)
-                ax.annotate(name, (ps_u[i], ps_v_[i]), color="red",
-                            xytext=(4, 8), textcoords="offset points",
-                            fontsize=5, alpha=0.9)
+                ax.plot(ps_u[i], ps_v_[i], marker="+", color="red", markersize=8, markeredgewidth=1.4)
+                ax.annotate(
+                    name,
+                    (ps_u[i], ps_v_[i]),
+                    color="red",
+                    xytext=(4, 8),
+                    textcoords="offset points",
+                    fontsize=5,
+                    alpha=0.9,
+                )
 
         ax.set_title(f"CAM{cid}  GT (lime o) vs posed model (red +)", fontsize=10)
         ax.set_xlim(0, W)
@@ -680,20 +693,27 @@ def visualize_named_keypoints(dataset_path, frame_index, output_dir, cam_ids):
     ax = fig.add_subplot(111, projection="3d")
 
     gt_pts = gt_3d_can[gt_present]
-    ax.scatter(gt_pts[:, 0], gt_pts[:, 1], gt_pts[:, 2],
-               c="green", s=50, label="GT (loader)", depthshade=False)
-    ax.scatter(posed_3d_can[:n_joints, 0], posed_3d_can[:n_joints, 1],
-               posed_3d_can[:n_joints, 2],
-               c="red", s=50, marker="+", label="Posed model (SMAL fwd)",
-               depthshade=False)
+    ax.scatter(gt_pts[:, 0], gt_pts[:, 1], gt_pts[:, 2], c="green", s=50, label="GT (loader)", depthshade=False)
+    ax.scatter(
+        posed_3d_can[:n_joints, 0],
+        posed_3d_can[:n_joints, 1],
+        posed_3d_can[:n_joints, 2],
+        c="red",
+        s=50,
+        marker="+",
+        label="Posed model (SMAL fwd)",
+        depthshade=False,
+    )
 
     for i in range(n_joints):
         name = j_names[i]
         if gt_present[i]:
-            ax.text(gt_3d_can[i, 0], gt_3d_can[i, 1], gt_3d_can[i, 2],
-                    f"  {name}", color="green", fontsize=6, alpha=0.85)
-        ax.text(posed_3d_can[i, 0], posed_3d_can[i, 1], posed_3d_can[i, 2],
-                f"  {name}", color="red", fontsize=6, alpha=0.85)
+            ax.text(
+                gt_3d_can[i, 0], gt_3d_can[i, 1], gt_3d_can[i, 2], f"  {name}", color="green", fontsize=6, alpha=0.85
+            )
+        ax.text(
+            posed_3d_can[i, 0], posed_3d_can[i, 1], posed_3d_can[i, 2], f"  {name}", color="red", fontsize=6, alpha=0.85
+        )
 
     # Equal axes for honest visual distance.
     all_pts = np.concatenate([gt_pts, posed_3d_can[:n_joints]], axis=0)
@@ -704,8 +724,7 @@ def visualize_named_keypoints(dataset_path, frame_index, output_dir, cam_ids):
     ax.set_xlabel("X (canonical)")
     ax.set_ylabel("Y (canonical)")
     ax.set_zlabel("Z (canonical)")
-    ax.set_title(f"Frame {frame_index} - 3D GT (green) vs posed model (red), "
-                 "joint names labelled.")
+    ax.set_title(f"Frame {frame_index} - 3D GT (green) vs posed model (red), joint names labelled.")
     ax.legend()
     out_3d = Path(output_dir) / f"frame_{frame_index:05d}_named_3d.png"
     fig.savefig(out_3d, dpi=150, bbox_inches="tight")
@@ -745,21 +764,31 @@ def main():
     parser.add_argument("--frame_index", type=int, default=0)
     parser.add_argument("--output_dir", default="TEST_plots/multiview_loader")
     parser.add_argument("--camera_indices", type=int, nargs="*", default=None)
-    parser.add_argument("--smal_file", default=None,
-                        help="If given, run model-fit compatibility checks against this SMAL pickle.")
+    parser.add_argument(
+        "--smal_file", default=None, help="If given, run model-fit compatibility checks against this SMAL pickle."
+    )
     parser.add_argument("--shape_family", type=int, default=None)
-    parser.add_argument("--render", action="store_true",
-                        help="Also render the posed SMAL mesh through each view's camera. "
-                             "Requires --smal_file and GPU; mirrors the single-view render path.")
-    parser.add_argument("--compare_frames", action="store_true",
-                        help="Run the canonical-camera-frame validation: numeric "
-                             "round-trip, side-by-side reprojection check, and raw-vs-"
-                             "canonical mesh renders. Requires --smal_file and GPU.")
-    parser.add_argument("--named_overlay", action="store_true",
-                        help="High-res per-camera overlay + 3D side-by-side plot "
-                             "with joint name labels. Compares loader GT against "
-                             "SMAL forward posed joints in canonical frame. "
-                             "Requires --smal_file and GPU.")
+    parser.add_argument(
+        "--render",
+        action="store_true",
+        help="Also render the posed SMAL mesh through each view's camera. "
+        "Requires --smal_file and GPU; mirrors the single-view render path.",
+    )
+    parser.add_argument(
+        "--compare_frames",
+        action="store_true",
+        help="Run the canonical-camera-frame validation: numeric "
+        "round-trip, side-by-side reprojection check, and raw-vs-"
+        "canonical mesh renders. Requires --smal_file and GPU.",
+    )
+    parser.add_argument(
+        "--named_overlay",
+        action="store_true",
+        help="High-res per-camera overlay + 3D side-by-side plot "
+        "with joint name labels. Compares loader GT against "
+        "SMAL forward posed joints in canonical frame. "
+        "Requires --smal_file and GPU.",
+    )
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset_path)
@@ -778,7 +807,9 @@ def main():
         sys.exit(f"No camera JSONs found for frame {args.frame_index}")
     print(f"Frame {args.frame_index}: {len(cam_ids)} cameras: {cam_ids}")
 
-    per_camera = {cid: load_per_camera(dataset_path, dataset_name, args.frame_index, cid, batch_data_file) for cid in cam_ids}
+    per_camera = {
+        cid: load_per_camera(dataset_path, dataset_name, args.frame_index, cid, batch_data_file) for cid in cam_ids
+    }
 
     n_views = len(cam_ids)
     n_cols = min(4, n_views)
@@ -801,21 +832,25 @@ def main():
         # GT 2D from this camera's JSON, plotted as raw pixels (2DPos.x, 2DPos.y).
         gt = pc["kp2d_pixels"]
         valid_gt = ~np.all(gt == 0, axis=1)
-        ax.scatter(gt[valid_gt, 0], gt[valid_gt, 1],
-                   facecolors="none", edgecolors="lime", s=80, linewidths=1.5,
-                   label="GT 2D (JSON 2DPos)")
+        ax.scatter(
+            gt[valid_gt, 0],
+            gt[valid_gt, 1],
+            facecolors="none",
+            edgecolors="lime",
+            s=80,
+            linewidths=1.5,
+            label="GT 2D (JSON 2DPos)",
+        )
 
         # Try every (R | R.T) × signed-depth-axis convention; pick the lowest-error one.
-        variants = project_row_vector(
-            pc["kp3d_world"], pc["R"], pc["t"], pc["fx"], pc["fy"], pc["cx"], pc["cy"]
-        )
+        variants = project_row_vector(pc["kp3d_world"], pc["R"], pc["t"], pc["fx"], pc["fy"], pc["cx"], pc["cy"])
         best_conv, best_err, best_uv = None, float("inf"), None
         for name, (u, v, depth) in variants.items():
             in_front = depth > 0
             common = valid_gt & in_front
             if common.sum() < 4:
                 continue
-            err = np.sqrt((u[common] - gt[common, 0])**2 + (v[common] - gt[common, 1])**2).mean()
+            err = np.sqrt((u[common] - gt[common, 0]) ** 2 + (v[common] - gt[common, 1]) ** 2).mean()
             if err < best_err:
                 best_err = err
                 best_conv = name
@@ -825,13 +860,13 @@ def main():
             best_uv = (np.zeros(len(gt)), np.zeros(len(gt)), np.ones(len(gt)))
         u, v, depth = best_uv
         in_front = depth > 0
-        ax.scatter(u[in_front], v[in_front],
-                   marker="+", color="red", s=80, linewidths=1.5,
-                   label=f"Projected 3D ({best_conv})")
+        ax.scatter(
+            u[in_front], v[in_front], marker="+", color="red", s=80, linewidths=1.5, label=f"Projected 3D ({best_conv})"
+        )
 
         common = valid_gt & in_front
         if common.any():
-            err = np.sqrt((u[common] - gt[common, 0])**2 + (v[common] - gt[common, 1])**2)
+            err = np.sqrt((u[common] - gt[common, 0]) ** 2 + (v[common] - gt[common, 1]) ** 2)
             mean_err = float(err.mean())
             max_err = float(err.max())
         else:
@@ -871,11 +906,18 @@ def main():
             render_per_view(dataset_path, args.frame_index, output_dir)
         if args.compare_frames:
             compare_frames_test(
-                dataset_path, args.frame_index, output_dir, per_camera, cam_ids,
+                dataset_path,
+                args.frame_index,
+                output_dir,
+                per_camera,
+                cam_ids,
             )
         if args.named_overlay:
             visualize_named_keypoints(
-                dataset_path, args.frame_index, output_dir, cam_ids,
+                dataset_path,
+                args.frame_index,
+                output_dir,
+                cam_ids,
             )
     elif args.render or args.compare_frames or args.named_overlay:
         print("\n⚠ --render / --compare_frames / --named_overlay requires --smal_file; skipping.")

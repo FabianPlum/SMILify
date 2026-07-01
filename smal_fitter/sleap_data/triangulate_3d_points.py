@@ -35,6 +35,7 @@ from tqdm import tqdm
 # Calibration loading
 # ---------------------------------------------------------------------------
 
+
 def load_calibration(calibration_path: str) -> Dict[str, dict]:
     """
     Load camera calibration from a calibration.toml file (anipose format).
@@ -75,6 +76,7 @@ def get_projection_matrix(cam: dict) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # 2D keypoint loading
 # ---------------------------------------------------------------------------
+
 
 def load_2d_keypoints_analysis_h5(h5_path: str) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """
@@ -152,8 +154,8 @@ def load_2d_keypoints_slp(slp_path: str, n_keypoints: int = 34) -> Tuple[np.ndar
 # Triangulation (vectorized for performance)
 # ---------------------------------------------------------------------------
 
-def triangulate_point_dlt(projections: List[np.ndarray],
-                          points_2d: List[np.ndarray]) -> np.ndarray:
+
+def triangulate_point_dlt(projections: List[np.ndarray], points_2d: List[np.ndarray]) -> np.ndarray:
     """
     Direct Linear Transform (DLT) triangulation from N≥2 views.
 
@@ -176,8 +178,7 @@ def triangulate_point_dlt(projections: List[np.ndarray],
     return (X[:3] / X[3]).astype(np.float64)
 
 
-def reprojection_errors_vectorized(Ps: np.ndarray, pt_3d: np.ndarray,
-                                   pts_2d: np.ndarray) -> np.ndarray:
+def reprojection_errors_vectorized(Ps: np.ndarray, pt_3d: np.ndarray, pts_2d: np.ndarray) -> np.ndarray:
     """
     Compute reprojection errors for a 3D point across N views (vectorized).
 
@@ -190,7 +191,7 @@ def reprojection_errors_vectorized(Ps: np.ndarray, pt_3d: np.ndarray,
         (N,) reprojection errors in pixels
     """
     X_hom = np.append(pt_3d, 1.0)  # (4,)
-    proj = Ps @ X_hom               # (N, 3)
+    proj = Ps @ X_hom  # (N, 3)
     proj_2d = proj[:, :2] / proj[:, 2:3]  # (N, 2)
     return np.linalg.norm(proj_2d - pts_2d, axis=1)
 
@@ -203,10 +204,13 @@ def reprojection_error(P: np.ndarray, pt_3d: np.ndarray, pt_2d: np.ndarray) -> f
     return float(np.linalg.norm(proj - pt_2d))
 
 
-def triangulate_point_ransac(Ps_arr: np.ndarray, pts_arr: np.ndarray,
-                             reproj_threshold: float = 15.0,
-                             min_inliers: int = 2,
-                             max_hypotheses: int = 50) -> Tuple[Optional[np.ndarray], int]:
+def triangulate_point_ransac(
+    Ps_arr: np.ndarray,
+    pts_arr: np.ndarray,
+    reproj_threshold: float = 15.0,
+    min_inliers: int = 2,
+    max_hypotheses: int = 50,
+) -> Tuple[Optional[np.ndarray], int]:
     """
     RANSAC-based triangulation using sampled pairs (optimized).
 
@@ -225,8 +229,7 @@ def triangulate_point_ransac(Ps_arr: np.ndarray, pts_arr: np.ndarray,
         return None, 0
 
     if n == 2:
-        pt_3d = triangulate_point_dlt([Ps_arr[0], Ps_arr[1]],
-                                       [pts_arr[0], pts_arr[1]])
+        pt_3d = triangulate_point_dlt([Ps_arr[0], Ps_arr[1]], [pts_arr[0], pts_arr[1]])
         errors = reprojection_errors_vectorized(Ps_arr, pt_3d, pts_arr)
         n_inliers = int((errors < reproj_threshold).sum())
         if n_inliers >= min_inliers:
@@ -235,6 +238,7 @@ def triangulate_point_ransac(Ps_arr: np.ndarray, pts_arr: np.ndarray,
 
     # Generate pair indices — all pairs if small, random sample if many cameras
     import itertools
+
     all_pairs = list(itertools.combinations(range(n), 2))
     if len(all_pairs) > max_hypotheses:
         rng = np.random.default_rng(42)
@@ -279,8 +283,7 @@ def triangulate_point_ransac(Ps_arr: np.ndarray, pts_arr: np.ndarray,
     return None, 0
 
 
-def undistort_points(points_2d: np.ndarray, K: np.ndarray,
-                     dist: np.ndarray) -> np.ndarray:
+def undistort_points(points_2d: np.ndarray, K: np.ndarray, dist: np.ndarray) -> np.ndarray:
     """
     Undistort 2D points using camera calibration.
 
@@ -304,6 +307,7 @@ def undistort_points(points_2d: np.ndarray, K: np.ndarray,
 # Reprojection analysis: reproject 3D points into each camera and compare
 # with undistorted 2D SLEAP detections (fair comparison in ideal pinhole space)
 # ---------------------------------------------------------------------------
+
 
 def reprojection_analysis(
     tracks_3d: np.ndarray,
@@ -348,26 +352,26 @@ def reprojection_analysis(
     cam_names = sorted(all_coords.keys())
 
     # Collect per-camera statistics
-    per_cam_errors = {}          # cam -> np.ndarray of errors
-    per_cam_joint_errors = {}    # cam -> joint_idx -> np.ndarray of errors
-    all_errors = []              # list of np.ndarray, concatenated at end
+    per_cam_errors = {}  # cam -> np.ndarray of errors
+    per_cam_joint_errors = {}  # cam -> joint_idx -> np.ndarray of errors
+    all_errors = []  # list of np.ndarray, concatenated at end
 
     for cam_name in tqdm(cam_names, desc=f"Reproj analysis ({label})", leave=False):
         if cam_name not in cameras:
             continue
         cam = cameras[cam_name]
-        coords_2d = all_coords[cam_name]   # (n_frames_cam, n_kp, 2)
-        scores_2d = all_scores[cam_name]    # (n_frames_cam, n_kp)
+        coords_2d = all_coords[cam_name]  # (n_frames_cam, n_kp, 2)
+        scores_2d = all_scores[cam_name]  # (n_frames_cam, n_kp)
         n_frames_cam = coords_2d.shape[0]
         n_compare = min(n_frames, n_frames_cam)
 
         # Build validity mask: valid_3d AND valid 2D (not NaN, not zero, above threshold)
-        valid_2d_sub = coords_2d[:n_compare]   # (n_compare, n_kp, 2)
-        scores_sub = scores_2d[:n_compare]     # (n_compare, n_kp)
-        valid_3d_sub = valid_3d[:n_compare]    # (n_compare, n_kp)
+        valid_2d_sub = coords_2d[:n_compare]  # (n_compare, n_kp, 2)
+        scores_sub = scores_2d[:n_compare]  # (n_compare, n_kp)
+        valid_3d_sub = valid_3d[:n_compare]  # (n_compare, n_kp)
 
-        not_nan_2d = ~np.isnan(valid_2d_sub).any(axis=-1)          # (n_compare, n_kp)
-        not_zero_2d = (valid_2d_sub != 0).any(axis=-1)             # (n_compare, n_kp)
+        not_nan_2d = ~np.isnan(valid_2d_sub).any(axis=-1)  # (n_compare, n_kp)
+        not_zero_2d = (valid_2d_sub != 0).any(axis=-1)  # (n_compare, n_kp)
         above_conf = np.isnan(scores_sub) | (scores_sub >= confidence_threshold)
         both_valid = valid_3d_sub & not_nan_2d & not_zero_2d & above_conf
 
@@ -379,8 +383,8 @@ def reprojection_analysis(
             continue
 
         # Gather valid 3D points and raw 2D observations
-        pts_3d_valid = kp_3d[fi_idx, ki_idx]      # (M, 3)
-        pts_2d_raw = coords_2d[fi_idx, ki_idx]    # (M, 2)
+        pts_3d_valid = kp_3d[fi_idx, ki_idx]  # (M, 3)
+        pts_2d_raw = coords_2d[fi_idx, ki_idx]  # (M, 2)
 
         # Undistort the raw 2D SLEAP keypoints into ideal pinhole space
         pts_2d_undist = undistort_points(pts_2d_raw, cam["K"], cam["dist"])  # (M, 2)
@@ -389,7 +393,7 @@ def reprojection_analysis(
         P = get_projection_matrix(cam)  # (3, 4)
         ones = np.ones((pts_3d_valid.shape[0], 1), dtype=np.float64)
         pts_3d_hom = np.hstack([pts_3d_valid, ones])  # (M, 4)
-        projected_hom = (P @ pts_3d_hom.T).T          # (M, 3)
+        projected_hom = (P @ pts_3d_hom.T).T  # (M, 3)
         projected = projected_hom[:, :2] / projected_hom[:, 2:3]  # (M, 2)
 
         errors = np.linalg.norm(projected - pts_2d_undist, axis=1)  # (M,)
@@ -408,9 +412,9 @@ def reprojection_analysis(
     all_errors = np.concatenate(all_errors) if all_errors else np.array([])
 
     # ---- Print report ----
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"REPROJECTION ANALYSIS — {label} 3D vs undistorted 2D SLEAP")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print(f"  3D source: {label} ({valid_3d.sum()} valid 3D keypoints across {n_frames} frames)")
     print("  Comparison space: undistorted (ideal pinhole) pixel coordinates")
     print(f"  Confidence threshold for 2D: {confidence_threshold}")
@@ -427,26 +431,28 @@ def reprojection_analysis(
     print(f"    P95:    {np.percentile(all_errors, 95):.2f} px")
     print(f"    P99:    {np.percentile(all_errors, 99):.2f} px")
     print(f"    Max:    {all_errors.max():.2f} px")
-    print(f"    < 5px:  {100*(all_errors < 5).mean():.1f}%")
-    print(f"    < 10px: {100*(all_errors < 10).mean():.1f}%")
-    print(f"    < 20px: {100*(all_errors < 20).mean():.1f}%")
+    print(f"    < 5px:  {100 * (all_errors < 5).mean():.1f}%")
+    print(f"    < 10px: {100 * (all_errors < 10).mean():.1f}%")
+    print(f"    < 20px: {100 * (all_errors < 20).mean():.1f}%")
 
     # Per-camera breakdown
     print(f"\n  {'Camera':<12} {'N':>8} {'Mean':>8} {'Median':>8} {'P90':>8} {'P95':>8} {'<10px':>8}")
-    print(f"  {'-'*62}")
+    print(f"  {'-' * 62}")
     for cam_name in cam_names:
         errs = per_cam_errors.get(cam_name, np.array([]))
         if len(errs) == 0:
             print(f"  {cam_name:<12} {'—':>8}")
             continue
         pct_10 = 100 * (errs < 10).mean()
-        print(f"  {cam_name:<12} {len(errs):>8d} {errs.mean():>8.2f} "
-              f"{np.median(errs):>8.2f} {np.percentile(errs, 90):>8.2f} "
-              f"{np.percentile(errs, 95):>8.2f} {pct_10:>7.1f}%")
+        print(
+            f"  {cam_name:<12} {len(errs):>8d} {errs.mean():>8.2f} "
+            f"{np.median(errs):>8.2f} {np.percentile(errs, 90):>8.2f} "
+            f"{np.percentile(errs, 95):>8.2f} {pct_10:>7.1f}%"
+        )
 
     # Per-joint breakdown (aggregate across all cameras)
     print(f"\n  {'Joint':<24} {'N':>8} {'Mean':>8} {'Median':>8} {'P90':>8} {'<10px':>8}")
-    print(f"  {'-'*68}")
+    print(f"  {'-' * 68}")
     for ki in range(n_keypoints):
         joint_errs = []
         for cam_name in cam_names:
@@ -459,9 +465,11 @@ def reprojection_analysis(
             print(f"  {name:<24} {'—':>8}")
             continue
         pct_10 = 100 * (joint_errs < 10).mean()
-        print(f"  {name:<24} {len(joint_errs):>8d} {joint_errs.mean():>8.2f} "
-              f"{np.median(joint_errs):>8.2f} {np.percentile(joint_errs, 90):>8.2f} "
-              f"{pct_10:>7.1f}%")
+        print(
+            f"  {name:<24} {len(joint_errs):>8d} {joint_errs.mean():>8.2f} "
+            f"{np.median(joint_errs):>8.2f} {np.percentile(joint_errs, 90):>8.2f} "
+            f"{pct_10:>7.1f}%"
+        )
 
     return {
         "label": label,
@@ -478,10 +486,10 @@ def reprojection_analysis(
 # Validation: 3D-vs-3D comparison between triangulated and reference
 # ---------------------------------------------------------------------------
 
-def validate_against_reference(tracks_3d: np.ndarray,
-                               reference_path: str,
-                               node_names: List[str],
-                               verbose: bool = True) -> dict:
+
+def validate_against_reference(
+    tracks_3d: np.ndarray, reference_path: str, node_names: List[str], verbose: bool = True
+) -> dict:
     """
     Compare triangulated 3D points against a reference points3d.h5 file.
     """
@@ -493,7 +501,7 @@ def validate_against_reference(tracks_3d: np.ndarray,
     n_compare = min(n_frames_ref, n_frames_tri)
 
     ref = ref_tracks[:n_compare, 0]  # (n_compare, n_kp, 3)
-    tri = tracks_3d[:n_compare, 0]   # (n_compare, n_kp, 3)
+    tri = tracks_3d[:n_compare, 0]  # (n_compare, n_kp, 3)
 
     ref_valid = ~np.isnan(ref).any(axis=-1) & (ref != 0).any(axis=-1)
     tri_valid = ~np.isnan(tri).any(axis=-1) & (tri != 0).any(axis=-1)
@@ -526,12 +534,11 @@ def validate_against_reference(tracks_3d: np.ndarray,
     }
 
     if verbose:
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("3D-vs-3D VALIDATION: TRIANGULATED vs REFERENCE (anipose)")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
         print(f"  Frames compared: {n_compare}")
-        print(f"  Keypoints compared: {n_both} "
-              f"(ref valid: {ref_valid.sum()}, tri valid: {tri_valid.sum()})")
+        print(f"  Keypoints compared: {n_both} (ref valid: {ref_valid.sum()}, tri valid: {tri_valid.sum()})")
         print("\n  3D Euclidean Error (mm):")
         print(f"    Mean:   {result['mean_error_mm']:.2f}")
         print(f"    Median: {result['median_error_mm']:.2f}")
@@ -547,7 +554,7 @@ def validate_against_reference(tracks_3d: np.ndarray,
 
         n_kp = ref.shape[1]
         print(f"\n  {'Joint':<24} {'N':>7} {'Mean':>8} {'Median':>8} {'P90':>8} {'<5mm':>7}")
-        print(f"  {'-'*66}")
+        print(f"  {'-' * 66}")
         for kp_idx in range(n_kp):
             joint_mask = both_valid[:, kp_idx]
             if joint_mask.sum() == 0:
@@ -555,9 +562,11 @@ def validate_against_reference(tracks_3d: np.ndarray,
             joint_dists = distances[:, kp_idx][joint_mask]
             name = node_names[kp_idx] if kp_idx < len(node_names) else f"joint_{kp_idx}"
             pct5 = 100 * (joint_dists < 5).mean()
-            print(f"  {name:<24} {joint_mask.sum():>7d} {np.mean(joint_dists):>8.2f} "
-                  f"{np.median(joint_dists):>8.2f} {np.percentile(joint_dists, 90):>8.2f} "
-                  f"{pct5:>6.1f}%")
+            print(
+                f"  {name:<24} {joint_mask.sum():>7d} {np.mean(joint_dists):>8.2f} "
+                f"{np.median(joint_dists):>8.2f} {np.percentile(joint_dists, 90):>8.2f} "
+                f"{pct5:>6.1f}%"
+            )
 
     return result
 
@@ -565,6 +574,7 @@ def validate_against_reference(tracks_3d: np.ndarray,
 # ---------------------------------------------------------------------------
 # Save
 # ---------------------------------------------------------------------------
+
 
 def generate_reprojections_h5(
     tracks_3d: np.ndarray,
@@ -622,15 +632,16 @@ def generate_reprojections_h5(
         print(f"\nSaved reprojections: {output_path}")
         print(f"  Cameras: {len(cam_names)} ({', '.join(cam_names)})")
         print(f"  Shape per camera: ({n_frames}, 1, {n_keypoints}, 2)")
-        print(f"  Valid projections: {n_valid} / {n_frames * n_keypoints} "
-              f"({100 * n_valid / max(1, n_frames * n_keypoints):.1f}%)")
+        print(
+            f"  Valid projections: {n_valid} / {n_frames * n_keypoints} "
+            f"({100 * n_valid / max(1, n_frames * n_keypoints):.1f}%)"
+        )
         print("  Projection model: ideal pinhole (K @ [R|t], no distortion)")
 
     return output_path
 
 
-def save_points3d_h5(tracks_3d: np.ndarray, output_path: str,
-                     frame_range: Optional[Tuple[int, int]] = None):
+def save_points3d_h5(tracks_3d: np.ndarray, output_path: str, frame_range: Optional[Tuple[int, int]] = None):
     """
     Save triangulated 3D points in the same format as anipose points3d.h5.
 
@@ -655,6 +666,7 @@ def save_points3d_h5(tracks_3d: np.ndarray, output_path: str,
 # Shared 2D data loader (used by both triangulation and analysis)
 # ---------------------------------------------------------------------------
 
+
 def detect_data_structure(session_path: str) -> str:
     """Detect the dataset layout: 'camera_dirs', 'session_dirs', or 'unknown'.
 
@@ -669,21 +681,20 @@ def detect_data_structure(session_path: str) -> str:
     camera_dirs_found = 0
     session_dirs_found = 0
     for item in session_path.iterdir():
-        if not item.is_dir() or item.name.startswith('.'):
+        if not item.is_dir() or item.name.startswith("."):
             continue
         if list(item.glob("*.slp")):
             camera_dirs_found += 1
         elif list(item.glob("*.h5")):
             session_dirs_found += 1
     if camera_dirs_found > 0 and session_dirs_found == 0:
-        return 'camera_dirs'
+        return "camera_dirs"
     if session_dirs_found > 0:
-        return 'session_dirs'
-    return 'unknown'
+        return "session_dirs"
+    return "unknown"
 
 
-def _load_camera_dirs_2d_data(session_path: Path, cameras: Dict[str, dict],
-                              verbose: bool):
+def _load_camera_dirs_2d_data(session_path: Path, cameras: Dict[str, dict], verbose: bool):
     """Load 2D keypoints from a ``camera_dirs`` session (one subdir per camera)."""
     all_coords, all_scores, node_names = {}, {}, None
 
@@ -736,8 +747,7 @@ def _load_camera_dirs_2d_data(session_path: Path, cameras: Dict[str, dict],
     return all_coords, all_scores, node_names
 
 
-def _load_session_dirs_2d_data(session_path: Path, cameras: Dict[str, dict],
-                               verbose: bool):
+def _load_session_dirs_2d_data(session_path: Path, cameras: Dict[str, dict], verbose: bool):
     """Load 2D keypoints from a ``session_dirs`` session.
 
     Cameras are discovered exactly like ``SLEAPDataLoader``: glob ``*_cam*.h5``
@@ -749,13 +759,13 @@ def _load_session_dirs_2d_data(session_path: Path, cameras: Dict[str, dict],
     calib_names = sorted(cameras.keys())
     cam_files: Dict[str, str] = {}
     for sub in sorted(session_path.iterdir()):
-        if not sub.is_dir() or sub.name.startswith('.'):
+        if not sub.is_dir() or sub.name.startswith("."):
             continue
         for h5 in sorted(sub.glob("*_cam*.h5")):
-            file_cam = h5.stem.split('_cam')[-1]
+            file_cam = h5.stem.split("_cam")[-1]
             for calib_name in calib_names:
                 cn = calib_name.lower()
-                if file_cam.lower() in (cn, cn.replace('camera', 'cam')):
+                if file_cam.lower() in (cn, cn.replace("camera", "cam")):
                     cam_files.setdefault(calib_name, str(h5))
                     break
 
@@ -782,10 +792,9 @@ def _load_session_dirs_2d_data(session_path: Path, cameras: Dict[str, dict],
     return all_coords, all_scores, node_names
 
 
-def load_all_2d_data(session_path: str, cameras: Dict[str, dict],
-                     verbose: bool = True) -> Tuple[Dict[str, np.ndarray],
-                                                     Dict[str, np.ndarray],
-                                                     List[str]]:
+def load_all_2d_data(
+    session_path: str, cameras: Dict[str, dict], verbose: bool = True
+) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], List[str]]:
     """
     Load 2D keypoint data from all cameras, auto-detecting the dataset layout
     (``camera_dirs`` or ``session_dirs``; see :func:`detect_data_structure`).
@@ -800,13 +809,11 @@ def load_all_2d_data(session_path: str, cameras: Dict[str, dict],
     if verbose:
         print(f"  Detected data structure: {structure}")
 
-    if structure == 'session_dirs':
-        all_coords, all_scores, node_names = _load_session_dirs_2d_data(
-            session_path, cameras, verbose)
+    if structure == "session_dirs":
+        all_coords, all_scores, node_names = _load_session_dirs_2d_data(session_path, cameras, verbose)
     else:
         # camera_dirs (legacy default); also the fallback for 'unknown'
-        all_coords, all_scores, node_names = _load_camera_dirs_2d_data(
-            session_path, cameras, verbose)
+        all_coords, all_scores, node_names = _load_camera_dirs_2d_data(session_path, cameras, verbose)
 
     if not all_coords:
         raise ValueError("No 2D keypoint data loaded from any camera")
@@ -820,6 +827,7 @@ def load_all_2d_data(session_path: str, cameras: Dict[str, dict],
 # ---------------------------------------------------------------------------
 # Core triangulation loop (reusable from other scripts)
 # ---------------------------------------------------------------------------
+
 
 def triangulate_all(
     cameras: Dict[str, dict],
@@ -882,8 +890,7 @@ def triangulate_all(
     }
 
     if verbose:
-        print(f"\n  Triangulating {n_out} frames × {n_keypoints} keypoints "
-              f"using {len(all_coords)} cameras")
+        print(f"\n  Triangulating {n_out} frames × {n_keypoints} keypoints using {len(all_coords)} cameras")
         print(f"  Confidence threshold: {confidence_threshold}")
         print(f"  Min views: {min_views}")
         print(f"  Reproj threshold: {reproj_threshold} px")
@@ -892,9 +899,7 @@ def triangulate_all(
 
     cam_name_list = sorted(all_coords.keys())
 
-    for out_idx, frame_idx in enumerate(tqdm(frame_indices,
-                                              desc="Triangulating",
-                                              disable=not verbose)):
+    for out_idx, frame_idx in enumerate(tqdm(frame_indices, desc="Triangulating", disable=not verbose)):
         for kp_idx in range(n_keypoints):
             view_Ps = []
             view_pts = []
@@ -932,7 +937,8 @@ def triangulate_all(
 
             if use_ransac and len(view_Ps) >= 3:
                 pt_3d, n_inliers = triangulate_point_ransac(
-                    Ps_arr, pts_arr,
+                    Ps_arr,
+                    pts_arr,
                     reproj_threshold=reproj_threshold,
                     min_inliers=min_views,
                 )
@@ -944,20 +950,16 @@ def triangulate_all(
                 pt_3d = triangulate_point_dlt(view_Ps, view_pts)
                 stats["views_used_list"].append(len(view_Ps))
 
-            mean_err = float(reprojection_errors_vectorized(
-                Ps_arr, pt_3d, pts_arr
-            ).mean())
+            mean_err = float(reprojection_errors_vectorized(Ps_arr, pt_3d, pts_arr).mean())
             stats["reproj_error_list"].append(mean_err)
 
             tracks_3d[out_idx, 0, kp_idx] = pt_3d
 
     elapsed = time.time() - start
 
-    stats["pct_triangulated"] = (100.0 * stats["triangulated"]
-                                 / max(1, stats["total_keypoints"]))
+    stats["pct_triangulated"] = 100.0 * stats["triangulated"] / max(1, stats["total_keypoints"])
     stats["triangulated"] = len(stats["views_used_list"])
-    stats["pct_triangulated"] = (100.0 * stats["triangulated"]
-                                 / max(1, stats["total_keypoints"]))
+    stats["pct_triangulated"] = 100.0 * stats["triangulated"] / max(1, stats["total_keypoints"])
     vu = stats.pop("views_used_list")
     re = stats.pop("reproj_error_list")
     stats["mean_views_used"] = float(np.mean(vu)) if vu else 0
@@ -966,8 +968,9 @@ def triangulate_all(
 
     if verbose:
         print(f"\n  Triangulation completed in {elapsed:.1f}s")
-        print(f"  Triangulated: {stats['triangulated']} / {stats['total_keypoints']} "
-              f"({stats['pct_triangulated']:.1f}%)")
+        print(
+            f"  Triangulated: {stats['triangulated']} / {stats['total_keypoints']} ({stats['pct_triangulated']:.1f}%)"
+        )
         print(f"  Failed (insufficient views): {stats['failed_insufficient_views']}")
         print(f"  Failed (RANSAC):             {stats['failed_ransac']}")
         print(f"  Mean views used:  {stats['mean_views_used']:.1f}")
@@ -981,6 +984,7 @@ def triangulate_all(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def find_reference_points3d(session_dir: str) -> Optional[str]:
     """Locate an existing points3d.h5 to validate against.
 
@@ -991,7 +995,7 @@ def find_reference_points3d(session_dir: str) -> Optional[str]:
     if os.path.exists(candidate):
         return candidate
     for sub in sorted(Path(session_dir).iterdir()):
-        if sub.is_dir() and not sub.name.startswith('.'):
+        if sub.is_dir() and not sub.name.startswith("."):
             sub_candidate = sub / "points3d.h5"
             if sub_candidate.exists():
                 return str(sub_candidate)
@@ -1003,33 +1007,46 @@ def main():
         description="Triangulate 3D keypoints from multi-view 2D SLEAP predictions",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("session_dir",
-                        help="Path to session directory with calibration.toml and Camera* dirs")
-    parser.add_argument("--output", "-o", default=None,
-                        help="Output HDF5 file path "
-                             "(default: <session_dir>/points3d_triangulated.h5)")
-    parser.add_argument("--confidence_threshold", type=float, default=0.3,
-                        help="Minimum SLEAP confidence for 2D keypoints (default: 0.3)")
-    parser.add_argument("--min_views", type=int, default=2,
-                        help="Minimum camera views to triangulate (default: 2)")
-    parser.add_argument("--reproj_threshold", type=float, default=15.0,
-                        help="Max reprojection error (px) for RANSAC inlier (default: 15.0)")
-    parser.add_argument("--no_undistort", action="store_true",
-                        help="Skip undistorting 2D points before triangulation")
-    parser.add_argument("--no_ransac", action="store_true",
-                        help="Use plain DLT instead of RANSAC")
-    parser.add_argument("--validate", type=str, default=None,
-                        help="Path to reference points3d.h5 (default: auto-detect)")
-    parser.add_argument("--max_frames", type=int, default=None,
-                        help="Limit to first N frames (for quick testing)")
-    parser.add_argument("--exclude_cameras", type=str, nargs="+", default=None,
-                        help="Camera names to exclude (e.g. Camera8 Camera10 Camera13 Camera15)")
-    parser.add_argument("--save_reprojections", action="store_true",
-                        help="Save reprojections.h5 alongside the 3D output")
-    parser.add_argument("--reprojections_output", type=str, default=None,
-                        help="Path for reprojections.h5 (default: <session_dir>/reprojections.h5)")
-    parser.add_argument("--quiet", action="store_true",
-                        help="Suppress progress output")
+    parser.add_argument("session_dir", help="Path to session directory with calibration.toml and Camera* dirs")
+    parser.add_argument(
+        "--output", "-o", default=None, help="Output HDF5 file path (default: <session_dir>/points3d_triangulated.h5)"
+    )
+    parser.add_argument(
+        "--confidence_threshold",
+        type=float,
+        default=0.3,
+        help="Minimum SLEAP confidence for 2D keypoints (default: 0.3)",
+    )
+    parser.add_argument("--min_views", type=int, default=2, help="Minimum camera views to triangulate (default: 2)")
+    parser.add_argument(
+        "--reproj_threshold",
+        type=float,
+        default=15.0,
+        help="Max reprojection error (px) for RANSAC inlier (default: 15.0)",
+    )
+    parser.add_argument("--no_undistort", action="store_true", help="Skip undistorting 2D points before triangulation")
+    parser.add_argument("--no_ransac", action="store_true", help="Use plain DLT instead of RANSAC")
+    parser.add_argument(
+        "--validate", type=str, default=None, help="Path to reference points3d.h5 (default: auto-detect)"
+    )
+    parser.add_argument("--max_frames", type=int, default=None, help="Limit to first N frames (for quick testing)")
+    parser.add_argument(
+        "--exclude_cameras",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Camera names to exclude (e.g. Camera8 Camera10 Camera13 Camera15)",
+    )
+    parser.add_argument(
+        "--save_reprojections", action="store_true", help="Save reprojections.h5 alongside the 3D output"
+    )
+    parser.add_argument(
+        "--reprojections_output",
+        type=str,
+        default=None,
+        help="Path for reprojections.h5 (default: <session_dir>/reprojections.h5)",
+    )
+    parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
 
     args = parser.parse_args()
 
@@ -1072,9 +1089,7 @@ def main():
     # ---- Load all 2D data (shared by triangulation + analysis) ----
     if verbose:
         print("\nLoading 2D keypoint data:")
-    all_coords, all_scores, node_names = load_all_2d_data(
-        session_dir, cameras, verbose=verbose
-    )
+    all_coords, all_scores, node_names = load_all_2d_data(session_dir, cameras, verbose=verbose)
 
     # ---- Determine frame count ----
     n_frames = max(c.shape[0] for c in all_coords.values())
@@ -1087,21 +1102,24 @@ def main():
     # ====================================================================
     if validate_path:
         if verbose:
-            print(f"\n\n{'#'*70}")
+            print(f"\n\n{'#' * 70}")
             print("# STEP 1: Baseline — reference (anipose) 3D reprojection into 2D")
-            print(f"{'#'*70}")
+            print(f"{'#' * 70}")
 
         with h5py.File(validate_path, "r") as f:
             ref_tracks = f["tracks"][:]  # (n_frames_ref, 1, n_kp, 3)
 
         n_frames_ref = ref_tracks.shape[0]
         if verbose:
-            print(f"  Reference has {n_frames_ref} frames, "
-                  f"{ref_tracks.shape[2]} keypoints")
+            print(f"  Reference has {n_frames_ref} frames, {ref_tracks.shape[2]} keypoints")
 
         reprojection_analysis(
-            ref_tracks, session_dir, all_coords, all_scores,
-            cameras, node_names,
+            ref_tracks,
+            session_dir,
+            all_coords,
+            all_scores,
+            cameras,
+            node_names,
             confidence_threshold=args.confidence_threshold,
             label="REFERENCE (anipose)",
         )
@@ -1110,9 +1128,9 @@ def main():
     # STEP 2: Triangulate
     # ====================================================================
     if verbose:
-        print(f"\n\n{'#'*70}")
+        print(f"\n\n{'#' * 70}")
         print("# STEP 2: Triangulating 3D points from 2D SLEAP detections")
-        print(f"{'#'*70}")
+        print(f"{'#' * 70}")
 
     undistort = not args.no_undistort
     use_ransac = not args.no_ransac
@@ -1120,12 +1138,16 @@ def main():
     conf_thr = args.confidence_threshold
 
     tracks_3d, stats = triangulate_all(
-        cameras, all_coords, all_scores,
-        n_frames=n_frames, n_keypoints=n_keypoints,
+        cameras,
+        all_coords,
+        all_scores,
+        n_frames=n_frames,
+        n_keypoints=n_keypoints,
         confidence_threshold=conf_thr,
         min_views=args.min_views,
         reproj_threshold=args.reproj_threshold,
-        undistort=undistort, use_ransac=use_ransac,
+        undistort=undistort,
+        use_ransac=use_ransac,
         verbose=verbose,
     )
 
@@ -1133,13 +1155,17 @@ def main():
     # STEP 3: Reprojection analysis of TRIANGULATED 3D -> 2D SLEAP
     # ====================================================================
     if verbose:
-        print(f"\n\n{'#'*70}")
+        print(f"\n\n{'#' * 70}")
         print("# STEP 3: Triangulated 3D reprojection into 2D")
-        print(f"{'#'*70}")
+        print(f"{'#' * 70}")
 
     reprojection_analysis(
-        tracks_3d, session_dir, all_coords, all_scores,
-        cameras, node_names,
+        tracks_3d,
+        session_dir,
+        all_coords,
+        all_scores,
+        cameras,
+        node_names,
         confidence_threshold=conf_thr,
         label="TRIANGULATED",
     )
@@ -1149,13 +1175,11 @@ def main():
     # ====================================================================
     if validate_path:
         if verbose:
-            print(f"\n\n{'#'*70}")
+            print(f"\n\n{'#' * 70}")
             print("# STEP 4: 3D-vs-3D comparison (triangulated vs reference)")
-            print(f"{'#'*70}")
+            print(f"{'#' * 70}")
 
-        validate_against_reference(
-            tracks_3d, validate_path, node_names, verbose=verbose
-        )
+        validate_against_reference(tracks_3d, validate_path, node_names, verbose=verbose)
 
     # ====================================================================
     # Save

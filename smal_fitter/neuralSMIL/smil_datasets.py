@@ -4,7 +4,8 @@ import sys
 
 import h5py
 import matplotlib
-matplotlib.use('Agg')  # Use non-GUI backend to prevent tkinter issues in multiprocessing
+
+matplotlib.use("Agg")  # Use non-GUI backend to prevent tkinter issues in multiprocessing
 import numpy as np
 import torch
 from scipy.spatial.transform import Rotation
@@ -16,10 +17,16 @@ from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_sample, Render_SMAL_Mo
 from smal_fitter.utils import eul_to_axis
 
 # Import rotation utilities from PyTorch3D
-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, rotation_6d_to_matrix, matrix_to_rotation_6d
+from pytorch3d.transforms import (
+    axis_angle_to_matrix,
+    matrix_to_axis_angle,
+    rotation_6d_to_matrix,
+    matrix_to_rotation_6d,
+)
 
 
 # ----------------------- ROTATION CONVERSION UTILS ----------------------- #
+
 
 def axis_angle_to_rotation_6d(axis_angle):
     """
@@ -35,19 +42,20 @@ def axis_angle_to_rotation_6d(axis_angle):
     else:
         axis_angle_tensor = axis_angle
         is_numpy = False
-    
+
     rotation_matrix = axis_angle_to_matrix(axis_angle_tensor)
     rotation_6d = matrix_to_rotation_6d(rotation_matrix)
-    
+
     if is_numpy:
         return rotation_6d.numpy()
     return rotation_6d
 
-class replicAntSMILDataset(torch.utils.data.Dataset):    
-    def __init__(self, data_path, use_ue_scaling=True, rotation_representation='axis_angle', backbone_name='resnet152'):
+
+class replicAntSMILDataset(torch.utils.data.Dataset):
+    def __init__(self, data_path, use_ue_scaling=True, rotation_representation="axis_angle", backbone_name="resnet152"):
         """
         Initialize replicAnt SMIL Dataset.
-        
+
         Args:
             data_path: Path to the dataset directory
             use_ue_scaling: Whether this dataset expects UE scaling (default True for replicAnt data)
@@ -60,40 +68,41 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
         self.backbone_name = backbone_name
         self.data_json_paths = []
         for file in os.listdir(self.data_path):
-            if file.endswith('.json') and not file.startswith('_BatchData'):
+            if file.endswith(".json") and not file.startswith("_BatchData"):
                 self.data_json_paths.append(os.path.join(self.data_path, file))
 
         # sort the data json paths so when iterating over the dataset, the order is consistent
         self.data_json_paths.sort()
-        
+
         # Detect input resolution from batch data file
         self.original_resolution = self._detect_input_resolution()
-        
+
         # Determine target resolution based on backbone
         from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
+
         self.target_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
     def _detect_input_resolution(self):
         """Detect the input resolution from the batch data file."""
         import json
         import os
-        
+
         # Look for batch data file
-        batch_files = [f for f in os.listdir(self.data_path) if f.startswith('_BatchData') and f.endswith('.json')]
-        
+        batch_files = [f for f in os.listdir(self.data_path) if f.startswith("_BatchData") and f.endswith(".json")]
+
         if batch_files:
             batch_file_path = os.path.join(self.data_path, batch_files[0])
             try:
-                with open(batch_file_path, 'r') as f:
+                with open(batch_file_path, "r") as f:
                     batch_data = json.load(f)
-                
-                if 'Image Resolution' in batch_data:
-                    resolution = batch_data['Image Resolution']
+
+                if "Image Resolution" in batch_data:
+                    resolution = batch_data["Image Resolution"]
                     # Return the resolution (assuming square images, take x or y)
-                    return resolution.get('x', resolution.get('y', 512))
+                    return resolution.get("x", resolution.get("y", 512))
             except Exception as e:
                 print(f"Warning: Could not load batch data file {batch_file_path}: {e}")
-        
+
         # Fallback to default resolution
         print("Warning: Could not detect input resolution, using default 512")
         return 512
@@ -101,11 +110,11 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
     def get_input_resolution(self):
         """Get the detected input resolution."""
         return self.original_resolution
-    
+
     def get_target_resolution(self):
         """Get the target resolution based on backbone."""
         return self.target_resolution
-    
+
     def get_ue_scaling_flag(self):
         """Get the UE scaling flag."""
         return self.use_ue_scaling
@@ -113,36 +122,36 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         # Use optimized loading with reduced I/O operations
         x, y = load_SMIL_Unreal_sample(
-            self.data_json_paths[idx], 
-            plot_tests=False, 
-            propagate_scaling=True, 
+            self.data_json_paths[idx],
+            plot_tests=False,
+            propagate_scaling=True,
             translation_factor=0.01,
             load_image=True,  # Ensure image is loaded
-            verbose=False  # Reduce output
+            verbose=False,  # Reduce output
         )
 
         # x contains the input image path and the input image data
         # y contains the processed SMIL data
 
         # Convert rotation representations if needed
-        if self.rotation_representation == '6d':
+        if self.rotation_representation == "6d":
             # Convert root rotation (global rotation) from axis-angle to 6D
-            if 'root_rot' in y:
-                y['root_rot'] = axis_angle_to_rotation_6d(y['root_rot'])
-            
+            if "root_rot" in y:
+                y["root_rot"] = axis_angle_to_rotation_6d(y["root_rot"])
+
             # Convert joint angles from axis-angle to 6D
-            if 'joint_angles' in y:
-                y['joint_angles'] = axis_angle_to_rotation_6d(y['joint_angles'])
+            if "joint_angles" in y:
+                y["joint_angles"] = axis_angle_to_rotation_6d(y["joint_angles"])
 
         return x, y
 
     def __len__(self):
         return len(self.data_json_paths)
-    
+
     def get_ue_scaling_flag(self):
         """
         Get the UE scaling flag for this dataset.
-        
+
         Returns:
             bool: Whether this dataset expects UE scaling
         """
@@ -152,12 +161,12 @@ class replicAntSMILDataset(torch.utils.data.Dataset):
 class UnifiedSMILDataset:
     """
     Factory class that can load either HDF5 optimized datasets or original JSON datasets.
-    
+
     This provides a unified interface for loading SMIL datasets regardless of format,
     enabling seamless transition between original and optimized datasets without
     changing existing training code.
     """
-    
+
     @staticmethod
     def from_path(data_path: str, **kwargs):
         """
@@ -180,20 +189,20 @@ class UnifiedSMILDataset:
               raise pointing the caller at the HDF5 preprocessor.
             * otherwise → `replicAntSMILDataset` (single-view JSON layout).
         """
-        if data_path.endswith('.h5') or data_path.endswith('.hdf5'):
+        if data_path.endswith(".h5") or data_path.endswith(".hdf5"):
             return UnifiedSMILDataset._dispatch_hdf5(data_path, **kwargs)
         return UnifiedSMILDataset._dispatch_directory(data_path, **kwargs)
 
     @staticmethod
     def _dispatch_hdf5(data_path: str, **kwargs):
         try:
-            with h5py.File(data_path, 'r') as f:
-                if 'metadata' in f:
-                    attrs = f['metadata'].attrs
-                    is_multiview = bool(attrs.get('is_multiview', False))
-                    dataset_type = attrs.get('dataset_type', None)
+            with h5py.File(data_path, "r") as f:
+                if "metadata" in f:
+                    attrs = f["metadata"].attrs
+                    is_multiview = bool(attrs.get("is_multiview", False))
+                    dataset_type = attrs.get("dataset_type", None)
                     if isinstance(dataset_type, bytes):
-                        dataset_type = dataset_type.decode('utf-8')
+                        dataset_type = dataset_type.decode("utf-8")
                 else:
                     is_multiview, dataset_type = False, None
         except OSError as e:
@@ -201,13 +210,16 @@ class UnifiedSMILDataset:
 
         if is_multiview:
             from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
+
             return SLEAPMultiViewDataset(data_path, **kwargs)
 
-        if dataset_type == 'sleap':
+        if dataset_type == "sleap":
             from smal_fitter.sleap_data.sleap_dataset import SLEAPDataset
+
             return SLEAPDataset(data_path, **kwargs)
 
         from smal_fitter.neuralSMIL.optimized_dataset import OptimizedSMILDataset
+
         return OptimizedSMILDataset(data_path, **kwargs)
 
     @staticmethod
@@ -225,24 +237,26 @@ class UnifiedSMILDataset:
                         f"and pass the resulting .h5 file instead."
                     )
         return replicAntSMILDataset(data_path, **kwargs)
-    
+
     @staticmethod
-    def preprocess_dataset(input_dir: str, 
-                          output_path: str,
-                          silhouette_threshold: float = 0.1,
-                          target_resolution: int = 224,
-                          backbone_name: str = 'vit_large_patch16_224',
-                          rotation_representation: str = '6d',
-                          min_visible_keypoints: int = 5,
-                          chunk_size: int = 8,
-                          num_workers: int = 4,
-                          jpeg_quality: int = 95,
-                          ignored_joints_config: dict = None,
-                          verbose: bool = False,
-                          show_progress: bool = True):
+    def preprocess_dataset(
+        input_dir: str,
+        output_path: str,
+        silhouette_threshold: float = 0.1,
+        target_resolution: int = 224,
+        backbone_name: str = "vit_large_patch16_224",
+        rotation_representation: str = "6d",
+        min_visible_keypoints: int = 5,
+        chunk_size: int = 8,
+        num_workers: int = 4,
+        jpeg_quality: int = 95,
+        ignored_joints_config: dict = None,
+        verbose: bool = False,
+        show_progress: bool = True,
+    ):
         """
         Preprocess a JSON dataset into optimized HDF5 format.
-        
+
         Args:
             input_dir: Input directory containing JSON files
             output_path: Output HDF5 file path
@@ -257,12 +271,12 @@ class UnifiedSMILDataset:
             ignored_joints_config: Configuration for ignored joints (from TrainingConfig)
             verbose: Whether to print detailed error messages for each failed sample
             show_progress: Whether to print final statistics
-            
+
         Returns:
             Dictionary containing preprocessing statistics
         """
         from smal_fitter.neuralSMIL.dataset_preprocessing import DatasetPreprocessor, print_statistics
-        
+
         # Create preprocessor
         preprocessor = DatasetPreprocessor(
             silhouette_threshold=silhouette_threshold,
@@ -273,30 +287,26 @@ class UnifiedSMILDataset:
             chunk_size=chunk_size,
             jpeg_quality=jpeg_quality,
             ignored_joints_config=ignored_joints_config,
-            verbose=verbose
+            verbose=verbose,
         )
-        
+
         # Process dataset
-        stats = preprocessor.process_dataset(
-            input_dir=input_dir,
-            output_path=output_path,
-            num_workers=num_workers
-        )
-        
+        stats = preprocessor.process_dataset(input_dir=input_dir, output_path=output_path, num_workers=num_workers)
+
         if show_progress:
             print_statistics(stats)
-        
+
         return stats
 
 
 if __name__ == "__main__":
     # provide path to a replicAnt SMIL dataset
     data_path = "data/replicAnt_trials/replicAnt-x-SMIL-TEX"
-    
+
     # Test original dataset
     synthDataset = replicAntSMILDataset(data_path)
     print("Number of samples in the dataset: ", len(synthDataset))
-    
+
     # Test unified dataset factory
     unified_dataset = UnifiedSMILDataset.from_path(data_path)
     print("Unified dataset samples: ", len(unified_dataset))
@@ -320,29 +330,26 @@ if __name__ == "__main__":
     test_amount, val_amount = int(synthDataset.__len__() * test_size), int(synthDataset.__len__() * val_size)
 
     # this function will automatically randomly split your dataset but you could also implement the split yourself
-    train_set, val_set, test_set = torch.utils.data.random_split(synthDataset, [
-                (synthDataset.__len__() - (test_amount + val_amount)), 
-                test_amount, 
-                val_amount
-    ])
-
+    train_set, val_set, test_set = torch.utils.data.random_split(
+        synthDataset, [(synthDataset.__len__() - (test_amount + val_amount)), test_amount, val_amount]
+    )
 
     train_dataloader = torch.utils.data.DataLoader(
-                train_set,
-                batch_size=BATCH_SIZE,
-                shuffle=True,
+        train_set,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
     )
     val_dataloader = torch.utils.data.DataLoader(
-                val_set,
-                batch_size=BATCH_SIZE,
-                shuffle=True,
+        val_set,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
     )
     test_dataloader = torch.utils.data.DataLoader(
-                test_set,
-                batch_size=BATCH_SIZE,
-                shuffle=True,
+        test_set,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
     )
-    
+
     # print the number of samples in each dataset
     print("\nNumber of samples in train set: ", len(train_set))
     print("Number of samples in val set: ", len(val_set))

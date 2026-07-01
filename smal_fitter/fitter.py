@@ -23,6 +23,7 @@ import config
 
 # outside of specific quadruped meshes, dynamically generate these instead of using the hard-coded files
 if config.ignore_hardcoded_body:
+
     class Prior(object):
         def __init__(self, device):
             pose_len = len(config.dd["J_names"]) * 3
@@ -42,7 +43,7 @@ if config.ignore_hardcoded_body:
                 name2id[joint] = j
 
             self.use_ind = np.ones(pose_len, dtype=bool)
-            self.use_ind[:3] = False # ignore rotation of base joint
+            self.use_ind[:3] = False  # ignore rotation of base joint
 
             self.use_ind_tch = torch.from_numpy(self.use_ind).float().to(device)
 
@@ -50,7 +51,7 @@ if config.ignore_hardcoded_body:
             mean_sub = x.reshape(-1, len(config.dd["J_names"]) * 3) - self.mean.unsqueeze(0)
             res = torch.tensordot(mean_sub, self.precs, dims=([1], [0])) * self.use_ind_tch
 
-            return res ** 2
+            return res**2
 else:
     from smal_fitter.priors.pose_prior_35 import Prior
 
@@ -85,23 +86,24 @@ class SMALFitter(nn.Module):
         self.propagate_scaling = False
 
         if use_unity_prior:
-            with open(config.SMAL_DATA_FILE, 'rb') as f:
+            with open(config.SMAL_DATA_FILE, "rb") as f:
                 u = pkl._Unpickler(f)
-                u.encoding = 'latin1'
+                u.encoding = "latin1"
                 smal_data = u.load()
 
             unity_data = np.load(config.UNITY_SHAPE_PRIOR)
-            model_covs = unity_data['cov'][:-1, :-1]
-            mean_betas = torch.from_numpy(unity_data['mean'][:-1]).float().to(device)
+            model_covs = unity_data["cov"][:-1, :-1]
+            mean_betas = torch.from_numpy(unity_data["mean"][:-1]).float().to(device)
             self.mean_betas = mean_betas.clone()
 
             invcov = np.linalg.inv(model_covs + 1e-5 * np.eye(model_covs.shape[0]))
             prec = np.linalg.cholesky(invcov)
 
             self.betas_prec = torch.FloatTensor(prec).to(device)
-            self.betas = nn.Parameter(self.mean_betas[
-                                      :20].clone())  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
-            # TODO: edit self.betas here according to N_BETAS. 
+            self.betas = nn.Parameter(
+                self.mean_betas[:20].clone()
+            )  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
+            # TODO: edit self.betas here according to N_BETAS.
             # Either pad with zeros or restrict to less than 20
             self.log_beta_scales = torch.nn.Parameter(self.mean_betas[20:].clone())
             self.pose_prior = Prior(config.WALKING_PRIOR_FILE, device)
@@ -110,21 +112,20 @@ class SMALFitter(nn.Module):
             if config.DEBUG:
                 print("\nPOSE PRIOR INFO: LOADED FROM PROVIDED DATA FILE, NOT THE SMIL MODEL!")
                 with open(config.WALKING_PRIOR_FILE, "rb") as f:
-                    res = pkl.load(f, encoding='latin1')
+                    res = pkl.load(f, encoding="latin1")
                 for key in res.keys():
-                        print(key)
-                        print(res[key].shape)
-                        print(res[key])
-                        print("\n")
-            
+                    print(key)
+                    print(res[key].shape)
+                    print(res[key])
+                    print("\n")
+
         else:
             if config.ignore_hardcoded_body:
                 if config.DEBUG:
                     print("Using shape prior learned from 3D scanned models")
                 try:
                     model_covs = config.dd["shape_cov"]
-                    self.mean_betas = torch.FloatTensor(config.dd["shape_mean_betas"])[:config.N_BETAS].to(
-                        device)
+                    self.mean_betas = torch.FloatTensor(config.dd["shape_mean_betas"])[: config.N_BETAS].to(device)
                     self.pose_prior = Prior(device)
                 except KeyError:
                     if config.DEBUG:
@@ -136,29 +137,31 @@ class SMALFitter(nn.Module):
                     self.mean_betas = torch.zeros(config.N_BETAS).to(device)
                     self.pose_prior = Prior(device)
             else:
-                with open(config.SMAL_DATA_FILE, 'rb') as f:
+                with open(config.SMAL_DATA_FILE, "rb") as f:
                     u = pkl._Unpickler(f)
-                    u.encoding = 'latin1'
+                    u.encoding = "latin1"
                     smal_data = u.load()
 
-                model_covs = np.array(smal_data['cluster_cov'])[[shape_family]][0]
-                self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
-                    device)
-                self.mean_betas = torch.FloatTensor(smal_data['cluster_means'][[shape_family]][0])[:config.N_BETAS].to(
-                    device)
-                
+                model_covs = np.array(smal_data["cluster_cov"])[[shape_family]][0]
+                self.mean_betas = torch.FloatTensor(smal_data["cluster_means"][[shape_family]][0])[: config.N_BETAS].to(
+                    device
+                )
+                self.mean_betas = torch.FloatTensor(smal_data["cluster_means"][[shape_family]][0])[: config.N_BETAS].to(
+                    device
+                )
+
                 self.pose_prior = Prior(config.WALKING_PRIOR_FILE, device)
 
                 # Remove this part once the pose prior (or lack thereof) is verified to work correctly.
                 if config.DEBUG:
                     print("\nPOSE PRIOR INFO: LOADED FROM PROVIDED DATA FILE, NOT THE SMIL MODEL!")
                     with open(config.WALKING_PRIOR_FILE, "rb") as f:
-                        res = pkl.load(f, encoding='latin1')
+                        res = pkl.load(f, encoding="latin1")
                     for key in res.keys():
-                            print(key)
-                            print(res[key].shape)
-                            print(res[key])
-                            print("\n")
+                        print(key)
+                        print(res[key].shape)
+                        print(res[key])
+                        print("\n")
 
             if config.DEBUG:
                 print("\nShape covariance matrix")
@@ -166,27 +169,33 @@ class SMALFitter(nn.Module):
                 print("\nShape mean betas")
                 print(self.mean_betas, "\n")
 
-            invcov = np.linalg.inv(model_covs + 1e-5 * np.eye(model_covs.shape[0])) # why the addition? Avoiding zeroes?
+            invcov = np.linalg.inv(
+                model_covs + 1e-5 * np.eye(model_covs.shape[0])
+            )  # why the addition? Avoiding zeroes?
             prec = np.linalg.cholesky(invcov)
 
-            self.betas_prec = torch.FloatTensor(prec)[:config.N_BETAS, :config.N_BETAS].to(device)
+            self.betas_prec = torch.FloatTensor(prec)[: config.N_BETAS, : config.N_BETAS].to(device)
 
             self.betas = nn.Parameter(
-                self.mean_betas.clone())  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
+                self.mean_betas.clone()
+            )  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
 
             if config.ignore_hardcoded_body:
                 # In the SMIL implementation, we allow all bones/joints to scale independently
                 self.log_beta_scales = torch.nn.Parameter(
-                    torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False)
+                    torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False
+                )
                 # Per-joint translation parameters (disabled by default)
                 self.betas_trans = torch.nn.Parameter(
-                    torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False)
+                    torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False
+                )
             else:
-                # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters 
-                # for coupled variation in legs, tail, and ear joints. 
+                # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters
+                # for coupled variation in legs, tail, and ear joints.
                 # (See: https://github.com/benjiebob/SMALify/blob/7f6f06f9e3080c32bb286cde1185de401c7b46e8/smal_model/batch_lbs.py#L106-L129)
                 self.log_beta_scales = torch.nn.Parameter(
-                    torch.zeros(self.num_images, 6).to(device), requires_grad=False)
+                    torch.zeros(self.num_images, 6).to(device), requires_grad=False
+                )
 
         # In the original SMALify code, the joint limits are not used.
         if config.ignore_hardcoded_body:
@@ -197,8 +206,9 @@ class SMALFitter(nn.Module):
             self.min_limits = torch.FloatTensor(limit_prior.min_values[3:]).view(config.N_POSE, 3).to(device)
 
         global_rotation_np = eul_to_axis(np.array([-np.pi / 2, 0, -np.pi / 2]))
-        global_rotation = torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0).repeat(self.num_images,
-                                                                                                      1)  # Global Init (Head-On)
+        global_rotation = (
+            torch.from_numpy(global_rotation_np).float().to(device).unsqueeze(0).repeat(self.num_images, 1)
+        )  # Global Init (Head-On)
         self.global_rotation = nn.Parameter(global_rotation)
 
         trans = torch.FloatTensor([0.0, 0.0, 0.0])[None, :].to(device).repeat(self.num_images, 1)  # Trans Init
@@ -211,7 +221,7 @@ class SMALFitter(nn.Module):
         self.global_mask = torch.ones(1, 3).to(device)
         # self.global_mask[:2] = 0.0
 
-        # Can be used to prevent certain joints rotating. 
+        # Can be used to prevent certain joints rotating.
         # Can be useful depending on sequence.
         self.rotation_mask = torch.ones(config.N_POSE, 3).to(device)
         # self.rotation_mask[25:32] = 0.0 # e.g. stop the tail moving
@@ -231,26 +241,26 @@ class SMALFitter(nn.Module):
 
         # these parameters are then the ones written out at each saved stage to the respective .pkl file
         batch_params = {
-            'global_rotation': self.global_rotation[batch_range] * self.global_mask,
-            'joint_rotations': self.joint_rotations[batch_range] * self.rotation_mask,
-            'betas': self.betas.expand(len(batch_range), self.n_betas),
-            'trans': self.trans[batch_range],
-            'fov': self.fov[batch_range]
+            "global_rotation": self.global_rotation[batch_range] * self.global_mask,
+            "joint_rotations": self.joint_rotations[batch_range] * self.rotation_mask,
+            "betas": self.betas.expand(len(batch_range), self.n_betas),
+            "trans": self.trans[batch_range],
+            "fov": self.fov[batch_range],
         }
 
         if config.ignore_hardcoded_body:
-            batch_params['log_betascale'] = self.log_beta_scales.expand(
+            batch_params["log_betascale"] = self.log_beta_scales.expand(
                 len(batch_range), self.joint_rotations.shape[1] + 1, 3
             ).to(self.device)
-            if hasattr(self, 'betas_trans'):
-                batch_params['betas_trans'] = self.betas_trans.expand(
+            if hasattr(self, "betas_trans"):
+                batch_params["betas_trans"] = self.betas_trans.expand(
                     len(batch_range), self.joint_rotations.shape[1] + 1, 3
                 ).to(self.device)
         else:
-            # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters 
-            # for coupled variation in legs, tail, and ear joints. 
+            # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters
+            # for coupled variation in legs, tail, and ear joints.
             # (See: https://github.com/benjiebob/SMALify/blob/7f6f06f9e3080c32bb286cde1185de401c7b46e8/smal_model/batch_lbs.py#L106-L129)
-            batch_params['log_betascale'] = self.log_beta_scales.expand(len(batch_range), 6)
+            batch_params["log_betascale"] = self.log_beta_scales.expand(len(batch_range), 6)
 
         target_joints = self.target_joints[batch_range].to(self.device)
         target_visibility = self.target_visibility[batch_range].to(self.device)
@@ -262,23 +272,22 @@ class SMALFitter(nn.Module):
         # phi (global and model joint rotations)
         # optionally scale parameters
         verts, joints, Rs, v_shaped = self.smal_model(
-            batch_params['betas'],
-            torch.cat([
-                batch_params['global_rotation'].unsqueeze(1),
-                batch_params['joint_rotations']], dim=1),
-            betas_logscale=batch_params.get('log_betascale', None),
-            betas_trans=batch_params.get('betas_trans', None),
-            propagate_scaling=self.propagate_scaling)
+            batch_params["betas"],
+            torch.cat([batch_params["global_rotation"].unsqueeze(1), batch_params["joint_rotations"]], dim=1),
+            betas_logscale=batch_params.get("log_betascale", None),
+            betas_trans=batch_params.get("betas_trans", None),
+            propagate_scaling=self.propagate_scaling,
+        )
 
-        verts = verts + batch_params['trans'].unsqueeze(1)
-        joints = joints + batch_params['trans'].unsqueeze(1)
+        verts = verts + batch_params["trans"].unsqueeze(1)
+        joints = joints + batch_params["trans"].unsqueeze(1)
 
         canonical_model_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
 
         self.renderer.cameras.fov = self.fov
         rendered_silhouettes, rendered_joints = self.renderer(
-            verts, canonical_model_joints,
-            self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1))
+            verts, canonical_model_joints, self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1)
+        )
 
         objs = {}
 
@@ -286,41 +295,44 @@ class SMALFitter(nn.Module):
             rendered_joints[~target_visibility.bool()] = -1.0
             target_joints[~target_visibility.bool()] = -1.0
 
-            objs['joint'] = w_j2d * F.mse_loss(rendered_joints, target_joints)
+            objs["joint"] = w_j2d * F.mse_loss(rendered_joints, target_joints)
 
         # TODO
         # In the original SMALify code, the joint limits are not used.
         # We're re-introducing them here (temporarily)
         if config.ignore_hardcoded_body:
             if w_limit > 0:
-                zeros = torch.zeros_like(batch_params['joint_rotations'])
-                objs['limit'] = w_limit * torch.mean(
-                    torch.max(batch_params['joint_rotations'] - self.max_limits, zeros) + \
-                    torch.max(self.min_limits - batch_params['joint_rotations'], zeros))
+                zeros = torch.zeros_like(batch_params["joint_rotations"])
+                objs["limit"] = w_limit * torch.mean(
+                    torch.max(batch_params["joint_rotations"] - self.max_limits, zeros)
+                    + torch.max(self.min_limits - batch_params["joint_rotations"], zeros)
+                )
 
         if w_pose > 0:
-            objs['pose'] = w_pose * self.pose_prior(
-                torch.cat([
-                    batch_params['global_rotation'].unsqueeze(1),
-                    batch_params['joint_rotations']], dim=1)).mean()
+            objs["pose"] = (
+                w_pose
+                * self.pose_prior(
+                    torch.cat([batch_params["global_rotation"].unsqueeze(1), batch_params["joint_rotations"]], dim=1)
+                ).mean()
+            )
 
         if w_splay > 0:
-            objs['splay'] = w_splay * torch.sum(batch_params['joint_rotations'][:, :, [0, 2]] ** 2)
+            objs["splay"] = w_splay * torch.sum(batch_params["joint_rotations"][:, :, [0, 2]] ** 2)
 
         if w_betas > 0:
             if self.use_unity_prior:
-                all_betas = torch.cat([batch_params['betas'], batch_params['log_betascale']], dim=1)
+                all_betas = torch.cat([batch_params["betas"], batch_params["log_betascale"]], dim=1)
             else:
                 # TODO: Add a simple regularizer to penalize log_betascale for this case.
                 # Right now, only when using the unity prior (WLDO) we take joint length scaling into consideration
-                all_betas = batch_params['betas']
+                all_betas = batch_params["betas"]
 
-            diff_betas = (all_betas - self.mean_betas.unsqueeze(0))  # N, B
+            diff_betas = all_betas - self.mean_betas.unsqueeze(0)  # N, B
             res = torch.tensordot(diff_betas, self.betas_prec, dims=([1], [0]))
-            objs['betas'] = w_betas * (res ** 2).mean()
-            
+            objs["betas"] = w_betas * (res**2).mean()
+
         if w_reproj > 0 and not self.rgb_only:
-            objs['sil_reproj'] = w_reproj * F.l1_loss(rendered_silhouettes, sil_imgs)
+            objs["sil_reproj"] = w_reproj * F.l1_loss(rendered_silhouettes, sil_imgs)
 
         return reduce(lambda x, y: x + y, objs.values()), objs
 
@@ -345,15 +357,17 @@ class SMALFitter(nn.Module):
 
         for frame_id in range(self.num_images):
             param_file = os.path.join(checkpoint_path, "{0:04}".format(frame_id), "{0}.pkl".format(epoch))
-            with open(param_file, 'rb') as f:
+            with open(param_file, "rb") as f:
                 img_parameters = pkl.load(f)
-                self.global_rotation[frame_id] = torch.from_numpy(img_parameters['global_rotation']).float().to(
-                    self.device)
-                self.joint_rotations[frame_id] = torch.from_numpy(img_parameters['joint_rotations']).float().to(
-                    self.device).view(config.N_POSE, 3)
-                self.trans[frame_id] = torch.from_numpy(img_parameters['trans']).float().to(self.device)
-                beta_list.append(img_parameters['betas'][:self.n_betas])
-                scale_list.append(img_parameters['log_betascale'])
+                self.global_rotation[frame_id] = (
+                    torch.from_numpy(img_parameters["global_rotation"]).float().to(self.device)
+                )
+                self.joint_rotations[frame_id] = (
+                    torch.from_numpy(img_parameters["joint_rotations"]).float().to(self.device).view(config.N_POSE, 3)
+                )
+                self.trans[frame_id] = torch.from_numpy(img_parameters["trans"]).float().to(self.device)
+                beta_list.append(img_parameters["betas"][: self.n_betas])
+                scale_list.append(img_parameters["log_betascale"])
 
         self.betas = torch.nn.Parameter(torch.from_numpy(np.mean(beta_list, axis=0)).float().to(self.device))
         self.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.mean(scale_list, axis=0)).float().to(self.device))
@@ -373,30 +387,30 @@ class SMALFitter(nn.Module):
             epoch: Current epoch number for naming visualization images
         """
         # rotation matrix here only used to produce alternative rotated view
-        rot_matrix = torch.from_numpy(R.from_euler('y', 180.0, degrees=True).as_matrix()).float().to(self.device)
+        rot_matrix = torch.from_numpy(R.from_euler("y", 180.0, degrees=True).as_matrix()).float().to(self.device)
         for j in range(0, self.num_images, self.batch_size):
             batch_range = list(range(j, min(self.num_images, j + self.batch_size)))
             batch_params = {
-                'global_rotation': self.global_rotation[batch_range] * self.global_mask,
-                'joint_rotations': self.joint_rotations[batch_range] * self.rotation_mask,
-                'betas': self.betas.expand(len(batch_range), self.n_betas),
-                'trans': self.trans[batch_range],
-                'fov': self.fov[batch_range]
+                "global_rotation": self.global_rotation[batch_range] * self.global_mask,
+                "joint_rotations": self.joint_rotations[batch_range] * self.rotation_mask,
+                "betas": self.betas.expand(len(batch_range), self.n_betas),
+                "trans": self.trans[batch_range],
+                "fov": self.fov[batch_range],
             }
 
             if config.ignore_hardcoded_body:
-                batch_params['log_betascale'] = self.log_beta_scales.expand(
+                batch_params["log_betascale"] = self.log_beta_scales.expand(
                     len(batch_range), self.joint_rotations.shape[1] + 1, 3
                 ).to(self.device)
-                if hasattr(self, 'betas_trans'):
-                    batch_params['betas_trans'] = self.betas_trans.expand(
+                if hasattr(self, "betas_trans"):
+                    batch_params["betas_trans"] = self.betas_trans.expand(
                         len(batch_range), self.joint_rotations.shape[1] + 1, 3
                     ).to(self.device)
             else:
-                # LEGACY CODE! The original code in the WLDO implementation has 6 scale parameters 
-                # for coupled variation in legs, tail, and ear joints. 
+                # LEGACY CODE! The original code in the WLDO implementation has 6 scale parameters
+                # for coupled variation in legs, tail, and ear joints.
                 # (See: https://github.com/benjiebob/SMALify/blob/7f6f06f9e3080c32bb286cde1185de401c7b46e8/smal_model/batch_lbs.py#L106-L129)
-                batch_params['log_betascale'] = self.log_beta_scales.expand(len(batch_range), 6)
+                batch_params["log_betascale"] = self.log_beta_scales.expand(len(batch_range), 6)
 
             target_joints = self.target_joints[batch_range]
             target_visibility = self.target_visibility[batch_range]
@@ -409,19 +423,18 @@ class SMALFitter(nn.Module):
 
             with torch.no_grad():
                 verts, joints, Rs, v_shaped = self.smal_model(
-                    batch_params['betas'],
-                    torch.cat([
-                        batch_params['global_rotation'].unsqueeze(1),
-                        batch_params['joint_rotations']], dim=1),
-                    betas_logscale=batch_params.get('log_betascale', None),
-                    betas_trans=batch_params.get('betas_trans', None),
-                    propagate_scaling=self.propagate_scaling)
+                    batch_params["betas"],
+                    torch.cat([batch_params["global_rotation"].unsqueeze(1), batch_params["joint_rotations"]], dim=1),
+                    betas_logscale=batch_params.get("log_betascale", None),
+                    betas_trans=batch_params.get("betas_trans", None),
+                    propagate_scaling=self.propagate_scaling,
+                )
 
                 if apply_UE_transform:
                     # in UE5 the model is scaled up by 10 (double check model size in your replicant project, if modified)
                     # needed to align the model at the root joint and scale it to the replicAnt model size
-                    verts = (verts - joints[:, 0, :]) * 10 + batch_params['trans'].unsqueeze(1)
-                    joints = (joints - joints[:, 0, :]) * 10 + batch_params['trans'].unsqueeze(1)
+                    verts = (verts - joints[:, 0, :]) * 10 + batch_params["trans"].unsqueeze(1)
+                    joints = (joints - joints[:, 0, :]) * 10 + batch_params["trans"].unsqueeze(1)
                 elif mesh_scale is not None:
                     # Apply mesh scaling (used when allow_mesh_scaling is enabled in training)
                     # Center at root joint, scale, then translate - matches _render_keypoints_with_camera
@@ -436,21 +449,24 @@ class SMALFitter(nn.Module):
                         elif scale_val.dim() == 1:
                             scale_val = scale_val.unsqueeze(1)
                     root_joint = joints[:, 0:1, :]
-                    verts = (verts - root_joint) * scale_val.unsqueeze(-1) + batch_params['trans'].unsqueeze(1)
-                    joints = (joints - root_joint) * scale_val.unsqueeze(-1) + batch_params['trans'].unsqueeze(1)
+                    verts = (verts - root_joint) * scale_val.unsqueeze(-1) + batch_params["trans"].unsqueeze(1)
+                    joints = (joints - root_joint) * scale_val.unsqueeze(-1) + batch_params["trans"].unsqueeze(1)
                 else:
-                    verts = verts + batch_params['trans'].unsqueeze(1)
-                    joints = joints + batch_params['trans'].unsqueeze(1)
+                    verts = verts + batch_params["trans"].unsqueeze(1)
+                    joints = joints + batch_params["trans"].unsqueeze(1)
 
                 canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
-                
+
                 # Ensure float32 for rendering (SMAL model can output float64 from some buffers)
                 verts = verts.float()
                 canonical_joints = canonical_joints.float()
 
                 rendered_silhouettes, rendered_joints, rendered_images = self.renderer(
-                    verts, canonical_joints,
-                    self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1), render_texture=True)
+                    verts,
+                    canonical_joints,
+                    self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1),
+                    render_texture=True,
+                )
 
                 verts_mean = verts - torch.mean(verts, dim=1, keepdim=True)
                 joints_mean = canonical_joints - torch.mean(verts, dim=1, keepdim=True)
@@ -459,33 +475,45 @@ class SMALFitter(nn.Module):
                 _, rev_joints, rev_images = self.renderer(
                     (rot_matrix @ verts_mean.unsqueeze(-1)).squeeze(-1).float(),
                     (rot_matrix @ joints_mean.unsqueeze(-1)).squeeze(-1).float(),
-                    self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1), render_texture=True)
+                    self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1),
+                    render_texture=True,
+                )
 
                 overlay_image = (rendered_images * 0.5) + (rgb_imgs * 0.5)
 
                 # Get image size for resolution-aware keypoint scaling
                 image_size = rgb_imgs.shape[-1]  # Assuming square images, get height/width
 
-                target_vis = SMALJointDrawer.draw_joints(rgb_imgs, target_joints, visible=target_visibility, image_size=image_size)
-                rendered_images_vis = SMALJointDrawer.draw_joints(rendered_images, rendered_joints,
-                                                                  visible=target_visibility, image_size=image_size)
-                rendered_overlay_vis = SMALJointDrawer.draw_joints(overlay_image, rendered_joints,
-                                                                   visible=target_visibility, image_size=image_size)
-                rev_images_vis = SMALJointDrawer.draw_joints(rev_images, rev_joints, visible=target_visibility, image_size=image_size)
+                target_vis = SMALJointDrawer.draw_joints(
+                    rgb_imgs, target_joints, visible=target_visibility, image_size=image_size
+                )
+                rendered_images_vis = SMALJointDrawer.draw_joints(
+                    rendered_images, rendered_joints, visible=target_visibility, image_size=image_size
+                )
+                rendered_overlay_vis = SMALJointDrawer.draw_joints(
+                    overlay_image, rendered_joints, visible=target_visibility, image_size=image_size
+                )
+                rev_images_vis = SMALJointDrawer.draw_joints(
+                    rev_images, rev_joints, visible=target_visibility, image_size=image_size
+                )
 
-                silhouette_error = 1.0 - F.l1_loss(sil_imgs, rendered_silhouettes, reduction='none')
+                silhouette_error = 1.0 - F.l1_loss(sil_imgs, rendered_silhouettes, reduction="none")
                 silhouette_error = silhouette_error.expand_as(rgb_imgs).data.cpu()
 
-                collage_rows = torch.cat([
-                    target_vis, rendered_images_vis,
-                    rendered_overlay_vis, silhouette_error, rev_images_vis
-                ], dim=3)
+                collage_rows = torch.cat(
+                    [target_vis, rendered_images_vis, rendered_overlay_vis, silhouette_error, rev_images_vis], dim=3
+                )
 
                 for batch_id, global_id in enumerate(batch_range):
                     collage_np = np.transpose(collage_rows[batch_id].numpy(), (1, 2, 0))
                     img_parameters = {k: v[batch_id].cpu().data.numpy() for (k, v) in batch_params.items()}
                     image_exporter.export(
                         (collage_np * 255.0).astype(np.uint8),
-                        batch_id, global_id, img_parameters,
-                        verts, self.smal_model.faces.data.cpu().numpy(),
-                        img_idx, epoch=epoch)
+                        batch_id,
+                        global_id,
+                        img_parameters,
+                        verts,
+                        self.smal_model.faces.data.cpu().numpy(),
+                        img_idx,
+                        epoch=epoch,
+                    )

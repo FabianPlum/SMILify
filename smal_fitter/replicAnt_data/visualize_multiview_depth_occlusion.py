@@ -26,6 +26,7 @@ J_names mapping in the loader produces all-zero keypoints and every panel
 will be empty. The default `config.SMAL_FILE` is the ant model — pass
 `--smal_file` pointing at the mouse pkl for the multi-cam mice dataset.
 """
+
 import argparse
 import os
 import sys
@@ -235,8 +236,7 @@ def visualize_frame(
                 label_depth_culled=(col >= 2),
             )
         fig.suptitle(
-            f"frame {frame_index} cam{cam_id}  "
-            f"id={int(vis_id.sum())} -> id+depth={int(vis_dep.sum())}",
+            f"frame {frame_index} cam{cam_id}  id={int(vis_id.sum())} -> id+depth={int(vis_dep.sum())}",
             fontsize=12,
         )
         plt.tight_layout(rect=[0, 0, 1, 0.96])
@@ -293,10 +293,7 @@ def visualize_frame(
         vid = int(y_id["keypoint_visibility_per_view"][v].sum())
         vd = int(y_d["keypoint_visibility_per_view"][v].sum())
         print(f"  {x_d['camera_ids'][v]:>4} {vid:>7} {vd:>10} {vid - vd:>16}")
-    print(
-        f"  totals: id={totals['id']}  id+depth={totals['depth']}  "
-        f"culled_by_depth={totals['depth_only_culled']}"
-    )
+    print(f"  totals: id={totals['id']}  id+depth={totals['depth']}  culled_by_depth={totals['depth_only_culled']}")
 
 
 def main():
@@ -365,10 +362,7 @@ def main():
 
     if args.smal_file is not None:
         apply_smal_file_override(args.smal_file)
-    print(
-        f"SMAL file: {config.SMAL_FILE}  "
-        f"({len(config.dd['J_names'])} joints)"
-    )
+    print(f"SMAL file: {config.SMAL_FILE}  ({len(config.dd['J_names'])} joints)")
 
     visualize_frame(
         data_path=args.data_path,

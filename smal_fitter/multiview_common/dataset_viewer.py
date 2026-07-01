@@ -42,10 +42,12 @@ from smal_fitter.multiview_common.canonical_frame import (  # noqa: E402
     kp2d_norm_yx_to_pixel_xy,
     project_world_to_pixel,
 )
+
 # SMAL rendering is an optional add-on (model + PyTorch3D). Failure to
 # import does NOT block the viewer; we just disable the SMAL features.
 try:
     from smal_fitter.multiview_common.smal_render import SMALRendererWrapper, overlay_silhouette  # noqa: E402
+
     _SMAL_AVAILABLE = True
 except Exception as _e:  # pragma: no cover
     SMALRendererWrapper = None  # type: ignore
@@ -76,10 +78,7 @@ def _read_metadata(path: str) -> Dict[str, object]:
             if isinstance(v, bytes):
                 v = v.decode("utf-8", errors="replace")
             elif isinstance(v, np.ndarray) and v.dtype.kind in ("S", "O"):
-                v = [
-                    e.decode("utf-8", errors="replace") if isinstance(e, bytes) else e
-                    for e in v
-                ]
+                v = [e.decode("utf-8", errors="replace") if isinstance(e, bytes) else e for e in v]
             out[k] = v
     return out
 
@@ -100,33 +99,28 @@ def _dataset_summary(path: str) -> Dict[str, object]:
                 else f["multiview_images/view_mask"][:].sum(axis=1)
             ).astype(int),
             "has_3d_data": (
-                f["auxiliary/has_3d_data"][:].astype(bool)
-                if "auxiliary/has_3d_data" in f
-                else np.zeros(n, dtype=bool)
+                f["auxiliary/has_3d_data"][:].astype(bool) if "auxiliary/has_3d_data" in f else np.zeros(n, dtype=bool)
             ),
         }
         if "auxiliary/origin_dataset" in f:
             origins = f["auxiliary/origin_dataset"][:]
-            out["origin_dataset"] = np.array([
-                s.decode("utf-8", errors="replace") if isinstance(s, bytes) else str(s)
-                for s in origins
-            ])
+            out["origin_dataset"] = np.array(
+                [s.decode("utf-8", errors="replace") if isinstance(s, bytes) else str(s) for s in origins]
+            )
         else:
             out["origin_dataset"] = None
         if "auxiliary/origin_source_file" in f:
             srcs = f["auxiliary/origin_source_file"][:]
-            out["origin_source_file"] = np.array([
-                s.decode("utf-8", errors="replace") if isinstance(s, bytes) else str(s)
-                for s in srcs
-            ])
+            out["origin_source_file"] = np.array(
+                [s.decode("utf-8", errors="replace") if isinstance(s, bytes) else str(s) for s in srcs]
+            )
         else:
             out["origin_source_file"] = None
         if "auxiliary/session_name" in f:
             sns = f["auxiliary/session_name"][:]
-            out["session_name"] = np.array([
-                s.decode("utf-8", errors="replace") if isinstance(s, bytes) else str(s)
-                for s in sns
-            ])
+            out["session_name"] = np.array(
+                [s.decode("utf-8", errors="replace") if isinstance(s, bytes) else str(s) for s in sns]
+            )
         else:
             out["session_name"] = None
     return out
@@ -160,11 +154,7 @@ def _read_sample(path: str, sample_idx: int) -> Dict[str, object]:
             if "auxiliary/has_3d_data" in f
             else not bool(np.all(kp3d == 0))
         )
-        frame_idx = (
-            int(f["auxiliary/frame_idx"][sample_idx])
-            if "auxiliary/frame_idx" in f
-            else int(sample_idx)
-        )
+        frame_idx = int(f["auxiliary/frame_idx"][sample_idx]) if "auxiliary/frame_idx" in f else int(sample_idx)
         origin_dataset = None
         if "auxiliary/origin_dataset" in f:
             v = f["auxiliary/origin_dataset"][sample_idx]
@@ -235,7 +225,7 @@ def _discover_smal_pkls() -> list:
     scan_dirs = [
         _REPO_ROOT_FOR_PKL_SCAN / "3D_model_prep",
         _REPO_ROOT_FOR_PKL_SCAN / "smal_model" / "data",
-        _REPO_ROOT_FOR_PKL_SCAN,   # top-level only, no recursion
+        _REPO_ROOT_FOR_PKL_SCAN,  # top-level only, no recursion
     ]
     seen = set()
     for d in scan_dirs:
@@ -300,7 +290,9 @@ def _get_smal_renderer(smal_pkl: str, render_size: int):
     if not _SMAL_AVAILABLE:
         return None
     return SMALRendererWrapper(
-        smal_file=smal_pkl, render_size=int(render_size), device="cpu",
+        smal_file=smal_pkl,
+        render_size=int(render_size),
+        device="cpu",
     )
 
 
@@ -336,7 +328,10 @@ def _smal_forward_for_sample(path: str, sample_idx: int, smal_pkl: str) -> Optio
 
 @st.cache_data(show_spinner="Rendering silhouettes…")
 def _render_silhouettes_for_sample(
-    path: str, sample_idx: int, smal_pkl: str, render_size: int,
+    path: str,
+    sample_idx: int,
+    smal_pkl: str,
+    render_size: int,
 ) -> Optional[Dict[int, np.ndarray]]:
     """Per-view silhouette mask in [0, 1], one per valid view.
     Cached by (path, sample_idx, pkl, render_size) so the click-to-render
@@ -358,7 +353,9 @@ def _render_silhouettes_for_sample(
             sil = renderer.render_silhouette(
                 verts_world=forward["vertices_world"],
                 faces=forward["faces"],
-                R_cv=sample["R"][v], t_cv=sample["t"][v], K=sample["K"][v],
+                R_cv=sample["R"][v],
+                t_cv=sample["t"][v],
+                K=sample["K"][v],
                 image_size_wh=sample["image_sizes_wh"][v],
             )
             sils[v] = sil
@@ -374,15 +371,17 @@ def _render_silhouettes_for_sample(
 
 def _draw_overlay(
     img_rgb: np.ndarray,
-    kp2d_norm_yx: np.ndarray,        # (J, 2) — [y/H_calib, x/W_calib]
-    kp_vis: np.ndarray,              # (J,)
-    R: np.ndarray, t: np.ndarray, K: np.ndarray,
-    kp3d: np.ndarray,                # (J, 3) world frame
+    kp2d_norm_yx: np.ndarray,  # (J, 2) — [y/H_calib, x/W_calib]
+    kp_vis: np.ndarray,  # (J,)
+    R: np.ndarray,
+    t: np.ndarray,
+    K: np.ndarray,
+    kp3d: np.ndarray,  # (J, 3) world frame
     image_sizes_wh: Tuple[int, int],  # (W_calib, H_calib) — K is calibrated for this
     show_gt: bool,
     show_reproj: bool,
-    smal_joints_world: Optional[np.ndarray] = None,   # (J, 3) — posed SMAL joints
-    silhouette: Optional[np.ndarray] = None,          # (S, S) [0, 1]
+    smal_joints_world: Optional[np.ndarray] = None,  # (J, 3) — posed SMAL joints
+    silhouette: Optional[np.ndarray] = None,  # (S, S) [0, 1]
 ) -> np.ndarray:
     """Stretch the JPEG to the calibration frame's aspect, then overlay GT
     and projected-3D keypoints. Visibility codes opacity / fill.
@@ -434,8 +433,11 @@ def _draw_overlay(
 
     if silhouette is not None and overlay_silhouette is not None:
         canvas = overlay_silhouette(
-            canvas, silhouette, np.array([W_calib, H_calib]),
-            colour=(255, 130, 30), alpha=0.40,
+            canvas,
+            silhouette,
+            np.array([W_calib, H_calib]),
+            colour=(255, 130, 30),
+            alpha=0.40,
         )
 
     if smal_joints_world is not None:
@@ -450,11 +452,14 @@ def _draw_overlay(
                 continue
             r = max(3, W_calib // 220)
             # Filled orange triangle (cv2 has no triangle marker, draw polygon).
-            pts = np.array([
-                [px, py - r],
-                [px - r, py + r],
-                [px + r, py + r],
-            ], dtype=np.int32)
+            pts = np.array(
+                [
+                    [px, py - r],
+                    [px - r, py + r],
+                    [px + r, py + r],
+                ],
+                dtype=np.int32,
+            )
             cv2.fillPoly(canvas, [pts], (255, 165, 0))
 
     return canvas
@@ -499,29 +504,46 @@ def _build_3d_figure(
 
     fig = go.Figure()
     if has_gt_3d.any():
-        fig.add_trace(go.Scatter3d(
-            x=kp3d[has_gt_3d, 0], y=kp3d[has_gt_3d, 1], z=kp3d[has_gt_3d, 2],
-            mode="markers",
-            marker=dict(size=4, color="black"),
-            name=f"kp3d (n={int(has_gt_3d.sum())})",
-        ))
+        fig.add_trace(
+            go.Scatter3d(
+                x=kp3d[has_gt_3d, 0],
+                y=kp3d[has_gt_3d, 1],
+                z=kp3d[has_gt_3d, 2],
+                mode="markers",
+                marker=dict(size=4, color="black"),
+                name=f"kp3d (n={int(has_gt_3d.sum())})",
+            )
+        )
 
     if smal_forward is not None:
         verts = smal_forward["vertices_world"]
         faces = smal_forward["faces"]
         joints = smal_forward["joints_world"]
-        fig.add_trace(go.Mesh3d(
-            x=verts[:, 0], y=verts[:, 1], z=verts[:, 2],
-            i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
-            color="orange", opacity=0.35, flatshading=True,
-            name="SMAL mesh", showscale=False,
-        ))
-        fig.add_trace(go.Scatter3d(
-            x=joints[:, 0], y=joints[:, 1], z=joints[:, 2],
-            mode="markers",
-            marker=dict(size=4, color="orange", symbol="diamond"),
-            name=f"SMAL joints (n={len(joints)})",
-        ))
+        fig.add_trace(
+            go.Mesh3d(
+                x=verts[:, 0],
+                y=verts[:, 1],
+                z=verts[:, 2],
+                i=faces[:, 0],
+                j=faces[:, 1],
+                k=faces[:, 2],
+                color="orange",
+                opacity=0.35,
+                flatshading=True,
+                name="SMAL mesh",
+                showscale=False,
+            )
+        )
+        fig.add_trace(
+            go.Scatter3d(
+                x=joints[:, 0],
+                y=joints[:, 1],
+                z=joints[:, 2],
+                mode="markers",
+                marker=dict(size=4, color="orange", symbol="diamond"),
+                name=f"SMAL joints (n={len(joints)})",
+            )
+        )
 
     cam_xyz, cam_labels = [], []
     for v in range(len(R)):
@@ -532,19 +554,25 @@ def _build_3d_figure(
         cam_labels.append(f"cam {v}")
     if cam_xyz:
         cam_xyz = np.stack(cam_xyz, axis=0)
-        fig.add_trace(go.Scatter3d(
-            x=cam_xyz[:, 0], y=cam_xyz[:, 1], z=cam_xyz[:, 2],
-            mode="markers+text",
-            marker=dict(size=6, color="firebrick", symbol="diamond"),
-            text=cam_labels,
-            textposition="top center",
-            name="cameras",
-        ))
+        fig.add_trace(
+            go.Scatter3d(
+                x=cam_xyz[:, 0],
+                y=cam_xyz[:, 1],
+                z=cam_xyz[:, 2],
+                mode="markers+text",
+                marker=dict(size=6, color="firebrick", symbol="diamond"),
+                text=cam_labels,
+                textposition="top center",
+                name="cameras",
+            )
+        )
     fig.update_layout(
         height=520,
         margin=dict(l=0, r=0, t=20, b=0),
         scene=dict(
-            xaxis_title="X", yaxis_title="Y", zaxis_title="Z",
+            xaxis_title="X",
+            yaxis_title="Y",
+            zaxis_title="Z",
             aspectmode="data",
         ),
         legend=dict(orientation="h", y=-0.05),
@@ -606,9 +634,16 @@ def _all_sample_reproj_errors(path: str, max_samples: int) -> Dict[str, np.ndarr
 def _ui_metadata(meta: Dict[str, object]) -> None:
     st.subheader("Metadata")
     headline_keys = [
-        "dataset_type", "num_samples", "max_views", "n_joints",
-        "target_resolution", "world_scale", "min_views_per_sample",
-        "is_multiview", "has_camera_parameters", "has_3d_keypoints",
+        "dataset_type",
+        "num_samples",
+        "max_views",
+        "n_joints",
+        "target_resolution",
+        "world_scale",
+        "min_views_per_sample",
+        "is_multiview",
+        "has_camera_parameters",
+        "has_3d_keypoints",
     ]
     headline = {k: meta.get(k, "—") for k in headline_keys}
     cols = st.columns(5)
@@ -682,13 +717,9 @@ def _ui_sample(
                     st.warning(f"view {v}: image missing")
                     continue
                 smal_joints_for_view = (
-                    smal_forward["joints_world"]
-                    if (smal_forward is not None and show_smal_2d)
-                    else None
+                    smal_forward["joints_world"] if (smal_forward is not None and show_smal_2d) else None
                 )
-                sil_for_view = (
-                    silhouettes.get(v) if silhouettes is not None else None
-                )
+                sil_for_view = silhouettes.get(v) if silhouettes is not None else None
                 drawn = _draw_overlay(
                     img,
                     sample["kp2d_norm_yx"][v],
@@ -727,8 +758,9 @@ def _ui_sample(
             c1, c2, c3 = st.columns(3)
             c1.code(f"K =\n{np.array2string(K, precision=3, suppress_small=True)}")
             c2.code(f"R =\n{np.array2string(R, precision=4, suppress_small=True)}")
-            c3.code(f"t = {np.array2string(t, precision=4, suppress_small=True)}\n"
-                    f"||t|| = {float(np.linalg.norm(t)):.4g}")
+            c3.code(
+                f"t = {np.array2string(t, precision=4, suppress_small=True)}\n||t|| = {float(np.linalg.norm(t)):.4g}"
+            )
 
 
 def _ui_stats(path: str, summary: Dict[str, object]) -> None:
@@ -744,19 +776,23 @@ def _ui_stats(path: str, summary: Dict[str, object]) -> None:
         height=260,
         margin=dict(l=0, r=0, t=24, b=0),
         title="Valid views per sample",
-        xaxis_title="num_views", yaxis_title="count",
+        xaxis_title="num_views",
+        yaxis_title="count",
     )
 
     # has_3d_data ratio.
     has3d = summary["has_3d_data"]
     pct = float(has3d.mean()) if has3d.size else 0.0
-    fig_h3 = go.Figure(go.Pie(
-        labels=["has_3d_data", "no 3D"],
-        values=[int(has3d.sum()), int((~has3d).sum())],
-        hole=0.45,
-    ))
+    fig_h3 = go.Figure(
+        go.Pie(
+            labels=["has_3d_data", "no 3D"],
+            values=[int(has3d.sum()), int((~has3d).sum())],
+            hole=0.45,
+        )
+    )
     fig_h3.update_layout(
-        height=260, margin=dict(l=0, r=0, t=24, b=0),
+        height=260,
+        margin=dict(l=0, r=0, t=24, b=0),
         title=f"has_3d_data ({pct:.0%})",
     )
 
@@ -769,9 +805,11 @@ def _ui_stats(path: str, summary: Dict[str, object]) -> None:
         uniq, counts = np.unique(origin, return_counts=True)
         fig_o = go.Figure(go.Bar(x=uniq.tolist(), y=counts.tolist()))
         fig_o.update_layout(
-            height=260, margin=dict(l=0, r=0, t=24, b=0),
+            height=260,
+            margin=dict(l=0, r=0, t=24, b=0),
             title="origin_dataset distribution (merged file)",
-            xaxis_title="origin", yaxis_title="count",
+            xaxis_title="origin",
+            yaxis_title="count",
         )
         st.plotly_chart(fig_o, width="stretch")
 
@@ -781,9 +819,11 @@ def _ui_stats(path: str, summary: Dict[str, object]) -> None:
         if len(uniq) > 1:
             fig_s = go.Figure(go.Bar(x=uniq.tolist(), y=counts.tolist()))
             fig_s.update_layout(
-                height=260, margin=dict(l=0, r=0, t=24, b=0),
+                height=260,
+                margin=dict(l=0, r=0, t=24, b=0),
                 title="origin_source_file (merged file)",
-                xaxis_title="source", yaxis_title="count",
+                xaxis_title="source",
+                yaxis_title="count",
             )
             st.plotly_chart(fig_s, width="stretch")
 
@@ -793,9 +833,11 @@ def _ui_stats(path: str, summary: Dict[str, object]) -> None:
         if len(uniq) > 1 and len(uniq) <= 50:
             fig_se = go.Figure(go.Bar(x=uniq.tolist(), y=counts.tolist()))
             fig_se.update_layout(
-                height=260, margin=dict(l=0, r=0, t=24, b=0),
+                height=260,
+                margin=dict(l=0, r=0, t=24, b=0),
                 title="session distribution",
-                xaxis_title="session", yaxis_title="count",
+                xaxis_title="session",
+                yaxis_title="count",
             )
             st.plotly_chart(fig_se, width="stretch")
 
@@ -803,11 +845,16 @@ def _ui_stats(path: str, summary: Dict[str, object]) -> None:
     st.markdown("**Reprojection error histogram** (one pass over the dataset)")
     # number_input handles n==1 cleanly (slider needs min < max).
     default_n = min(n, 1000)
-    max_n = int(st.number_input(
-        "Max samples to scan",
-        min_value=1, max_value=max(n, 1), value=default_n, step=max(1, n // 100),
-        help="Scanning thousands of samples is expensive; limit for speed.",
-    ))
+    max_n = int(
+        st.number_input(
+            "Max samples to scan",
+            min_value=1,
+            max_value=max(n, 1),
+            value=default_n,
+            step=max(1, n // 100),
+            help="Scanning thousands of samples is expensive; limit for speed.",
+        )
+    )
     if st.button("Compute reprojection error histogram"):
         data = _all_sample_reproj_errors(path, int(max_n))
         errs = data["max_err"]
@@ -817,12 +864,14 @@ def _ui_stats(path: str, summary: Dict[str, object]) -> None:
             return
         fig_err = go.Figure(go.Histogram(x=valid_errs.tolist(), nbinsx=60))
         fig_err.update_layout(
-            height=320, margin=dict(l=0, r=0, t=24, b=0),
+            height=320,
+            margin=dict(l=0, r=0, t=24, b=0),
             title=f"Per-sample max reprojection error (n={valid_errs.size}, "
-                  f"median={float(np.median(valid_errs)):.2f}px, "
-                  f"p95={float(np.percentile(valid_errs, 95)):.2f}px, "
-                  f"max={float(valid_errs.max()):.2f}px)",
-            xaxis_title="px (calibration frame)", yaxis_title="count",
+            f"median={float(np.median(valid_errs)):.2f}px, "
+            f"p95={float(np.percentile(valid_errs, 95)):.2f}px, "
+            f"max={float(valid_errs.max()):.2f}px)",
+            xaxis_title="px (calibration frame)",
+            yaxis_title="count",
         )
         st.plotly_chart(fig_err, width="stretch")
 
@@ -851,9 +900,11 @@ def main() -> None:
     default_path = _parse_cli_default_path() or ""
     with st.sidebar:
         st.header("Dataset")
-        path_str = st.text_input("HDF5 path", value=default_path,
-                                 help="Path to a SLEAPMultiViewDataset-format HDF5 "
-                                      "(SLEAP, replicAnt, or merger output).")
+        path_str = st.text_input(
+            "HDF5 path",
+            value=default_path,
+            help="Path to a SLEAPMultiViewDataset-format HDF5 (SLEAP, replicAnt, or merger output).",
+        )
         if not path_str:
             st.info("Enter an HDF5 path to begin.")
             return
@@ -882,7 +933,10 @@ def main() -> None:
         st.session_state.sample_idx = _clamp(st.session_state.sample_idx)
 
         st.number_input(
-            "index", min_value=0, max_value=max(n - 1, 0), step=1,
+            "index",
+            min_value=0,
+            max_value=max(n - 1, 0),
+            step=1,
             key="sample_idx",
             help=f"0 .. {max(n - 1, 0)}",
         )
@@ -890,11 +944,15 @@ def main() -> None:
 
         prev_col, next_col = st.columns(2)
         prev_col.button(
-            "◀ prev", width="stretch", disabled=sample_idx <= 0,
+            "◀ prev",
+            width="stretch",
+            disabled=sample_idx <= 0,
             on_click=lambda: st.session_state.update(sample_idx=_clamp(st.session_state.sample_idx - 1)),
         )
         next_col.button(
-            "next ▶", width="stretch", disabled=sample_idx >= n - 1,
+            "next ▶",
+            width="stretch",
+            disabled=sample_idx >= n - 1,
             on_click=lambda: st.session_state.update(sample_idx=_clamp(st.session_state.sample_idx + 1)),
         )
 
@@ -929,23 +987,24 @@ def main() -> None:
             default_pkl = previously or auto
             default_idx = 0
             if default_pkl in discovered:
-                default_idx = discovered.index(default_pkl) + 1   # +1 for the NONE sentinel
+                default_idx = discovered.index(default_pkl) + 1  # +1 for the NONE sentinel
             elif default_pkl:
-                default_idx = len(choices) - 1   # "custom path…"
+                default_idx = len(choices) - 1  # "custom path…"
 
             picked = st.selectbox(
                 "SMAL pkl",
                 options=choices,
                 index=default_idx,
                 format_func=lambda p: (
-                    p if p in (NONE, CUSTOM)
+                    p
+                    if p in (NONE, CUSTOM)
                     else str(Path(p).relative_to(_REPO_ROOT_FOR_PKL_SCAN))
                     if Path(p).is_relative_to(_REPO_ROOT_FOR_PKL_SCAN)
                     else p
                 ),
                 help="Picks from .pkl files discovered under 3D_model_prep/, "
-                     "smal_model/data/, and the repo root. Choose '🗂 custom path…' "
-                     "to enter an absolute path.",
+                "smal_model/data/, and the repo root. Choose '🗂 custom path…' "
+                "to enter an absolute path.",
             )
 
             if picked == NONE:
@@ -955,7 +1014,7 @@ def main() -> None:
                     "Custom pkl path",
                     value=default_pkl if (default_pkl and default_pkl not in discovered) else "",
                     help="Accepts WSL paths (/mnt/c/...) or Windows paths "
-                         "(C:\\Users\\...); the latter are auto-converted.",
+                    "(C:\\Users\\...); the latter are auto-converted.",
                 )
                 norm = _normalize_path_for_wsl(raw_input) if raw_input else ""
                 if norm and Path(norm).is_file():
@@ -995,19 +1054,27 @@ def main() -> None:
         if smal_pkl and st.button(
             "🎨 Render SMAL silhouette overlay for this sample",
             help="Rasterises the posed mesh through each stored camera and "
-                 "alpha-blends onto the input images. Takes a few seconds.",
+            "alpha-blends onto the input images. Takes a few seconds.",
             disabled=not smal_pkl,
         ):
             st.session_state[sil_cache_key] = True
         if smal_pkl and st.session_state.get(sil_cache_key):
             silhouettes = _render_silhouettes_for_sample(
-                str(path), int(sample_idx), smal_pkl, render_size=256,
+                str(path),
+                int(sample_idx),
+                smal_pkl,
+                render_size=256,
             )
         _ui_sample(
-            str(path), int(sample_idx),
-            show_2d=show_2d, show_reproj=show_reproj, show_3d=show_3d,
-            show_smal_3d=show_smal_3d, show_smal_2d=show_smal_2d,
-            smal_pkl=smal_pkl, silhouettes=silhouettes,
+            str(path),
+            int(sample_idx),
+            show_2d=show_2d,
+            show_reproj=show_reproj,
+            show_3d=show_3d,
+            show_smal_3d=show_smal_3d,
+            show_smal_2d=show_smal_2d,
+            smal_pkl=smal_pkl,
+            silhouettes=silhouettes,
         )
     with tab_stats:
         _ui_stats(str(path), summary)

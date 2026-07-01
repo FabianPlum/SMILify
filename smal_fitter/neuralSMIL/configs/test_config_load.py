@@ -7,6 +7,7 @@ Run from project root:
 Or from smal_fitter/neuralSMIL:
   python configs/test_config_load.py
 """
+
 from __future__ import print_function
 
 import os
@@ -65,6 +66,7 @@ def test_multiview():
 def test_mode_required():
     import tempfile
     import json
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump({"dataset": {"data_path": "x.h5"}}, f)
         path = f.name

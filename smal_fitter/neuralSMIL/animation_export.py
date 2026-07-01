@@ -27,6 +27,7 @@ def rotation_6d_to_axis_angle(d6: torch.Tensor) -> torch.Tensor:
     conversion. Uses pytorch3d's transforms directly.
     """
     from pytorch3d.transforms import rotation_6d_to_matrix, matrix_to_axis_angle
+
     return matrix_to_axis_angle(rotation_6d_to_matrix(d6))
 
 
@@ -61,9 +62,7 @@ class AnimationRecorder:
         model_id: Optional[str] = None,
     ) -> None:
         if rotation_representation not in ("axis_angle", "6d"):
-            raise ValueError(
-                f"rotation_representation must be 'axis_angle' or '6d', got {rotation_representation!r}"
-            )
+            raise ValueError(f"rotation_representation must be 'axis_angle' or '6d', got {rotation_representation!r}")
         self.output_path = Path(output_path)
         self.rotation_representation = rotation_representation
         self.n_joints = int(n_joints)
@@ -152,12 +151,14 @@ class AnimationRecorder:
         R = np.stack(self._cam_rot).mean(axis=0)
         t = np.stack(self._cam_trans).mean(axis=0) if self._cam_trans else np.zeros(3, np.float32)
         fov = float(np.mean(self._fov)) if self._fov else 0.0
-        return [{
-            "view_name": "view_0",
-            "R": R.tolist(),
-            "t": t.flatten().tolist(),
-            "fov": fov,
-        }]
+        return [
+            {
+                "view_name": "view_0",
+                "R": R.tolist(),
+                "t": t.flatten().tolist(),
+                "fov": fov,
+            }
+        ]
 
     def write(self) -> Dict[str, Path]:
         if not self._poses:
@@ -257,12 +258,14 @@ def build_multiview_cameras(
         if counts[v] == 0:
             continue
         name = camera_order[v] if v < len(camera_order) else f"view_{v}"
-        cameras.append({
-            "view_name": str(name),
-            "R": (R_sum[v] / counts[v]).tolist(),
-            "t": (t_sum[v] / counts[v]).tolist(),
-            "fov": fov_sum[v] / counts[v],
-        })
+        cameras.append(
+            {
+                "view_name": str(name),
+                "R": (R_sum[v] / counts[v]).tolist(),
+                "t": (t_sum[v] / counts[v]).tolist(),
+                "fov": fov_sum[v] / counts[v],
+            }
+        )
     return cameras
 
 
