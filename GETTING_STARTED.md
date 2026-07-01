@@ -93,7 +93,47 @@ On the console you'll see **PCK@5px** (2D accuracy) and — because this dataset
 
 ---
 
-## 4. Train a model from scratch
+## 4. Render a multi-view inference video
+
+Inference runs the trained model over the dataset and renders its predicted meshes back onto the frames — no extra data needed, it reuses the **same preprocessed dataset**:
+
+```bash
+python smal_fitter/neuralSMIL/run_multiview_inference.py \
+    --dataset SMILySTICKS_centred_reprojected_FIXED.h5 \
+    --checkpoint SMILySTICKS_ViT_model.pth \
+    --smal_file 3D_model_prep/SMILy_STICK.pkl \
+    --max_frames 100
+```
+
+> ⚠️ **Flag spelling differs from benchmarking:** inference uses `--dataset` and `--smal_file` (underscore); benchmarking uses `--dataset_path` and `--smal-file` (hyphen). Easy to trip on when copy-pasting between the two.
+
+Two videos are written to the working directory (with a frame-range suffix when `--max_frames` is set):
+- `..._multiview_inference.avi` — a side-by-side grid of every camera view with the predicted mesh overlaid (AVI / MJPG).
+- `..._singleview_inference.mp4` — a full mesh render for the view(s) chosen with `--view_indices` (default `"0"`).
+
+Handy flags: `--view_indices 0,2,4`, `--render_resolution 512`, `--smoothing_window 5` (temporal smoothing), `--fps 30`, `--max_frames N` (quick preview).
+
+### Export the animation to Blender
+
+Add `--export_animation <name>` to also write the predicted sequence as an animation clip (`<name>.npz` + `<name>.json`):
+
+```bash
+python smal_fitter/neuralSMIL/run_multiview_inference.py \
+    --dataset SMILySTICKS_centred_reprojected_FIXED.h5 \
+    --checkpoint SMILySTICKS_ViT_model.pth \
+    --smal_file 3D_model_prep/SMILy_STICK.pkl \
+    --export_animation stick_clip
+```
+
+You can load the exported clip into the Blender SMIL addon ([`3D_model_prep/SMIL_processing_addon.py`](3D_model_prep/SMIL_processing_addon.py)) and render it with your own materials. The example below was made this way — the predicted stick-insect sequence with a simple Voronoi texture applied to the mesh:
+
+<img src="docs/stick_blender_render.gif" width="480">
+
+> Full reference: [Inference](README.md#inference).
+
+---
+
+## 5. Train a model from scratch
 
 The bundled [`getting_started.json`](smal_fitter/neuralSMIL/configs/examples/getting_started.json) config is set up for exactly this: multi-view with a **ViT-Large** backbone (the same architecture as the example checkpoint), pointed at the stick model, and — crucially — `"resume_checkpoint": null` so it genuinely starts fresh. It mirrors the production recipe in [`multiview_SMILySTICKS_3D_ViT_Large_AUG_FIXED.json`](smal_fitter/neuralSMIL/configs/examples/multiview_SMILySTICKS_3D_ViT_Large_AUG_FIXED.json), with resume cleared and isolated output dirs.
 
