@@ -1679,7 +1679,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         Triangulate 3D joint positions from multi-view 2D keypoints using DLT.
 
         Uses the predicted camera parameters to build projection matrices, then
-        solves the linear triangulation system per joint via SVD.
+        solves the linear triangulation system per joint via damped normal equations (Tikhonov-regularized least squares).
 
         Args:
             keypoints_2d: GT 2D keypoints ``(B, V, J, 2)`` normalised to [0, 1].
