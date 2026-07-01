@@ -438,11 +438,11 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
         if model_config['head_type'] == 'transformer_decoder' and not has_transformer_head:
             print("WARNING: Config specifies transformer_decoder but checkpoint doesn't contain transformer_head")
         
-        print(f"Checkpoint verification:")
+        print("Checkpoint verification:")
         print(f"  Inferred backbone: {inferred_backbone or 'unknown'}")
         print(f"  Contains transformer_head: {has_transformer_head}")
         
-        print(f"Model configuration:")
+        print("Model configuration:")
         for key, value in model_config.items():
             if key != 'transformer_config':
                 print(f"  {key}: {value}")
@@ -522,7 +522,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
         # Print model info
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"Model statistics:")
+        print("Model statistics:")
         print(f"  Total parameters: {total_params:,}")
         print(f"  Trainable parameters: {trainable_params:,}")
         print(f"  Head type: {model.head_type}")
@@ -1239,7 +1239,7 @@ def process_video(model: SMILImageRegressor, video_path: str, output_folder: str
     else:
         frames_to_process = total_frames
     
-    print(f"Video properties:")
+    print("Video properties:")
     print(f"  Total frames: {total_frames}")
     print(f"  Frames to process: {frames_to_process}")
     print(f"  Input FPS: {input_fps}")
@@ -1392,7 +1392,7 @@ def process_video(model: SMILImageRegressor, video_path: str, output_folder: str
         cap.release()
         out.release()
     
-    print(f"\nVideo processing complete!")
+    print("\nVideo processing complete!")
     print(f"  Output video: {output_video_path}")
     print(f"  Processed {frame_idx} frames")
     if save_frames:
@@ -1498,7 +1498,7 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         if args.max_frames > 0:
             print(f"Max frames: {args.max_frames}")
         else:
-            print(f"Max frames: All frames")
+            print("Max frames: All frames")
     
     # Set device
     if args.device == 'auto':

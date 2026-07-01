@@ -417,7 +417,7 @@ class SLEAPMultiViewPreprocessor:
                 frames_in_range = sum(1 for idx in frame_indices if idx < n_frames_3d)
                 frames_out_of_range = len(frame_indices) - frames_in_range
                 
-                print(f"  3D data coverage:")
+                print("  3D data coverage:")
                 print(f"    - 3D data file contains frames 0 to {n_frames_3d - 1} ({n_frames_3d} frames)")
                 print(f"    - Requested frame indices: {min_idx} to {max_idx}")
                 if frames_out_of_range > 0:
@@ -1824,7 +1824,7 @@ Examples:
         
         if not args.quiet:
             print(f"\nProcessing completed in {end_time - start_time:.1f} seconds")
-            print(f"\nStatistics:")
+            print("\nStatistics:")
             print(f"  Total sessions: {stats['total_sessions']}")
             print(f"  Sessions processed: {stats['sessions_processed']}")
             print(f"  Multi-view samples: {stats['total_multiview_samples']}")
@@ -1843,7 +1843,7 @@ Examples:
                 min_frame = 0
             
             if frames_3d > 0 and (samples_in_range > 0 or samples_out_of_range > 0):
-                print(f"\n3D data coverage:")
+                print("\n3D data coverage:")
                 print(f"  3D keypoints file contains: {frames_3d} frames (indices 0-{frames_3d - 1})")
                 print(f"  Requested frame index range: {min_frame} to {max_frame}")
                 print(f"  Samples with frame_idx < {frames_3d}: {samples_in_range} (have 3D data)")
@@ -1865,7 +1865,7 @@ Examples:
             total_excluded_processing = total_attempted - total_included
             total_excluded_all = total_potential - total_included
             
-            print(f"\nView statistics:")
+            print("\nView statistics:")
             print(f"  Total cameras: {total_cameras}")
             print(f"  Total potential views (cameras × samples): {total_potential}")
             print(f"  Total views included: {total_included}")
@@ -1907,7 +1907,7 @@ Examples:
                 if stats.get('views_excluded_processing_error', 0) > 0:
                     print(f"    - Processing error: {stats['views_excluded_processing_error']}")
             
-            print(f"\nViews per sample distribution:")
+            print("\nViews per sample distribution:")
             for num_views, count in sorted(stats['views_per_sample_histogram'].items()):
                 print(f"    {num_views} views: {count} samples")
         

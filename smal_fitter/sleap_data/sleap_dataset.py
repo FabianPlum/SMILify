@@ -376,10 +376,10 @@ if __name__ == "__main__":
     
     # Test loading a sample
     if len(dataset) > 0:
-        print(f"\nTesting sample loading...")
+        print("\nTesting sample loading...")
         x_data, y_data = dataset[0]
         
-        print(f"Sample 0:")
+        print("Sample 0:")
         print(f"  Image shape: {x_data['input_image_data'].shape}")
         print(f"  Mask shape: {x_data['input_image_mask'].shape}")
         print(f"  Keypoints 2D shape: {y_data['keypoints_2d'].shape}")

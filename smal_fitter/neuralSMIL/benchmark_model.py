@@ -412,7 +412,7 @@ def _create_singleview_model(
     from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
     input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
 
-    log_fn(f"Singleview model config:")
+    log_fn("Singleview model config:")
     log_fn(f"  backbone: {backbone_name}")
     log_fn(f"  head_type: {model_config.get('head_type', 'mlp')}")
     log_fn(f"  rotation_representation: {rotation_representation}")
@@ -617,7 +617,7 @@ def _run_singleview_benchmark(
         dataset, [train_size, val_size, test_size],
         generator=torch.Generator().manual_seed(sv_config["seed"]),
     )
-    log_fn(f"\nDataset split sizes:")
+    log_fn("\nDataset split sizes:")
     log_fn(f"  Train: {len(train_set)}")
     log_fn(f"  Val:   {len(val_set)}")
     log_fn(f"  Test:  {len(test_set)}")
@@ -685,8 +685,8 @@ def _run_singleview_benchmark(
     np.save(os.path.join(output_dir, "errors_2d_px_input.npy"), inp["errors_px"])
 
     log_fn(f"\nSaved outputs to: {output_dir}")
-    log_fn(f"  PCK plots: pck_curve_native.png, pck_curve_input.png")
-    log_fn(f"  Error histograms: error_histogram_native.png, error_histogram_input.png")
+    log_fn("  PCK plots: pck_curve_native.png, pck_curve_input.png")
+    log_fn("  Error histograms: error_histogram_native.png, error_histogram_input.png")
 
     return native["errors_px"]
 
@@ -934,7 +934,7 @@ def _run_multiview_benchmark(
     log_fn(f"Dataset canonical camera order: {dataset_canonical_camera_order}")
 
     # CRITICAL: Infer max_views and canonical_camera_order from checkpoint
-    log_fn(f"\nInferring model architecture from checkpoint...")
+    log_fn("\nInferring model architecture from checkpoint...")
     state_dict = checkpoint.get("model_state_dict", checkpoint)
 
     if 'view_embeddings.weight' in state_dict:
@@ -971,7 +971,7 @@ def _run_multiview_benchmark(
     log_fn(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
     if max_views > dataset_max_views:
         log_fn(f"Note: Model supports {max_views} views, dataset has up to {dataset_max_views} views")
-        log_fn(f"      Model will handle samples with fewer views via view_mask")
+        log_fn("      Model will handle samples with fewer views via view_mask")
     elif max_views < dataset_max_views:
         log_fn(f"WARNING: Model supports {max_views} views but dataset has up to {dataset_max_views} views")
         log_fn(f"         Samples with >{max_views} views will be truncated")
@@ -1029,7 +1029,7 @@ def _run_multiview_benchmark(
     if allow_mesh_scaling:
         log_fn(f"Mesh scaling enabled with init={mesh_scale_init}")
     if use_gt_camera_init:
-        log_fn(f"GT camera initialization enabled - model predicts deltas from GT camera params")
+        log_fn("GT camera initialization enabled - model predicts deltas from GT camera params")
 
     model = create_multiview_regressor(
         device=device,
@@ -1202,8 +1202,8 @@ def _run_multiview_benchmark(
     np.save(os.path.join(output_dir, "errors_3d_mm.npy"), errors_mm)
 
     log_fn(f"\nSaved outputs to: {output_dir}")
-    log_fn(f"  PCK plots: pck_curve_native.png, pck_curve_input.png")
-    log_fn(f"  Error histograms: error_histogram_native.png, error_histogram_input.png")
+    log_fn("  PCK plots: pck_curve_native.png, pck_curve_input.png")
+    log_fn("  Error histograms: error_histogram_native.png, error_histogram_input.png")
     log_fn(f"  MPJPE histogram: {mpjpe_hist_path}")
     if errors_mm.size > 0 and samples_3d_for_plot:
         log_fn(f"  3D percentile plots: {os.path.join(output_dir, 'sample_00_3d_keypoints_percentiles.png')} (and next 4)")

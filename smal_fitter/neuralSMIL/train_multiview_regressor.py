@@ -133,7 +133,7 @@ def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int =
     ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
     if not re.match(ipv4_pattern, master_addr):
         print(f"WARNING: MASTER_ADDR '{master_addr}' is not an IPv4 address!")
-        print(f"  Attempting to resolve to IPv4...")
+        print("  Attempting to resolve to IPv4...")
         try:
             import socket
             resolved = False
@@ -1234,7 +1234,7 @@ def render_singleview_for_sample(model: MultiViewSMILImageRegressor,
         print(f"\n[Visualization] Using model renderer image size: {target_size}")
         print(f"  Original image size: {images[0].shape if isinstance(images[0], np.ndarray) else 'tensor'}")
         print(f"  Model renderer size: {model_renderer_size}")
-        print(f"  This ensures keypoint normalization matches training")
+        print("  This ensures keypoint normalization matches training")
     
     # Debug: Print predicted params summary and input fingerprint for EACH sample
     # This helps diagnose if model receives different inputs but outputs same predictions
@@ -1929,7 +1929,7 @@ def visualize_3d_keypoints(model: MultiViewSMILImageRegressor,
                 print(f"  Mean 3D error: {mean_error:.4f}, Max error: {max_error:.4f}")
                 print(f"  Plotted joints: {len(plotted_joint_indices)}, Suppressed: {len(suppressed_joint_indices)}")
             else:
-                print(f"  No valid joints to plot (all filtered)")
+                print("  No valid joints to plot (all filtered)")
         
     except Exception as e:
         print(f"Warning: Failed to create 3D keypoint visualization for sample {sample_idx}: {e}")
@@ -2273,7 +2273,7 @@ def main(config: dict):
     resume_checkpoint_path = config.get('resume_checkpoint')
     if resume_checkpoint_path and os.path.exists(resume_checkpoint_path):
         if rank == 0:
-            print(f"\nResuming from checkpoint - inferring model architecture from checkpoint...")
+            print("\nResuming from checkpoint - inferring model architecture from checkpoint...")
         checkpoint = torch.load(resume_checkpoint_path, map_location='cpu')  # Load on CPU first
         ckpt_config = checkpoint.get("config", {})
         state_dict = checkpoint.get("model_state_dict", checkpoint)
@@ -2307,7 +2307,7 @@ def main(config: dict):
             print(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
             if max_views > dataset_max_views:
                 print(f"Note: Model supports {max_views} views, dataset has up to {dataset_max_views} views")
-                print(f"      Model will handle samples with fewer views via view_mask")
+                print("      Model will handle samples with fewer views via view_mask")
             elif max_views < dataset_max_views:
                 print(f"WARNING: Model supports {max_views} views but dataset has up to {dataset_max_views} views")
                 print(f"         Samples with >{max_views} views will be truncated")
@@ -2333,7 +2333,7 @@ def main(config: dict):
     dataset_fraction = config.get('dataset_fraction', 1.0)
     
     if rank == 0:
-        print(f"\nDataset split:")
+        print("\nDataset split:")
         print(f"  Train: {len(train_set)}")
         print(f"  Val: {len(val_set)}")
         print(f"  Test: {len(test_set)}")
@@ -2341,13 +2341,13 @@ def main(config: dict):
             samples_per_epoch = max(1, int(len(train_set) * dataset_fraction))
             print(f"\n  Dataset fraction: {dataset_fraction:.1%}")
             print(f"  Samples per epoch: {samples_per_epoch} (of {len(train_set)} total)")
-            print(f"  Note: Different random subset sampled each epoch for diversity")
+            print("  Note: Different random subset sampled each epoch for diversity")
         if aug_enabled:
             geo_enabled = aug_config.get('geometric_enabled', False)
             aug_types = "photometric" + (" + geometric" if geo_enabled else "")
             print(f"  Augmentation: enabled ({aug_types})")
         else:
-            print(f"  Augmentation: disabled")
+            print("  Augmentation: disabled")
 
     # Create validation data loader (always uses full validation set)
     if is_distributed:
@@ -2434,7 +2434,7 @@ def main(config: dict):
         if config.get('backbone_chunk_size'):
             print(f"Backbone chunk size: {config['backbone_chunk_size']} (reduces peak VRAM)")
         if config.get('use_mixed_precision'):
-            print(f"Mixed precision training: enabled")
+            print("Mixed precision training: enabled")
         accum = config.get('gradient_accumulation_steps', 1)
         if accum > 1:
             print(f"Gradient accumulation: {accum} steps (effective batch size: {config['batch_size'] * accum})")
@@ -2686,7 +2686,7 @@ def main(config: dict):
         plot_loss_components(training_history, os.path.join(plots_dir, 'final_loss_components.png'))
         plot_learning_rate(training_history, os.path.join(plots_dir, 'final_learning_rate.png'))
 
-        print(f"\nTraining completed!")
+        print("\nTraining completed!")
         print(f"Best validation loss: {best_val_loss:.4f}")
         print(f"Checkpoints saved to: {config['checkpoint_dir']}")
         print(f"Training plots saved to: {plots_dir}")
@@ -3013,7 +3013,7 @@ if __name__ == "__main__":
         # Only print from rank 0 to avoid duplicate output
         if rank == 0:
             local_rank = int(os.environ['LOCAL_RANK'])
-            print(f"Detected torchrun/HPC launch environment:")
+            print("Detected torchrun/HPC launch environment:")
             print(f"  Global rank: {rank}")
             print(f"  Local rank (GPU): {local_rank}")
             print(f"  World size: {world_size}")

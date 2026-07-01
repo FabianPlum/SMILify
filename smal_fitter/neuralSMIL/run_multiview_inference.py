@@ -214,7 +214,7 @@ def setup_ddp(rank: int, world_size: int, port: str = '12345', local_rank: int =
     ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
     if not re.match(ipv4_pattern, master_addr):
         print(f"WARNING: MASTER_ADDR '{master_addr}' is not an IPv4 address!")
-        print(f"  Attempting to resolve to IPv4...")
+        print("  Attempting to resolve to IPv4...")
         try:
             # Force IPv4 resolution
             result = socket.getaddrinfo(master_addr, master_port, socket.AF_INET, socket.SOCK_STREAM)
@@ -383,7 +383,7 @@ def load_multiview_model_from_checkpoint(checkpoint_path: Path,
             print(f"Loaded canonical camera order from checkpoint: {canonical_camera_order}")
     
     print(f"Model architecture: max_views={max_views}, canonical_camera_order has {len(canonical_camera_order)} cameras")
-    print(f"Note: Model can handle samples with fewer views than max_views via view_mask")
+    print("Note: Model can handle samples with fewer views than max_views via view_mask")
 
     from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
     input_resolution = BackboneFactory.get_default_input_resolution(backbone_name)
@@ -413,7 +413,7 @@ def load_multiview_model_from_checkpoint(checkpoint_path: Path,
     ).to(device)
     
     if use_gt_camera_init:
-        print(f"  Note: Model trained with GT camera initialization - will use GT camera params as base for delta predictions")
+        print("  Note: Model trained with GT camera initialization - will use GT camera params as base for delta predictions")
 
     state_dict = checkpoint.get("model_state_dict", checkpoint)
     smal_optimization_params = [
@@ -1145,9 +1145,9 @@ def main_inference(
         if args.generate_num_subclips > 1:
             print(f"Subclips: {args.generate_num_subclips} (per-clip length: {args.max_frames})")
         if args.disable_scaling:
-            print(f"Part scaling: DISABLED (comparison mode)")
+            print("Part scaling: DISABLED (comparison mode)")
         if args.disable_translation:
-            print(f"Part translation: DISABLED (comparison mode)")
+            print("Part translation: DISABLED (comparison mode)")
         print(f"View indices for singleview: {view_indices}")
         if args.smoothing_window > 0:
             print(f"Temporal smoothing: {args.smoothing_window} frames")
@@ -1172,7 +1172,7 @@ def main_inference(
         print(f"Dataset size: {len(dataset)}")
         print(f"Max views in dataset: {dataset_max_views}")
         print(f"Dataset canonical camera order: {dataset_canonical_camera_order}")
-        print(f"Note: Samples may have fewer views than dataset max_views\n")
+        print("Note: Samples may have fewer views than dataset max_views\n")
     
     # Load model
     # CRITICAL: max_views and canonical_camera_order are inferred from the checkpoint,
@@ -1193,7 +1193,7 @@ def main_inference(
         print(f"Dataset max_views: {dataset_max_views}")
         if model_max_views > dataset_max_views:
             print(f"Note: Model supports {model_max_views} views, dataset has up to {dataset_max_views} views")
-            print(f"      Model will handle samples with fewer views via view_mask\n")
+            print("      Model will handle samples with fewer views via view_mask\n")
         elif model_max_views < dataset_max_views:
             print(f"WARNING: Model supports {model_max_views} views but dataset has up to {dataset_max_views} views")
             print(f"         Samples with >{model_max_views} views will be truncated\n")
@@ -1538,7 +1538,7 @@ def main():
         # Only print from rank 0 to avoid duplicate output
         if rank == 0:
             local_rank = int(os.environ['LOCAL_RANK'])
-            print(f"Detected torchrun/HPC launch environment:")
+            print("Detected torchrun/HPC launch environment:")
             print(f"  Global rank: {rank}")
             print(f"  Local rank (GPU): {local_rank}")
             print(f"  World size: {world_size}")

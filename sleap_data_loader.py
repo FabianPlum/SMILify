@@ -526,7 +526,7 @@ class SLEAPDataLoader:
         elif 'points' in camera_data and len(camera_data['points']) > 0:
             points = camera_data['points']
         else:
-            print(f"Warning: No point data available")
+            print("Warning: No point data available")
             return np.array([]), np.array([])
         
         # Find instances for the specified frame
@@ -1473,10 +1473,10 @@ class SLEAPDataLoader:
         
         # Validate the number of components
         if actual_n_betas != expected_n_betas:
-            print(f"WARNING: Mismatch in number of shape betas!")
+            print("WARNING: Mismatch in number of shape betas!")
             print(f"  Expected (from config): {expected_n_betas}")
             print(f"  Found in table: {actual_n_betas}")
-            print(f"  This may cause issues during training.")
+            print("  This may cause issues during training.")
             
             # Use the smaller number to avoid index errors
             self.n_shape_betas_to_use = min(expected_n_betas, actual_n_betas)
@@ -1769,7 +1769,7 @@ def main():
         
         if shape_betas_info['shape_betas_available']:
             print(f"Final shape betas shape: {shape_betas_info['shape_betas_shape']}")
-            print(f"Shape betas statistics:")
+            print("Shape betas statistics:")
             print(f"  Range: [{shape_betas_info['shape_betas_range'][0]:.3f}, {shape_betas_info['shape_betas_range'][1]:.3f}]")
             print(f"  Mean: {shape_betas_info['shape_betas_mean']:.3f}")
             print(f"  Std: {shape_betas_info['shape_betas_std']:.3f}")

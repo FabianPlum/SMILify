@@ -171,8 +171,8 @@ def load_config(
         config = MultiViewConfig()
     else:
         raise ConfigurationError(
-            f"Cannot determine mode. Provide --config with a 'mode' field "
-            f"or ensure expected_mode is set."
+            "Cannot determine mode. Provide --config with a 'mode' field "
+            "or ensure expected_mode is set."
         )
 
     # Merge JSON overrides

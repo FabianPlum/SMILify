@@ -730,7 +730,7 @@ def debug_single_vertex(mesh: Meshes, num_rays: int = 30, output_dir: str = "sdf
         # Print angle statistics
         angles = torch.acos(torch.clamp(torch.matmul(all_directions, -normal), -1, 1))
         angles_degrees = angles * 180 / np.pi
-        print(f"\nRay angle statistics (degrees):")
+        print("\nRay angle statistics (degrees):")
         print(f"Min angle: {angles_degrees.min().item():.2f}°")
         print(f"Max angle: {angles_degrees.max().item():.2f}°")
         print(f"Mean angle: {angles_degrees.mean().item():.2f}°")

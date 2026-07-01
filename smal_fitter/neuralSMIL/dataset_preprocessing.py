@@ -686,12 +686,12 @@ def print_statistics(stats: Dict[str, Any]):
         print(f"Success rate: {success_rate:.1f}%")
     
     if stats['error_samples'] > 0:
-        print(f"\nNote: Errors indicate samples incompatible with target")
-        print(f"      model structure - correctly filtered out.")
+        print("\nNote: Errors indicate samples incompatible with target")
+        print("      model structure - correctly filtered out.")
         
         # Show missing root joints breakdown
         if stats.get('missing_roots'):
-            print(f"\nMissing ROOT_JOINT breakdown:")
+            print("\nMissing ROOT_JOINT breakdown:")
             for root_name, count in sorted(stats['missing_roots'].items(), key=lambda x: -x[1]):
                 print(f"  - '{root_name}': {count} samples")
     

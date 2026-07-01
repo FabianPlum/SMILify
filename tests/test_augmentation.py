@@ -1068,7 +1068,7 @@ class TestRealDatasetAugmentation:
             kp_aug_px = _norm_yx_to_pixel_xy(kp_aug, target_res)
             ax.scatter(kp_aug_px[v_mask, 0], kp_aug_px[v_mask, 1],
                        c='lime', s=20, marker='o', label='aug kps')
-            ax.set_title(f"Aug + transformed kps")
+            ax.set_title("Aug + transformed kps")
             ax.axis('off')
 
             # Panel 3: augmented + reprojected kps (should match panel 2)
@@ -1079,7 +1079,7 @@ class TestRealDatasetAugmentation:
                        c='red', s=40, marker='x', linewidths=1.5, label='reproj 3D')
             ax.scatter(kp_aug_px[v_mask, 0], kp_aug_px[v_mask, 1],
                        c='lime', s=15, marker='o', alpha=0.7, label='aug kps')
-            ax.set_title(f"Aug + reproj overlay")
+            ax.set_title("Aug + reproj overlay")
             ax.axis('off')
             if vi == 0:
                 ax.legend(fontsize=7)

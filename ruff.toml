@@ -1,0 +1,30 @@
+# Ruff configuration for SMILify (tracked by issue #15, tracker item C17).
+#
+# The repo is intentionally NOT pip-installable, so this is a standalone
+# ruff.toml rather than a [tool.ruff] table in pyproject.toml.
+#
+# Rollout is staged: start with pyflakes (real-bug detectors) + the safe
+# pycodestyle error classes, get the baseline clean, THEN expand the ruleset
+# (I/isort, UP/pyupgrade, B/bugbear, SIM, …) and wire `ruff check` into CI.
+
+target-version = "py310"
+line-length = 120
+
+# `utilities/` is legacy and explicitly ignored (see CLAUDE.md). Ruff already
+# skips .git, __pycache__, and build/cache dirs by default.
+extend-exclude = ["utilities"]
+
+[lint]
+# Conservative starting set. Pyflakes (F) finds unused/undefined names — the
+# actually-valuable, bug-catching rules — plus the safe pycodestyle error
+# classes. Broader style/modernization rules come in a later stage.
+select = ["E4", "E7", "E9", "F"]
+
+ignore = [
+    # module-import-not-at-top-of-file. INTENTIONAL in entrypoints that set
+    # CUDA_VISIBLE_DEVICES / CUDA_DEVICE_ORDER *before* `import torch` — see
+    # C14/C15. Reordering those imports reintroduces the torch>=2.3 CUDA-init
+    # assert, so this rule must stay off (isort, when enabled later, must be
+    # configured not to move imports across the os.environ setup too).
+    "E402",
+]

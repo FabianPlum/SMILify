@@ -5,7 +5,6 @@ import numpy as np
 import cv2
 import pickle as pkl
 import os
-import scipy.misc
 from scipy.spatial.transform import Rotation as R
 
 import torch

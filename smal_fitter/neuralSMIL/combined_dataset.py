@@ -292,7 +292,7 @@ class CombinedSMILDataset:
         if num_samples is None:
             num_samples = len(train_indices)
         
-        print(f"\nWeighted Sampler Statistics:")
+        print("\nWeighted Sampler Statistics:")
         print(f"  Dataset sizes: {self.dataset_lengths}")
         print(f"  User weights: {weights}")
         print(f"  Normalized per-sample weights: {normalized_weights}")
@@ -358,7 +358,7 @@ class CombinedSMILDataset:
         val_dataset = Subset(self, val_indices)
         test_dataset = Subset(self, test_indices)
         
-        print(f"\nTotal combined split:")
+        print("\nTotal combined split:")
         print(f"  Train: {len(train_indices)}, Val: {len(val_indices)}, Test: {len(test_indices)}")
         
         # Store training indices for weighted sampler
@@ -403,7 +403,7 @@ class CombinedSMILDataset:
         for ds_stats in stats['datasets']:
             print(f"Dataset: {ds_stats['name']}")
             print(f"  Samples: {ds_stats['num_samples']} ({ds_stats['num_samples']/stats['total_samples']*100:.1f}%)")
-            print(f"  Available labels:")
+            print("  Available labels:")
             
             # Group labels by availability
             available = [k for k, v in ds_stats['available_labels'].items() if v]

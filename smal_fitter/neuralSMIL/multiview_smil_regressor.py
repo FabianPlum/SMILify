@@ -1234,7 +1234,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                             loss_components['keypoint_3d'] = kp3d_loss
                             total_loss = total_loss + loss_weights['keypoint_3d'] * kp3d_loss
                         else:
-                            print(f"Warning: Non-finite 3D keypoint loss detected, skipping")
+                            print("Warning: Non-finite 3D keypoint loss detected, skipping")
                             loss_components['keypoint_3d'] = torch.tensor(0.0, device=self.device, requires_grad=True)
                     else:
                         # No valid joints in batch

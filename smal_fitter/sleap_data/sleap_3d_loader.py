@@ -369,7 +369,7 @@ class SLEAP3DDataLoader:
         
         # Print mapping for debugging
         if self.camera_name_to_dir:
-            print(f"Camera name mapping (calibration -> directory/file):")
+            print("Camera name mapping (calibration -> directory/file):")
             for calib_name, dir_name in sorted(self.camera_name_to_dir.items()):
                 print(f"  {calib_name} -> {dir_name}")
         else:
@@ -629,11 +629,11 @@ class SLEAP3DDataLoader:
         print(f"Keypoints: {summary['n_keypoints']}")
         print(f"Cameras: {summary['n_cameras']}")
         print(f"Camera names: {summary['camera_names']}")
-        print(f"\n3D coordinate ranges (mm):")
+        print("\n3D coordinate ranges (mm):")
         print(f"  X: [{summary['keypoints_3d_range']['x'][0]:.2f}, {summary['keypoints_3d_range']['x'][1]:.2f}]")
         print(f"  Y: [{summary['keypoints_3d_range']['y'][0]:.2f}, {summary['keypoints_3d_range']['y'][1]:.2f}]")
         print(f"  Z: [{summary['keypoints_3d_range']['z'][0]:.2f}, {summary['keypoints_3d_range']['z'][1]:.2f}]")
-        print(f"\nData quality:")
+        print("\nData quality:")
         print(f"  Has NaN: {summary['has_nan']}")
         print(f"  Has Inf: {summary['has_inf']}")
         print("="*60 + "\n")
@@ -1374,7 +1374,7 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
                 original_2d, visibility = loader.load_2d_predictions(camera_name, frame_idx=0)
                 
                 if len(original_2d) == 0:
-                    print(f"  Warning: No 2D predictions found for frame 0")
+                    print("  Warning: No 2D predictions found for frame 0")
                     continue
                 
                 print(f"  Original 2D points shape: {original_2d.shape}")
@@ -1400,12 +1400,12 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
                         
                         # Use the convention with lower error
                         if mean_error_alternative < mean_error_standard:
-                            print(f"  Using ALTERNATIVE convention (R^T, -R^T*t)")
+                            print("  Using ALTERNATIVE convention (R^T, -R^T*t)")
                             reprojected_2d = reprojected_2d_alternative
                             errors = errors_alternative
                             all_errors_alternative.extend(errors.tolist())
                         else:
-                            print(f"  Using STANDARD convention (R, t)")
+                            print("  Using STANDARD convention (R, t)")
                             reprojected_2d = reprojected_2d_standard
                             errors = errors_standard
                             all_errors_standard.extend(errors.tolist())
@@ -1415,13 +1415,13 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
                         max_error = errors.max()
                         std_error = errors.std()
                         
-                        print(f"  Reprojection errors (visible keypoints only):")
+                        print("  Reprojection errors (visible keypoints only):")
                         print(f"    Mean: {mean_error:.2f} px")
                         print(f"    Median: {median_error:.2f} px")
                         print(f"    Max: {max_error:.2f} px")
                         print(f"    Std: {std_error:.2f} px")
                     else:
-                        print(f"  Warning: No visible keypoints to compare")
+                        print("  Warning: No visible keypoints to compare")
                         reprojected_2d = reprojected_2d_standard
                 else:
                     print(f"  Warning: Mismatch in number of keypoints "
@@ -1447,7 +1447,7 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
                             import traceback
                             traceback.print_exc()
                     else:
-                        print(f"  Note: pytorch3d not available, skipping pytorch3d visualization")
+                        print("  Note: pytorch3d not available, skipping pytorch3d visualization")
                 
             except Exception as e:
                 print(f"  Warning: Could not load 2D predictions: {e}")
@@ -1458,13 +1458,13 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
         # Print overall statistics
         all_errors = all_errors_standard + all_errors_alternative
         if all_errors:
-            print(f"\nOverall reprojection statistics (all cameras):")
+            print("\nOverall reprojection statistics (all cameras):")
             print(f"  Mean error: {np.mean(all_errors):.2f} px")
             print(f"  Median error: {np.median(all_errors):.2f} px")
             print(f"  Max error: {np.max(all_errors):.2f} px")
             print(f"  Std error: {np.std(all_errors):.2f} px")
             if all_errors_standard and all_errors_alternative:
-                print(f"\nConvention usage:")
+                print("\nConvention usage:")
                 print(f"  Standard (R, t): {len(all_errors_standard)} keypoints")
                 print(f"  Alternative (R^T, -R^T*t): {len(all_errors_alternative)} keypoints")
         
@@ -1503,7 +1503,7 @@ def test_data_consistency_with_loader(loader: SLEAP3DDataLoader):
         print(f"Inf values: {inf_count}")
         
         # Check coordinate ranges
-        print(f"\nCoordinate statistics:")
+        print("\nCoordinate statistics:")
         for axis, idx in [('X', 0), ('Y', 1), ('Z', 2)]:
             coords = all_keypoints[:, :, idx]
             print(f"  {axis}: min={coords.min():.2f}, max={coords.max():.2f}, "
@@ -1513,7 +1513,7 @@ def test_data_consistency_with_loader(loader: SLEAP3DDataLoader):
         if loader.n_frames > 1:
             velocities = np.diff(all_keypoints, axis=0)
             speeds = np.linalg.norm(velocities, axis=2)
-            print(f"\nMotion statistics:")
+            print("\nMotion statistics:")
             print(f"  Mean speed: {speeds.mean():.2f} mm/frame")
             print(f"  Max speed: {speeds.max():.2f} mm/frame")
             print(f"  Std speed: {speeds.std():.2f} mm/frame")
@@ -1588,7 +1588,7 @@ def main():
         if args.session_idx is not None:
             if args.session_idx < 0 or args.session_idx >= len(sessions):
                 print(f"Error: Session index {args.session_idx} out of range [0, {len(sessions)-1}]")
-                print(f"\nAvailable sessions:")
+                print("\nAvailable sessions:")
                 for i, session in enumerate(sessions):
                     print(f"  [{i}] {Path(session).name}")
                 sys.exit(1)
@@ -1680,7 +1680,7 @@ def main():
                     print(f"  {test_name:20s}: {status}")
     
     # Print overall summary
-    print(f"\nOverall Results:")
+    print("\nOverall Results:")
     for test_name, passed in results.items():
         status = "✓ PASSED" if passed else "✗ FAILED"
         print(f"{test_name:20s}: {status}")

@@ -677,6 +677,6 @@ if __name__ == "__main__":
         resnet_features = resnet(dummy_input)
         vit_features = vit(dummy_input)
         
-    print(f"\nForward pass test:")
+    print("\nForward pass test:")
     print(f"ResNet output shape: {resnet_features.shape}")
     print(f"ViT output shape: {vit_features.shape}")

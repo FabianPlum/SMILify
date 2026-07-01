@@ -49,7 +49,7 @@ def test_mlp_head():
         head_type='mlp'  # Use MLP head
     ).to(device)
     
-    print(f"Model created with MLP head")
+    print("Model created with MLP head")
     print(f"Backbone: {model.backbone_name}")
     print(f"Feature dimension: {model.feature_dim}")
     print(f"Head type: {model.head_type}")
@@ -58,7 +58,7 @@ def test_mlp_head():
     with torch.no_grad():
         params = model(images.to(device))
     
-    print(f"Forward pass successful!")
+    print("Forward pass successful!")
     print(f"Output parameters: {list(params.keys())}")
     for key, value in params.items():
         if isinstance(value, torch.Tensor):
@@ -113,7 +113,7 @@ def test_transformer_decoder_head():
         transformer_config=transformer_config
     ).to(device)
     
-    print(f"Model created with Transformer Decoder head")
+    print("Model created with Transformer Decoder head")
     print(f"Backbone: {model.backbone_name}")
     print(f"Feature dimension: {model.feature_dim}")
     print(f"Head type: {model.head_type}")
@@ -123,7 +123,7 @@ def test_transformer_decoder_head():
     with torch.no_grad():
         params = model(images.to(device))
     
-    print(f"Forward pass successful!")
+    print("Forward pass successful!")
     print(f"Output parameters: {list(params.keys())}")
     for key, value in params.items():
         if isinstance(value, torch.Tensor):
@@ -181,7 +181,7 @@ def test_with_training_config():
         transformer_config=config['model_config'].get('transformer_config', {})
     ).to(device)
     
-    print(f"Model created successfully using training config!")
+    print("Model created successfully using training config!")
     print(f"Head type: {model.head_type}")
     
     # Test forward pass
@@ -242,7 +242,7 @@ def compare_heads():
     mlp_params = sum(p.numel() for p in mlp_model.parameters() if p.requires_grad)
     transformer_params = sum(p.numel() for p in transformer_model.parameters() if p.requires_grad)
     
-    print(f"\nParameter Comparison:")
+    print("\nParameter Comparison:")
     print(f"MLP head parameters: {mlp_params:,}")
     print(f"Transformer decoder parameters: {transformer_params:,}")
     print(f"Ratio: {transformer_params / mlp_params:.2f}x")
@@ -252,7 +252,7 @@ def compare_heads():
         mlp_output = mlp_model(images.to(device))
         transformer_output = transformer_model(images.to(device))
     
-    print(f"\nOutput Comparison:")
+    print("\nOutput Comparison:")
     print(f"MLP output keys: {list(mlp_output.keys())}")
     print(f"Transformer output keys: {list(transformer_output.keys())}")
     

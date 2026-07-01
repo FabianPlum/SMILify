@@ -607,8 +607,8 @@ def plot_mesh_normals_high_res(mesh: Meshes, output_path, title="Surface Normals
         cbar.set_ticklabels(['Thick', 'Medium', 'Thin'])
         
         # Add a labeled artist for the normals to include in the legend
-        ax.plot([], [], color='red', label=f"Thin Regions")
-        ax.plot([], [], color='green', label=f"Thick Regions")
+        ax.plot([], [], color='red', label="Thin Regions")
+        ax.plot([], [], color='green', label="Thick Regions")
     else:
         # Add a labeled artist for the normals to include in the legend
         ax.plot([], [], color=normal_color, label=f"Normals ({len(indices)} of {num_faces})")
@@ -752,8 +752,8 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Surf
         
         # Add legend
         if color_by_thinness:
-            ax.plot([], [], color='red', label=f"Thin Regions")
-            ax.plot([], [], color='green', label=f"Thick Regions")
+            ax.plot([], [], color='red', label="Thin Regions")
+            ax.plot([], [], color='green', label="Thick Regions")
         else:
             ax.plot([], [], color="red", label=f"Normals ({len(indices)} of {num_faces})")
         
@@ -836,11 +836,11 @@ def plot_mesh_normals_comparison(target_mesh, src_mesh, output_path, title="Surf
         # Add legend entries
         if color_by_thinness:
             if color == target_color:
-                ax3.plot([], [], color=[1, 0, 0.3], label=f"Target Thin")
-                ax3.plot([], [], color=[0, 1, 0.3], label=f"Target Thick")
+                ax3.plot([], [], color=[1, 0, 0.3], label="Target Thin")
+                ax3.plot([], [], color=[0, 1, 0.3], label="Target Thick")
             else:
-                ax3.plot([], [], color=[1, 0, 0.7], label=f"SMAL Thin")
-                ax3.plot([], [], color=[0, 1, 0.7], label=f"SMAL Thick")
+                ax3.plot([], [], color=[1, 0, 0.7], label="SMAL Thin")
+                ax3.plot([], [], color=[0, 1, 0.7], label="SMAL Thick")
         else:
             ax3.plot([], [], color=color, label=f"{label} Normals ({len(indices)} of {num_faces})")
     

@@ -490,7 +490,7 @@ def check_J_regressor_alignment(J_regressor, joints, vertices, joint_names=None)
     mean_relative_discrepancy = np.mean(relative_discrepancies)
 
     # Print detailed information
-    print(f"\nJ_regressor alignment check:")
+    print("\nJ_regressor alignment check:")
     print(f"  Original joints shape: {joints.shape}")
     print(f"  Regressed joints shape: {regressed_joints.shape}")
     print(f"  Model size: {model_size}")
@@ -750,7 +750,7 @@ def apply_pose_correctives(obj, posedirs, base_vertices):
 
         # Print debug info for first vertex
         if idx == 0:
-            print(f"First vertex:")
+            print("First vertex:")
             print(f"  Base position: {base_vertices[idx]}")
             print(f"  Base skinned position: {skinned_pos}")
             print(f"  Pose offset: {offset}")
@@ -1108,20 +1108,20 @@ def apply_entangled_pca_and_create_shapekeys(
     combined_features = np.concatenate([vertex_features, scale_data, translation_features], axis=1)
     
     # Debug: Check each feature type separately with detailed statistics
-    print(f"=== FEATURE RANGES BEFORE NORMALIZATION ===")
-    print(f"Vertex features:")
+    print("=== FEATURE RANGES BEFORE NORMALIZATION ===")
+    print("Vertex features:")
     print(f"  Shape: {vertex_features.shape}")
     print(f"  Range: {np.min(vertex_features):.6f} to {np.max(vertex_features):.6f}")
     print(f"  Mean: {np.mean(vertex_features):.6f}, Std: {np.std(vertex_features):.6f}")
     print(f"  Min abs: {np.min(np.abs(vertex_features)):.6f}, Max abs: {np.max(np.abs(vertex_features)):.6f}")
     
-    print(f"Scale data:")
+    print("Scale data:")
     print(f"  Shape: {scale_data.shape}")
     print(f"  Range: {np.min(scale_data):.6f} to {np.max(scale_data):.6f}")
     print(f"  Mean: {np.mean(scale_data):.6f}, Std: {np.std(scale_data):.6f}")
     print(f"  Min abs: {np.min(np.abs(scale_data)):.6f}, Max abs: {np.max(np.abs(scale_data)):.6f}")
     
-    print(f"Translation features:")
+    print("Translation features:")
     print(f"  Shape: {translation_features.shape}")
     print(f"  Range: {np.min(translation_features):.6f} to {np.max(translation_features):.6f}")
     print(f"  Mean: {np.mean(translation_features):.6f}, Std: {np.std(translation_features):.6f}")
@@ -1144,8 +1144,8 @@ def apply_entangled_pca_and_create_shapekeys(
     scale_magnitude = np.std(scale_data)
     translation_magnitude = np.std(translation_features)
     
-    print(f"=== NORMALIZATION ASSESSMENT ===")
-    print(f"Feature standard deviations:")
+    print("=== NORMALIZATION ASSESSMENT ===")
+    print("Feature standard deviations:")
     print(f"  Vertex: {vertex_magnitude:.6f}")
     print(f"  Scale: {scale_magnitude:.6f}")
     print(f"  Translation: {translation_magnitude:.6f}")
@@ -1161,7 +1161,7 @@ def apply_entangled_pca_and_create_shapekeys(
         print("Normalization is ADVISABLE - moderate magnitude differences detected")
     else:
         print("Normalization may not be necessary - similar magnitudes")
-    print(f"=== END FEATURE ANALYSIS ===")
+    print("=== END FEATURE ANALYSIS ===")
     
     # Check for NaN values and handle them
     nan_mask = np.isnan(combined_features)
@@ -1259,7 +1259,7 @@ def apply_entangled_pca_and_create_shapekeys(
             pc_xy_path = os.path.join(output_dir, "smil_entangled_PC_xy.csv")
             
             # Debug: Check what we're about to write
-            print(f"About to write PC XY data:")
+            print("About to write PC XY data:")
             print(f"  Number of labels: {len(labels)}")
             print(f"  transformed_betas shape: {transformed_betas.shape}")
             print(f"  First few PC1 values: {transformed_betas[:3, 0] if transformed_betas.shape[1] > 0 else 'No PC1'}")
@@ -1505,7 +1505,7 @@ def make_symmetrical(obj, pkl_data, center_tolerance=0.005):
         print(
             f"Error enforcing symmetry: Unequal number of vertices on left ({len(left_inds)})",
             f"and right ({len(right_inds)}) sides. This may indicate an asymmetric mesh or",
-            f"incorrect symmetry axis.",
+            "incorrect symmetry axis.",
         )
 
     symIdx = rebuild_symmetry_array(
@@ -2583,7 +2583,7 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                         data["J_regressor"] = np.zeros((num_joints, num_vertices), dtype=np.float32)
                         obj["static_joint_locs"] = True
                         data["static_joint_locs"] = True
-                        print(f"Static joint locations enabled - J_regressor set to zeroes")
+                        print("Static joint locations enabled - J_regressor set to zeroes")
                     
                     # Update the stored data with the new shape info
                     store_smpl_data(context, data, obj=obj)
@@ -2781,11 +2781,11 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                         
                         # Debug: Check for NaN values in scale data
                         if np.any(np.isnan(scale_data)):
-                            print(f"Warning: NaN values found in scale_data array")
+                            print("Warning: NaN values found in scale_data array")
                         if np.any(np.isnan(translation_data)):
-                            print(f"Warning: NaN values found in translation_data array")
+                            print("Warning: NaN values found in translation_data array")
                         if np.any(np.isnan(verts_data)):
-                            print(f"Warning: NaN values found in verts_data array")
+                            print("Warning: NaN values found in verts_data array")
                         
                         cov, mean_betas, scaledirs, transdirs = apply_entangled_pca_and_create_shapekeys(
                             verts_data,
@@ -2815,7 +2815,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                 data["J_regressor"] = np.zeros((num_joints, num_vertices), dtype=np.float32)
                 obj["static_joint_locs"] = True
                 data["static_joint_locs"] = True
-                print(f"Static joint locations enabled - J_regressor set to zeroes")
+                print("Static joint locations enabled - J_regressor set to zeroes")
             
             # Update the stored data with the new shape info
             store_smpl_data(context, data, obj=obj)
@@ -2833,7 +2833,7 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
                         
                         data["scaledirs"] = computed_scaledirs
                         data["transdirs"] = computed_transdirs
-                        print(f"Added Transformation PCA components to generated model:")
+                        print("Added Transformation PCA components to generated model:")
                         print(f"  scaledirs shape: {computed_scaledirs.shape}")
                         print(f"  transdirs shape: {computed_transdirs.shape}")
                         # Update the stored data with the morph PCA info
@@ -3337,10 +3337,10 @@ class SMPL_OT_LoadAllUnposedMeshes(bpy.types.Operator):
                 computed_scaledirs = scaledirs
                 computed_transdirs = transdirs
                 
-                print(f"Stored PCA components in pkl_data:")
+                print("Stored PCA components in pkl_data:")
                 print(f"  scaledirs shape: {scaledirs.shape}")
                 print(f"  transdirs shape: {transdirs.shape}")
-                print(f"Also stored in global variables for use by other operators")
+                print("Also stored in global variables for use by other operators")
 
                 pc_output_path = os.path.join(
                     os.path.dirname(pkl_filepath), "smil_morph_PC_data.csv"
