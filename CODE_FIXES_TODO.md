@@ -7,27 +7,29 @@
 
 **Status legend:** 🔍 needs-verification · ✅ confirmed (ready to fix) · 🛠 fixed · ❎ won't-fix/not-a-bug
 
+> **Each open item has a GitHub issue** (linked in its header). Note: `C#` are this file's internal tracker ids; `#N` are GitHub issue/PR numbers (one shared sequence) — they are **not** the same. C14/C15 are fixed (no issue); C17 → existing #15.
+
 ---
 
 ## Seeded from the README audit (2026-06-30)
 
-### C1 — `config.CHECKPOINT_NAME` is undefined but read by `generate_video.py` 🔍
+### C1 — `config.CHECKPOINT_NAME` is undefined but read by `generate_video.py` 🔍  · [#29](https://github.com/FabianPlum/SMILify/issues/29)
 - **Source:** legacy/README.md audit (major).
 - **Symptom:** [smal_fitter/generate_video.py](smal_fitter/generate_video.py) reads `config.CHECKPOINT_NAME` (lines ~36, ~70), but [config.py](config.py) never defines it (only `OUTPUT_DIR = "checkpoints/{timestamp}"`). Running `generate_video.py` as shipped → `AttributeError`.
 - **Decision needed:** add `CHECKPOINT_NAME` to config.py, OR refactor generate_video.py to take a CLI arg / read `OUTPUT_DIR`.
 - **Note:** legacy/optimization path — confirm it's still meant to work before fixing.
 
-### C2 — `global_feats` may be computed but unused by the multi-view decoder 🔍
+### C2 — `global_feats` may be computed but unused by the multi-view decoder 🔍  · [#30](https://github.com/FabianPlum/SMILify/issues/30)
 - **Source:** implementation_history/decoder_architecture_issues.md audit (major).
 - **Symptom:** The doc claims issue #10 ("global_feats computed but never used") was FIXED via a `global_feat_proj` Linear — but no `global_feat_proj` symbol exists. `global_feats` is still computed and passed as the first positional arg to `self.transformer_head(global_feats, spatial_feats)` in [smal_fitter/neuralSMIL/multiview_smil_regressor.py](smal_fitter/neuralSMIL/multiview_smil_regressor.py) (~671-692). **Open question: does the transformer head actually consume `global_feats`, or is it dead compute?**
 - **Action:** trace `transformer_head.forward` to confirm whether `global_feats` is used. If unused → either wire it in or drop the computation. Potential latent issue, not just a stale doc.
 
-### C3 — Solver docstring says "via SVD" but code uses normal equations 🔍
+### C3 — Solver docstring says "via SVD" but code uses normal equations 🔍  · [#31](https://github.com/FabianPlum/SMILify/issues/31)
 - **Source:** implementation_history/triangulation_consistency_loss.md audit (minor).
 - **Symptom:** Triangulation solver docstring at [multiview_smil_regressor.py:1682](smal_fitter/neuralSMIL/multiview_smil_regressor.py#L1682) says "via SVD" while the implementation uses normal equations + `torch.linalg.solve`.
 - **Fix:** correct the in-code docstring (pure comment fix).
 
-### C4 — Repo-wide CLI flag inconsistencies ✅
+### C4 — Repo-wide CLI flag inconsistencies ✅  · [#32](https://github.com/FabianPlum/SMILify/issues/32)
 - **Source:** neuralSMIL/README.md + configs/README.md audits; **expanded 2026-07-01 via a full-repo argparse scan** (108 `.py` files, 41 define flags). argparse does NOT treat `-` and `_` as aliases, so a command copy-pasted between scripts errors out. Two classes:
 
 **(a) Same flag, inconsistent hyphen vs underscore spelling:**
@@ -57,17 +59,17 @@
 
 - **Fix (proposed):** standardize on underscores (the neuralSMIL majority); register the other spelling as an argparse alias per flag for back-compat; give the dataset input ONE name (`--dataset_path`) across benchmark/inference/train; and rename `train_smil_regressor.py`'s legacy `--dataset` selector to something unambiguous (e.g. `--builtin_dataset`).
 
-### C5 — `multiview_mouse_UNET_long.json` sets `use_mixed_precision: false` 🔍
+### C5 — `multiview_mouse_UNET_long.json` sets `use_mixed_precision: false` 🔍  · [#33](https://github.com/FabianPlum/SMILify/issues/33)
 - **Source:** configs/examples/README.md audit (major).
 - **Symptom:** The "long/optimized" example config disables mixed precision ([configs/examples/multiview_mouse_UNET_long.json:194](smal_fitter/neuralSMIL/configs/examples/multiview_mouse_UNET_long.json#L194)). Doc described it as using mixed precision.
 - **Decision needed:** is MP intentionally off here? If it was meant to be on, this is a config bug; otherwise just a doc fix.
 
-### C6 — `fitter_3d` scheme names don't match their parameters 🔍
+### C6 — `fitter_3d` scheme names don't match their parameters 🔍  · [#34](https://github.com/FabianPlum/SMILify/issues/34)
 - **Source:** fitter_3d/README.md audit (major/minor).
 - **Symptom:** In `SMALParamGroup.param_map` ([fitter_3d/trainer.py:238-249](fitter_3d/trainer.py#L238-L249)): `pose` includes `betas`/`log_beta_scales` (shape params) and adds `betas_trans`; `shape` drops `joint_rot` but also adds `betas_trans`. The names mislead ("pose" ≠ no-shape).
 - **Decision needed:** rename/redefine schemes to match contents, or accept and document. (Low priority — mostly a clarity wart.)
 
-### C7 — `--export_animation` silently treats any string as a path 🔍
+### C7 — `--export_animation` silently treats any string as a path 🔍  · [#35](https://github.com/FabianPlum/SMILify/issues/35)
 - **Source:** docs/design/animation_export_plan.md audit (minor UX).
 - **Symptom:** `--export_animation` is `type=str` and used as an output path; `--export_animation True` creates `True.npz`/`True.json` instead of erroring. Easy footgun.
 - **Decision needed:** validate/normalize, or leave as-is and only document (likely just doc).
@@ -78,7 +80,7 @@
 
 <!-- ID — title — status — file:line — note -->
 
-### C8 — Test suite does not run clean under any single pytest invocation ✅
+### C8 — Test suite does not run clean under any single pytest invocation ✅  · [#36](https://github.com/FabianPlum/SMILify/issues/36)
 - **Found:** while verifying tests/README (P0 #3) by *actually running* `pytest`.
 - **Empirical state (env `pytorch3d`, 2026-06-30):**
   - `pytest tests/ -m "not slow"` → **70 passed**, but `test_triangulation_consistency.py` (12) errors and `test_animation_export.py` (5) errors on collection.
@@ -87,23 +89,23 @@
 - **Root cause:** no `tests/conftest.py` and no `testpaths` in `pytest.ini`, so each test module relies on its own ad-hoc `sys.path` hacks, which conflict.
 - **Fix (proposed):** add a `conftest.py` that puts the right dirs on `sys.path` once, add `testpaths = tests` to `pytest.ini`, and resolve C9/C10/C11/C12 so `pytest tests/` just works.
 
-### C9 — `smal_fitter` is ambiguous (dir vs module); no `smal_fitter/__init__.py` ✅
+### C9 — `smal_fitter` is ambiguous (dir vs module); no `smal_fitter/__init__.py` ✅  · [#37](https://github.com/FabianPlum/SMILify/issues/37)
 - **Symptom:** `from smal_fitter import SMALFitter` ([smal_fitter/neuralSMIL/smil_image_regressor.py:24](smal_fitter/neuralSMIL/smil_image_regressor.py#L24)) only resolves when `smal_fitter/` is on `sys.path` (so `smal_fitter` → `smal_fitter.py`). Under pytest, repo root is on the path first, so `smal_fitter` resolves to the **directory** (namespace package) and the import fails: `cannot import name 'SMALFitter' from 'smal_fitter'`.
 - **Fix:** decide whether `smal_fitter` is a package (add `__init__.py`, make imports `from smal_fitter.smal_fitter import SMALFitter`) or keep it a sys.path dir — and make it consistent. Affects all of neuralSMIL.
 
-### C10 — `utils` module name collision (`smal_fitter/utils.py` vs `fitter_3d/utils.py`) ✅
+### C10 — `utils` module name collision (`smal_fitter/utils.py` vs `fitter_3d/utils.py`) ✅  · [#38](https://github.com/FabianPlum/SMILify/issues/38)
 - **Symptom:** with `smal_fitter/` on `PYTHONPATH`, `from utils import perspective_proj_withz` ([smal_fitter/p3d_renderer.py:17](smal_fitter/p3d_renderer.py#L17)) resolves to `fitter_3d/utils.py` (wrong module, no such symbol) → `test_fitter_3d_optimise` fails. Without it, the triangulation tests fail instead.
 - **Fix:** disambiguate the two `utils` modules (package-qualified imports, or rename one).
 
-### C11 — `tests/test_animation_export.py` uses an import style that can't work ✅
+### C11 — `tests/test_animation_export.py` uses an import style that can't work ✅  · [#39](https://github.com/FabianPlum/SMILify/issues/39)
 - **Symptom:** `from smal_fitter.neuralSMIL.animation_export import ...` requires `smal_fitter` (and `neuralSMIL`) to be importable **packages**; they have no `__init__.py`, so this errors (`'smal_fitter' is not a package`) under every invocation tried. Inconsistent with the rest of the suite (which imports via `sys.path`).
 - **Fix:** rewrite the import to match the suite's convention (depends on C9 decision).
 
-### C12 — stray test file collected from repo root ✅
+### C12 — stray test file collected from repo root ✅  · [#40](https://github.com/FabianPlum/SMILify/issues/40)
 - **Symptom:** `smal_fitter/sleap_data/test_sleap_preprocessing.py` is picked up by bare `pytest` (no `testpaths`) and errors: `from preprocess_sleap_dataset import ...` (cwd-relative).
 - **Fix:** add `testpaths = tests` to `pytest.ini` (and/or move/repair this file).
 
-### C13 — Inference uses a strict state_dict load; benchmark is tolerant ✅
+### C13 — Inference uses a strict state_dict load; benchmark is tolerant ✅  · [#41](https://github.com/FabianPlum/SMILify/issues/41)
 - **Found:** verifying the Getting Started inference command (2026-07-01).
 - **Symptom:** `run_multiview_inference.py` → `load_multiview_model_from_checkpoint` (~L430) does a **strict** `load_state_dict`, so it raises `RuntimeError: size mismatch` when the checkpoint's head dims differ from the reconstructed model — e.g. an older ViT stick checkpoint with a 9-dim camera-rotation head (`transformer_head.cam_rot_head` [9], `init_cam_rot` [1,9]) vs the current 6D-rotation model ([6] / [1,6]); `param_norm` / `token_embedding` differ by 3 accordingly. `benchmark_model.py` loads the **same** checkpoint fine (it re-infers dims from tensor shapes).
 - **Note:** observed with an OLD substitute checkpoint (pre-6D-rotation refactor, `ViT_Large_Full_Stick_3D_post_decoder_fix`); a current-code checkpoint likely loads. But the asymmetry (benchmark tolerant, inference strict) is real and will bite anyone loading a slightly-older checkpoint for inference.
@@ -124,11 +126,11 @@
 - **NOTE — C14's grep was incomplete:** it scoped to `smal_fitter/*.py` and missed `smal_fitter/neuralSMIL/`. Those entrypoints DO handle CVD but LATE (in `main()`, after `import torch`): `train_multiview_regressor.py:2227` (only CUDA_DEVICE_ORDER), `train_smil_regressor.py:1310-1311`, `test_smil_regressor_ground_truth.py:1159-1160`, `main.py:103-104`; `run_multiview_inference.py` only *prints* CVD, never sets it (why inference works on 2.3.1). They passed in testing, but the late-set pattern is fragile on torch ≥ 2.3 — normalize (set CVD before torch) in the code pass.
 - **Also pre-existing (not from this branch):** importing `Unreal2Pytorch3D` (and its chain) sets `CUDA_VISIBLE_DEVICES` = `config.GPU_IDS` at **import time** — verified the same on `master`. Any importer (dataset_preprocessing, run_singleview_inference, train_smil_regressor, smil_datasets, …) inherits this side effect. Pin down the exact module and remove the import-time write when normalizing CVD handling.
 
-### C16 — Unify import / package management across the repo ✅ (umbrella)
+### C16 — Unify import / package management across the repo ✅ (umbrella)  · [#42](https://github.com/FabianPlum/SMILify/issues/42)
 - **Symptom:** scripts depend on *where* they are run from and on ad-hoc `sys.path.append(...)` hacks, so imports and cross-module communication break depending on the working directory. There is no proper package: `smal_fitter/` (and `smal_fitter/neuralSMIL/`) have no `__init__.py`, so `smal_fitter` is ambiguous (the directory vs the `smal_fitter.py` module), `from smal_fitter import SMALFitter` only resolves from certain paths, and there are name collisions (`smal_fitter/utils.py` vs `fitter_3d/utils.py`). Most visible in the **test suite** (no single `pytest` invocation runs green) but it runs throughout — neuralSMIL scripts must be launched from specific directories, and the CVD import-order breakage in C14/C15 is downstream of the same fragility.
 - **Umbrella / root cause for:** C8 (no `conftest.py` / `testpaths`), C9 (`smal_fitter` not a package), C10 (`utils` name collision), C11 (`test_animation_export` import style), C12 (stray collected test), and the import-order pieces of C14 / C15.
 - **Fix direction:** make the repo a proper installable package — add `__init__.py` files + a `pyproject.toml`/setup so it can be `pip install -e .`; replace the ad-hoc `sys.path.append` hacks with package-qualified imports; resolve the `utils` and `smal_fitter` name collisions. Then a single `pytest` — and every entrypoint — works regardless of CWD. This is the foundational cleanup the other import-related items build on; do it before C17.
 
-### C17 — Run `ruff` across the repo — SEPARATE PR, do LAST 📌
+### C17 — Run `ruff` across the repo — SEPARATE PR, do LAST 📌  · [#15](https://github.com/FabianPlum/SMILify/issues/15)
 - Once the functional fixes above (especially **C16** import/packaging) are done, let `ruff` loose on the repo (lint + format + autofix) to clean up unused imports, dead code, style, etc.
 - **Separate PR**, tracked by issue [#15](https://github.com/FabianPlum/SMILify/issues/15). Deliberately last, so `ruff` operates on the unified package structure rather than churning code that is about to be restructured by C16.
