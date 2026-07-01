@@ -21,10 +21,6 @@ import numpy as np
 # Path setup — make smal_fitter and neuralSMIL importable
 # ---------------------------------------------------------------------------
 _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-_neural_smil = os.path.join(_repo_root, "smal_fitter", "neuralSMIL")
-for p in [_repo_root, _neural_smil]:
-    if p not in sys.path:
-        sys.path.insert(0, p)
 
 # ---------------------------------------------------------------------------
 # Model / config paths
@@ -224,7 +220,7 @@ class _TriangulatorStub:
         self.device = device
 
         # Import the actual method and bind to this stub
-        from multiview_smil_regressor import MultiViewSMILImageRegressor
+        from smal_fitter.neuralSMIL.multiview_smil_regressor import MultiViewSMILImageRegressor
         import types
 
         self._triangulate_joints_dlt = types.MethodType(

@@ -24,11 +24,6 @@ import numpy as np
 
 # Path setup
 _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-_sleap_data = os.path.join(_repo_root, "smal_fitter", "sleap_data")
-_neural_smil = os.path.join(_repo_root, "smal_fitter", "neuralSMIL")
-for p in [_repo_root, _sleap_data, _neural_smil]:
-    if p not in sys.path:
-        sys.path.insert(0, p)
 
 # Output directory for visualizations
 VIZ_DIR = os.path.join(os.path.dirname(__file__), "test_output", "augmentation")
@@ -196,7 +191,7 @@ class TestPhotometricAugmentation:
     @pytest.fixture(autouse=True)
     def setup_dataset(self):
         """Create a minimal dataset-like object with augmentation methods."""
-        from sleap_multiview_dataset import SLEAPMultiViewDataset
+        from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
         self.ds = object.__new__(SLEAPMultiViewDataset)
         self.ds.augment = True
         self.ds.aug_color_jitter_brightness = 0.2
@@ -309,7 +304,7 @@ class TestGeometricAugmentation:
 
     @pytest.fixture(autouse=True)
     def setup_dataset(self):
-        from sleap_multiview_dataset import SLEAPMultiViewDataset
+        from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
         self.ds = object.__new__(SLEAPMultiViewDataset)
         self.ds.augment = True
         self.ds.aug_crop_jitter_fraction = 0.0
@@ -476,7 +471,7 @@ class TestMultiViewConsistency:
 
     @pytest.fixture(autouse=True)
     def setup_dataset(self):
-        from sleap_multiview_dataset import SLEAPMultiViewDataset
+        from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
         self.ds = object.__new__(SLEAPMultiViewDataset)
         self.ds.augment = True
         self.ds.aug_color_jitter_brightness = 0.2
@@ -614,7 +609,7 @@ class TestAugmentationToggle:
 
     @pytest.fixture(autouse=True)
     def setup_dataset(self):
-        from sleap_multiview_dataset import SLEAPMultiViewDataset
+        from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
         self.ds = object.__new__(SLEAPMultiViewDataset)
         self.ds.aug_color_jitter_brightness = 0.3
         self.ds.aug_color_jitter_contrast = 0.3
@@ -708,7 +703,7 @@ class TestRealDatasetAugmentation:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        from sleap_multiview_dataset import SLEAPMultiViewDataset
+        from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
         self.ds = SLEAPMultiViewDataset(
             hdf5_path=REAL_H5_PATH,
             augment=True,
@@ -916,7 +911,7 @@ class TestRealDatasetAugmentation:
         except ImportError:
             pytest.skip("matplotlib not installed")
 
-        from sleap_multiview_dataset import SLEAPMultiViewDataset
+        from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
 
         # Pick the first view with visible keypoints
         view_idx = 0
@@ -1024,7 +1019,7 @@ class TestRealDatasetAugmentation:
         except ImportError:
             pytest.skip("matplotlib not installed")
 
-        from sleap_multiview_dataset import SLEAPMultiViewDataset
+        from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
 
         ds_bare = object.__new__(SLEAPMultiViewDataset)
         ds_bare.augment = True
