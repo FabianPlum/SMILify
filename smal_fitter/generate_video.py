@@ -40,7 +40,21 @@ class ImageExporter():
             pkl.dump(img_parameters, f)
 
 def main():
-    OUTPUT_DIR = os.path.join("exported", config.CHECKPOINT_NAME, config.EPOCH_NAME)
+    parser = argparse.ArgumentParser(description="Export visualization frames from a fitted checkpoint")
+    parser.add_argument(
+        "--checkpoint-name",
+        default=getattr(config, "CHECKPOINT_NAME", None),
+        help="Checkpoint folder name under checkpoints/ (e.g. timestamp from a training run)",
+    )
+    args = parser.parse_args()
+    checkpoint_name = args.checkpoint_name
+    if not checkpoint_name:
+        sys.exit(
+            "error: checkpoint name required — set config.CHECKPOINT_NAME or pass --checkpoint-name "
+            "(see legacy/README.md)"
+        )
+
+    OUTPUT_DIR = os.path.join("exported", checkpoint_name, config.EPOCH_NAME)
 
     # CUDA_VISIBLE_DEVICES is set at the top of this file, before torch is imported.
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -72,7 +86,7 @@ def main():
     image_exporter = ImageExporter(OUTPUT_DIR)
     model = SMALFitter(device, data, config.WINDOW_SIZE, config.SHAPE_FAMILY, use_unity_prior)
 
-    model.load_checkpoint(os.path.join("checkpoints", config.CHECKPOINT_NAME), config.EPOCH_NAME)
+    model.load_checkpoint(os.path.join("checkpoints", checkpoint_name), config.EPOCH_NAME)
     model.generate_visualization(image_exporter) # Final stage
 
 if __name__ == '__main__':
