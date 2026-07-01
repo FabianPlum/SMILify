@@ -117,7 +117,7 @@ id2name31 = {v: k for k, v in name2id31.items()}
 def get_ignore_names(path):
     if "notail" in path:
         # ignore_joints = range(22, 30)
-        ignore_names = [key for key in name2id.keys() if "Tail" in key]
+        ignore_names = [key for key in name2id.keys() if "Tail" in key]  # noqa: F821  (tracked in #65)
     elif "bodyneckelbowtail" in path:
         ignore_names = [
             "LLeg2",
@@ -401,7 +401,7 @@ def reflect_pose(pose, name2id, model=None):
     asis = [name for name in name2id.keys() if name not in right + left]
 
     if model is not None:
-        mv = MeshViewer()
+        mv = MeshViewer()  # noqa: F821  (tracked in #65)
         model.pose[:] = pose
         model.trans[1] = 0.80
         orig_r = model.r.copy()
@@ -425,7 +425,7 @@ def reflect_pose(pose, name2id, model=None):
     if model is not None:
         # Visualize
         model.pose[:] = new_pose
-        mv.set_dynamic_meshes([Mesh(model.r, model.f), Mesh(orig_r, model.f, vc=name_to_rgb["steel blue"])])
+        mv.set_dynamic_meshes([Mesh(model.r, model.f), Mesh(orig_r, model.f, vc=name_to_rgb["steel blue"])])  # noqa: F821  (tracked in #65)
         import ipdb
 
         ipdb.set_trace()
