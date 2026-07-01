@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/FabianPlum/SMILify/actions/workflows/tests.yml/badge.svg)](https://github.com/FabianPlum/SMILify/actions/workflows/tests.yml)
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![lint](https://github.com/FabianPlum/SMILify/actions/workflows/lint.yml/badge.svg)](https://github.com/FabianPlum/SMILify/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 This repository is based on [SMALify](https://github.com/benjiebob/SMALify) with the aim to turn any rigged 3D model into
