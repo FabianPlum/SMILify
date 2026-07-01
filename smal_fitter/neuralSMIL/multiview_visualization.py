@@ -14,7 +14,6 @@ import numpy as np
 import torch
 
 
-
 def run_forward_multiview_single_sample(model, x_data: dict, y_data: dict, device: str) -> Optional[dict]:
     """Run a single-sample multi-view forward pass and return ``predicted_params``."""
     images = x_data.get("images", [])
