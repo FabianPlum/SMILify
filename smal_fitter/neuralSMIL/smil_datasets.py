@@ -1,6 +1,5 @@
 import glob
 import os
-import sys
 
 import h5py
 import matplotlib
@@ -8,19 +7,15 @@ import matplotlib
 matplotlib.use("Agg")  # Use non-GUI backend to prevent tkinter issues in multiprocessing
 import numpy as np
 import torch
-from scipy.spatial.transform import Rotation
 
 # Add the parent directories to the path to import modules
 # not very pretty, but it works.
 
 from smal_fitter.Unreal2Pytorch3D import load_SMIL_Unreal_sample, Render_SMAL_Model_from_Unreal_data
-from smal_fitter.utils import eul_to_axis
 
 # Import rotation utilities from PyTorch3D
 from pytorch3d.transforms import (
     axis_angle_to_matrix,
-    matrix_to_axis_angle,
-    rotation_6d_to_matrix,
     matrix_to_rotation_6d,
 )
 

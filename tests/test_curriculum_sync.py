@@ -5,7 +5,6 @@ is correctly synced to the legacy TrainingConfig class.
 """
 
 import json
-import sys
 import os
 
 import pytest

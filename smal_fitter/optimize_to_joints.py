@@ -1,4 +1,4 @@
-import sys, os
+import os
 
 # Set CUDA device visibility BEFORE importing torch: torch >= 2.3 raises an INTERNAL
 # ASSERT ("device >= 0 && device < num_gpus") if CUDA_VISIBLE_DEVICES is changed after
@@ -9,10 +9,8 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
 
 import numpy as np
-import cv2
 import argparse
 
-import matplotlib.pyplot as plt
 from smal_fitter.fitter import SMALFitter
 import pickle as pkl
 
@@ -24,8 +22,7 @@ import trimesh
 
 from tqdm import trange
 
-import os, time, shutil
-import sys
+import os
 
 
 class ImageExporter:

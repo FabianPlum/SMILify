@@ -116,8 +116,6 @@ class CombinedSMILDataset:
                 **self.dataset_kwargs,
             )
         elif dataset_type == "sleap":
-            import sys
-            import os
             from smal_fitter.sleap_data.sleap_dataset import SLEAPDataset
 
             return SLEAPDataset(

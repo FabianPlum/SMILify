@@ -6,7 +6,6 @@ alongside the traditional MLP regression head.
 """
 
 import torch
-import numpy as np
 from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
 

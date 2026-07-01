@@ -13,7 +13,6 @@ Usage:
     camera_params = loader.get_camera_parameters(camera_name="Camera0")
 """
 
-import os
 import sys
 import h5py
 import numpy as np

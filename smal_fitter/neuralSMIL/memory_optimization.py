@@ -9,11 +9,9 @@ including mixed precision training, gradient checkpointing, and memory monitorin
 
 import torch
 import torch.nn as nn
-import torch.cuda as cuda
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import gc
 import psutil
-import os
 
 
 class MemoryMonitor:

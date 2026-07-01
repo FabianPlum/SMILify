@@ -24,11 +24,8 @@ import numpy as np
 import cv2
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
-import pandas as pd
 from tqdm import tqdm
-import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import json
 
 
 from sleap_data_loader import SLEAPDataLoader

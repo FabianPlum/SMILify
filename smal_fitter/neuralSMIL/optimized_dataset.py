@@ -6,13 +6,11 @@ from HDF5 files. The classes are designed for maximum I/O efficiency during trai
 """
 
 import os
-import sys
 import h5py
 import numpy as np
 import torch
 import cv2
-from typing import Dict, Tuple, Any, Optional
-import threading
+from typing import Dict, Tuple, Any
 
 
 class OptimizedSMILDataset(torch.utils.data.Dataset):

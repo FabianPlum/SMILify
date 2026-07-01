@@ -5,7 +5,6 @@ This module provides functionality to load and process SLEAP pose estimation dat
 for integration with the SMILify training pipeline.
 """
 
-import os
 import h5py
 import json
 import numpy as np
@@ -15,7 +14,6 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import toml
 import pandas as pd
-import sys
 
 import config
 

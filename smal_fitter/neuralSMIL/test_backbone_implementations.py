@@ -6,18 +6,14 @@ for both ResNet and ViT backbones.
 """
 
 import torch
-import torch.nn as nn
-import numpy as np
-import sys
 import os
-from typing import Dict, Any
 
 
 # Change to the project root directory to find SMAL files
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 os.chdir(project_root)
 
-from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory, BackboneInterface
+from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
 from smal_fitter.neuralSMIL.memory_optimization import MemoryMonitor, get_backbone_memory_requirements
 
 # Import config with error handling for missing SMAL files

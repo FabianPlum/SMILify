@@ -10,12 +10,10 @@ to verify the loss computation.
 """
 
 import os
-import sys
 import math
 
 import pytest
 import torch
-import numpy as np
 
 # ---------------------------------------------------------------------------
 # Path setup — make smal_fitter and neuralSMIL importable

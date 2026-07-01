@@ -12,8 +12,6 @@ import numpy as np
 from typing import Dict, Tuple, Optional, List, Any
 
 # Import from parent modules
-import sys
-import os
 
 from smal_fitter.neuralSMIL.smil_image_regressor import (
     SMILImageRegressor,

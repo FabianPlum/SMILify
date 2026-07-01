@@ -517,7 +517,7 @@ if __name__ == "__main__":
 
     # Load model
     from psbody.mesh import Mesh
-    from psbody.mesh.meshviewer import MeshViewer, MeshViewers
+    from psbody.mesh.meshviewer import MeshViewer
 
     # model_dir = '/scratch1/Dropbox/research/animal_proj/smpl_models'
     model_dir = "../../smpl_models"

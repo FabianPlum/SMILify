@@ -21,7 +21,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 import numpy as np
 import os
-import sys
 import gc
 import random
 from tqdm import tqdm
@@ -31,19 +30,16 @@ import imageio
 
 from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
 from smal_fitter.neuralSMIL.smil_datasets import UnifiedSMILDataset
-from smal_fitter.neuralSMIL.optimized_dataset import OptimizedSMILDataset
 from smal_fitter.fitter import SMALFitter
 from smal_fitter.Unreal2Pytorch3D import return_placeholder_data
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
 from smal_fitter.neuralSMIL.configs import (
-    SingleViewConfig,
     load_config,
     save_config_json,
     apply_smal_file_override,
-    ConfigurationError,
 )
-from smal_fitter.neuralSMIL.memory_optimization import MemoryOptimizer, recommend_training_config, MixedPrecisionTrainer
+from smal_fitter.neuralSMIL.memory_optimization import MemoryOptimizer, recommend_training_config
 
 # UnifiedSMILDataset.from_path now dispatches to SLEAPDataset / SLEAPMultiViewDataset
 # directly based on HDF5 /metadata attrs — no monkey-patch required.

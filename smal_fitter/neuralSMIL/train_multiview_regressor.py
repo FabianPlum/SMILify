@@ -37,7 +37,6 @@ import matplotlib
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from mpl_toolkits.mplot3d import Axes3D  # For 3D plotting (imported for side effects)
 
 import torch
 import torch.nn as nn
@@ -54,7 +53,7 @@ import random
 import json
 from tqdm import tqdm
 from contextlib import nullcontext
-from datetime import datetime, timedelta
+from datetime import timedelta
 import argparse
 import gc
 import imageio
@@ -68,15 +67,12 @@ from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
 from smal_fitter.neuralSMIL.configs import (
-    MultiViewConfig,
     load_config,
     save_config_json,
     apply_smal_file_override,
-    ConfigurationError,
 )
 from smal_fitter.neuralSMIL.multiview_visualization import (
     create_multiview_visualization,
-    create_rendered_view_with_keypoints,
     print_joint_scale_diagnostics,
     run_forward_multiview_single_sample,
 )

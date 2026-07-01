@@ -35,7 +35,6 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import List
 
 import h5py
 import numpy as np

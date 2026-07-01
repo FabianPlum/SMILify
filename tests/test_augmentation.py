@@ -16,7 +16,6 @@ tests/test_output/augmentation/ for manual inspection.
 """
 
 import os
-import sys
 import math
 
 import pytest

@@ -12,11 +12,8 @@ import config
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
 
-import numpy as np
-import cv2
 import argparse
 
-import matplotlib.pyplot as plt
 from smal_fitter.fitter import SMALFitter
 
 import torch
@@ -24,7 +21,6 @@ import imageio
 import config
 
 from smal_fitter.data_loader import load_badja_sequence, load_stanford_sequence
-import time
 
 import pickle as pkl
 

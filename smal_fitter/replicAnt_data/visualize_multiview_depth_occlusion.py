@@ -28,8 +28,6 @@ will be empty. The default `config.SMAL_FILE` is the ant model — pass
 """
 
 import argparse
-import os
-import sys
 from pathlib import Path
 
 # Standard sys.path pattern used by sibling scripts in this directory so

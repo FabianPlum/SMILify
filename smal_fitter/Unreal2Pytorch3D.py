@@ -1,4 +1,4 @@
-import os as _os, sys as _sys
+import os as _os
 
 if __name__ == "__main__":
     # Set CUDA_VISIBLE_DEVICES BEFORE torch is imported below: torch >= 2.3 raises an
@@ -16,9 +16,7 @@ import torch
 import os
 import imageio
 import re
-import sys
 from pathlib import Path
-from typing import List, Tuple, Dict, Optional
 from scipy.spatial.transform import Rotation
 
 from smal_fitter.fitter import SMALFitter
