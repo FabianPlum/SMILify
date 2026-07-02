@@ -14,7 +14,7 @@
 
 ```
 config.py                          # Legacy root config (still required by fitter_3d, optimize_to_joints.py)
-smal_fitter/smal_fitter.py         # Optimization-based fitting (SMALFitter nn.Module)
+smal_fitter/fitter.py              # Optimization-based fitting (SMALFitter nn.Module)
 smal_fitter/neuralSMIL/            # Neural inference module
   train_smil_regressor.py          # Single-view training
   train_multiview_regressor.py     # Multi-view training
@@ -32,7 +32,7 @@ utilities/                         # legacy utilities, ignore.
 
 Two fitting approaches share the same `smal_model` (SMAL/SMIL parametric model):
 
-- **Optimization-based** (`smal_fitter/smal_fitter.py`): `SMALFitter` is an `nn.Module` that optimizes per-frame pose, shape (betas), translation, and FOV via gradient descent. Losses: 2D joint reprojection, silhouette, beta prior, pose prior, joint limits, splay. Supports both legacy quadruped priors (`use_unity_prior`) and arbitrary rigged models (`config.ignore_hardcoded_body`) with per-joint scaling.
+- **Optimization-based** (`smal_fitter/fitter.py`): `SMALFitter` is an `nn.Module` that optimizes per-frame pose, shape (betas), translation, and FOV via gradient descent. Losses: 2D joint reprojection, silhouette, beta prior, pose prior, joint limits, splay. Supports both legacy quadruped priors (`use_unity_prior`) and arbitrary rigged models (`config.ignore_hardcoded_body`) with per-joint scaling.
 - **Neural inference** (`smal_fitter/neuralSMIL/`): Learned regressors that predict SMIL parameters from images (single-view or multi-view).
 
 Key globals from `config.py` used throughout: `N_BETAS`, `N_POSE`, `CANONICAL_MODEL_JOINTS`, `ignore_hardcoded_body`, `dd` (model dict), `DEBUG`.
