@@ -925,10 +925,25 @@ def visualize_training_progress(
                     temp_fitter.log_beta_scales.data = scale_pred
                     temp_fitter.betas_trans.data = trans_pred
 
-            # Set camera parameters from PREDICTED values (not ground truth!)
-            # This ensures visualization matches the loss computation
-            if "cam_rot" in predicted_params and "cam_trans" in predicted_params:
-                # Use predicted camera parameters for consistent visualization
+            # Set camera parameters for visualization.
+            if getattr(model, "fixed_camera", False):
+                # camera_centric: the camera is FIXED at the PyTorch3D identity with
+                # the FOV from calibration. The model's camera heads are unsupervised
+                # here (garbage), so must NOT be used for the render — mirror the
+                # predict_from_batch fixed-camera override so the viz matches the loss.
+                gt_fov = y_data.get("cam_fov")
+                if isinstance(gt_fov, list):
+                    gt_fov = gt_fov[0]
+                fov_val = float(gt_fov) if gt_fov is not None else 60.0
+                fov_t = torch.tensor([fov_val], dtype=torch.float32, device=device)
+                temp_fitter.fov.data = fov_t
+                temp_fitter.renderer.set_camera_parameters(
+                    R=torch.eye(3, device=device).unsqueeze(0),
+                    T=torch.zeros(1, 3, device=device),
+                    fov=fov_t,
+                )
+            elif "cam_rot" in predicted_params and "cam_trans" in predicted_params:
+                # Predicted camera (matches the loss for model_centric checkpoints)
                 temp_fitter.renderer.set_camera_parameters(
                     R=predicted_params["cam_rot"][0:1],  # Predicted camera rotation
                     T=predicted_params["cam_trans"][0:1],  # Predicted camera translation
@@ -964,9 +979,19 @@ def visualize_training_progress(
 
                     temp_fitter.renderer.set_camera_parameters(R=cam_rot_tensor, T=cam_trans_tensor, fov=fov_tensor)
 
-            # Generate visualization - match model's UE scaling setting
+            # Generate visualization - match the model's placement: UE 10x scaling
+            # (legacy) or the predicted per-sample mesh_scale (camera_centric). Without
+            # mesh_scale the mesh renders at native size (~8.6x too large vs the metric
+            # 3D), so the overlay would not match the model's actual training placement.
+            mesh_scale_viz = None
+            if getattr(model, "allow_mesh_scaling", False) and "mesh_scale" in predicted_params:
+                mesh_scale_viz = predicted_params["mesh_scale"][0:1]
             temp_fitter.generate_visualization(
-                image_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=sample_count, epoch=epoch
+                image_exporter,
+                apply_UE_transform=model.use_ue_scaling,
+                img_idx=sample_count,
+                epoch=epoch,
+                mesh_scale=mesh_scale_viz,
             )
 
             sample_count += 1
@@ -1432,6 +1457,11 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         "from_multiview": from_multiview,
         "use_ue_scaling": use_ue_scaling,
         "fixed_camera": camera_centric,
+        # Persist mesh-scale so benchmark/inference rebuild the model with the
+        # mesh_scale head (otherwise its weights are silently dropped and the
+        # mesh renders at native size — ~35x too large vs the metric 3D).
+        "allow_mesh_scaling": allow_mesh_scaling,
+        "init_mesh_scale": mesh_scale_init,
     }
 
     # Use checkpoint from config if not provided as argument

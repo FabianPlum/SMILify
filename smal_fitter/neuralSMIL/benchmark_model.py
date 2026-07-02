@@ -417,6 +417,12 @@ def _create_singleview_model(
     from_multiview = bool(ckpt_config.get("from_multiview", False))
     fixed_camera = bool(ckpt_config.get("fixed_camera", camera_centric))
     use_ue_scaling = bool(ckpt_config.get("use_ue_scaling", not fixed_camera))
+    # Mesh-scale: prefer the persisted flag; fall back to detecting the mesh_scale
+    # head in the state dict so older checkpoints rebuild with it (otherwise the
+    # head's weights are dropped and the mesh renders ~35x too large).
+    _has_mesh_scale_head = any("mesh_scale_head" in k for k in checkpoint.get("model_state_dict", {}))
+    allow_mesh_scaling = bool(ckpt_config.get("allow_mesh_scaling", _has_mesh_scale_head))
+    mesh_scale_init = float(ckpt_config.get("init_mesh_scale", 1.0))
 
     # CLI overrides
     smal_file = smal_file_override or ckpt_config.get("smal_file")
@@ -470,6 +476,8 @@ def _create_singleview_model(
         transformer_config=model_config.get("transformer_config", {}),
         scale_trans_mode=scale_trans_mode,
         fixed_camera=fixed_camera,
+        allow_mesh_scaling=allow_mesh_scaling,  # rebuild the mesh_scale head
+        mesh_scale_init=mesh_scale_init,
     ).to(device)
 
     # Load weights (filter out SMAL optimization params, same as inference script)

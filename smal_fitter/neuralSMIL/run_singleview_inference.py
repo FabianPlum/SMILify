@@ -298,6 +298,7 @@ class InferenceImageExporter:
         faces: np.ndarray,
         img_idx: int = 0,
         image_name: str = "image",
+        **kwargs,  # tolerate extra kwargs (e.g. epoch) passed by SMALFitter.generate_visualization
     ):
         """
         Export visualization image and parameters.
@@ -321,20 +322,26 @@ class InferenceImageExporter:
         params_filename = f"{image_name}_parameters.json"
         params_path = os.path.join(self.output_dir, params_filename)
 
-        # Convert numpy arrays and tensors to lists for JSON serialization
-        json_parameters = {}
-        for key, value in img_parameters.items():
-            if isinstance(value, np.ndarray):
-                json_parameters[key] = value.tolist()
-            elif isinstance(value, torch.Tensor):
-                json_parameters[key] = value.detach().cpu().numpy().tolist()
-            elif hasattr(value, "numpy"):  # Handle other tensor-like objects
-                json_parameters[key] = value.numpy().tolist()
-            else:
-                json_parameters[key] = value
+        # Convert numpy arrays / tensors to lists for JSON serialization, recursing
+        # into nested dicts/lists (a nested tensor previously escaped the top-level
+        # check and raised "Object of type Tensor is not JSON serializable").
+        def _to_jsonable(v):
+            if isinstance(v, torch.Tensor):
+                return v.detach().cpu().numpy().tolist()
+            if isinstance(v, np.ndarray):
+                return v.tolist()
+            if isinstance(v, (np.floating, np.integer)):
+                return v.item()
+            if isinstance(v, dict):
+                return {k: _to_jsonable(x) for k, x in v.items()}
+            if isinstance(v, (list, tuple)):
+                return [_to_jsonable(x) for x in v]
+            return v
+
+        json_parameters = _to_jsonable(img_parameters)
 
         with open(params_path, "w") as f:
-            json.dump(json_parameters, f, indent=2)
+            json.dump(json_parameters, f, indent=2, default=str)
 
         # Save parameters as pickle (for exact reproduction)
         pkl_filename = f"{image_name}_parameters.pkl"
@@ -401,6 +408,12 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
         frame_convention = ckpt_config.get("frame_convention", "model_centric") if ckpt_config else "model_centric"
         fixed_camera = bool(ckpt_config.get("fixed_camera", frame_convention == "camera_centric"))
         use_ue_scaling = bool(ckpt_config.get("use_ue_scaling", not fixed_camera))
+        # Mesh-scale: prefer the persisted flag; fall back to detecting the
+        # mesh_scale head in the state dict so older checkpoints (saved before the
+        # flag was persisted) still rebuild with the head instead of dropping it.
+        _has_mesh_scale_head = any("mesh_scale_head" in k for k in checkpoint.get("model_state_dict", {}))
+        allow_mesh_scaling = bool(ckpt_config.get("allow_mesh_scaling", _has_mesh_scale_head))
+        mesh_scale_init = float(ckpt_config.get("init_mesh_scale", 1.0))
         model_config["frame_convention"] = frame_convention
         model_config["fixed_camera"] = fixed_camera
 
@@ -511,6 +524,8 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
             transformer_config=model_config.get("transformer_config", {}),
             scale_trans_mode=scale_trans_mode,  # Critical for correct output dimensions
             fixed_camera=fixed_camera,  # camera-centric: pin camera to identity
+            allow_mesh_scaling=allow_mesh_scaling,  # rebuild the mesh_scale head
+            mesh_scale_init=mesh_scale_init,
         ).to(device)
 
         # Load model state, handling batch size differences
@@ -1139,8 +1154,9 @@ def generate_visualization(
                 self.base_exporter = base_exporter
                 self.image_name = image_name
 
-            def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0):
-                # Call the base exporter with the specific image name
+            def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, **kwargs):
+                # Call the base exporter with the specific image name; forward any
+                # extra kwargs (e.g. epoch) from SMALFitter.generate_visualization.
                 self.base_exporter.export(
                     collage_np,
                     batch_id,
@@ -1150,10 +1166,18 @@ def generate_visualization(
                     faces,
                     img_idx=img_idx,
                     image_name=self.image_name,
+                    **kwargs,
                 )
 
         named_exporter = NamedImageExporter(image_exporter, image_name)
-        temp_fitter.generate_visualization(named_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=0)
+        # Apply the predicted per-sample mesh scale (camera_centric); without it the
+        # mesh renders at native size (~35x too large vs the metric 3D).
+        mesh_scale_viz = None
+        if getattr(model, "allow_mesh_scaling", False) and "mesh_scale" in predicted_params:
+            mesh_scale_viz = predicted_params["mesh_scale"].to(device)
+        temp_fitter.generate_visualization(
+            named_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=0, mesh_scale=mesh_scale_viz
+        )
 
         print(f"Generated visualization for {image_name}")
 
@@ -1530,6 +1554,13 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
     input_group.add_argument("-v", "--input_video", type=str, help="Path to input video file")
 
     parser.add_argument("-o", "--output_folder", type=str, required=True, help="Path to folder for saving results")
+
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=1,
+        help="Batch size for image-folder inference (default: 1).",
+    )
 
     parser.add_argument(
         "--fov",
