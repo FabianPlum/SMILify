@@ -131,7 +131,11 @@ if [[ "$SKIP_TESTS" -eq 1 ]]; then
     echo "==> Skipping tests (--skip-tests)"
 else
     echo "==> Running tests: pytest tests/ -v -s"
-    pytest tests/ -v -s
+    # Non-fatal: the env build above is what matters, so don't abort the install if a
+    # test fails (e.g. a GPU-dependent test on a node with a bad CUDA context, or a
+    # data-dependent test with datasets absent on this machine).
+    pytest tests/ -v -s || \
+        echo "==> WARN: test step had failures — env is still installed; see tests/README.md" >&2
 fi
 
 echo
