@@ -1144,7 +1144,33 @@ def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=Fa
                 new_state_dict[new_key] = value
             model_state_dict = new_state_dict
 
-        model.load_state_dict(model_state_dict, strict=False)
+        # Drop checkpoint entries whose shape doesn't match the current model.
+        # `strict=False` only suppresses missing/unexpected keys, NOT shape
+        # mismatches on matched keys — those raise a RuntimeError and abort the
+        # entire load. The batch-sized per-frame scratch params inherited from
+        # SMALFitter (global_rotation, trans, joint_rotations, log_beta_scales,
+        # betas_trans) carry a leading dim equal to the batch size, so resuming
+        # with a different batch size than the checkpoint was made with would
+        # otherwise silently fall back to training from scratch. These params are
+        # overwritten every forward pass, so skipping them loses nothing.
+        current_state = model.state_dict()
+        filtered_state_dict = {}
+        skipped_shape_mismatch = []
+        for key, value in model_state_dict.items():
+            if key in current_state and current_state[key].shape != value.shape:
+                skipped_shape_mismatch.append((key, tuple(value.shape), tuple(current_state[key].shape)))
+                continue
+            filtered_state_dict[key] = value
+
+        if skipped_shape_mismatch:
+            log(
+                f"Skipping {len(skipped_shape_mismatch)} checkpoint param(s) with shape mismatch "
+                "(kept current-model init; typically batch-sized scratch params):"
+            )
+            for key, ckpt_shape, model_shape in skipped_shape_mismatch:
+                log(f"  ~ {key}: checkpoint={ckpt_shape}, model={model_shape}")
+
+        model.load_state_dict(filtered_state_dict, strict=False)
         log("Model state loaded successfully")
 
         # Get epoch information first (before trying to load optimizer)
