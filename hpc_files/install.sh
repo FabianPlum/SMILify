@@ -27,7 +27,9 @@ for arg in "$@"; do
     esac
 done
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Repo root is the parent of this script's hpc_files/ folder, so the script works
+# whether invoked from the repo root or from inside hpc_files/.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 # Locate conda. Prefer $CONDA_EXE, then common install paths.
