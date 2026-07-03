@@ -298,6 +298,7 @@ class InferenceImageExporter:
         faces: np.ndarray,
         img_idx: int = 0,
         image_name: str = "image",
+        **kwargs,  # tolerate extra kwargs (e.g. epoch) passed by SMALFitter.generate_visualization
     ):
         """
         Export visualization image and parameters.
@@ -321,20 +322,26 @@ class InferenceImageExporter:
         params_filename = f"{image_name}_parameters.json"
         params_path = os.path.join(self.output_dir, params_filename)
 
-        # Convert numpy arrays and tensors to lists for JSON serialization
-        json_parameters = {}
-        for key, value in img_parameters.items():
-            if isinstance(value, np.ndarray):
-                json_parameters[key] = value.tolist()
-            elif isinstance(value, torch.Tensor):
-                json_parameters[key] = value.detach().cpu().numpy().tolist()
-            elif hasattr(value, "numpy"):  # Handle other tensor-like objects
-                json_parameters[key] = value.numpy().tolist()
-            else:
-                json_parameters[key] = value
+        # Convert numpy arrays / tensors to lists for JSON serialization, recursing
+        # into nested dicts/lists (a nested tensor previously escaped the top-level
+        # check and raised "Object of type Tensor is not JSON serializable").
+        def _to_jsonable(v):
+            if isinstance(v, torch.Tensor):
+                return v.detach().cpu().numpy().tolist()
+            if isinstance(v, np.ndarray):
+                return v.tolist()
+            if isinstance(v, (np.floating, np.integer)):
+                return v.item()
+            if isinstance(v, dict):
+                return {k: _to_jsonable(x) for k, x in v.items()}
+            if isinstance(v, (list, tuple)):
+                return [_to_jsonable(x) for x in v]
+            return v
+
+        json_parameters = _to_jsonable(img_parameters)
 
         with open(params_path, "w") as f:
-            json.dump(json_parameters, f, indent=2)
+            json.dump(json_parameters, f, indent=2, default=str)
 
         # Save parameters as pickle (for exact reproduction)
         pkl_filename = f"{image_name}_parameters.pkl"
@@ -394,7 +401,24 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
             shape_family = config.SHAPE_FAMILY
             config_source = "training_config.py (no config in checkpoint)"
 
+        # Frame convention + camera flags (persisted at the TOP level of
+        # checkpoint["config"] by the trainer, not inside model_config).
+        # camera_centric checkpoints use a fixed identity camera and were
+        # trained without the 10x UE scaling.
+        frame_convention = ckpt_config.get("frame_convention", "model_centric") if ckpt_config else "model_centric"
+        fixed_camera = bool(ckpt_config.get("fixed_camera", frame_convention == "camera_centric"))
+        use_ue_scaling = bool(ckpt_config.get("use_ue_scaling", not fixed_camera))
+        # Mesh-scale: prefer the persisted flag; fall back to detecting the
+        # mesh_scale head in the state dict so older checkpoints (saved before the
+        # flag was persisted) still rebuild with the head instead of dropping it.
+        _has_mesh_scale_head = any("mesh_scale_head" in k for k in checkpoint.get("model_state_dict", {}))
+        allow_mesh_scaling = bool(ckpt_config.get("allow_mesh_scaling", _has_mesh_scale_head))
+        mesh_scale_init = float(ckpt_config.get("init_mesh_scale", 1.0))
+        model_config["frame_convention"] = frame_convention
+        model_config["fixed_camera"] = fixed_camera
+
         print(f"Configuration from {config_source}:")
+        print(f"  frame_convention: {frame_convention} (fixed_camera={fixed_camera}, use_ue_scaling={use_ue_scaling})")
         print(f"  backbone_name: {model_config['backbone_name']}")
         print(f"  head_type: {model_config.get('head_type', 'mlp')}")
         print(f"  rotation_representation: {rotation_representation}")
@@ -490,13 +514,18 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
             rgb_only=model_config.get("rgb_only", True),
             freeze_backbone=model_config.get("freeze_backbone", True),
             hidden_dim=model_config.get("hidden_dim", 1024),
-            use_ue_scaling=True,  # Default for replicAnt data
+            # Legacy replicAnt single-view uses 10x UE scaling; camera-centric
+            # (multi-view-derived) checkpoints do not (scale baked via world_scale).
+            use_ue_scaling=use_ue_scaling,
             rotation_representation=rotation_representation,
             input_resolution=input_resolution,
             backbone_name=model_config["backbone_name"],
             head_type=model_config.get("head_type", "mlp"),
             transformer_config=model_config.get("transformer_config", {}),
             scale_trans_mode=scale_trans_mode,  # Critical for correct output dimensions
+            fixed_camera=fixed_camera,  # camera-centric: pin camera to identity
+            allow_mesh_scaling=allow_mesh_scaling,  # rebuild the mesh_scale head
+            mesh_scale_init=mesh_scale_init,
         ).to(device)
 
         # Load model state, handling batch size differences
@@ -725,6 +754,18 @@ def run_inference_on_image(
             # The model's forward() method handles batches correctly
             predicted_params = model.forward(image_tensor)
 
+            # Camera-centric checkpoints: pin the camera to the PyTorch3D identity
+            # and inject the chosen FOV. Inference calls forward() directly (not
+            # predict_from_batch), and there is no GT calibration for a raw image,
+            # so we re-implement the fixed_camera override here, sourcing the FOV
+            # from model._inference_fov (resolved in main: --fov or 60.0 default).
+            if getattr(model, "fixed_camera", False):
+                bs = predicted_params["global_rot"].shape[0]
+                predicted_params["cam_rot"] = torch.eye(3, device=device).unsqueeze(0).expand(bs, 3, 3).contiguous()
+                predicted_params["cam_trans"] = torch.zeros(bs, 3, device=device)
+                fov_deg = float(getattr(model, "_inference_fov", 60.0))
+                predicted_params["fov"] = torch.full((bs, 1), fov_deg, device=device)
+
             # Move results back to CPU for visualization
             cpu_params = {}
             for key, value in predicted_params.items():
@@ -826,9 +867,14 @@ def render_model_only(
                 propagate_scaling=temp_fitter.propagate_scaling,
             )
 
-            # Apply UE scaling transformation (10x scale)
-            verts = (verts - joints[:, 0, :].unsqueeze(1)) * 10 + temp_fitter.trans.unsqueeze(1)
-            joints = (joints - joints[:, 0, :].unsqueeze(1)) * 10 + temp_fitter.trans.unsqueeze(1)
+            if model.use_ue_scaling:
+                # Apply UE scaling transformation (10x scale) — legacy replicAnt
+                verts = (verts - joints[:, 0, :].unsqueeze(1)) * 10 + temp_fitter.trans.unsqueeze(1)
+                joints = (joints - joints[:, 0, :].unsqueeze(1)) * 10 + temp_fitter.trans.unsqueeze(1)
+            else:
+                # Camera-centric / no UE scaling: plain translation (scale baked in).
+                verts = verts + temp_fitter.trans.unsqueeze(1)
+                joints = joints + temp_fitter.trans.unsqueeze(1)
 
             # Get canonical model joints
             canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
@@ -947,9 +993,14 @@ def render_prediction_on_frame(
                 propagate_scaling=temp_fitter.propagate_scaling,
             )
 
-            # Apply UE scaling transformation (10x scale)
-            verts = (verts - joints[:, 0, :].unsqueeze(1)) * 10 + temp_fitter.trans.unsqueeze(1)
-            joints = (joints - joints[:, 0, :].unsqueeze(1)) * 10 + temp_fitter.trans.unsqueeze(1)
+            if model.use_ue_scaling:
+                # Apply UE scaling transformation (10x scale) — legacy replicAnt
+                verts = (verts - joints[:, 0, :].unsqueeze(1)) * 10 + temp_fitter.trans.unsqueeze(1)
+                joints = (joints - joints[:, 0, :].unsqueeze(1)) * 10 + temp_fitter.trans.unsqueeze(1)
+            else:
+                # Camera-centric / no UE scaling: plain translation (scale baked in).
+                verts = verts + temp_fitter.trans.unsqueeze(1)
+                joints = joints + temp_fitter.trans.unsqueeze(1)
 
             # Get canonical model joints
             canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]
@@ -1103,8 +1154,9 @@ def generate_visualization(
                 self.base_exporter = base_exporter
                 self.image_name = image_name
 
-            def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0):
-                # Call the base exporter with the specific image name
+            def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, **kwargs):
+                # Call the base exporter with the specific image name; forward any
+                # extra kwargs (e.g. epoch) from SMALFitter.generate_visualization.
                 self.base_exporter.export(
                     collage_np,
                     batch_id,
@@ -1114,10 +1166,18 @@ def generate_visualization(
                     faces,
                     img_idx=img_idx,
                     image_name=self.image_name,
+                    **kwargs,
                 )
 
         named_exporter = NamedImageExporter(image_exporter, image_name)
-        temp_fitter.generate_visualization(named_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=0)
+        # Apply the predicted per-sample mesh scale (camera_centric); without it the
+        # mesh renders at native size (~35x too large vs the metric 3D).
+        mesh_scale_viz = None
+        if getattr(model, "allow_mesh_scaling", False) and "mesh_scale" in predicted_params:
+            mesh_scale_viz = predicted_params["mesh_scale"].to(device)
+        temp_fitter.generate_visualization(
+            named_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=0, mesh_scale=mesh_scale_viz
+        )
 
         print(f"Generated visualization for {image_name}")
 
@@ -1495,6 +1555,22 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
 
     parser.add_argument("-o", "--output_folder", type=str, required=True, help="Path to folder for saving results")
 
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=1,
+        help="Batch size for image-folder inference (default: 1).",
+    )
+
+    parser.add_argument(
+        "--fov",
+        type=float,
+        default=None,
+        help="Vertical field-of-view in degrees for camera-centric checkpoints (fixed identity camera). "
+        "Fallback chain: --fov -> 60.0 (pytorch3d / codebase default). "
+        "Ignored for legacy model-centric checkpoints (which predict their own camera).",
+    )
+
     # Preprocessing options
     parser.add_argument(
         "--crop_mode",
@@ -1611,6 +1687,16 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         print("\n" + "=" * 40)
         print("Loading model...")
         model, model_config = load_model_from_checkpoint(args.checkpoint, device)
+
+        # Resolve the inference FOV for camera-centric checkpoints. A raw image
+        # carries no GT calibration, so the fallback chain is: --fov -> 60.0
+        # (the pytorch3d / codebase default). Stashed on the model for the
+        # fixed-camera override in run_inference_on_image.
+        chosen_fov = args.fov if args.fov is not None else 60.0
+        model._inference_fov = chosen_fov
+        if getattr(model, "fixed_camera", False):
+            src = "from --fov" if args.fov is not None else "default"
+            print(f"Camera-centric checkpoint: fixed identity camera, FOV={chosen_fov} deg ({src})")
 
         if args.crop_mode == "bbox_crop":
             sleap_helper = SLEAPCroppingHelper(

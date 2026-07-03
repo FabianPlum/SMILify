@@ -9,7 +9,8 @@ The model type is auto-detected from the checkpoint state dict:
 Outputs:
   - PCK@5 (pixel threshold on original image size)
   - PCK curve over multiple thresholds
-  - MPJPE in mm (after converting back to original world scale) [multi-view only, when 3D GT available]
+  - MPJPE in mm (after converting back to original world scale), when 3D GT is available
+    (multi-view: shared canonical frame; single-view camera-centric: the fixed-camera frame)
   - Dataset stats and HDF5 key inventory
   - Plots and a text report in a dedicated output directory
 """
@@ -247,16 +248,29 @@ def _compute_pck_errors(
     return errors_native, errors_input
 
 
-def _compute_mpjpe_mm(
-    model,
-    predicted_params: Dict[str, torch.Tensor],
+def _accumulate_mpjpe_mm(
+    pred_joints_np: np.ndarray,
     y_data_batch: List[Dict],
     world_scale: float,
+    samples_3d_for_plot: Optional[List[Dict]] = None,
+    max_plot_samples: int = 5,
 ) -> Tuple[List[float], int]:
-    errors_mm = []
+    """Accumulate per-joint 3D errors (mm) for a batch of predicted joints.
+
+    ``pred_joints_np`` (B, J, 3) must already be in the SAME frame and units as
+    each sample's ``keypoints_3d`` GT (multi-view: the shared canonical/world
+    frame; single-view camera-centric: the fixed-camera frame). Joints flagged as
+    the ``(0, 0, 0)`` sentinel or non-finite in the GT are excluded (matching how
+    the training 3D loss masks them). Errors are converted back to the original
+    world units (typically mm) via ``1 / world_scale``.
+
+    If ``samples_3d_for_plot`` is given, up to ``max_plot_samples`` per-sample
+    dicts (``gt``/``pred``/``errors_mm``) are appended for the percentile scatter
+    plots. Returns ``(errors_mm_list, valid_samples)``.
+    """
+    errors_mm: List[float] = []
     valid_samples = 0
-    pred_joints = model._predict_canonical_joints_3d(predicted_params)  # (B, J, 3)
-    pred_joints_np = pred_joints.detach().cpu().numpy()
+    scale = 1.0 / float(world_scale) if float(world_scale) != 0.0 else 1.0
 
     for b_idx, y_data in enumerate(y_data_batch):
         if not bool(y_data.get("has_3d_data", False)):
@@ -264,13 +278,13 @@ def _compute_mpjpe_mm(
         gt = y_data.get("keypoints_3d")
         if gt is None:
             continue
-        gt = np.array(gt, dtype=np.float32)
-        pred = pred_joints_np[b_idx]
+        gt = np.asarray(gt, dtype=np.float32)
+        pred = np.asarray(pred_joints_np[b_idx], dtype=np.float32)
 
         J = min(gt.shape[0], pred.shape[0])
         if J == 0:
             continue
-        # Apply training-style masking: exclude zero joints and non-finite values
+        # Apply training-style masking: exclude zero (sentinel) joints and non-finite values
         gt_slice = gt[:J]
         pred_slice = pred[:J]
         joint_norms = np.linalg.norm(gt_slice, axis=1)
@@ -280,15 +294,60 @@ def _compute_mpjpe_mm(
             continue
 
         diff = pred_slice[valid_joint_mask] - gt_slice[valid_joint_mask]
-        dist = np.linalg.norm(diff, axis=1)  # in scaled world units
-
-        # Convert back to original world scale (typically mm)
-        scale = 1.0 / float(world_scale) if float(world_scale) != 0.0 else 1.0
-        dist_mm = dist * scale
+        dist_mm = np.linalg.norm(diff, axis=1) * scale  # scaled world units -> mm
         errors_mm.extend(dist_mm.tolist())
         valid_samples += 1
 
+        if samples_3d_for_plot is not None and len(samples_3d_for_plot) < max_plot_samples:
+            samples_3d_for_plot.append(
+                {
+                    "gt": gt_slice[valid_joint_mask],
+                    "pred": pred_slice[valid_joint_mask],
+                    "errors_mm": dist_mm,
+                }
+            )
+
     return errors_mm, valid_samples
+
+
+def _compute_mpjpe_mm(
+    model,
+    predicted_params: Dict[str, torch.Tensor],
+    y_data_batch: List[Dict],
+    world_scale: float,
+    samples_3d_for_plot: Optional[List[Dict]] = None,
+    max_plot_samples: int = 5,
+) -> Tuple[List[float], int]:
+    """Multi-view MPJPE: predict canonical 3D joints, then accumulate errors (mm)."""
+    pred_joints_np = model._predict_canonical_joints_3d(predicted_params).detach().cpu().numpy()  # (B, J, 3)
+    return _accumulate_mpjpe_mm(pred_joints_np, y_data_batch, world_scale, samples_3d_for_plot, max_plot_samples)
+
+
+def _compute_mpjpe_mm_singleview(
+    model: SMILImageRegressor,
+    predicted_params: Dict[str, torch.Tensor],
+    y_data_batch: List[Dict],
+    world_scale: float,
+    samples_3d_for_plot: Optional[List[Dict]] = None,
+    max_plot_samples: int = 5,
+) -> Tuple[List[float], int]:
+    """Single-view (camera-centric) MPJPE.
+
+    Renders the model's predicted 3D joints in the fixed-camera frame via
+    ``_compute_rendered_outputs(compute_joints_3d=True)`` (root translation +
+    mesh_scale applied, exactly as in the training 3D loss), then accumulates
+    per-joint errors (mm) against the camera-centric ``keypoints_3d`` GT.
+    """
+    _, _, joints_3d = model._compute_rendered_outputs(
+        predicted_params,
+        compute_joints=False,
+        compute_silhouette=False,
+        compute_joints_3d=True,
+    )
+    if joints_3d is None:
+        return [], 0
+    pred_joints_np = joints_3d.detach().cpu().numpy()  # (B, J, 3)
+    return _accumulate_mpjpe_mm(pred_joints_np, y_data_batch, world_scale, samples_3d_for_plot, max_plot_samples)
 
 
 def _assign_percentile_bins(errors_mm: np.ndarray, thresholds: List[float]) -> np.ndarray:
@@ -374,6 +433,67 @@ def _plot_3d_keypoints_by_percentile(
         plt.close()
 
 
+def _report_mpjpe_mm(
+    log_fn,
+    all_3d_errors_mm: List[float],
+    samples_with_3d: int,
+    samples_3d_for_plot: List[Dict],
+    output_dir: str,
+):
+    """Log MPJPE stats and save the 3D outputs (percentile scatter plots, error
+    histogram, raw ``errors_3d_mm.npy``). Shared by the multi-view and single-view
+    benchmarks so both produce identical 3D reporting.
+    """
+    errors_mm = np.array(all_3d_errors_mm, dtype=np.float32)
+    if errors_mm.size > 0:
+        mpjpe_mm = float(np.mean(errors_mm))
+        median_mpjpe_mm = float(np.median(errors_mm))
+    else:
+        mpjpe_mm = 0.0
+        median_mpjpe_mm = 0.0
+
+    log_fn("")
+    log_fn(f"MPJPE (mm): {mpjpe_mm:.4f}")
+    log_fn(f"Median MPJPE (mm): {median_mpjpe_mm:.4f}")
+    if errors_mm.size > 0:
+        percentiles = [50, 75, 90, 95, 99]
+        pct_values = np.percentile(errors_mm, percentiles).tolist()
+        log_fn("MPJPE percentiles (mm):")
+        for p, v in zip(percentiles, pct_values):
+            log_fn(f"  P{p}: {v:.4f}")
+    log_fn(f"3D samples with GT: {samples_with_3d}")
+    log_fn(f"3D joint errors count: {errors_mm.size}")
+
+    # 3D percentile scatter plots
+    if errors_mm.size > 0 and samples_3d_for_plot:
+        percentile_thresholds = np.percentile(errors_mm, [50, 75, 90, 95, 99]).tolist()
+        _plot_3d_keypoints_by_percentile(
+            samples=samples_3d_for_plot,
+            percentile_thresholds=percentile_thresholds,
+            output_dir=output_dir,
+        )
+
+    # MPJPE histogram (log-scaled)
+    mpjpe_hist_path = os.path.join(output_dir, "mpjpe_histogram.png")
+    plt.figure(figsize=(8, 5))
+    pos = errors_mm[errors_mm > 0]
+    if pos.size > 0:
+        max_err_mm = max(200.0, float(np.max(errors_mm)))
+        bins_mm = np.logspace(np.log10(max(0.1, float(pos.min()))), np.log10(max_err_mm), 50)
+        plt.hist(errors_mm, bins=bins_mm, color="#55A868", alpha=0.8)
+    plt.xscale("log")
+    plt.title("3D Joint Error Histogram (mm)")
+    plt.xlabel("Error (mm)")
+    plt.ylabel("Count")
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.savefig(mpjpe_hist_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    np.save(os.path.join(output_dir, "errors_3d_mm.npy"), errors_mm)
+
+    return errors_mm, mpjpe_hist_path
+
+
 # ---------------------------------------------------------------------------
 # Single-view helpers
 # ---------------------------------------------------------------------------
@@ -408,6 +528,21 @@ def _create_singleview_model(
         rotation_representation = fallback_params["rotation_representation"]
         scale_trans_mode = TrainingConfig.get_scale_trans_mode()
         shape_family = config.SHAPE_FAMILY
+
+    # Frame convention + camera flags (persisted at the TOP level of
+    # checkpoint["config"] by the trainer). camera_centric checkpoints use a
+    # fixed identity camera and were trained without 10x UE scaling.
+    frame_convention = ckpt_config.get("frame_convention", "model_centric")
+    camera_centric = frame_convention == "camera_centric"
+    from_multiview = bool(ckpt_config.get("from_multiview", False))
+    fixed_camera = bool(ckpt_config.get("fixed_camera", camera_centric))
+    use_ue_scaling = bool(ckpt_config.get("use_ue_scaling", not fixed_camera))
+    # Mesh-scale: prefer the persisted flag; fall back to detecting the mesh_scale
+    # head in the state dict so older checkpoints rebuild with it (otherwise the
+    # head's weights are dropped and the mesh renders ~35x too large).
+    _has_mesh_scale_head = any("mesh_scale_head" in k for k in checkpoint.get("model_state_dict", {}))
+    allow_mesh_scaling = bool(ckpt_config.get("allow_mesh_scaling", _has_mesh_scale_head))
+    mesh_scale_init = float(ckpt_config.get("init_mesh_scale", 1.0))
 
     # CLI overrides
     smal_file = smal_file_override or ckpt_config.get("smal_file")
@@ -453,13 +588,16 @@ def _create_singleview_model(
         rgb_only=model_config.get("rgb_only", True),
         freeze_backbone=model_config.get("freeze_backbone", True),
         hidden_dim=model_config.get("hidden_dim", 1024),
-        use_ue_scaling=True,
+        use_ue_scaling=use_ue_scaling,
         rotation_representation=rotation_representation,
         input_resolution=input_resolution,
         backbone_name=backbone_name,
         head_type=model_config.get("head_type", "mlp"),
         transformer_config=model_config.get("transformer_config", {}),
         scale_trans_mode=scale_trans_mode,
+        fixed_camera=fixed_camera,
+        allow_mesh_scaling=allow_mesh_scaling,  # rebuild the mesh_scale head
+        mesh_scale_init=mesh_scale_init,
     ).to(device)
 
     # Load weights (filter out SMAL optimization params, same as inference script)
@@ -489,6 +627,7 @@ def _create_singleview_model(
     log_fn(f"Loaded singleview model ({sum(p.numel() for p in model.parameters()):,} params)")
 
     # Build a flat resolved config dict for the benchmark loop
+    ckpt_tp = ckpt_config.get("training_params", {}) if ckpt_config else {}
     resolved = {
         "model_config": model_config,
         "rotation_representation": rotation_representation,
@@ -496,22 +635,33 @@ def _create_singleview_model(
         "shape_family": shape_family,
         "backbone_name": backbone_name,
         "input_resolution": input_resolution,
-        "batch_size": ckpt_config.get("training_params", {}).get("batch_size", fallback_params.get("batch_size", 4)),
-        "seed": ckpt_config.get("training_params", {}).get("seed", fallback_params.get("seed", 0)),
-        "train_ratio": training_config_fallback.get("split_config", {}).get(
-            "train_size",
-            1.0
-            - training_config_fallback.get("split_config", {}).get("val_size", 0.1)
-            - training_config_fallback.get("split_config", {}).get("test_size", 0.1),
+        "batch_size": ckpt_tp.get("batch_size", fallback_params.get("batch_size", 4)),
+        # Split determinants: prefer the values the trainer persisted so the
+        # benchmark reproduces the exact sample-grouped test split.
+        "seed": ckpt_tp.get("seed", fallback_params.get("seed", 0)),
+        "train_ratio": ckpt_tp.get(
+            "train_ratio",
+            training_config_fallback.get("split_config", {}).get(
+                "train_size",
+                1.0
+                - training_config_fallback.get("split_config", {}).get("val_size", 0.1)
+                - training_config_fallback.get("split_config", {}).get("test_size", 0.1),
+            ),
         ),
-        "val_ratio": training_config_fallback.get("split_config", {}).get("val_size", 0.1),
+        "val_ratio": ckpt_tp.get("val_ratio", training_config_fallback.get("split_config", {}).get("val_size", 0.1)),
+        # Single-view-from-multiview / camera-centric flags.
+        "frame_convention": frame_convention,
+        "camera_centric": camera_centric,
+        "from_multiview": from_multiview,
+        "use_ue_scaling": use_ue_scaling,
+        "fixed_camera": fixed_camera,
     }
     return model, resolved
 
 
 def _compute_pck_errors_singleview(
     model: SMILImageRegressor,
-    x_data_batch: list,
+    predicted_params: Dict[str, torch.Tensor],
     y_data_batch: list,
     default_resolution: int,
     override_size: Optional[Tuple[int, int]],
@@ -519,20 +669,15 @@ def _compute_pck_errors_singleview(
 ) -> Tuple[List[float], List[float]]:
     """Compute per-joint 2D pixel errors for a single-view batch, at two scales.
 
-    Uses the model's own ``predict_from_batch`` and ``_compute_rendered_outputs``
-    to obtain normalised predicted joint positions, then compares against the
-    ground-truth ``keypoints_2d`` and ``keypoint_visibility`` stored in
-    *y_data_batch*.
+    Renders the (already predicted) ``predicted_params`` via
+    ``_compute_rendered_outputs`` to obtain normalised predicted joint positions,
+    then compares against the ground-truth ``keypoints_2d`` and
+    ``keypoint_visibility`` stored in *y_data_batch*.
 
     Returns ``(errors_native, errors_input)``: native uses ``override_size`` if
     given, else the square ``default_resolution``; input uses the model's square
     ``input_resolution``. The valid-joint set is identical for both.
     """
-    result = model.predict_from_batch(x_data_batch, y_data_batch)
-    if result[0] is None:
-        return [], []
-
-    predicted_params, _, _ = result
 
     # Render predicted 2D joints (normalised [0, 1] in [y, x] order)
     rendered_joints, _, _ = model._compute_rendered_outputs(
@@ -625,10 +770,17 @@ def _run_singleview_benchmark(
 
     backbone_name = sv_config["backbone_name"]
     rotation_representation = sv_config["rotation_representation"]
+    # Camera-centric checkpoints benchmark on single-view items drawn from the
+    # multi-view HDF5, in the same camera-centric frame they were trained in.
+    camera_centric = bool(sv_config.get("camera_centric", False)) and bool(sv_config.get("from_multiview", False))
+    sv_from_mv_kwargs = (
+        dict(return_single_view=True, camera_centric=True, expand_all_views=True) if camera_centric else {}
+    )
     dataset = UnifiedSMILDataset.from_path(
         args.dataset_path,
         rotation_representation=rotation_representation,
         backbone_name=backbone_name,
+        **sv_from_mv_kwargs,
     )
     target_resolution = dataset.get_target_resolution()
     log_fn(f"\nDataset size: {len(dataset)}")
@@ -636,23 +788,46 @@ def _run_singleview_benchmark(
 
     _log_keypoint_rescaling_info_sv(log_fn, target_resolution, override_size)
 
-    # Split (mirror training script)
-    total_size = len(dataset)
-    train_ratio = sv_config["train_ratio"]
-    val_ratio = sv_config["val_ratio"]
-    train_size = int(total_size * train_ratio)
-    val_size = int(total_size * val_ratio)
-    test_size = total_size - train_size - val_size
+    # Split (mirror the training script).
+    if camera_centric and getattr(dataset, "item_sample_indices", None) is not None:
+        # Sample-grouped split reproducing the trainer's split (same seed +
+        # ratios) so the benchmark TEST set == the training / multi-view test set.
+        from torch.utils.data import Subset
 
-    train_set, val_set, test_set = torch.utils.data.random_split(
-        dataset,
-        [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(sv_config["seed"]),
-    )
-    log_fn("\nDataset split sizes:")
-    log_fn(f"  Train: {len(train_set)}")
-    log_fn(f"  Val:   {len(val_set)}")
-    log_fn(f"  Test:  {len(test_set)}")
+        n_samples = int(dataset.num_samples)
+        train_ratio = sv_config["train_ratio"]
+        val_ratio = sv_config["val_ratio"]
+        n_train = int(n_samples * train_ratio)
+        n_val = int(n_samples * val_ratio)
+        n_test = n_samples - n_train - n_val
+        _, _, sample_test = torch.utils.data.random_split(
+            range(n_samples),
+            [n_train, n_val, n_test],
+            generator=torch.Generator().manual_seed(sv_config["seed"]),
+        )
+        test_samples = set(int(s) for s in sample_test)
+        isi = dataset.item_sample_indices
+        test_idx = [i for i, s in enumerate(isi) if int(s) in test_samples]
+        test_set = Subset(dataset, test_idx)
+        log_fn(f"\nDataset split (camera-centric, sample-grouped, seed={sv_config['seed']}):")
+        log_fn(f"  {n_train}/{n_val}/{n_test} samples -> Test: {len(test_set)} view-items")
+    else:
+        total_size = len(dataset)
+        train_ratio = sv_config["train_ratio"]
+        val_ratio = sv_config["val_ratio"]
+        train_size = int(total_size * train_ratio)
+        val_size = int(total_size * val_ratio)
+        test_size = total_size - train_size - val_size
+
+        train_set, val_set, test_set = torch.utils.data.random_split(
+            dataset,
+            [train_size, val_size, test_size],
+            generator=torch.Generator().manual_seed(sv_config["seed"]),
+        )
+        log_fn("\nDataset split sizes:")
+        log_fn(f"  Train: {len(train_set)}")
+        log_fn(f"  Val:   {len(val_set)}")
+        log_fn(f"  Test:  {len(test_set)}")
 
     test_loader = DataLoader(
         test_set,
@@ -674,16 +849,26 @@ def _run_singleview_benchmark(
         "PCK@Npx is resolution-dependent, so both are shown."
     )
 
-    # Benchmark loop (accumulate errors at both scales)
+    # Benchmark loop. One forward pass per batch feeds both the 2D PCK (at two
+    # scales) and, when 3D GT is available (camera-centric), the 3D MPJPE.
     all_errors_native: List[float] = []
     all_errors_input: List[float] = []
+    all_3d_errors_mm: List[float] = []
+    samples_with_3d = 0
+    samples_3d_for_plot: List[Dict] = []
     with torch.no_grad():
         for batch_idx, (x_data_batch, y_data_batch) in enumerate(test_loader):
             if args.max_batches is not None and batch_idx >= args.max_batches:
                 break
+
+            result = model.predict_from_batch(x_data_batch, y_data_batch)
+            if result[0] is None:
+                continue
+            predicted_params, _, _ = result
+
             batch_native, batch_input = _compute_pck_errors_singleview(
                 model,
-                x_data_batch,
+                predicted_params,
                 y_data_batch,
                 default_resolution=target_resolution,
                 override_size=override_size,
@@ -692,6 +877,17 @@ def _run_singleview_benchmark(
             all_errors_native.extend(batch_native)
             all_errors_input.extend(batch_input)
 
+            # 3D MPJPE (camera-centric frame). No-op for samples without 3D GT.
+            batch_errors_mm, batch_samples_with_3d = _compute_mpjpe_mm_singleview(
+                model=model,
+                predicted_params=predicted_params,
+                y_data_batch=y_data_batch,
+                world_scale=dataset.world_scale,
+                samples_3d_for_plot=samples_3d_for_plot,
+            )
+            all_3d_errors_mm.extend(batch_errors_mm)
+            samples_with_3d += batch_samples_with_3d
+
     # Compute PCK metrics at both resolutions
     native = _summarize_pck(all_errors_native)
     inp = _summarize_pck(all_errors_input)
@@ -699,6 +895,12 @@ def _run_singleview_benchmark(
     log_fn("\n==== BENCHMARK RESULTS (TEST SPLIT) ====")
     _log_pck_block(log_fn, native_label, native)
     _log_pck_block(log_fn, input_label, inp)
+
+    # MPJPE stats + 3D outputs (percentile scatter plots, histogram, errors_3d_mm.npy).
+    # Shared with the multi-view benchmark for identical 3D reporting.
+    errors_mm, mpjpe_hist_path = _report_mpjpe_mm(
+        log_fn, all_3d_errors_mm, samples_with_3d, samples_3d_for_plot, output_dir
+    )
 
     # Separate plot per resolution (single curve each) + per-resolution histograms
     _save_pck_plot(
@@ -723,13 +925,19 @@ def _run_singleview_benchmark(
         title=f"2D Keypoint Error Histogram ({input_label})",
     )
 
-    # Save raw errors
+    # Save raw 2D error arrays (errors_3d_mm.npy is saved by _report_mpjpe_mm)
     np.save(os.path.join(output_dir, "errors_2d_px_native.npy"), native["errors_px"])
     np.save(os.path.join(output_dir, "errors_2d_px_input.npy"), inp["errors_px"])
 
     log_fn(f"\nSaved outputs to: {output_dir}")
     log_fn("  PCK plots: pck_curve_native.png, pck_curve_input.png")
     log_fn("  Error histograms: error_histogram_native.png, error_histogram_input.png")
+    if errors_mm.size > 0:
+        log_fn(f"  MPJPE histogram: {mpjpe_hist_path}")
+        if samples_3d_for_plot:
+            log_fn(
+                f"  3D percentile plots: {os.path.join(output_dir, 'sample_00_3d_keypoints_percentiles.png')} (and next 4)"
+            )
 
     return native["errors_px"]
 
@@ -1125,7 +1333,6 @@ def _run_multiview_benchmark(
                 break
 
             predicted_params, _, _ = model.predict_from_multiview_batch(x_data_batch, y_data_batch)
-            pred_joints_np = model._predict_canonical_joints_3d(predicted_params).detach().cpu().numpy()
 
             batch_native, batch_input = _compute_pck_errors(
                 model=model,
@@ -1144,81 +1351,23 @@ def _run_multiview_benchmark(
                 predicted_params=predicted_params,
                 y_data_batch=y_data_batch,
                 world_scale=dataset.world_scale,
+                samples_3d_for_plot=samples_3d_for_plot,
             )
             all_3d_errors_mm.extend(batch_errors_mm)
             samples_with_3d += batch_samples_with_3d
-
-            if len(samples_3d_for_plot) < 5:
-                for b_idx, y_data in enumerate(y_data_batch):
-                    if len(samples_3d_for_plot) >= 5:
-                        break
-                    if not bool(y_data.get("has_3d_data", False)):
-                        continue
-                    gt = y_data.get("keypoints_3d")
-                    if gt is None:
-                        continue
-                    gt = np.array(gt, dtype=np.float32)
-                    pred = pred_joints_np[b_idx].astype(np.float32)
-                    J = min(gt.shape[0], pred.shape[0])
-                    if J == 0:
-                        continue
-                    gt_slice = gt[:J]
-                    pred_slice = pred[:J]
-                    joint_norms = np.linalg.norm(gt_slice, axis=1)
-                    finite_mask = np.isfinite(gt_slice).all(axis=1)
-                    valid_joint_mask = (joint_norms > 1e-6) & finite_mask
-                    if not np.any(valid_joint_mask):
-                        continue
-
-                    diff = pred_slice[valid_joint_mask] - gt_slice[valid_joint_mask]
-                    dist = np.linalg.norm(diff, axis=1)
-                    scale = 1.0 / float(dataset.world_scale) if float(dataset.world_scale) != 0.0 else 1.0
-                    dist_mm = dist * scale
-                    samples_3d_for_plot.append(
-                        {
-                            "gt": gt_slice[valid_joint_mask],
-                            "pred": pred_slice[valid_joint_mask],
-                            "errors_mm": dist_mm,
-                        }
-                    )
 
     # Compute PCK metrics at both resolutions
     native = _summarize_pck(all_errors_native)
     inp = _summarize_pck(all_errors_input)
 
-    # Compute MPJPE
-    errors_mm = np.array(all_3d_errors_mm, dtype=np.float32)
-    if errors_mm.size > 0:
-        mpjpe_mm = float(np.mean(errors_mm))
-        median_mpjpe_mm = float(np.median(errors_mm))
-    else:
-        mpjpe_mm = 0.0
-        median_mpjpe_mm = 0.0
-
     log_fn("\n==== BENCHMARK RESULTS (TEST SPLIT) ====")
     _log_pck_block(log_fn, native_label, native)
     _log_pck_block(log_fn, input_label, inp)
 
-    log_fn("")
-    log_fn(f"MPJPE (mm): {mpjpe_mm:.4f}")
-    log_fn(f"Median MPJPE (mm): {median_mpjpe_mm:.4f}")
-    if errors_mm.size > 0:
-        percentiles = [50, 75, 90, 95, 99]
-        pct_values = np.percentile(errors_mm, percentiles).tolist()
-        log_fn("MPJPE percentiles (mm):")
-        for p, v in zip(percentiles, pct_values):
-            log_fn(f"  P{p}: {v:.4f}")
-    log_fn(f"3D samples with GT: {samples_with_3d}")
-    log_fn(f"3D joint errors count: {errors_mm.size}")
-
-    # 3D percentile plots
-    if errors_mm.size > 0 and samples_3d_for_plot:
-        percentile_thresholds = np.percentile(errors_mm, [50, 75, 90, 95, 99]).tolist()
-        _plot_3d_keypoints_by_percentile(
-            samples=samples_3d_for_plot,
-            percentile_thresholds=percentile_thresholds,
-            output_dir=output_dir,
-        )
+    # MPJPE stats + 3D outputs (percentile scatter plots, histogram, errors_3d_mm.npy)
+    errors_mm, mpjpe_hist_path = _report_mpjpe_mm(
+        log_fn, all_3d_errors_mm, samples_with_3d, samples_3d_for_plot, output_dir
+    )
 
     # Separate plot per resolution (single curve each) + per-resolution histograms
     _save_pck_plot(
@@ -1243,25 +1392,9 @@ def _run_multiview_benchmark(
         title=f"2D Keypoint Error Histogram ({input_label})",
     )
 
-    # MPJPE histogram (multi-view only)
-    mpjpe_hist_path = os.path.join(output_dir, "mpjpe_histogram.png")
-    plt.figure(figsize=(8, 5))
-    if errors_mm.size > 0:
-        max_err_mm = max(200.0, float(np.max(errors_mm)))
-        bins_mm = np.logspace(np.log10(max(0.1, float(errors_mm[errors_mm > 0].min()))), np.log10(max_err_mm), 50)
-        plt.hist(errors_mm, bins=bins_mm, color="#55A868", alpha=0.8)
-    plt.xscale("log")
-    plt.title("3D Joint Error Histogram (mm)")
-    plt.xlabel("Error (mm)")
-    plt.ylabel("Count")
-    plt.grid(True, linestyle="--", alpha=0.5)
-    plt.savefig(mpjpe_hist_path, dpi=150, bbox_inches="tight")
-    plt.close()
-
-    # Save raw error arrays
+    # Save raw 2D error arrays (the 3D errors_3d_mm.npy is saved by _report_mpjpe_mm)
     np.save(os.path.join(output_dir, "errors_2d_px_native.npy"), native["errors_px"])
     np.save(os.path.join(output_dir, "errors_2d_px_input.npy"), inp["errors_px"])
-    np.save(os.path.join(output_dir, "errors_3d_mm.npy"), errors_mm)
 
     log_fn(f"\nSaved outputs to: {output_dir}")
     log_fn("  PCK plots: pck_curve_native.png, pck_curve_input.png")

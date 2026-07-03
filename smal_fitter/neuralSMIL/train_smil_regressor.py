@@ -5,6 +5,28 @@ This script demonstrates how to train the SMILImageRegressor network
 to predict SMIL parameters from input images.
 """
 
+# ── Multi-GPU visibility (must run before ANY import) ────────────────────────
+# Several modules setdefault CUDA_VISIBLE_DEVICES to config.GPU_IDS ("0") at
+# import time. When multi-GPU training is requested (--num_gpus N > 1) and the
+# user has not pinned CUDA_VISIBLE_DEVICES themselves, expose the first N GPUs
+# HERE — before those imports run — so torch sees all requested devices. If the
+# user set CUDA_VISIBLE_DEVICES explicitly, it is respected as-is.
+import os
+import sys
+
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    try:
+        _requested_gpus = 1
+        for _i, _arg in enumerate(sys.argv):
+            if _arg == "--num_gpus" and _i + 1 < len(sys.argv):
+                _requested_gpus = int(sys.argv[_i + 1])
+            elif _arg.startswith("--num_gpus="):
+                _requested_gpus = int(_arg.split("=", 1)[1])
+        if _requested_gpus > 1:
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(_g) for _g in range(_requested_gpus))
+    except Exception:
+        pass
+
 # Set matplotlib backend BEFORE any other imports to prevent tkinter issues
 import matplotlib
 
@@ -387,6 +409,51 @@ def custom_collate_fn(batch):
     return x_data_batch, y_data_batch
 
 
+def create_fractional_train_loader_sv(
+    train_set,
+    epoch,
+    dataset_fraction,
+    seed,
+    batch_size,
+    num_workers,
+    pin_memory,
+    prefetch_factor,
+    is_distributed,
+    collate_fn,
+):
+    """Per-epoch fractional training loader (mirrors the multi-view trainer).
+
+    Returns a DataLoader over a deterministic random `dataset_fraction` subset of
+    `train_set`, re-sampled each epoch via seed `seed + epoch` (so all DDP ranks
+    agree on the subset). Returns `None` when `dataset_fraction >= 1.0` so the
+    caller falls back to the full-dataset loader.
+    """
+    if dataset_fraction >= 1.0:
+        return None
+
+    full_size = len(train_set)
+    n_samples = max(1, int(full_size * dataset_fraction))
+    rng = torch.Generator()
+    rng.manual_seed(int(seed) + int(epoch))
+    indices = torch.randperm(full_size, generator=rng)[:n_samples].tolist()
+    epoch_subset = torch.utils.data.Subset(train_set, indices)
+
+    loader_kwargs = dict(
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        collate_fn=collate_fn,
+    )
+    if num_workers > 0:
+        loader_kwargs["prefetch_factor"] = prefetch_factor
+
+    if is_distributed:
+        sampler = DistributedSampler(epoch_subset, shuffle=True)
+        sampler.set_epoch(epoch)
+        return DataLoader(epoch_subset, sampler=sampler, **loader_kwargs)
+    return DataLoader(epoch_subset, shuffle=True, **loader_kwargs)
+
+
 def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_weights, is_distributed=False, rank=0):
     """
     Train the model for one epoch using batch processing.
@@ -736,12 +803,13 @@ def visualize_training_progress(
                     # Create silhouette tensor
                     sil = torch.FloatTensor(x_data["input_image_mask"])[None, None, ...]
 
-                    # Convert keypoints to pixel coordinates using model's actual resolution
-                    target_size = model.input_resolution
-
+                    # Convert keypoints to pixel coordinates at the NATIVE render
+                    # resolution. The mesh renders at the native image size (512),
+                    # NOT the ViT input_resolution (224) — scaling GT by input_resolution
+                    # shrinks the markers by input_res/native and misaligns them.
                     pixel_coords = y_data["keypoints_2d"].copy()
-                    pixel_coords[:, 0] = pixel_coords[:, 0] * target_size  # y coordinates
-                    pixel_coords[:, 1] = pixel_coords[:, 1] * target_size  # x coordinates
+                    pixel_coords[:, 0] = pixel_coords[:, 0] * image_height  # y coordinates
+                    pixel_coords[:, 1] = pixel_coords[:, 1] * image_width  # x coordinates
 
                     num_joints = len(y_data["keypoints_2d"])
                     joints = torch.tensor(pixel_coords.reshape(1, num_joints, 2), dtype=torch.float32)
@@ -793,8 +861,10 @@ def visualize_training_progress(
             # Set proper target joints and visibility for visualization
             # Convert normalized keypoints back to pixel coordinates for visualization
             if "keypoints_2d" in y_data and "keypoint_visibility" in y_data:
-                # Use model's actual resolution for keypoint conversion
-                target_height, target_width = model.input_resolution, model.input_resolution
+                # Scale GT keypoints to the resolution the mesh is actually rendered
+                # at (SMALFitter renders at temp_fitter.image_size = native image size),
+                # NOT model.input_resolution.
+                target_height = target_width = temp_fitter.image_size
 
                 # Convert normalized [0,1] coordinates to pixel coordinates
                 keypoints_2d = y_data["keypoints_2d"]  # Shape: (num_joints, 2), already in [y_norm, x_norm] format
@@ -855,10 +925,25 @@ def visualize_training_progress(
                     temp_fitter.log_beta_scales.data = scale_pred
                     temp_fitter.betas_trans.data = trans_pred
 
-            # Set camera parameters from PREDICTED values (not ground truth!)
-            # This ensures visualization matches the loss computation
-            if "cam_rot" in predicted_params and "cam_trans" in predicted_params:
-                # Use predicted camera parameters for consistent visualization
+            # Set camera parameters for visualization.
+            if getattr(model, "fixed_camera", False):
+                # camera_centric: the camera is FIXED at the PyTorch3D identity with
+                # the FOV from calibration. The model's camera heads are unsupervised
+                # here (garbage), so must NOT be used for the render — mirror the
+                # predict_from_batch fixed-camera override so the viz matches the loss.
+                gt_fov = y_data.get("cam_fov")
+                if isinstance(gt_fov, list):
+                    gt_fov = gt_fov[0]
+                fov_val = float(gt_fov) if gt_fov is not None else 60.0
+                fov_t = torch.tensor([fov_val], dtype=torch.float32, device=device)
+                temp_fitter.fov.data = fov_t
+                temp_fitter.renderer.set_camera_parameters(
+                    R=torch.eye(3, device=device).unsqueeze(0),
+                    T=torch.zeros(1, 3, device=device),
+                    fov=fov_t,
+                )
+            elif "cam_rot" in predicted_params and "cam_trans" in predicted_params:
+                # Predicted camera (matches the loss for model_centric checkpoints)
                 temp_fitter.renderer.set_camera_parameters(
                     R=predicted_params["cam_rot"][0:1],  # Predicted camera rotation
                     T=predicted_params["cam_trans"][0:1],  # Predicted camera translation
@@ -894,9 +979,19 @@ def visualize_training_progress(
 
                     temp_fitter.renderer.set_camera_parameters(R=cam_rot_tensor, T=cam_trans_tensor, fov=fov_tensor)
 
-            # Generate visualization - match model's UE scaling setting
+            # Generate visualization - match the model's placement: UE 10x scaling
+            # (legacy) or the predicted per-sample mesh_scale (camera_centric). Without
+            # mesh_scale the mesh renders at native size (~8.6x too large vs the metric
+            # 3D), so the overlay would not match the model's actual training placement.
+            mesh_scale_viz = None
+            if getattr(model, "allow_mesh_scaling", False) and "mesh_scale" in predicted_params:
+                mesh_scale_viz = predicted_params["mesh_scale"][0:1]
             temp_fitter.generate_visualization(
-                image_exporter, apply_UE_transform=model.use_ue_scaling, img_idx=sample_count, epoch=epoch
+                image_exporter,
+                apply_UE_transform=model.use_ue_scaling,
+                img_idx=sample_count,
+                epoch=epoch,
+                mesh_scale=mesh_scale_viz,
             )
 
             sample_count += 1
@@ -1301,6 +1396,11 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                     training_config[key].update(value)
                 else:
                     training_config[key] = value
+            else:
+                # New keys introduced by the dataclass config (e.g. the
+                # single-view-from-multiview "dataset" block) that the legacy
+                # TrainingConfig.get_all_config() does not define.
+                training_config[key] = value
 
     # Print configuration summary (only on main process to avoid duplicate output)
     if not is_distributed or rank == 0:
@@ -1312,16 +1412,56 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     model_config = training_config["model_config"]
     output_config = training_config["output_config"]
 
+    # Single-view-from-multiview / camera-centric options
+    dataset_cfg = training_config.get("dataset", {})
+    from_multiview = bool(dataset_cfg.get("from_multiview", False))
+    frame_convention = dataset_cfg.get("frame_convention", "model_centric")
+    camera_centric = frame_convention == "camera_centric"
+    expand_all_views = bool(dataset_cfg.get("expand_all_views", True))
+    # UE 10x scaling: default True (legacy), but must be False for multi-view
+    # HDF5s (scale baked in via world_scale). Force False for camera_centric.
+    use_ue_scaling = bool(dataset_cfg.get("use_ue_scaling", True)) and not camera_centric
+    # Backbone fine-tuning LR: mirror the multi-view trainer's backbone_lr_multiplier
+    # (backbone trains at base_lr * multiplier) when the backbone is unfrozen in the
+    # single-view-from-multiview path. Legacy paths are unaffected.
+    freeze_backbone_flag = bool(model_config.get("freeze_backbone", True))
+    backbone_lr_mult = float(model_config.get("backbone_lr_multiplier", 0.1))
+    # Fraction of the training set used per epoch (previously ignored in the
+    # single-view trainer). 1.0 = full set; <1.0 = deterministic per-epoch subset.
+    dataset_fraction = float(training_config.get("split_config", {}).get("dataset_fraction", 1.0))
+    # Predicted per-sample mesh scale (previously not wired into the single-view
+    # trainer). Essential for camera_centric: the SMAL mesh's native size does
+    # not match the metric triangulated 3D, and translation alone cannot resize.
+    mesh_scaling_cfg = training_config.get("mesh_scaling", {})
+    allow_mesh_scaling = bool(mesh_scaling_cfg.get("allow_mesh_scaling", False))
+    mesh_scale_init = float(mesh_scaling_cfg.get("init_mesh_scale", 1.0))
+
     # Build config to save in checkpoints so run_inference can load without training_config
     checkpoint_config = {
         "model_config": model_config.copy(),
         "training_params": {
             "rotation_representation": training_params.get("rotation_representation", "6d"),
+            # Persist split determinants so the benchmark can reproduce the exact
+            # sample-grouped test split (SV test set == MV test set).
+            "seed": training_params.get("seed"),
+            "train_ratio": float(dataset_cfg.get("train_ratio", 0.85)),
+            "val_ratio": float(dataset_cfg.get("val_ratio", 0.05)),
         },
         "scale_trans_mode": TrainingConfig.get_scale_trans_mode(),
         "scale_trans_config": TrainingConfig.get_scale_trans_config(),
         "shape_family": config.SHAPE_FAMILY,
         "smal_file": getattr(config, "SMAL_FILE", None),
+        # Persist the training convention so benchmark/inference know what the
+        # checkpoint expects (camera-centric fixed camera vs model-centric).
+        "frame_convention": frame_convention,
+        "from_multiview": from_multiview,
+        "use_ue_scaling": use_ue_scaling,
+        "fixed_camera": camera_centric,
+        # Persist mesh-scale so benchmark/inference rebuild the model with the
+        # mesh_scale head (otherwise its weights are silently dropped and the
+        # mesh renders at native size — ~35x too large vs the metric 3D).
+        "allow_mesh_scaling": allow_mesh_scaling,
+        "init_mesh_scale": mesh_scale_init,
     }
 
     # Use checkpoint from config if not provided as argument
@@ -1354,8 +1494,10 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         if not is_distributed or rank == 0:
             print(f"Using device override: {device}")
     else:
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
+        # setdefault so an external CUDA_VISIBLE_DEVICES (e.g. "0,1" for multi-GPU)
+        # is respected instead of being force-pinned to config.GPU_IDS.
+        os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+        os.environ.setdefault("CUDA_VISIBLE_DEVICES", config.GPU_IDS)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if not is_distributed or rank == 0:
             print(f"Using device: {device}")
@@ -1450,18 +1592,76 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             else:
                 print("SLEAP dataset support: not available")
 
+        # Single-view-from-multiview: build the multi-view dataset in single-view
+        # mode so each item is one camera view. from_path forwards these kwargs
+        # to SLEAPMultiViewDataset (only pass them for multi-view HDF5s).
+        aug_cfg = training_config.get("augmentation", {})
+        aug_enabled = bool(aug_cfg.get("enabled", False))
+        sv_from_mv_kwargs = {}
+        if from_multiview:
+            sv_from_mv_kwargs = dict(
+                return_single_view=True,
+                camera_centric=camera_centric,
+                expand_all_views=expand_all_views,
+                # Photometric-only augmentation (geometric stays off in
+                # camera_centric — it would mutate K/fov). augment is toggled
+                # per train/val phase in the epoch loop below.
+                augment=False,
+                augmentation_config=aug_cfg if aug_enabled else None,
+            )
         dataset = UnifiedSMILDataset.from_path(
-            data_path, rotation_representation=rotation_representation, backbone_name=model_config["backbone_name"]
+            data_path,
+            rotation_representation=rotation_representation,
+            backbone_name=model_config["backbone_name"],
+            **sv_from_mv_kwargs,
         )
         if not is_distributed or rank == 0:
             print(f"Dataset size: {len(dataset)}")
             print(f"Original resolution: {dataset.get_input_resolution()}")
             print(f"Target resolution: {dataset.get_target_resolution()}")
 
-        # Split dataset using configuration
-        train_amount, val_amount, test_amount = TrainingConfig.get_train_val_test_sizes(len(dataset))
+        # Split dataset.
+        if from_multiview and expand_all_views and getattr(dataset, "item_sample_indices", None) is not None:
+            # Split at the SAMPLE level (mirroring train_multiview_regressor.py's
+            # seeded random_split over samples), then expand each split's samples
+            # into their view-items. This yields the SAME test specimens as the
+            # multi-view run (given the same seed + ratios) and guarantees no
+            # camera view of a sample leaks across train/val/test.
+            from torch.utils.data import Subset
 
-        train_set, val_set, test_set = torch.utils.data.random_split(dataset, [train_amount, val_amount, test_amount])
+            n_samples = int(dataset.num_samples)
+            train_ratio = float(dataset_cfg.get("train_ratio", 0.85))
+            val_ratio = float(dataset_cfg.get("val_ratio", 0.05))
+            n_train = int(n_samples * train_ratio)
+            n_val = int(n_samples * val_ratio)
+            n_test = n_samples - n_train - n_val
+            sample_train, sample_val, sample_test = torch.utils.data.random_split(
+                range(n_samples),
+                [n_train, n_val, n_test],
+                generator=torch.Generator().manual_seed(seed),
+            )
+            train_samples = set(int(s) for s in sample_train)
+            val_samples = set(int(s) for s in sample_val)
+            test_samples = set(int(s) for s in sample_test)
+
+            isi = dataset.item_sample_indices
+            train_idx = [i for i, s in enumerate(isi) if int(s) in train_samples]
+            val_idx = [i for i, s in enumerate(isi) if int(s) in val_samples]
+            test_idx = [i for i, s in enumerate(isi) if int(s) in test_samples]
+            train_set = Subset(dataset, train_idx)
+            val_set = Subset(dataset, val_idx)
+            test_set = Subset(dataset, test_idx)
+            if not is_distributed or rank == 0:
+                print(
+                    f"Single-view-from-multiview split (sample-grouped, seed={seed}): "
+                    f"{n_train}/{n_val}/{n_test} samples -> "
+                    f"{len(train_idx)}/{len(val_idx)}/{len(test_idx)} view-items"
+                )
+        else:
+            train_amount, val_amount, test_amount = TrainingConfig.get_train_val_test_sizes(len(dataset))
+            train_set, val_set, test_set = torch.utils.data.random_split(
+                dataset, [train_amount, val_amount, test_amount]
+            )
 
         train_sampler_weighted = None  # No weighted sampler for single dataset
 
@@ -1624,14 +1824,22 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         rgb_only=model_config["rgb_only"],
         freeze_backbone=model_config["freeze_backbone"],
         hidden_dim=model_config["hidden_dim"],
-        # use_ue_scaling=dataset.get_ue_scaling_flag(),
-        use_ue_scaling=True,  # Always apply UE scaling so training matches visualization behaviour
+        # Legacy replicAnt single-view needs 10x UE scaling; multi-view HDF5s
+        # bake scale in at preprocess time (world_scale) so it must be False.
+        # Forced False in camera_centric mode (see dataset config resolution).
+        use_ue_scaling=use_ue_scaling,
         rotation_representation=rotation_representation,
         input_resolution=input_resolution,
         backbone_name=model_config["backbone_name"],
         head_type=model_config.get("head_type", "mlp"),
         transformer_config=model_config.get("transformer_config", {}),
         scale_trans_mode=TrainingConfig.get_scale_trans_mode(),
+        # Camera-centric: pin the camera to identity, take FOV from calibration.
+        fixed_camera=camera_centric,
+        # Predicted per-sample mesh scale (needed to bridge the SMAL mesh's native
+        # size and the metric 3D; compatible with fixed_camera).
+        allow_mesh_scaling=allow_mesh_scaling,
+        mesh_scale_init=mesh_scale_init,
     ).to(device)
 
     # Print model configuration
@@ -1820,19 +2028,57 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         loss_weights = TrainingConfig.get_loss_weights_for_epoch(epoch)
         current_lr = TrainingConfig.get_learning_rate_for_epoch(epoch)
 
-        # Update learning rate if it has changed
+        # Update learning rate if it has changed. In the single-view-from-multiview
+        # fine-tuning path, backbone (non-head) groups use base_lr * backbone_lr_mult
+        # (mirrors the multi-view trainer); everything else uses the scheduled LR.
         for param_group in optimizer.param_groups:
-            if param_group["lr"] != current_lr:
-                param_group["lr"] = current_lr
+            apply_backbone_mult = (
+                from_multiview and not freeze_backbone_flag and param_group.get("name", "") != "transformer_head"
+            )
+            target_lr = current_lr * backbone_lr_mult if apply_backbone_mult else current_lr
+            if param_group["lr"] != target_lr:
+                param_group["lr"] = target_lr
                 if not is_distributed or rank == 0:
-                    print(f"Learning rate updated to {current_lr} at epoch {epoch}")
+                    print(
+                        f"Learning rate updated to {target_lr} "
+                        f"(group '{param_group.get('name', '?')}') at epoch {epoch}"
+                    )
+
+        # Photometric augmentation on for training, off for validation. The
+        # single-view-from-multiview dataset shares one object across the
+        # train/val Subsets; toggling before each phase's first iteration sets
+        # the state its (separate) persistent worker pool captures. Mirrors the
+        # multi-view trainer.
+        if from_multiview:
+            dataset.augment = aug_enabled
+
+        # Use only a fraction of the train set this epoch when configured
+        # (deterministic per-epoch subset); otherwise the full train loader.
+        epoch_train_loader = (
+            create_fractional_train_loader_sv(
+                train_set,
+                epoch,
+                dataset_fraction,
+                seed,
+                batch_size,
+                num_workers,
+                pin_memory,
+                prefetch_factor,
+                is_distributed,
+                custom_collate_fn,
+            )
+            or train_loader
+        )
 
         # Train
         train_loss, train_param_err = train_epoch(
-            model, train_loader, optimizer, criterion, device, epoch, loss_weights, is_distributed, rank
+            model, epoch_train_loader, optimizer, criterion, device, epoch, loss_weights, is_distributed, rank
         )
         train_losses.append(train_loss)
         train_param_errors.append(train_param_err)
+
+        if from_multiview:
+            dataset.augment = False
 
         # Validate
         val_loss, val_param_err = validate_epoch(
