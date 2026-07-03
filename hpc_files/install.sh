@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install the SMILify pytorch3d conda environment on Ubuntu/Linux.
 # Mirrors the steps documented in README.md.
+# Also installs tmux (handy for detaching long-running run.ai jobs).
 #
 # Usage:
 #   bash install.sh                # full install + run tests
@@ -26,9 +27,7 @@ for arg in "$@"; do
     esac
 done
 
-# Repo root is the parent of this script's hpc_files/ folder, so the script works
-# whether invoked from the repo root or from inside hpc_files/.
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 # Locate conda. Prefer $CONDA_EXE, then common install paths.
@@ -69,6 +68,37 @@ fi
 
 conda activate "$ENV_NAME"
 
+# 1b. tmux — installed SYSTEM-WIDE via apt (independent of conda), so it can be
+#     called from any shell to detach long-running run.ai training/inference jobs.
+#     Non-fatal: never abort the install if tmux can't be installed here.
+install_tmux() {
+    if command -v tmux >/dev/null 2>&1; then
+        echo "==> tmux already installed ($(tmux -V)) — skipping"
+        return 0
+    fi
+    if ! command -v apt-get >/dev/null 2>&1; then
+        echo "==> WARNING: apt-get not found; install tmux manually (e.g. 'apt-get install -y tmux')." >&2
+        return 0
+    fi
+    local SUDO=""
+    if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+    fi
+    echo "==> Installing tmux (system-wide via apt)"
+    # Refresh package lists best-effort. On run.ai CUDA images the NVIDIA repo can
+    # make `apt-get update` exit non-zero (GPG/key warnings), but the Ubuntu lists
+    # that actually carry tmux still refresh — so do NOT gate the install on the
+    # update exit code (the old `update && install` chain silently skipped install).
+    $SUDO apt-get update -qq || echo "==> apt-get update reported errors (continuing anyway)" >&2
+    if $SUDO apt-get install -y tmux && command -v tmux >/dev/null 2>&1; then
+        echo "==> tmux installed ($(tmux -V))"
+    else
+        echo "==> WARNING: could not install tmux via apt; install it manually with 'apt-get install -y tmux'." >&2
+    fi
+    return 0
+}
+install_tmux
+
 # 2. PyTorch 2.3.1 + CUDA 11.8
 echo "==> Installing PyTorch 2.3.1 + CUDA 11.8"
 conda install -n "$ENV_NAME" -y \
@@ -98,12 +128,30 @@ pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psut
 if [[ "$SKIP_TESTS" -eq 1 ]]; then
     echo "==> Skipping tests (--skip-tests)"
 else
-    echo "==> Running tests: pytest tests/ -m 'not slow'"
-    # Non-fatal: the env build above is what matters, so don't abort the install if a
-    # test fails (e.g. a data-dependent test with datasets absent on this machine).
-    pytest tests/ -m "not slow" || \
-        echo "WARN: test step had failures — see tests/README.md"
+    echo "==> Running tests: pytest tests/ -v -s"
+    pytest tests/ -v -s
 fi
 
 echo
 echo "==> Install complete. Activate with: conda activate $ENV_NAME"
+
+# tmux quick-start — get a detachable training run going immediately.
+cat <<EOF
+
+============================================================
+ tmux quick-start — detachable training on run.ai
+============================================================
+  # 1. Create a detachable session named "smil-train"
+  tmux new-session -s smil-train
+
+  # 2. Inside the session: activate the env + launch an example training run
+  conda activate $ENV_NAME
+  python -m smal_fitter.neuralSMIL.train_multiview_regressor \\
+      --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json
+
+  # 3. Detach (leave training running in the background): press  Ctrl-b  then  d
+
+  # 4. Re-attach later from any shell:
+  tmux attach -t smil-train
+============================================================
+EOF
