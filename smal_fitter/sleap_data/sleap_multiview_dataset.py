@@ -18,6 +18,10 @@ from typing import Dict, List, Tuple, Optional, Any
 # Keep this import; do not let F401 remove it.
 import config  # noqa: F401
 
+# Camera-at-origin re-canonicalization for single-view-from-multiview sampling.
+# Single source of truth for the frame convention — do NOT re-implement here.
+from smal_fitter.multiview_common.canonical_frame import recanonicalize_single_view, RZ_180
+
 
 class SLEAPMultiViewDataset(torch.utils.data.Dataset):
     """
@@ -41,6 +45,8 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         return_single_view: bool = False,
         preferred_view: int = 0,
         random_view_sampling: bool = True,
+        camera_centric: bool = False,
+        expand_all_views: bool = False,
         backbone_name: str = None,
         augment: bool = False,
         augmentation_config: Optional[Dict[str, Any]] = None,
@@ -58,6 +64,18 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             return_single_view: If True, return only one view (backward compatible)
             preferred_view: Which view to return if return_single_view=True
             random_view_sampling: If True, randomly sample views when more available
+            camera_centric: Single-view-from-multiview convention. If True (only
+                            meaningful with return_single_view=True), re-express
+                            the sampled view's camera as the world origin: the
+                            camera becomes the PyTorch3D identity, and the shared
+                            3D keypoints / root pose are transformed into that
+                            camera's frame. See `recanonicalize_single_view`.
+            expand_all_views: If True (with return_single_view=True), every valid
+                              view of every sample becomes its own single-view
+                              item (len = total valid views), instead of one item
+                              per sample. Split grouping stays at the sample level
+                              via `item_sample_indices` so no view leaks across
+                              splits.
             backbone_name: Backbone name (for compatibility)
             **kwargs: Additional keyword arguments (for compatibility)
         """
@@ -67,6 +85,8 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         self.return_single_view = return_single_view
         self.preferred_view = preferred_view
         self.random_view_sampling = random_view_sampling
+        self.camera_centric = camera_centric
+        self.expand_all_views = expand_all_views
         self.augment = augment
 
         # Augmentation defaults (overridden by augmentation_config)
@@ -91,6 +111,12 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
 
         # Validate dataset
         self._validate_dataset()
+
+        # Single-view "all views as items" flat index (sample, view_slot).
+        self._sv_items: Optional[List[Tuple[int, int]]] = None
+        self.item_sample_indices: Optional[np.ndarray] = None
+        if self.return_single_view and self.expand_all_views:
+            self._build_single_view_index()
 
     def _load_metadata(self):
         """Load dataset metadata from HDF5 file."""
@@ -196,6 +222,18 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         T_p3d = (Rz_180 @ t_cv).astype(np.float32)
         return R_p3d, T_p3d, fov_y, aspect_ratio
 
+    @staticmethod
+    def _rotate_axis_angle_left(aa: np.ndarray, M: np.ndarray) -> np.ndarray:
+        """Left-multiply an axis-angle rotation by matrix `M`: `R_new = M @ R(aa)`.
+
+        Used in camera_centric mode to move the model's global orientation into
+        the sampled view's frame. Returns the composed rotation as axis-angle.
+        """
+        R, _ = cv2.Rodrigues(np.asarray(aa, dtype=np.float64).reshape(3, 1))
+        R_new = np.asarray(M, dtype=np.float64) @ R
+        aa_new, _ = cv2.Rodrigues(R_new)
+        return aa_new.reshape(3)
+
     def _validate_dataset(self):
         """Validate that the dataset is properly formatted."""
         with h5py.File(self.hdf5_path, "r") as f:
@@ -257,8 +295,35 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         root_loc = trans.astype(np.float32) * float(self.world_scale)
         return root_rot, joint_angles, root_loc
 
+    def _build_single_view_index(self):
+        """Enumerate every valid view as its own single-view item.
+
+        Builds `self._sv_items = [(sample_idx, view_slot), ...]` over all
+        `view_mask=True` slots, and `self.item_sample_indices` (the parent
+        sample index per item). The latter lets the trainer keep the
+        train/val/test split at the *sample* level — grouping all views of a
+        sample into one split — so it mirrors the multi-view split exactly with
+        zero cross-view leakage.
+        """
+        with h5py.File(self.hdf5_path, "r") as f:
+            view_mask = f["multiview_images/view_mask"][:]  # (N, max_views) bool
+
+        items: List[Tuple[int, int]] = []
+        for s in range(view_mask.shape[0]):
+            for v in np.where(view_mask[s])[0]:
+                items.append((int(s), int(v)))
+
+        self._sv_items = items
+        self.item_sample_indices = np.array([s for (s, _v) in items], dtype=np.int64)
+
     def __len__(self) -> int:
-        """Return the number of samples in the dataset."""
+        """Return the number of items in the dataset.
+
+        In `expand_all_views` single-view mode this is the total number of
+        valid views across all samples; otherwise it is the number of samples.
+        """
+        if self.return_single_view and self.expand_all_views:
+            return len(self._sv_items)
         return self.num_samples
 
     def __getitem__(self, idx: int) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -266,7 +331,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         Get a sample from the dataset.
 
         Args:
-            idx: Sample index
+            idx: Sample index (or flat view-item index in expand_all_views mode)
 
         Returns:
             Tuple of (x_data, y_data) where:
@@ -276,6 +341,9 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         self._ensure_file_open()
 
         if self.return_single_view:
+            if self.expand_all_views:
+                sample_idx, forced_view = self._sv_items[idx]
+                return self._get_single_view_sample(sample_idx, forced_view=forced_view)
             return self._get_single_view_sample(idx)
         else:
             return self._get_multiview_sample(idx)
@@ -514,8 +582,16 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
 
         return x_data, y_data
 
-    def _get_single_view_sample(self, idx: int) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Get a single-view sample (backward compatibility mode)."""
+    def _get_single_view_sample(
+        self, idx: int, forced_view: Optional[int] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Get a single-view sample.
+
+        Args:
+            idx: Sample index into the HDF5.
+            forced_view: If given (expand_all_views mode), the exact view slot to
+                sample. Otherwise the preferred/first available view is used.
+        """
         f = self._file
 
         # Get view mask
@@ -525,8 +601,10 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         if len(available_view_indices) == 0:
             raise ValueError(f"No valid views for sample {idx}")
 
-        # Select the preferred view, or first available
-        if self.preferred_view < len(available_view_indices):
+        # Select the view: explicit (expand_all_views), else preferred, else first.
+        if forced_view is not None:
+            selected_view = int(forced_view)
+        elif self.preferred_view < len(available_view_indices):
             selected_view = available_view_indices[self.preferred_view]
         else:
             selected_view = available_view_indices[0]
@@ -560,14 +638,18 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             "frame_idx": frame_idx,
             "is_sleap_dataset": True,
             "is_multiview": False,
+            "frame_convention": "camera_centric" if self.camera_centric else "model_centric",
+            "selected_view": int(selected_view),
             "available_labels": {
                 "global_rot": has_pose,
                 "joint_rot": has_pose,
                 "betas": bool(has_ground_truth_betas),
                 "trans": has_pose,
-                "fov": self.has_camera_parameters,
-                "cam_rot": self.has_camera_parameters,
-                "cam_trans": self.has_camera_parameters,
+                # In camera_centric mode the camera is FIXED at the identity
+                # (it IS the world origin), so it is not a prediction target.
+                "fov": self.has_camera_parameters and not self.camera_centric,
+                "cam_rot": self.has_camera_parameters and not self.camera_centric,
+                "cam_trans": self.has_camera_parameters and not self.camera_centric,
                 "log_beta_scales": False,
                 "betas_trans": False,
                 "keypoint_2d": True,
@@ -581,6 +663,13 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             "keypoints_2d": keypoints_2d,
             "keypoint_visibility": keypoint_visibility,
             "shape_betas": betas if has_ground_truth_betas else None,
+            # No GT PCA scale/trans weights for triangulated real data → the
+            # model falls back to zero targets (masked). Keys must exist for the
+            # single-view target-extraction contract (smil_image_regressor).
+            "scale_weights": None,
+            "trans_weights": None,
+            "propagate_scaling": True,
+            "translation_factor": 0.01,
             "root_rot": root_rot,
             "joint_angles": joint_angles,
             "root_loc": root_loc,
@@ -599,8 +688,18 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             "has_ground_truth_betas": has_ground_truth_betas,
         }
 
-        # Optional supervision for single-view mode: select the chosen view's camera params
+        # Optional supervision for single-view mode: the chosen view's camera
+        # params and the shared 3D keypoints. In camera_centric mode we
+        # re-express the camera as the world origin (identity) and transform the
+        # 3D keypoints / root pose into that camera's frame.
         try:
+            # Shared 3D keypoints (stored world frame, world_scale applied).
+            kp3d_scaled = None
+            has_3d = False
+            if self.has_3d_keypoints and "keypoints_3d" in f["multiview_keypoints"] and "has_3d_data" in f["auxiliary"]:
+                kp3d_scaled = f["multiview_keypoints/keypoints_3d"][idx].astype(np.float32) * float(self.world_scale)
+                has_3d = bool(f["auxiliary/has_3d_data"][idx])
+
             if self.has_camera_parameters and "camera_intrinsics" in f["multiview_keypoints"]:
                 K = f["multiview_keypoints/camera_intrinsics"][idx, selected_view].astype(np.float32)
                 R = f["multiview_keypoints/camera_extrinsics_R"][idx, selected_view].astype(np.float32)
@@ -608,26 +707,75 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                     self.world_scale
                 )
                 sz = f["multiview_keypoints/image_sizes"][idx, selected_view].astype(np.int32)
-                R_p3d, T_p3d, fov_y, aspect = self._sleap_to_pytorch3d_camera(R, t, K, sz.astype(np.float32))
-                y_data.update(
-                    {
-                        "camera_intrinsics": K,
-                        "camera_extrinsics_R": R,
-                        "camera_extrinsics_t": t,
-                        "image_sizes": sz,
-                        "cam_fov": float(fov_y),
-                        "cam_rot": R_p3d,
-                        "cam_trans": T_p3d,
-                        "cam_aspect": float(aspect),
-                    }
-                )
 
-            if self.has_3d_keypoints and "keypoints_3d" in f["multiview_keypoints"] and "has_3d_data" in f["auxiliary"]:
-                kp3d = f["multiview_keypoints/keypoints_3d"][idx].astype(np.float32) * float(self.world_scale)
-                y_data["keypoints_3d"] = kp3d
-                y_data["has_3d_data"] = bool(f["auxiliary/has_3d_data"][idx])
+                if self.camera_centric:
+                    # Re-anchor the world onto this view: camera -> PyTorch3D
+                    # identity, 3D keypoints + root pose -> this view's frame.
+                    kp3d_src = (
+                        kp3d_scaled if kp3d_scaled is not None else np.zeros((int(self.n_joints), 3), dtype=np.float32)
+                    )
+                    kp3d_view, R_cv_out, t_cv_out, R_0, t_0 = recanonicalize_single_view(R, t, kp3d_src)
+                    R_p3d, T_p3d, fov_y, aspect = self._sleap_to_pytorch3d_camera(
+                        R_cv_out.astype(np.float32), t_cv_out.astype(np.float32), K, sz.astype(np.float32)
+                    )
+                    y_data.update(
+                        {
+                            "camera_intrinsics": K,
+                            "camera_extrinsics_R": R_cv_out.astype(np.float32),
+                            "camera_extrinsics_t": t_cv_out.astype(np.float32),
+                            "image_sizes": sz,
+                            "cam_fov": float(fov_y),
+                            "cam_rot": R_p3d,  # == identity (fixed camera)
+                            "cam_trans": T_p3d,  # == zero
+                            "cam_aspect": float(aspect),
+                        }
+                    )
+                    if kp3d_scaled is not None:
+                        y_data["keypoints_3d"] = kp3d_view.astype(np.float32)
+                        y_data["has_3d_data"] = has_3d
+
+                    # Transform GT root pose (synthetic only) into the view frame.
+                    # world -> view:  M = RZ_180 @ R_0,  b = RZ_180 @ t_0.
+                    if root_loc is not None or root_rot is not None:
+                        M = RZ_180 @ np.asarray(R_0, dtype=np.float64)
+                        b = RZ_180 @ np.asarray(t_0, dtype=np.float64)
+                        if root_loc is not None:
+                            y_data["root_loc"] = (M @ np.asarray(root_loc, dtype=np.float64) + b).astype(np.float32)
+                        if root_rot is not None:
+                            # global orientation composes on the left by M
+                            y_data["root_rot"] = self._rotate_axis_angle_left(root_rot, M).astype(np.float32)
+                else:
+                    R_p3d, T_p3d, fov_y, aspect = self._sleap_to_pytorch3d_camera(R, t, K, sz.astype(np.float32))
+                    y_data.update(
+                        {
+                            "camera_intrinsics": K,
+                            "camera_extrinsics_R": R,
+                            "camera_extrinsics_t": t,
+                            "image_sizes": sz,
+                            "cam_fov": float(fov_y),
+                            "cam_rot": R_p3d,
+                            "cam_trans": T_p3d,
+                            "cam_aspect": float(aspect),
+                        }
+                    )
+                    if kp3d_scaled is not None:
+                        y_data["keypoints_3d"] = kp3d_scaled
+                        y_data["has_3d_data"] = has_3d
+            elif kp3d_scaled is not None:
+                # No camera params (cannot re-anchor) — keep world-frame 3D.
+                y_data["keypoints_3d"] = kp3d_scaled
+                y_data["has_3d_data"] = has_3d
         except Exception:
             pass
+
+        # Photometric augmentation only (training). Reuses the same helper as the
+        # multi-view path. Geometric/scale-jitter augmentation is intentionally
+        # NOT applied here: it would mutate the intrinsics K and hence the FOV of
+        # the fixed identity camera in camera_centric mode, breaking the
+        # fixed-camera reprojection target. Pixel-only augmentation never touches
+        # K / R / t / keypoints, so it is safe for both conventions.
+        if self.augment:
+            x_data["input_image_data"] = self._apply_photometric_augmentation(x_data["input_image_data"])
 
         return x_data, y_data
 
@@ -886,6 +1034,11 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
 
     def get_target_resolution(self) -> int:
         """Get the target resolution of the dataset."""
+        return self.target_resolution
+
+    def get_input_resolution(self) -> int:
+        """Input (stored) resolution. Images are stored at target_resolution;
+        provided for parity with the single-view dataset API used by the trainer."""
         return self.target_resolution
 
     def get_ue_scaling_flag(self) -> bool:

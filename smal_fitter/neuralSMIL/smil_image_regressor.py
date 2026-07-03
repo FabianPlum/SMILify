@@ -124,6 +124,7 @@ class SMILImageRegressor(SMALFitter):
         scale_trans_mode="separate",
         allow_mesh_scaling=False,
         mesh_scale_init=1.0,
+        fixed_camera=False,
     ):
         """
         Initialize the SMIL Image Regressor.
@@ -170,6 +171,14 @@ class SMILImageRegressor(SMALFitter):
         self.scale_trans_mode = scale_trans_mode
         self.allow_mesh_scaling = allow_mesh_scaling
         self.mesh_scale_init = mesh_scale_init
+        # Camera-centric (single-view-from-multiview) mode: the sampled camera is
+        # the world origin, so the camera is FIXED at the PyTorch3D identity and
+        # the vertical FOV comes from the dataset's per-sample calibration. The
+        # camera heads still exist but their outputs are ignored at render and
+        # their supervision is masked (available_labels fov/cam_* = False).
+        self.fixed_camera = fixed_camera
+        if self.fixed_camera and self.use_ue_scaling:
+            raise ValueError("fixed_camera (camera_centric) requires use_ue_scaling=False")
 
         # Enable scaling propagation for SMIL models (matches Unreal2Pytorch3D behavior)
         self.propagate_scaling = True
@@ -777,6 +786,19 @@ class SMILImageRegressor(SMALFitter):
 
         # Combine target parameters into batched format
         target_params_batch = self._combine_target_parameters_batch(batch_target_params)
+
+        # Camera-centric mode: pin the camera to the PyTorch3D identity and take
+        # the vertical FOV from calibration (target_params_batch["fov"]). This
+        # overrides whatever the (now-unsupervised) camera heads predicted, so
+        # the 2D reprojection loss is evaluated through the fixed known camera —
+        # the model cannot cheat the reprojection by moving the camera.
+        if self.fixed_camera:
+            bs = predicted_params["global_rot"].shape[0]
+            predicted_params["cam_rot"] = torch.eye(3, device=self.device).unsqueeze(0).expand(bs, 3, 3).contiguous()
+            predicted_params["cam_trans"] = torch.zeros(bs, 3, device=self.device)
+            gt_fov = target_params_batch.get("fov", None)
+            if gt_fov is not None:
+                predicted_params["fov"] = gt_fov.to(self.device).reshape(bs, 1)
 
         # If per-sample available_labels provided, convert them to availability masks
         # so unavailable parameters are fully masked from loss
@@ -3351,7 +3373,11 @@ class SMILImageRegressor(SMALFitter):
             # Apply visibility mask - only compute loss for visible joints
             visible_mask = visibility.bool()
             finite_mask = torch.isfinite(joints_3d[i]).all(dim=-1) & torch.isfinite(target_keypoints_3d).all(dim=-1)
-            valid_mask = visible_mask & finite_mask
+            # Exclude (0, 0, 0) sentinel joints (no 3D ground truth) — the
+            # SLEAP/replicAnt convention marks missing 3D keypoints as all-zero
+            # rows, which must not be supervised as if the joint were at origin.
+            sentinel_mask = target_keypoints_3d.abs().sum(dim=-1) > 0
+            valid_mask = visible_mask & finite_mask & sentinel_mask
 
             if valid_mask.any():
                 mask_weights = valid_mask.float()  # Shape: (n_joints,)
