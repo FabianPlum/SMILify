@@ -54,3 +54,12 @@ Key globals from `config.py` used throughout: `N_BETAS`, `N_POSE`, `CANONICAL_MO
 - Use dataclasses for new configuration
 - Keep legacy `config.py` working for backward compatibility with fitter_3d
 - Unify functionality and flag repeated code when applicable, as duplicate functions exist from earlier developement stages
+
+## Diagnostics & Validation
+
+These are rules for Claude, derived from past first-cut bugs and premature cleanups on this project.
+
+- **Probe before editing.** Before any edit that depends on data shape, channel ordering, dtype, or a struct/config attribute, read the actual artifact (sample file, dataclass definition, function signature) and state the concrete fact in the response before writing. Past misses on this repo: cv2.imread depth swap assuming R=G=B with BGR ordering, helper using `action_dim` off the wrong EnvConfig, sign-flipped canonical-frame projection.
+- **Verify byte-equivalence on I/O swaps.** When swapping I/O libraries (cv2 ↔ PIL ↔ imageio), check channel order and dtype explicitly — don't trust that "an image is an image."
+- **Add empirical probes on data-pipeline changes.** Round-trip equivalence checks, per-view visualizations, and projection sanity asserts go in alongside the change, not after the user asks. Be explicit about producing these elements and review them with feedback from the user.
+- **Preserve diagnostic artifacts.** Scratch scripts, probe outputs, and comparison plots stay on disk under a clearly-named path (`diagnostics/`, `*_PROBE.*`) until the user has reviewed them and signaled OK. No same-turn cleanup.
