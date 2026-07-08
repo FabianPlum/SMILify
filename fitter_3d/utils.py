@@ -11,7 +11,6 @@ import matplotlib
 matplotlib.use("Agg")  # Use Agg backend for non-GUI/non-interactive plotting
 
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from pytorch3d.io import load_obj
 from pytorch3d.structures import Meshes
 
