@@ -403,7 +403,8 @@ def reflect_pose(pose, name2id, model=None):
     if model is not None:
         from psbody.mesh import Mesh, MeshViewer
         from psbody.mesh.colors import name_to_rgb
-        mv = MeshViewer() 
+
+        mv = MeshViewer()
         model.pose[:] = pose
         model.trans[1] = 0.80
         orig_r = model.r.copy()
