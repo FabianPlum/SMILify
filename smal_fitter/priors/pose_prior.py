@@ -117,7 +117,7 @@ id2name31 = {v: k for k, v in name2id31.items()}
 def get_ignore_names(path):
     if "notail" in path:
         # ignore_joints = range(22, 30)
-        ignore_names = [key for key in name2id.keys() if "Tail" in key]  # noqa: F821  (tracked in #65)
+        ignore_names = ["Tail1", "Tail2", "Tail3", "Tail4", "Tail5", "Tail6", "Tail7"]
     elif "bodyneckelbowtail" in path:
         ignore_names = [
             "LLeg2",
@@ -401,7 +401,9 @@ def reflect_pose(pose, name2id, model=None):
     asis = [name for name in name2id.keys() if name not in right + left]
 
     if model is not None:
-        mv = MeshViewer()  # noqa: F821  (tracked in #65)
+        from psbody.mesh import Mesh, MeshViewer
+        from psbody.mesh.colors import name_to_rgb
+        mv = MeshViewer() 
         model.pose[:] = pose
         model.trans[1] = 0.80
         orig_r = model.r.copy()
