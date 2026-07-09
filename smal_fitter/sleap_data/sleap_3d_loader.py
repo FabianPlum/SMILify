@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-SLEAP 3D Data Loader
+"""SLEAP 3D Data Loader
 
 This module provides functionality to load 3D keypoint coordinates and camera
 calibration parameters from SLEAP datasets for multi-view model fitting.
@@ -13,30 +12,31 @@ Usage:
     camera_params = loader.get_camera_parameters(camera_name="Camera0")
 """
 
+import re
 import sys
+from pathlib import Path
+from typing import Any
+
+import cv2
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 import toml
-import re
-import matplotlib.pyplot as plt
-from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
-import cv2
 
 # Try to import pytorch3d for visualization
 try:
     import torch
-    from pytorch3d.structures import Meshes
     from pytorch3d.renderer import (
         FoVPerspectiveCameras,
-        RasterizationSettings,
-        MeshRenderer,
-        MeshRasterizer,
-        PointLights,
         HardPhongShader,
         Materials,
+        MeshRasterizer,
+        MeshRenderer,
+        PointLights,
+        RasterizationSettings,
         TexturesVertex,
     )
+    from pytorch3d.structures import Meshes
     from pytorch3d.utils import ico_sphere
 
     PYTORCH3D_AVAILABLE = True
@@ -46,11 +46,11 @@ except ImportError:
 
 
 def get_default_device() -> str:
-    """
-    Get the default device for PyTorch operations.
+    """Get the default device for PyTorch operations.
 
     Returns:
         "cuda:0" if GPU is available, otherwise "cpu"
+
     """
     if torch is not None and torch.cuda.is_available():
         return "cuda:0"
@@ -58,8 +58,7 @@ def get_default_device() -> str:
 
 
 class SLEAP3DDataLoader:
-    """
-    Loader for 3D keypoint coordinates and camera calibration from SLEAP datasets.
+    """Loader for 3D keypoint coordinates and camera calibration from SLEAP datasets.
 
     This class provides clean access to:
     - 3D keypoint trajectories from points3d.h5
@@ -70,9 +69,8 @@ class SLEAP3DDataLoader:
     All data is formatted for use in multi-view model fitting pipelines.
     """
 
-    def __init__(self, session_path: str, video_subdir: Optional[str] = None, session_idx: int = 0):
-        """
-        Initialize the 3D data loader.
+    def __init__(self, session_path: str, video_subdir: str | None = None, session_idx: int = 0):
+        """Initialize the 3D data loader.
 
         Args:
             session_path: Path to SLEAP session directory or project directory containing sessions.
@@ -80,6 +78,7 @@ class SLEAP3DDataLoader:
             video_subdir: Optional video subdirectory name (e.g., "PerShu_012").
                          If None, will search for points3d.h5 in subdirectories.
             session_idx: Index of session to use if session_path is a project directory (default: 0)
+
         """
         self.session_path = Path(session_path)
 
@@ -120,12 +119,12 @@ class SLEAP3DDataLoader:
         self._validate_data()
 
     def _is_project_directory(self) -> bool:
-        """
-        Check if the path is a project directory (contains multiple sessions)
+        """Check if the path is a project directory (contains multiple sessions)
         or a single session directory.
 
         Returns:
             True if project directory, False if session directory
+
         """
         # Check if this looks like a project directory (contains session subdirectories)
         session_count = 0
@@ -143,9 +142,8 @@ class SLEAP3DDataLoader:
 
         return session_count > 1
 
-    def _discover_sessions(self) -> List[str]:
-        """
-        Discover all SLEAP session directories in a project directory.
+    def _discover_sessions(self) -> list[str]:
+        """Discover all SLEAP session directories in a project directory.
         Uses the same logic as preprocess_sleap_dataset.py
         """
         sessions = []
@@ -176,15 +174,15 @@ class SLEAP3DDataLoader:
 
         return False
 
-    def _find_points3d_file(self, video_subdir: Optional[str] = None) -> Optional[Path]:
-        """
-        Find points3d.h5 file. May be in session root or in video subdirectory.
+    def _find_points3d_file(self, video_subdir: str | None = None) -> Path | None:
+        """Find points3d.h5 file. May be in session root or in video subdirectory.
 
         Args:
             video_subdir: Optional video subdirectory name to search in
 
         Returns:
             Path to points3d.h5 file or None if not found
+
         """
         # First check session root
         points3d_file = self.session_path / "points3d.h5"
@@ -280,8 +278,7 @@ class SLEAP3DDataLoader:
         self._discover_camera_mapping()
 
     def _discover_camera_mapping(self):
-        """
-        Discover actual camera directories/files and map them to calibration camera names.
+        """Discover actual camera directories/files and map them to calibration camera names.
         Creates a mapping from calibration camera names to actual directory/file names.
         """
         data_structure = self._detect_data_structure()
@@ -314,7 +311,7 @@ class SLEAP3DDataLoader:
                                 if "Camera" in calib_name:
                                     calib_num = int(calib_name.replace("Camera", ""))
                                 if "cam" in dir_name.lower():
-                                    nums = re.findall(r"\d+", dir_name)  # noqa: F823  (tracked in #62)
+                                    nums = re.findall(r"\d+", dir_name)
                                     if nums:
                                         dir_num = int(nums[0])
                                 if calib_num is not None and dir_num is not None and calib_num == dir_num:
@@ -341,8 +338,6 @@ class SLEAP3DDataLoader:
                                 if item.is_dir() and not item.name.startswith("."):
                                     slp_files = list(item.glob("*.slp"))
                                     if slp_files:
-                                        import re
-
                                         nums = re.findall(r"\d+", item.name)
                                         if nums and int(nums[0]) == idx:
                                             self.camera_name_to_dir[calib_name] = item.name
@@ -421,14 +416,14 @@ class SLEAP3DDataLoader:
                 print(f"Warning: Rotation matrix for {camera_name} may not be valid (det={np.linalg.det(R):.6f})")
 
     def get_3d_keypoints(self, frame_idx: int) -> np.ndarray:
-        """
-        Get 3D keypoints for a specific frame.
+        """Get 3D keypoints for a specific frame.
 
         Args:
             frame_idx: Frame index (0-based)
 
         Returns:
             Array of shape (n_keypoints, 3) with 3D coordinates in mm
+
         """
         if frame_idx < 0 or frame_idx >= self.n_frames:
             raise IndexError(f"Frame index {frame_idx} out of range [0, {self.n_frames - 1}]")
@@ -436,17 +431,16 @@ class SLEAP3DDataLoader:
         return self.keypoints_3d[frame_idx].copy()  # (n_keypoints, 3)
 
     def get_all_3d_keypoints(self) -> np.ndarray:
-        """
-        Get all 3D keypoints for all frames.
+        """Get all 3D keypoints for all frames.
 
         Returns:
             Array of shape (n_frames, n_keypoints, 3) with 3D coordinates in mm
+
         """
         return self.keypoints_3d.copy()
 
-    def get_camera_parameters(self, camera_name: str) -> Dict[str, Any]:
-        """
-        Get camera parameters for a specific camera.
+    def get_camera_parameters(self, camera_name: str) -> dict[str, Any]:
+        """Get camera parameters for a specific camera.
 
         Args:
             camera_name: Name of the camera (e.g., "Camera0")
@@ -457,6 +451,7 @@ class SLEAP3DDataLoader:
             - 'extrinsic': {'R': 3x3 rotation matrix, 't': 3x1 translation vector}
             - 'image_size': {'width': int, 'height': int}
             - 'name': str
+
         """
         if camera_name not in self.cameras:
             raise ValueError(f"Camera '{camera_name}' not found. Available: {self.camera_names}")
@@ -464,20 +459,19 @@ class SLEAP3DDataLoader:
         return self.cameras[camera_name].copy()
 
     def get_camera_intrinsic(self, camera_name: str) -> np.ndarray:
-        """
-        Get camera intrinsic matrix (K) for a specific camera.
+        """Get camera intrinsic matrix (K) for a specific camera.
 
         Args:
             camera_name: Name of the camera
 
         Returns:
             3x3 camera intrinsic matrix
+
         """
         return self.get_camera_parameters(camera_name)["intrinsic"]["K"].copy()
 
-    def get_camera_extrinsic(self, camera_name: str) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Get camera extrinsic parameters (rotation and translation).
+    def get_camera_extrinsic(self, camera_name: str) -> tuple[np.ndarray, np.ndarray]:
+        """Get camera extrinsic parameters (rotation and translation).
 
         Args:
             camera_name: Name of the camera
@@ -486,13 +480,13 @@ class SLEAP3DDataLoader:
             Tuple of (R, t) where:
             - R: 3x3 rotation matrix
             - t: 3x1 translation vector
+
         """
         params = self.get_camera_parameters(camera_name)
         return params["extrinsic"]["R"].copy(), params["extrinsic"]["t"].copy()
 
     def get_camera_projection_matrix(self, camera_name: str, use_alternative_convention: bool = False) -> np.ndarray:
-        """
-        Get camera projection matrix P = K [R | t].
+        """Get camera projection matrix P = K [R | t].
 
         Args:
             camera_name: Name of the camera
@@ -500,6 +494,7 @@ class SLEAP3DDataLoader:
 
         Returns:
             3x4 projection matrix P
+
         """
         K = self.get_camera_intrinsic(camera_name)
         R, t = self.get_camera_extrinsic(camera_name)
@@ -515,8 +510,7 @@ class SLEAP3DDataLoader:
         return P
 
     def get_camera_center(self, camera_name: str, use_alternative_convention: bool = False) -> np.ndarray:
-        """
-        Get camera center position in world coordinates.
+        """Get camera center position in world coordinates.
 
         If R and t represent camera pose: camera_center = t (or -R @ t depending on convention)
         If R and t represent world-to-camera transform: camera_center = -R^T @ t
@@ -527,35 +521,37 @@ class SLEAP3DDataLoader:
 
         Returns:
             3D position of camera center in world coordinates
+
         """
         R, t = self.get_camera_extrinsic(camera_name)
 
         if use_alternative_convention:
             # R and t represent camera pose: camera center is at t in world coordinates
             return t.copy()
-        else:
-            # R and t represent world-to-camera transform: camera center = -R^T @ t
-            return -R.T @ t
+        # R and t represent world-to-camera transform: camera center = -R^T @ t
+        return -R.T @ t
 
-    def get_image_size(self, camera_name: str) -> Tuple[int, int]:
-        """
-        Get image size for a specific camera.
+    def get_image_size(self, camera_name: str) -> tuple[int, int]:
+        """Get image size for a specific camera.
 
         Args:
             camera_name: Name of the camera
 
         Returns:
             Tuple of (width, height)
+
         """
         params = self.get_camera_parameters(camera_name)
         size = params["image_size"]
         return size["width"], size["height"]
 
     def project_3d_to_2d(
-        self, points_3d: np.ndarray, camera_name: str, use_alternative_convention: bool = False
+        self,
+        points_3d: np.ndarray,
+        camera_name: str,
+        use_alternative_convention: bool = False,
     ) -> np.ndarray:
-        """
-        Project 3D points to 2D image coordinates for a specific camera.
+        """Project 3D points to 2D image coordinates for a specific camera.
 
         In SLEAP/OpenCV conventions, the rotation and translation may represent the
         camera pose (position/orientation in world space). For projection, we need
@@ -568,6 +564,7 @@ class SLEAP3DDataLoader:
 
         Returns:
             Array of shape (N, 2) with 2D image coordinates in pixels
+
         """
         K = self.get_camera_intrinsic(camera_name)
         R, t = self.get_camera_extrinsic(camera_name)
@@ -597,12 +594,12 @@ class SLEAP3DDataLoader:
 
         return points_2d
 
-    def get_summary(self) -> Dict[str, Any]:
-        """
-        Get summary of loaded data.
+    def get_summary(self) -> dict[str, Any]:
+        """Get summary of loaded data.
 
         Returns:
             Dictionary with summary information
+
         """
         return {
             "session_path": str(self.session_path),
@@ -661,14 +658,12 @@ class SLEAP3DDataLoader:
 
         if camera_dirs_found > 0 and session_dirs_found == 0:
             return "camera_dirs"
-        elif session_dirs_found > 0:
+        if session_dirs_found > 0:
             return "session_dirs"
-        else:
-            return "unknown"
+        return "unknown"
 
-    def load_2d_predictions(self, camera_name: str, frame_idx: int) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Load 2D keypoint predictions from SLEAP prediction files.
+    def load_2d_predictions(self, camera_name: str, frame_idx: int) -> tuple[np.ndarray, np.ndarray]:
+        """Load 2D keypoint predictions from SLEAP prediction files.
 
         Uses SLEAPDataLoader to ensure consistent data access with preprocessing scripts.
         This matches exactly how preprocess_sleap_dataset.py and preprocess_sleap_multiview_dataset.py
@@ -682,6 +677,7 @@ class SLEAP3DDataLoader:
             Tuple of (keypoints_2d, visibility) where:
             - keypoints_2d: (n_keypoints, 2) array of 2D coordinates
             - visibility: (n_keypoints,) boolean array
+
         """
         from sleap_data_loader import SLEAPDataLoader
 
@@ -725,7 +721,7 @@ class SLEAP3DDataLoader:
         if camera_data is None:
             raise ValueError(
                 f"Could not find camera data for {camera_name} (tried: {actual_cam_name}). "
-                f"Available cameras: {loader.camera_views}"
+                f"Available cameras: {loader.camera_views}",
             )
 
         # Extract 2D keypoints using the same method as preprocessing scripts
@@ -739,7 +735,7 @@ class SLEAP3DDataLoader:
                     if len(instances) > 0:
                         available_frames = sorted(np.unique(instances["frame_id"]).tolist())
                         print(
-                            f"  Debug: Available frames for {used_cam_name}: {available_frames[:10]}... (showing first 10)"
+                            f"  Debug: Available frames for {used_cam_name}: {available_frames[:10]}... (showing first 10)",
                         )
             elif loader.data_structure_type == "session_dirs":
                 if "tracks" in camera_data:
@@ -844,14 +840,14 @@ def test_camera_parameters_with_loader(loader: SLEAP3DDataLoader):
 
 
 def visualize_reprojection_comparison(loader: SLEAP3DDataLoader, camera_name: str, frame_idx: int, output_path: str):
-    """
-    Visualize comparison between reprojected 2D coordinates and original predictions.
+    """Visualize comparison between reprojected 2D coordinates and original predictions.
 
     Args:
         loader: SLEAP3DDataLoader instance
         camera_name: Name of the camera
         frame_idx: Frame index
         output_path: Path to save the plot
+
     """
     # Load original 2D predictions
     try:
@@ -876,10 +872,12 @@ def visualize_reprojection_comparison(loader: SLEAP3DDataLoader, camera_name: st
         visible_mask = visibility > 0
         if visible_mask.sum() > 0:
             errors_standard = np.linalg.norm(
-                original_2d[visible_mask] - reprojected_2d_standard[visible_mask], axis=1
+                original_2d[visible_mask] - reprojected_2d_standard[visible_mask],
+                axis=1,
             ).mean()
             errors_alternative = np.linalg.norm(
-                original_2d[visible_mask] - reprojected_2d_alternative[visible_mask], axis=1
+                original_2d[visible_mask] - reprojected_2d_alternative[visible_mask],
+                axis=1,
             ).mean()
             reprojected_2d = (
                 reprojected_2d_alternative if errors_alternative < errors_standard else reprojected_2d_standard
@@ -1027,10 +1025,10 @@ def visualize_reprojection_comparison(loader: SLEAP3DDataLoader, camera_name: st
 
 
 def convert_sleap_to_pytorch3d_camera(
-    loader: SLEAP3DDataLoader, camera_name: str
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray]:
-    """
-    Convert SLEAP camera parameters to pytorch3d format.
+    loader: SLEAP3DDataLoader,
+    camera_name: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray]:
+    """Convert SLEAP camera parameters to pytorch3d format.
 
     SLEAP/OpenCV convention: X_cam = R @ X_world + t (column vector)
         Camera coords: X-right, Y-down, Z-forward
@@ -1048,6 +1046,7 @@ def convert_sleap_to_pytorch3d_camera(
         - T_pytorch3d: (1, 3) translation vector
         - fov: (1,) field of view in degrees
         - flip_matrix: (3, 3) matrix to convert points from SLEAP to PyTorch3D coords
+
     """
     if not PYTORCH3D_AVAILABLE:
         raise ImportError("pytorch3d is not available. Please install it to use this function.")
@@ -1103,12 +1102,11 @@ def convert_sleap_to_pytorch3d_camera(
 def create_sphere_meshes_at_points(
     points: np.ndarray,
     radius: float = 0.05,
-    device: Optional[str] = None,
-    color: Optional[np.ndarray] = None,
+    device: str | None = None,
+    color: np.ndarray | None = None,
     use_rainbow: bool = True,
 ) -> Meshes:
-    """
-    Create pytorch3d sphere meshes at 3D point locations.
+    """Create pytorch3d sphere meshes at 3D point locations.
 
     Args:
         points: (N, 3) array of 3D points
@@ -1119,6 +1117,7 @@ def create_sphere_meshes_at_points(
 
     Returns:
         Meshes object containing all spheres
+
     """
     if not PYTORCH3D_AVAILABLE:
         raise ImportError("pytorch3d is not available. Please install it to use this function.")
@@ -1205,10 +1204,9 @@ def visualize_pytorch3d_alignment(
     original_2d: np.ndarray,
     visibility: np.ndarray,
     output_path: str,
-    device: Optional[str] = None,
+    device: str | None = None,
 ):
-    """
-    Visualize 3D keypoints rendered from camera perspective using pytorch3d,
+    """Visualize 3D keypoints rendered from camera perspective using pytorch3d,
     overlaid with original 2D keypoints to verify alignment.
 
     This function verifies that camera parameters can be correctly converted to
@@ -1223,6 +1221,7 @@ def visualize_pytorch3d_alignment(
         visibility: (N,) boolean array of keypoint visibility
         output_path: Path to save the visualization
         device: Device to use for rendering (None = auto-detect, prefer GPU)
+
     """
     if not PYTORCH3D_AVAILABLE:
         print("Warning: pytorch3d not available, skipping pytorch3d visualization")
@@ -1256,7 +1255,7 @@ def visualize_pytorch3d_alignment(
     print(
         f"    3D keypoints range: X[{keypoints_3d[:, 0].min():.1f}, {keypoints_3d[:, 0].max():.1f}], "
         f"Y[{keypoints_3d[:, 1].min():.1f}, {keypoints_3d[:, 1].max():.1f}], "
-        f"Z[{keypoints_3d[:, 2].min():.1f}, {keypoints_3d[:, 2].max():.1f}]"
+        f"Z[{keypoints_3d[:, 2].min():.1f}, {keypoints_3d[:, 2].max():.1f}]",
     )
 
     # Use keypoints directly (no coordinate flip)
@@ -1273,7 +1272,10 @@ def visualize_pytorch3d_alignment(
     sphere_radius = max(0.005, scene_scale * 0.01)  # 2% of scene size, minimum 0.01
 
     sphere_meshes = create_sphere_meshes_at_points(
-        keypoints_3d_p3d, radius=sphere_radius, device=device, use_rainbow=True
+        keypoints_3d_p3d,
+        radius=sphere_radius,
+        device=device,
+        use_rainbow=True,
     )
 
     # Set up renderer
@@ -1337,11 +1339,11 @@ def visualize_pytorch3d_alignment(
     print(f"    Rendered at native camera resolution: {width}x{height}")
     print(
         f"    Projected 2D range: X[{projected_2d[:, 0].min():.1f}, {projected_2d[:, 0].max():.1f}], "
-        f"Y[{projected_2d[:, 1].min():.1f}, {projected_2d[:, 1].max():.1f}]"
+        f"Y[{projected_2d[:, 1].min():.1f}, {projected_2d[:, 1].max():.1f}]",
     )
     print(
         f"    Original 2D range: X[{scaled_original_2d[:, 0].min():.1f}, {scaled_original_2d[:, 0].max():.1f}], "
-        f"Y[{scaled_original_2d[:, 1].min():.1f}, {scaled_original_2d[:, 1].max():.1f}]"
+        f"Y[{scaled_original_2d[:, 1].min():.1f}, {scaled_original_2d[:, 1].max():.1f}]",
     )
 
     # Render spheres
@@ -1444,12 +1446,12 @@ def test_3d_to_2d_projection(session_path: str, plot_examples: bool = False):
 
 
 def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_examples: bool = False):
-    """
-    Test 3D to 2D projection by comparing to ground truth predictions.
+    """Test 3D to 2D projection by comparing to ground truth predictions.
 
     Args:
         loader: Pre-initialized SLEAP3DDataLoader
         plot_examples: If True, save visualization plots for first frame of each camera
+
     """
     print("\n" + "=" * 60)
     print("TEST 3: 3D to 2D Projection (vs Ground Truth)")
@@ -1496,12 +1498,16 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
 
                 # Try standard convention
                 reprojected_2d_standard = loader.project_3d_to_2d(
-                    keypoints_3d, camera_name, use_alternative_convention=False
+                    keypoints_3d,
+                    camera_name,
+                    use_alternative_convention=False,
                 )
 
                 # Try alternative convention
                 reprojected_2d_alternative = loader.project_3d_to_2d(
-                    keypoints_3d, camera_name, use_alternative_convention=True
+                    keypoints_3d,
+                    camera_name,
+                    use_alternative_convention=True,
                 )
 
                 # Compare both with original
@@ -1510,13 +1516,15 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
                     if visible_mask.sum() > 0:
                         # Standard convention errors
                         errors_standard = np.linalg.norm(
-                            original_2d[visible_mask] - reprojected_2d_standard[visible_mask], axis=1
+                            original_2d[visible_mask] - reprojected_2d_standard[visible_mask],
+                            axis=1,
                         )
                         mean_error_standard = errors_standard.mean()
 
                         # Alternative convention errors
                         errors_alternative = np.linalg.norm(
-                            original_2d[visible_mask] - reprojected_2d_alternative[visible_mask], axis=1
+                            original_2d[visible_mask] - reprojected_2d_alternative[visible_mask],
+                            axis=1,
                         )
                         mean_error_alternative = errors_alternative.mean()
 
@@ -1545,7 +1553,7 @@ def test_3d_to_2d_projection_with_loader(loader: SLEAP3DDataLoader, plot_example
                 else:
                     print(
                         f"  Warning: Mismatch in number of keypoints "
-                        f"(original: {len(original_2d)}, reprojected: {len(reprojected_2d_standard)})"
+                        f"(original: {len(original_2d)}, reprojected: {len(reprojected_2d_standard)})",
                     )
 
                 # Create visualization if requested
@@ -1636,7 +1644,7 @@ def test_data_consistency_with_loader(loader: SLEAP3DDataLoader):
             coords = all_keypoints[:, :, idx]
             print(
                 f"  {axis}: min={coords.min():.2f}, max={coords.max():.2f}, "
-                f"mean={coords.mean():.2f}, std={coords.std():.2f}"
+                f"mean={coords.mean():.2f}, std={coords.std():.2f}",
             )
 
         # Check frame-to-frame motion
@@ -1673,7 +1681,9 @@ def main():
         help="Which test to run (default: all)",
     )
     parser.add_argument(
-        "--plot_examples", action="store_true", help="Save visualization plots for reprojection comparison"
+        "--plot_examples",
+        action="store_true",
+        help="Save visualization plots for reprojection comparison",
     )
     parser.add_argument(
         "--session_idx",
@@ -1794,7 +1804,8 @@ def main():
 
         if args.test in ["all", "projection"]:
             session_results["projection"] = test_3d_to_2d_projection_with_loader(
-                loader, plot_examples=args.plot_examples
+                loader,
+                plot_examples=args.plot_examples,
             )
 
         if args.test in ["all", "consistency"]:
