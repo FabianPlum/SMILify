@@ -6,6 +6,7 @@ to install via Blender's "Install from Disk…". Run from ``3D_model_prep/``:
 
     python build_addon.py
 """
+
 import os
 import zipfile
 

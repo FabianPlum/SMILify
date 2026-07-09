@@ -12,6 +12,7 @@ except ImportError:  # pragma: no cover
     PCA = None
     EmpiricalCovariance = None
 
+
 def apply_pca_and_create_shapekeys(
     scans,
     obj,
@@ -430,4 +431,3 @@ def apply_entangled_pca_and_create_shapekeys(
         print(f"Failed exporting entangled morph data: {e}")
 
     return cov_out, mean_betas, scaledirs, transdirs
-

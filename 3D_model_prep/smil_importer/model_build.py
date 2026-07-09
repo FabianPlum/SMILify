@@ -6,9 +6,17 @@ import pickle
 import bpy
 import numpy as np
 
-from .core_mesh import export_J_regressor_to_npy, export_faces_to_npy, export_joint_hierarchy_to_npy, export_joint_locations_to_npy, export_vertex_groups_to_npy, export_y_axis_vertices_to_npy
+from .core_mesh import (
+    export_J_regressor_to_npy,
+    export_faces_to_npy,
+    export_joint_hierarchy_to_npy,
+    export_joint_locations_to_npy,
+    export_vertex_groups_to_npy,
+    export_y_axis_vertices_to_npy,
+)
 from .measurements import sort_shape_keys
 from .unpickler import CustomUnpickler
+
 
 def load_pkl_file(filepath):
     try:
@@ -478,4 +486,3 @@ def export_smpl_model(obj, export_path, pkl_data=None):
         print(f"New SMPL file saved successfully at {output_path}.")
     except Exception as e:
         print(f"Failed to save new SMPL file: {e}")
-

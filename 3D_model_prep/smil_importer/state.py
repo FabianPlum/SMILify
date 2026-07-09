@@ -21,4 +21,3 @@ def get_morph_pca_status():
         return True, f"Available - scaledirs: {computed_scaledirs.shape}, transdirs: {computed_transdirs.shape}"
     else:
         return False, "Not available - run 'Load all unposed registered meshes' first"
-

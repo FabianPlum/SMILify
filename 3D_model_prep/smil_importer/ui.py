@@ -5,6 +5,7 @@ import bpy
 from .measurements import get_reference_measurements
 from .state import get_morph_pca_status
 
+
 class SMPL_PT_Panel(bpy.types.Panel):
     bl_label = "SMIL Model Importer"
     bl_idname = "SMPL_PT_Panel"
@@ -119,4 +120,3 @@ class SMPL_PT_MorphometryPanel(bpy.types.Panel):
 
         box.operator("smpl.export_joint_distances", text="Joint Distances")
         box.operator("smpl.export_mesh_measurements", text="Surface Area & Volume")
-
