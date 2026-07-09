@@ -1,9 +1,12 @@
-import torch
 import os
-
+import config
 # Add the parent directories to the path to import modules
 # not very pretty, but it works.
 
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", config.GPU_IDS)
+
+import torch
 from smal_fitter.neuralSMIL.smil_datasets import replicAntSMILDataset
 from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
 import config
@@ -95,10 +98,6 @@ def demonstrate_smil_regressor():
 
 
 if __name__ == "__main__":
-    # set the device to use (first available GPU by default)
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Demonstrate the SMIL Image Regressor

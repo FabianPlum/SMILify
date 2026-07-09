@@ -11,9 +11,18 @@ Key Features:
 - Per-view 2D keypoint loss with visibility weighting
 """
 
+# ===== CRITICAL: CUDA env vars BEFORE any torch import =====
+import os
+import config as _cfg_for_env
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", _cfg_for_env.GPU_IDS)
+del _cfg_for_env
+
 # ===== CRITICAL: Force IPv4 BEFORE any other imports =====
 # This prevents "Address family not supported by protocol" (errno: 97) errors
 # on HPC systems that don't have full IPv6 support
+
 import socket
 
 _original_getaddrinfo = socket.getaddrinfo
@@ -2273,7 +2282,6 @@ def main(config: dict):
     if device_override:
         device = device_override
     else:
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     if rank == 0:

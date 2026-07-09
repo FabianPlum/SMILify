@@ -27,6 +27,14 @@ if "CUDA_VISIBLE_DEVICES" not in os.environ:
     except Exception:
         pass
 
+# Single-GPU default: set CVD before any torch import. setdefault means the
+# multi-GPU branch above and any externally-set CVD both take precedence.
+import config as _cfg_for_env
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", _cfg_for_env.GPU_IDS)
+del _cfg_for_env
+
 # Set matplotlib backend BEFORE any other imports to prevent tkinter issues
 import matplotlib
 
@@ -1520,10 +1528,6 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         if not is_distributed or rank == 0:
             print(f"Using device override: {device}")
     else:
-        # setdefault so an external CUDA_VISIBLE_DEVICES (e.g. "0,1" for multi-GPU)
-        # is respected instead of being force-pinned to config.GPU_IDS.
-        os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
-        os.environ.setdefault("CUDA_VISIBLE_DEVICES", config.GPU_IDS)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if not is_distributed or rank == 0:
             print(f"Using device: {device}")
