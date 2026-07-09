@@ -81,8 +81,8 @@ def unregister():
                     pass
 
     # Clean up reference measurements file.
-    if hasattr(bpy.context.scene, "reference_measurements_path"):
-        temp_path = bpy.context.scene.reference_measurements_path
+    if "reference_measurements_path" in bpy.context.scene:
+        temp_path = bpy.context.scene["reference_measurements_path"]
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
