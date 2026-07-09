@@ -96,8 +96,12 @@ def install_dependencies():
     # never need administrator privileges.
     _run(
         [
-            python_exe, "-m", "pip", "install",
-            "--target", target,
+            python_exe,
+            "-m",
+            "pip",
+            "install",
+            "--target",
+            target,
             "--upgrade",
             *[pip_name for _, pip_name in DEPENDENCIES],
         ],

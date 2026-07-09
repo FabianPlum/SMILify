@@ -14,6 +14,7 @@ SMPL_DATA_PROP = "smpl_data_b64"
 
 from .core_mesh import export_J_regressor_to_npy, recalculate_joint_positions
 
+
 def _encode_smpl_data(data):
     """Serialize a SMPL/SMIL data dict for storage in a Blender string property."""
     return base64.b64encode(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)).decode("ascii")
@@ -612,4 +613,3 @@ def get_reference_measurements(context):
             with open(temp_path, "rb") as f:
                 return pickle.load(f)
     return {}
-

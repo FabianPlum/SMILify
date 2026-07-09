@@ -14,6 +14,7 @@ try:
 except ImportError:  # pragma: no cover
     KDTree = None
 
+
 def ensure_mesh(func):
     def wrapper(obj, *args, **kwargs):
         if not obj or obj.type != "MESH":
@@ -698,4 +699,3 @@ def cleanup_mesh(obj, center_tolerance=0.005):
 
     # Return to object mode
     bpy.ops.object.mode_set(mode="OBJECT")
-

@@ -2,6 +2,7 @@
 
 import bpy
 
+
 class SMPLProperties(bpy.types.PropertyGroup):
     pkl_filepath: bpy.props.StringProperty(
         name="PKL Filepath",
@@ -98,4 +99,3 @@ class SMPLProperties(bpy.types.PropertyGroup):
         description="Joint locations will not be affected by shape keys. J_regressor will be set to all zeroes. Useful for models with root bone at world origin or when joint locations should remain constant.",
         default=False,
     )
-

@@ -4,6 +4,7 @@ import pickle
 
 import numpy as np
 
+
 class CustomUnpickler(pickle.Unpickler):
     """Custom unpickler that handles legacy SMAL model files containing chumpy arrays"""
 
@@ -42,4 +43,3 @@ class CustomUnpickler(pickle.Unpickler):
         def r(self):
             """Mimic chumpy's .r property which returns the underlying data"""
             return self.data
-

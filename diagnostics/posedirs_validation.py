@@ -70,7 +70,7 @@ def reference_offset(posedirs_native, R_local_model):
 def addon_offset(posedirs_native, pose_feature):
     """Reproduces the add-on's reshape+matmul verbatim, given its pose_feature."""
     V, _, P = posedirs_native.shape
-    posedirs_reshaped = np.reshape(posedirs_native, [-1, P])          # (V*3, P)
+    posedirs_reshaped = np.reshape(posedirs_native, [-1, P])  # (V*3, P)
     v_offset = np.reshape(np.matmul(pose_feature, posedirs_reshaped.T), [-1, 3])
     return v_offset
 
@@ -80,13 +80,11 @@ def addon_offset(posedirs_native, pose_feature):
 # --------------------------------------------------------------------------- #
 def main():
     rng = np.random.default_rng(0)
-    V, J = 40, 6                      # tiny synthetic model
+    V, J = 40, 6  # tiny synthetic model
     P = (J - 1) * 9
     posedirs = rng.normal(size=(V, 3, P)) * 0.01
 
-    R_local_model = np.stack(
-        [rodrigues(rng.normal(size=3), rng.uniform(-1.0, 1.0)) for _ in range(J - 1)]
-    )
+    R_local_model = np.stack([rodrigues(rng.normal(size=3), rng.uniform(-1.0, 1.0)) for _ in range(J - 1)])
 
     ref = reference_offset(posedirs, R_local_model)
 
@@ -100,8 +98,7 @@ def main():
     B_list_const = [B_const] * (J - 1)
     B_list_var = [random_orthonormal(rng) for _ in range(J - 1)]
 
-    for label, B_list in [("constant B (current rig)", B_list_const),
-                          ("per-bone B (general rig)", B_list_var)]:
+    for label, B_list in [("constant B (current rig)", B_list_const), ("per-bone B (general rig)", B_list_var)]:
         matrix_basis = [B.T @ R @ B for B, R in zip(B_list, R_local_model)]
 
         pf_old = np.concatenate([(Mb - np.eye(3)).flatten() for Mb in matrix_basis])
@@ -193,9 +190,7 @@ def mirror_end_to_end_test():
     posedirs = rng.normal(size=(V, 3, P)) * 0.02
     base_vertices = rng.normal(size=(V, 3))
 
-    R_local_model = np.stack(
-        [rodrigues(rng.normal(size=3), rng.uniform(-1, 1)) for _ in range(J - 1)]
-    )
+    R_local_model = np.stack([rodrigues(rng.normal(size=3), rng.uniform(-1, 1)) for _ in range(J - 1)])
     ref_offset = reference_offset(posedirs, R_local_model)
     ref_final = base_vertices + ref_offset
 
@@ -223,9 +218,7 @@ def mirror_end_to_end_test():
     print(f"    final rest verts max abs err vs reference : {err:.3e}")
     assert err < 1e-9, "rewritten function logic must match the reference"
 
-    final2 = np.asarray(base_vertices) + np.reshape(
-        np.matmul(pose_feature, posedirs_reshaped.T), [-1, 3]
-    )
+    final2 = np.asarray(base_vertices) + np.reshape(np.matmul(pose_feature, posedirs_reshaped.T), [-1, 3])
     assert np.abs(final2 - final).max() < 1e-12
     print("    idempotent re-application                 : OK")
     print("    joint-name ordering restores kintree order: OK")

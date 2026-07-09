@@ -63,7 +63,7 @@ def rodrigues(axis, angle):
 def reference_offset(posedirs, R_local_model):
     """smal_torch formula: (V,3,P) posedirs, R_local_model list len J-1 (model frame)."""
     V, _, P = posedirs.shape
-    posedirs_mat = np.reshape(posedirs, [-1, P]).T                       # (P, V*3)
+    posedirs_mat = np.reshape(posedirs, [-1, P]).T  # (P, V*3)
     pose_feature = np.concatenate([(R - np.eye(3)).flatten() for R in R_local_model])
     return np.reshape(pose_feature @ posedirs_mat, [V, 3])
 
@@ -75,7 +75,7 @@ def clean_scene():
 
 def build_synthetic_data(seed=0):
     rng = np.random.default_rng(seed)
-    J = 4                                   # 1 root + 3 posed joints
+    J = 4  # 1 root + 3 posed joints
     # joints along +X, so bones are non-trivially oriented (tail = head + +Z)
     Jloc = np.stack([np.array([i * 0.3, 0.0, 0.0]) for i in range(J)]).astype(np.float64)
     # a little cloud of vertices around the joints
@@ -90,7 +90,7 @@ def build_synthetic_data(seed=0):
     # one-hot skin weights: each vertex bound to its joint
     weights = np.zeros((V, J), dtype=np.float64)
     for j in range(J):
-        weights[j * V_per:(j + 1) * V_per, j] = 1.0
+        weights[j * V_per : (j + 1) * V_per, j] = 1.0
     # chain kintree 0->1->2->3
     kintree = np.array([[-1, 0, 1, 2], [0, 1, 2, 3]], dtype=np.int64)
     P = (J - 1) * 9
@@ -126,12 +126,12 @@ def run():
     bpy.ops.object.mode_set(mode="POSE")
     for k, name in enumerate(joint_names[1:]):
         pb = armature.pose.bones.get(name)
-        B4 = pb.bone.matrix_local.to_3x3().to_4x4()      # rest orientation (bone-local -> model)
+        B4 = pb.bone.matrix_local.to_3x3().to_4x4()  # rest orientation (bone-local -> model)
         Rm4 = Matrix(np.eye(4))
         for r in range(3):
             for c in range(3):
                 Rm4[r][c] = float(R_model[k][r, c])
-        pb.matrix_basis = B4.inverted() @ Rm4 @ B4       # inverse of B @ basis @ B^T
+        pb.matrix_basis = B4.inverted() @ Rm4 @ B4  # inverse of B @ basis @ B^T
     bpy.ops.object.mode_set(mode="OBJECT")
 
     # Reference offset (independent of the add-on)
