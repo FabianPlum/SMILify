@@ -314,7 +314,7 @@ class SLEAP3DDataLoader:
                                 if "Camera" in calib_name:
                                     calib_num = int(calib_name.replace("Camera", ""))
                                 if "cam" in dir_name.lower():
-                                    nums = re.findall(r"\d+", dir_name)  # noqa: F823  (tracked in #62)
+                                    nums = re.findall(r"\d+", dir_name)
                                     if nums:
                                         dir_num = int(nums[0])
                                 if calib_num is not None and dir_num is not None and calib_num == dir_num:
@@ -341,8 +341,6 @@ class SLEAP3DDataLoader:
                                 if item.is_dir() and not item.name.startswith("."):
                                     slp_files = list(item.glob("*.slp"))
                                     if slp_files:
-                                        import re
-
                                         nums = re.findall(r"\d+", item.name)
                                         if nums and int(nums[0]) == idx:
                                             self.camera_name_to_dir[calib_name] = item.name
