@@ -11,7 +11,6 @@ import matplotlib
 matplotlib.use("Agg")  # Use Agg backend for non-GUI/non-interactive plotting
 
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from pytorch3d.io import load_obj
 from pytorch3d.structures import Meshes
 
@@ -297,33 +296,6 @@ def stack_as_batch(tensor: torch.Tensor, n_repeats=1, dim=0) -> torch.Tensor:
     repeats[dim] = n_repeats  # repeat across target dimension
     res = res.repeat(*repeats)
     return res
-
-
-def animator(ax):
-    """Wrapper used for animating meshes.
-    - Clears all current trisurfs
-    - Runs func, which returns new meshes
-    - Plot these meshes.
-
-    func must contain at least verts, faces"""
-
-    def wrapper(func):
-        # aux is wrapper function sent to wrap around existing anim
-        def aux(frame):
-            [child.remove() for child in ax.get_children() if isinstance(child, Poly3DCollection)]
-            kwargs = func(frame)
-            assert "mesh" in kwargs, "anim function must return 'mesh' object"
-            plot_mesh(ax, **kwargs)
-
-        return aux
-
-    return wrapper
-
-
-def save_animation(fig, func, n_frames, fmt="gif", fps=15, title="output", callback=True, **kwargs):
-    """Save matplotlib animation."""
-
-    arap_utils.save_animation(fig, func, n_frames, fmt=fmt, fps=fps, title=title, callback=callback, **kwargs)  # noqa: F821  (tracked in #63)
 
 
 def load_meshes(mesh_dir=None, mesh_files=None, sorting=lambda arr: arr, n_meshes=None, frame_step=1, device="cuda:0"):
