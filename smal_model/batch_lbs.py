@@ -99,17 +99,21 @@ def batch_global_rigid_transformation(
       new_J : `Tensor`: N x J x 3 location of absolute joints
       A     : `Tensor`: N x J 4 x 4 relative joint transformations for LBS.
     """
+    N = Rs.shape[0]
     if rotate_base:
         print("Flipping the SMPL coordinate frame!!!!")
-        rot_x = torch.Tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
-        rot_x = torch.reshape(torch.repeat(rot_x, [N, 1]), [N, 3, 3])  # noqa: F821  (tracked in #61)
+        rot_x = torch.tensor(
+            [[1, 0, 0], [0, -1, 0], [0, 0, -1]],
+            dtype=Rs.dtype,
+            device=Rs.device,
+        )
+        rot_x = rot_x.unsqueeze(0).expand(N, 3, 3)
         root_rotation = torch.matmul(Rs[:, 0, :, :], rot_x)
     else:
         root_rotation = Rs[:, 0, :, :]
 
     # Now Js is N x J x 3 x 1
     Js = Js.unsqueeze(-1)
-    N = Rs.shape[0]
 
     Js_orig = Js.clone()
 
