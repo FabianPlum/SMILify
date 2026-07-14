@@ -122,7 +122,12 @@ id2name35 = {v: k for k, v in name2id35.items()}
 
 def get_ignore_names(path):
     if "notail" in path:
-        ignore_names = [key for key in name2id.keys() if "Tail" in key]
+        # Legacy 35-part quadruped tail joints, hardcoded on purpose: newer rigs use their
+        # own naming (e.g. "Tail_07") and must not be routed through this path. Superseded
+        # by model-authored joint limits (#56).
+        # Previously read a module-level `name2id`, which only exists as a local in
+        # Prior.__init__ and in the __main__ block -> NameError on import (see #65).
+        ignore_names = ["Tail1", "Tail2", "Tail3", "Tail4", "Tail5", "Tail6", "Tail7"]
     elif "bodyneckelbowtail" in path:
         ignore_names = [
             "LLeg2",

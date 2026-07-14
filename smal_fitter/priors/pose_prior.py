@@ -117,6 +117,9 @@ id2name31 = {v: k for k, v in name2id31.items()}
 def get_ignore_names(path):
     if "notail" in path:
         # ignore_joints = range(22, 30)
+        # Legacy 35-part quadruped tail joints, hardcoded on purpose: newer rigs use their
+        # own naming (e.g. "Tail_07") and must not be routed through this path. Superseded
+        # by model-authored joint limits (#56).
         ignore_names = ["Tail1", "Tail2", "Tail3", "Tail4", "Tail5", "Tail6", "Tail7"]
     elif "bodyneckelbowtail" in path:
         ignore_names = [
@@ -428,7 +431,7 @@ def reflect_pose(pose, name2id, model=None):
     if model is not None:
         # Visualize
         model.pose[:] = new_pose
-        mv.set_dynamic_meshes([Mesh(model.r, model.f), Mesh(orig_r, model.f, vc=name_to_rgb["steel blue"])])  # noqa: F821  (tracked in #65)
+        mv.set_dynamic_meshes([Mesh(model.r, model.f), Mesh(orig_r, model.f, vc=name_to_rgb["steel blue"])])
         import ipdb
 
         ipdb.set_trace()
