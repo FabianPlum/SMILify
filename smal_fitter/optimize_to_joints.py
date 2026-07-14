@@ -1,15 +1,15 @@
 import os
 
-# Set CUDA device visibility BEFORE importing torch: torch >= 2.3 raises an INTERNAL
-# ASSERT ("device >= 0 && device < num_gpus") if CUDA_VISIBLE_DEVICES is changed after
-# CUDA has been initialized. config.py imports no torch, so this is safe here.
-# Use setdefault so an explicit external CUDA_VISIBLE_DEVICES (e.g. "0,1" for
-# multi-GPU DDP training) is respected — importing this module must NOT silently
-# pin visibility to a single GPU.
-import config
+# CUDA_VISIBLE_DEVICES must be set before `import torch` (torch >= 2.3 raises
+# an INTERNAL ASSERT if CVD changes after CUDA init). Guarded on __main__ so
+# importing this module as a library has no CVD side-effect on the importer.
+# See issue #73.
+if __name__ == "__main__":
+    import config as _cfg_for_env
 
-os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", config.GPU_IDS)
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", _cfg_for_env.GPU_IDS)
+    del _cfg_for_env
 
 import numpy as np
 import argparse
@@ -24,8 +24,6 @@ from smal_fitter.data_loader import load_badja_sequence, load_stanford_sequence,
 import trimesh
 
 from tqdm import trange
-
-import os
 
 
 class ImageExporter:
@@ -185,4 +183,13 @@ def main():
 
 
 if __name__ == "__main__":
+    # Set CVD before torch touches CUDA. Safe here because __main__ runs after
+    # imports, but torch.cuda has not been initialized yet in typical use, any
+    # entrypoint that needs strict pre-torch CVD should set it in its own
+    # top-of-file block (see train_smil_regressor.py, benchmark_model.py).
+    import config as _cfg_for_env
+
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", _cfg_for_env.GPU_IDS)
+    del _cfg_for_env
     main()

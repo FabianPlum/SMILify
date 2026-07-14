@@ -15,10 +15,26 @@ This test ensures that:
 - The optimization doesn't introduce errors
 """
 
-import torch
-import numpy as np
 import os
 import sys
+import config
+
+# Pre-parse --device before importing torch so CVD is set correctly.
+# argparse's full parse happens later in main();
+if "--device" in sys.argv:
+    _i = sys.argv.index("--device")
+    _dev = sys.argv[_i + 1] if _i + 1 < len(sys.argv) else "cpu"
+else:
+    _dev = "cpu"
+
+if _dev == "cuda":
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", config.GPU_IDS)
+
+
+import torch
+import numpy as np
+
 import cv2
 from typing import Dict, Any
 
@@ -1247,8 +1263,6 @@ def main():
 
     # Set up environment
     if args.device == "cuda":
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        os.environ["CUDA_VISIBLE_DEVICES"] = config.GPU_IDS
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cpu":
             print("Warning: CUDA requested but not available, using CPU")
