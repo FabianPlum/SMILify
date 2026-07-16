@@ -160,6 +160,17 @@ else:  # use joint and plotting configuration of default dog model:
         # PRIORS
         WALKING_PRIOR_FILE = join(data_path, "priors", "walking_toy_symmetric_pose_prior_with_cov_35parts.pkl")
 
+    # The SMAL pose priors are not redistributable (see docs/THIRD_PARTY_MODELS.md),
+    # so they are not tracked in this repo and may legitimately be absent.
+    if not os.path.exists(WALKING_PRIOR_FILE):
+        print(
+            "WARNING: SMAL pose prior not found at {0}\n"
+            "         This file is licensed by MPI and is not distributed with SMILify.\n"
+            "         See docs/THIRD_PARTY_MODELS.md for how to obtain it.\n"
+            "         Only the legacy quadruped path needs it; the SMIL/insect and\n"
+            "         neural-inference paths do not.".format(WALKING_PRIOR_FILE)
+        )
+
     # JOINT DEFINITIONS
     TORSO_JOINTS = [2, 5, 8, 11, 12, 23]
 
