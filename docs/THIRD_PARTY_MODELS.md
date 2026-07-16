@@ -42,6 +42,24 @@ naming prefix. They are **not** SMPL and are unaffected by the above:
 - `data/priors/unity_*` — generated from our own replicAnt synthetic data by
   [`data/priors/prepare_shape_prior.py`](../data/priors/prepare_shape_prior.py).
 
+## Purging them from git history
+
+Untracking these files stops them being distributed *going forward*, but every
+historical commit still carries the blobs, so they remain downloadable. Fully
+removing them means rewriting all history:
+
+```bash
+./scripts/purge_licensed_blobs.sh            # dry run: report only
+./scripts/purge_licensed_blobs.sh --execute  # rewrite a mirror clone locally
+```
+
+Neither mode writes to the remote — `--execute` rewrites a throwaway mirror
+clone and prints the force-push commands for you to run deliberately.
+
+A rewrite alone is **not** sufficient: GitHub still serves unreachable blobs by
+SHA and from forks, so it must be followed by a GitHub Support ticket and
+coordination with fork owners. The script prints the full checklist.
+
 ## Please don't re-add them
 
 `.gitignore` now blocks these paths. Avoid blanket `git add -A`; prefer staging
