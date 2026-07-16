@@ -10,23 +10,39 @@
 #   ./scripts/purge_licensed_blobs.sh            # dry run: report only, no writes
 #   ./scripts/purge_licensed_blobs.sh --execute  # rewrite a mirror clone locally
 #
-# Even --execute does NOT touch the remote. It rewrites a throwaway mirror clone
-# under /tmp and prints the force-push commands for you to run deliberately.
+# Even --execute does NOT touch the remote. It rewrites a mirror clone and
+# prints the force-push commands for you to run deliberately.
+#
+# STATUS: this purge was executed on 2026-07-16. master is now 626bb22 and a
+# fresh clone carries none of the licensed blobs. The notes below are kept for
+# anyone re-running it (e.g. if blobs are ever reintroduced).
 #
 # READ THIS FIRST -- a rewrite is NOT sufficient on its own:
-#   1. Force-pushing rewrites all 14 branches. Open PRs (#79, #81) will need
-#      rebasing; every existing clone must re-clone. Coordinate first.
-#   2. GitHub keeps unreachable blobs reachable by SHA and serves them from the
-#      5 forks. After force-pushing you MUST open a GitHub Support ticket asking
+#   1. Force-pushing rewrites every branch. Open PRs need rebasing and every
+#      existing clone must re-clone. Coordinate first.
+#   2. GitHub keeps unreachable blobs reachable by SHA and serves them from
+#      forks. After force-pushing you MUST open a GitHub Support ticket asking
 #      them to purge cached views, and ask fork owners to delete/re-fork.
 #   3. Treat the SMPL/SMAL copies as having been public. If that matters
 #      contractually, tell MPI rather than relying on a silent rewrite.
+#   4. A force-push INFLATES the GitHub contribution graph: rewritten commits
+#      keep their author dates but get new SHAs, so GitHub credits them again
+#      on top of the originals. Cosmetic, but expect ~1 extra "commit" per
+#      rewritten commit on your profile. There is no clean fix short of asking
+#      GitHub Support.
+#   5. Merge any pending PR BEFORE purging. Otherwise its base and head are both
+#      rewritten and the PR breaks; and master ends up with the blobs stripped
+#      but without the .gitignore guard that lives on the PR branch.
 #
 set -euo pipefail
 
 # Source to clone. Override to rehearse the rewrite against a local copy
 # without hitting the network, e.g.  PURGE_SOURCE=. ./scripts/purge_licensed_blobs.sh --execute
 PURGE_SOURCE="${PURGE_SOURCE:-https://github.com/FabianPlum/SMILify}"
+
+# Where a deliberate force-push would go. Kept separate from PURGE_SOURCE so a
+# local-path rehearsal (PURGE_SOURCE=.) still prints the real remote.
+PUSH_REMOTE="${PUSH_REMOTE:-https://github.com/FabianPlum/SMILify.git}"
 
 # Deliberately NOT /tmp: the rewritten mirror must survive between the rewrite
 # and the force-push, and /tmp is wiped on WSL session restart (observed during
@@ -130,16 +146,30 @@ if [[ $fail -ne 0 ]]; then
   echo; echo "Verification FAILED -- do not push. Inspect ${MIRROR}"; exit 1
 fi
 
+# git-filter-repo deliberately removes the 'origin' remote after rewriting, to
+# stop you force-pushing by reflex. Re-add it so the commands printed below
+# actually run; this does NOT push anything.
+git -C "$MIRROR" remote remove origin 2>/dev/null || true
+git -C "$MIRROR" remote add origin "$PUSH_REMOTE"
+
 cat <<EOF
 
 --- Rewrite complete and verified, locally only. ---
 Rewritten mirror: ${MIRROR}
+Origin re-added : ${PUSH_REMOTE}  (nothing pushed)
 
 Nothing has been pushed. When you have coordinated with collaborators and
 fork owners, push deliberately from the mirror:
 
-    git -C "${MIRROR}" push --force --all
-    git -C "${MIRROR}" push --force --tags
+    git -C "${MIRROR}" push --force --all origin
+    git -C "${MIRROR}" push --force --tags origin
+
+Both are required: tags are branch archives here and pin old commits, so
+pushing branches alone would leave the blobs reachable via tags.
+
+The pushing clone needs credentials for the remote. A mirror cloned over
+plain https in a bare WSL shell typically has none and will hang on a
+credential prompt; push from wherever your git/gh auth already works.
 
 Then, and only then:
   - Open a GitHub Support ticket to purge cached blob views + fork copies.

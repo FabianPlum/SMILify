@@ -42,23 +42,90 @@ naming prefix. They are **not** SMPL and are unaffected by the above:
 - `data/priors/unity_*` — generated from our own replicAnt synthetic data by
   [`data/priors/prepare_shape_prior.py`](../data/priors/prepare_shape_prior.py).
 
-## Purging them from git history
+## The history purge (done 2026-07-16)
 
-Untracking these files stops them being distributed *going forward*, but every
-historical commit still carries the blobs, so they remain downloadable. Fully
-removing them means rewriting all history:
+These files were not only untracked but purged from **all** git history. `master`
+is now `626bb22`, and a fresh clone contains none of the licensed blobs.
+
+The tooling is kept in [`scripts/purge_licensed_blobs.sh`](../scripts/purge_licensed_blobs.sh)
+in case it is ever needed again:
 
 ```bash
 ./scripts/purge_licensed_blobs.sh            # dry run: report only
 ./scripts/purge_licensed_blobs.sh --execute  # rewrite a mirror clone locally
 ```
 
-Neither mode writes to the remote — `--execute` rewrites a throwaway mirror
-clone and prints the force-push commands for you to run deliberately.
+Neither mode writes to the remote — `--execute` rewrites a mirror clone and
+prints the force-push commands to run deliberately.
 
 A rewrite alone is **not** sufficient: GitHub still serves unreachable blobs by
 SHA and from forks, so it must be followed by a GitHub Support ticket and
-coordination with fork owners. The script prints the full checklist.
+coordination with fork owners.
+
+## What contributors and fork owners need to do
+
+Because all history was rewritten, **every commit has a new SHA**. Old clones and
+forks still contain the licensed blobs and will reintroduce them if pushed.
+
+> **Back up your model files first.** These files are git-ignored now, but if
+> your clone predates the purge they were *tracked*, so `git reset --hard` onto
+> the rewritten history **deletes them from disk**. Copy them somewhere safe
+> before you start, then copy them back afterwards.
+
+### If you have a clone
+
+Simplest and safest is to **re-clone**. To keep an existing clone instead:
+
+```bash
+cp -r smal_model/smpl/models /tmp/model-backup          # back up (see warning)
+cp data/priors/*_pose_prior_with_cov_35parts*.pkl /tmp/model-backup/
+
+git fetch origin
+git checkout master
+git reset --hard origin/master                          # deletes the files above
+git reflog expire --expire=now --expire-unreachable=now --all
+git repack -ad && git prune --expire=now                # `gc` alone is NOT enough
+
+cp -r /tmp/model-backup/models smal_model/smpl/         # restore your copies
+cp /tmp/model-backup/*.pkl data/priors/
+```
+
+`git gc --prune=now` does **not** remove the blobs — they sit in an existing
+pack, and only `git repack -ad` rewrites it to evict them. Verify with:
+
+```bash
+git cat-file -e f5337df59c61c6825ec1dda302d38bfa09dcacc4 && echo "STILL PRESENT" || echo "purged"
+```
+
+Any local branch created before the purge still carries the blobs. Rebase it
+onto the rewritten `master` (`git rebase --onto origin/master <old-base> <branch>`)
+rather than merging, and never force-push a pre-purge branch.
+
+### If you have a fork
+
+A force-push to this repository does **not** touch forks, and GitHub keeps forks
+in a shared object store — so blobs can stay reachable through a fork even after
+the parent is clean. Please either:
+
+- **Delete the fork** and re-fork if you still need it (cleanest), or
+- Reset it onto the rewritten history and force-push your own fork:
+
+  ```bash
+  git remote add upstream https://github.com/FabianPlum/SMILify.git
+  git fetch upstream
+  git checkout master && git reset --hard upstream/master
+  git push --force origin master
+  ```
+
+Open PRs raised from pre-purge branches must be rebased onto the new `master`
+or closed and reopened; their old commits no longer exist upstream.
+
+### Note on the contribution graph
+
+The rewrite gives every commit a new SHA while preserving author dates, so
+GitHub credits the rewritten commits *in addition to* the originals. Profile
+commit counts are inflated as a result. This is cosmetic — no work was
+duplicated or lost — and is inherent to any `filter-repo` history rewrite.
 
 ## Please don't re-add them
 
