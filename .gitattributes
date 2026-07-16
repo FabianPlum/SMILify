@@ -1,0 +1,27 @@
+# Shell scripts must always check out with LF, regardless of core.autocrlf.
+# With autocrlf=true on Windows these were checked out CRLF, which makes them
+# unrunnable in bash/WSL ("syntax error near unexpected token $'do\r'") and on
+# the Linux HPC cluster. Git already stores them as LF; this pins the checkout.
+*.sh text eol=lf
+
+# Same reasoning for other Unix-executed text.
+*.sbatch text eol=lf
+
+# PowerShell is Windows-side; keep CRLF.
+*.ps1 text eol=crlf
+
+# Never touch line endings inside binary assets. Parametric models, meshes and
+# archives are byte-sensitive: a stray CRLF conversion corrupts them.
+*.pkl binary
+*.npz binary
+*.npy binary
+*.h5 binary
+*.pth binary
+*.blend binary
+*.glb binary
+*.zip binary
+*.avi binary
+*.mp4 binary
+*.gif binary
+*.png binary
+*.jpg binary
