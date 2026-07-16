@@ -74,6 +74,11 @@ The conda environment is defined in [environment.yml](environment.yml). The reco
    ```
    (See [tests/README.md](tests/README.md).)
 
+> **Legacy quadruped path only:** the SMPL/SMAL models and priors are licensed by
+> MPI and are *not* redistributable, so they are not included in this repository.
+> Download them yourself — see [docs/THIRD_PARTY_MODELS.md](docs/THIRD_PARTY_MODELS.md).
+> The SMIL/insect models and the neural-inference pipeline need none of them.
+
 > On an HPC cluster you can instead run [`hpc_files/install.sh`](hpc_files/install.sh), which performs the same conda setup end-to-end (supports `--skip-tests` and a configurable `ENV_NAME`).
 
 <details>
