@@ -28,7 +28,9 @@ def _ranges_from_joint_limits(dd, default_range=np.pi):
         jl = np.asarray(joint_limits, dtype=np.float64)
         expected = (len(joint_names), 3, 2)
         if jl.shape != expected:
-            raise ValueError(f"'joint_limits' has shape {jl.shape}, expected {expected} (one [min,max] per axis per joint).")
+            raise ValueError(
+                f"'joint_limits' has shape {jl.shape}, expected {expected} (one [min,max] per axis per joint)."
+            )
         if not np.all(jl[..., 0] <= jl[..., 1]):
             raise ValueError("'joint_limits' has min > max for at least one joint/axis.")
         if not np.isfinite(jl).all():

@@ -14,12 +14,7 @@ import numpy as np
 import pytest
 
 # Load smil_importer/axis_remap.py in isolation (no package __init__ -> no bpy).
-_MODULE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "3D_model_prep"
-    / "smil_importer"
-    / "axis_remap.py"
-)
+_MODULE_PATH = Path(__file__).resolve().parents[1] / "3D_model_prep" / "smil_importer" / "axis_remap.py"
 _spec = importlib.util.spec_from_file_location("axis_remap", _MODULE_PATH)
 axis_remap = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(axis_remap)
