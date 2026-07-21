@@ -127,7 +127,7 @@ python -m smal_fitter.neuralSMIL.run_multiview_inference \
     --export_animation stick_clip
 ```
 
-One example of what you can do downstream with those parameters: load the exported clip into the Blender SMIL addon ([`3D_model_prep/SMIL_processing_addon.py`](3D_model_prep/SMIL_processing_addon.py)) and render the mesh with your own materials. The clip below is the predicted stick-insect sequence with a simple Voronoi texture — purely illustrative, not part of the pipeline:
+One example of what you can do downstream with those parameters: load the exported clip into the Blender SMIL addon ([`3D_model_prep/smil_importer`](3D_model_prep/smil_importer)) and render the mesh with your own materials. The clip below is the predicted stick-insect sequence with a simple Voronoi texture — purely illustrative, not part of the pipeline:
 
 <img src="docs/stick_blender_render.gif" width="480">
 

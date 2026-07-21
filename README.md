@@ -24,7 +24,7 @@ Example 18 camera inference results, using a newly developed [parametric mouse m
 
 <img src="docs/peruphasma_4_cam_smil.gif" width="800">
 
-Example 4-5 camera inference results with a model trained on data collected from an Omni-Directional Treadmill (ODT) using a [parametric multi species stick insect model](3D_model_prep/SMILy_STICK.pkl) configured with the [Blender SMIL Addon](3D_model_prep/SMIL_processing_addon.py).
+Example 4-5 camera inference results with a model trained on data collected from an Omni-Directional Treadmill (ODT) using a [parametric multi species stick insect model](3D_model_prep/SMILy_STICK.pkl) configured with the [Blender SMIL Addon](3D_model_prep/smil_importer).
 
 
 ## Repository structure
@@ -349,7 +349,7 @@ python -m smal_fitter.neuralSMIL.benchmark_model \
 
 ## Adding new parametric models
 
-The [Blender SMIL Addon](3D_model_prep/SMIL_processing_addon.py) lets you turn virtually any rigged mesh into a fully parametric SMIL-compatible model — no fixed skeleton topology required. As long as your mesh has an armature with vertex weights, the addon can extract all the components needed for a differentiable linear blend skinning model: vertex templates, joint regressors, kinematic trees, shape spaces, and symmetry maps.
+The [Blender SMIL Addon](3D_model_prep/smil_importer) lets you turn virtually any rigged mesh into a fully parametric SMIL-compatible model — no fixed skeleton topology required. As long as your mesh has an armature with vertex weights, the addon can extract all the components needed for a differentiable linear blend skinning model: vertex templates, joint regressors, kinematic trees, shape spaces, and symmetry maps.
 
 <img src="docs/SMILify_Blender_Addon_ants.png" width="800">
 
