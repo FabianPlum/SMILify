@@ -128,7 +128,7 @@ choose.
   1. Use the clip-averaged `betas` only (ignore `betas_per_frame`).
   2. Apply those betas to the shape keys once (static for the clip).
   3. Invoke the existing `SMPL_OT_RecomputeJointPositions` operator
-     ([SMIL_processing_addon.py:3356](../../3D_model_prep/SMIL_processing_addon.py))
+     ([SMIL_processing_addon.py:3356](../../3D_model_prep/legacy/SMIL_processing_addon.py))
      once to re-regress the armature's rest pose to the averaged shape.
   4. Then keyframe rotation / bone scale / root trans as normal.
   Importer emits an INFO message explaining per-frame shape animation is
@@ -185,7 +185,7 @@ d416d5c  Wire --export_animation into multiview inference
 
 ### Files
 
-- **MODIFIED** [3D_model_prep/SMIL_processing_addon.py](../../3D_model_prep/SMIL_processing_addon.py)
+- **MODIFIED** [3D_model_prep/legacy/SMIL_processing_addon.py](../../3D_model_prep/legacy/SMIL_processing_addon.py)
   — new operator `SMPL_OT_ImportAnimation`
   (bl_idname: `smpl.import_animation`), registered in the `classes` tuple and
   surfaced as a panel button `"Import SMIL Animation (.npz)"` in
@@ -245,7 +245,7 @@ Items surfaced from end-to-end testing in Blender; deferred for follow-up:
 ### Out of scope for Phase 2
 
 - Posedir correctives application (existing logic at
-  [SMIL_processing_addon.py:705-760](../../3D_model_prep/SMIL_processing_addon.py)
+  [SMIL_processing_addon.py:705-760](../../3D_model_prep/legacy/SMIL_processing_addon.py)
   can be wired in later).
 - Drivers-based live evaluation.
 - Animated cameras.

@@ -1,18 +1,54 @@
 import numpy as np
 import config
 
-# TODO - read out J_names from input smpl file and treat all joints as ball joints for now
-# Once that works, in Blender allow for setting up joint limits on the model
-# Then, read those in here, all stored in the SMPL file and replace the hard-coded nightmare below.
+
+def _ranges_from_joint_limits(dd, default_range=np.pi):
+    """Build a ``{joint_name: [[min, max] x 3]}`` ranges dict for an arbitrary rig.
+
+    Issue #56: prefer user-defined per-joint rotation limits stored in the model
+    ``.pkl`` under the ``joint_limits`` key. Expected shape ``(J, 3, 2)`` in the same
+    order as ``dd['J_names']`` (radians, interpreted per axis in the axis-angle space
+    of ``joint_rotations``), where ``[:, axis, 0]`` is the min and ``[:, axis, 1]`` the
+    max for each axis.
+
+    When ``joint_limits`` is absent, fall back to a wide-open
+    ``[-default_range, +default_range]`` per axis so that new models are NOT
+    pose-frozen. (The previous placeholder clamped every non-root joint to
+    +/-0.01 rad, which effectively locked the pose whenever the limit loss was on.)
+
+    The root joint (``J_names[0]``) is always fixed at ``[0, 0]`` on every axis; the
+    fitter ignores it via the ``[3:]`` slice on ``min_values``/``max_values``.
+    """
+    joint_names = dd["J_names"]
+    root_joint = joint_names[0]
+    joint_limits = dd.get("joint_limits", None)
+    ranges = {}
+
+    if joint_limits is not None:
+        jl = np.asarray(joint_limits, dtype=np.float64)
+        expected = (len(joint_names), 3, 2)
+        if jl.shape != expected:
+            raise ValueError(
+                f"'joint_limits' has shape {jl.shape}, expected {expected} (one [min,max] per axis per joint)."
+            )
+        if not np.all(jl[..., 0] <= jl[..., 1]):
+            raise ValueError("'joint_limits' has min > max for at least one joint/axis.")
+        if not np.isfinite(jl).all():
+            raise ValueError("'joint_limits' contains non-finite values.")
+        for j, joint in enumerate(joint_names):
+            ranges[joint] = jl[j].tolist()  # [[min_x, max_x], [min_y, max_y], [min_z, max_z]]
+    else:
+        w = float(default_range)
+        for joint in joint_names:
+            ranges[joint] = [[-w, w], [-w, w], [-w, w]]
+
+    # Root joint is fixed and ignored downstream.
+    ranges[root_joint] = [[0, 0], [0, 0], [0, 0]]
+    return ranges
+
 
 if config.ignore_hardcoded_body:
-    Ranges = {}
-    _root_joint = config.dd["J_names"][0]
-    for joint in config.dd["J_names"]:
-        if joint == _root_joint:
-            Ranges[joint] = [[0, 0], [0, 0], [0, 0]]
-        else:
-            Ranges[joint] = [[-0.01, 0.01], [-0.01, 0.01], [-0.01, 0.01]]
+    Ranges = _ranges_from_joint_limits(config.dd)
 else:
     Ranges = {
         "pelvis": [[0, 0], [0, 0], [0, 0]],
@@ -54,16 +90,12 @@ else:
 class LimitPrior(object):
     def __init__(self):
         if config.ignore_hardcoded_body:
-            # Build Ranges at init time from the current config.dd, not the
+            # Build ranges at init time from the current config.dd, not the
             # module-level Ranges which may have been built with a different
             # SMAL model at import time (e.g. before apply_smal_file_override).
-            ranges = {}
-            root_joint = config.dd["J_names"][0]
-            for joint in config.dd["J_names"]:
-                if joint == root_joint:
-                    ranges[joint] = [[0, 0], [0, 0], [0, 0]]
-                else:
-                    ranges[joint] = [[-0.01, 0.01], [-0.01, 0.01], [-0.01, 0.01]]
+            # Issue #56: reads user-defined 'joint_limits' from the model .pkl when
+            # present, otherwise falls back to a wide-open range (see helper).
+            ranges = _ranges_from_joint_limits(config.dd)
 
             self.parts = {}
             for j, joint in enumerate(config.dd["J_names"]):
