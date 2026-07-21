@@ -9,6 +9,16 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
+# Bone-local -> model-frame limit remap (issue #56). Kept in a bpy-free module so
+# it can be unit tested without Blender (tests/test_axis_remap.py). Aliased to the
+# previous private names for backward compatibility with existing importers
+# (e.g. diagnostics/probe_joint_limits_axis_remap.py).
+from .axis_remap import (
+    rot3 as _rot3,
+    is_signed_permutation as _is_signed_permutation,
+    remap_bounds_to_model_frame as _remap_bounds_to_model_frame,
+)
+
 try:
     from scipy.spatial import KDTree
 except ImportError:  # pragma: no cover
@@ -166,6 +176,104 @@ def export_joint_hierarchy_to_npy(armature_obj, filepath):
     hierarchy = np.array(hierarchy, dtype=np.int32).T
     np.save(filepath, hierarchy)
     return filepath, hierarchy
+
+
+@ensure_armature
+def export_joint_limits_to_npy(armature_obj, filepath, default_range=np.pi):
+    """Export per-joint rotation limits as a ``(J, 3, 2)`` array (issue #56).
+
+    Bones are iterated in ``armature.data.bones`` order - the SAME order used by
+    :func:`export_joint_locations_to_npy` and :func:`export_joint_hierarchy_to_npy`,
+    which is the order stored in ``J_names``/``J``/``kintree_table``. The returned
+    array therefore lines up index-for-index with those keys.
+
+    Layout::
+
+        limits[j, axis, 0] = min angle (radians) for joint j, axis in {x, y, z}
+        limits[j, axis, 1] = max angle (radians)
+
+    For each bone the per-axis limits are read, in priority order, from:
+
+    1. a ``LIMIT_ROTATION`` pose-bone constraint (``use_limit_x/y/z`` with
+       ``min_x``/``max_x`` etc.), or
+    2. the bone's IK rotation limits and locks (``lock_ik_x`` -> pinned to 0,
+       ``use_ik_limit_x`` -> ``ik_min_x``/``ik_max_x``).
+
+    Axes with no explicit limit fall back to ``[-default_range, +default_range]``
+    (wide open). The root bone (index 0) is fixed at ``[0, 0]`` on every axis,
+    matching the fitter's ``LimitPrior`` which ignores the root joint.
+
+    FRAME: limits are authored in each bone's *local* frame (that is what a Limit
+    Rotation constraint bounds), but the fitter's ``LimitPrior`` compares the
+    pose's *model-frame* axis-angle components against them. When a bone's rest
+    orientation is tilted relative to the model, a bound authored on bone-local Y
+    would otherwise land on the wrong model axis. Each bone's bounds are therefore
+    rotated into the model frame via ``B = rot3(bone.matrix_local)`` (see
+    :func:`_remap_bounds_to_model_frame`). For the common "clean axis" case where
+    ``B`` is a signed permutation this is exact; for a genuinely rotated ``B`` no
+    per-axis box is exact, so the bounds are kept verbatim and a warning is emitted
+    (bounded issue-#56 caveat). Values remain per-axis bounds in the axis-angle
+    space of ``joint_rotations`` - the same convention as the legacy ``Ranges``.
+
+    Returns ``(filepath, limits)`` where ``limits`` is a float32 ``(J, 3, 2)`` array.
+    """
+    bones = armature_obj.data.bones
+    pose_bones = armature_obj.pose.bones
+    num_joints = len(bones)
+    limits = np.empty((num_joints, 3, 2), dtype=np.float32)
+
+    for i, bone in enumerate(bones):
+        lo = [-float(default_range)] * 3
+        hi = [float(default_range)] * 3
+
+        pbone = pose_bones.get(bone.name)
+        if pbone is not None:
+            limit_con = next((c for c in pbone.constraints if c.type == "LIMIT_ROTATION"), None)
+            if limit_con is not None:
+                if limit_con.use_limit_x:
+                    lo[0], hi[0] = limit_con.min_x, limit_con.max_x
+                if limit_con.use_limit_y:
+                    lo[1], hi[1] = limit_con.min_y, limit_con.max_y
+                if limit_con.use_limit_z:
+                    lo[2], hi[2] = limit_con.min_z, limit_con.max_z
+            else:
+                # Fall back to IK rotation limits / locks.
+                if pbone.lock_ik_x:
+                    lo[0] = hi[0] = 0.0
+                elif pbone.use_ik_limit_x:
+                    lo[0], hi[0] = pbone.ik_min_x, pbone.ik_max_x
+                if pbone.lock_ik_y:
+                    lo[1] = hi[1] = 0.0
+                elif pbone.use_ik_limit_y:
+                    lo[1], hi[1] = pbone.ik_min_y, pbone.ik_max_y
+                if pbone.lock_ik_z:
+                    lo[2] = hi[2] = 0.0
+                elif pbone.use_ik_limit_z:
+                    lo[2], hi[2] = pbone.ik_min_z, pbone.ik_max_z
+
+        # Limits are authored in the bone-local frame; rotate them into the
+        # model frame so they line up with the axis-angle components the fitter
+        # compares against (issue #56). B's columns are the bone-local axes in
+        # model coordinates; a signed-permutation B just permutes/flips axes.
+        B = _rot3(bone.matrix_local)
+        lo, hi = _remap_bounds_to_model_frame(B, lo, hi, bone.name)
+
+        limits[i, :, 0] = lo
+        limits[i, :, 1] = hi
+
+    # Root joint (index 0) is fixed; the fitter drops it via LimitPrior anyway.
+    if num_joints > 0:
+        limits[0] = 0.0
+
+    # Guarantee min <= max even if a user authored an inverted constraint.
+    lo_col = limits[..., 0].copy()
+    hi_col = limits[..., 1].copy()
+    swapped = lo_col > hi_col
+    limits[..., 0] = np.where(swapped, hi_col, lo_col)
+    limits[..., 1] = np.where(swapped, lo_col, hi_col)
+
+    np.save(filepath, limits)
+    return filepath, limits
 
 
 @ensure_mesh
@@ -452,9 +560,14 @@ def export_J_regressor_to_npy(
     if filepath:
         np.save(filepath, J_regressor)
 
-    if export_as_csv:
-        # np.savetxt(filepath.replace(".npy", ".csv"), J_regressor, delimiter=",")
-        np.savetxt("test_J_reg.csv", J_regressor, delimiter=",", fmt="%1.8f")
+    if export_as_csv and filepath:
+        # Write the debug CSV next to the .npy (blend-relative, writable) instead of a
+        # bare "test_J_reg.csv" that lands in Blender's read-only CWD. Never let a debug
+        # dump crash the export.
+        try:
+            np.savetxt(filepath.replace(".npy", ".csv"), J_regressor, delimiter=",", fmt="%1.8f")
+        except Exception as e:
+            print(f"Warning: could not write J_regressor debug CSV ({e})")
 
     return J_regressor
 

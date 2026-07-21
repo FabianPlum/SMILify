@@ -99,3 +99,28 @@ class SMPLProperties(bpy.types.PropertyGroup):
         description="Joint locations will not be affected by shape keys. J_regressor will be set to all zeroes. Useful for models with root bone at world origin or when joint locations should remain constant.",
         default=False,
     )
+
+    # Issue #56: export user-defined per-joint rotation limits.
+    export_joint_limits: bpy.props.BoolProperty(
+        name="Export Joint Limits",
+        description=(
+            "Read per-bone rotation limits and store them in the exported .pkl under the "
+            "'joint_limits' key. Limits act as pose priors for the optimisation fitter and "
+            "neural inference. For each bone the limits are read from a 'Limit Rotation' "
+            "pose-bone constraint if present, otherwise from the bone's IK rotation "
+            "limits/locks. Axes with no explicit limit use the wide-open default range "
+            "below; the root bone is fixed."
+        ),
+        default=True,
+    )
+
+    joint_limit_default_range: bpy.props.FloatProperty(
+        name="Default Joint Limit Range (rad)",
+        description=(
+            "Half-range in radians used for axes with no explicit limit. Such axes are "
+            "exported as [-value, +value]. A large value (e.g. pi) means effectively "
+            "unconstrained, so the limit prior stays inactive until real limits are set."
+        ),
+        default=3.141592653589793,
+        min=0.0,
+    )

@@ -1322,6 +1322,7 @@ class SMILImageRegressor(SMALFitter):
                 "keypoint_3d": 0.0,
                 "silhouette": 0.0,
                 "joint_angle_regularization": 0.001,  # Penalty for large joint angles
+                "joint_limit_regularization": 0.0,  # Issue #56: hinge penalty vs authored per-joint limits (off by default)
                 "limb_scale_regularization": 0.01,  # Penalty for deviations from scale=1
                 "limb_trans_regularization": 0.1,  # Heavy penalty for translation changes
             }
@@ -1815,6 +1816,45 @@ class SMILImageRegressor(SMALFitter):
             total_loss = total_loss + loss_weights["joint_angle_regularization"] * joint_angle_reg
         else:
             loss_components["joint_angle_regularization"] = torch.tensor(eps, device=self.device, requires_grad=True)
+
+        # Joint-limit regularization (issue #56): hinge penalty against the per-joint
+        # rotation limits authored in the model .pkl (config.dd['joint_limits']). Same
+        # flat + linear-past-the-limit formulation as the optimisation fitter. Off by
+        # default (weight 0.0) and wrapped in try/except so it can never break training.
+        if (
+            loss_weights.get("joint_limit_regularization", 0) > 0
+            and "joint_rot" in predicted_params
+            and num_valid_samples > 0
+        ):
+            try:
+                if not hasattr(self, "_joint_limit_bounds"):
+                    from smal_fitter.priors.joint_limits_prior import LimitPrior
+
+                    _lp = LimitPrior()
+                    _n = config.N_POSE
+                    _min = np.asarray(_lp.min_values[3:], dtype=np.float32).reshape(_n, 3)
+                    _max = np.asarray(_lp.max_values[3:], dtype=np.float32).reshape(_n, 3)
+                    self._joint_limit_bounds = (
+                        torch.tensor(_min, device=self.device),
+                        torch.tensor(_max, device=self.device),
+                    )
+                min_lim, max_lim = self._joint_limit_bounds
+
+                joint_rot_pred = predicted_params["joint_rot"][sample_validity_mask]  # (valid, N_POSE, 6 or 3)
+                if self.rotation_representation == "6d":
+                    joint_rot_aa = rotation_6d_to_axis_angle(joint_rot_pred)  # (valid, N_POSE, 3)
+                else:
+                    joint_rot_aa = joint_rot_pred
+
+                zeros = torch.zeros_like(joint_rot_aa)
+                joint_limit_reg = torch.mean(
+                    torch.maximum(joint_rot_aa - max_lim, zeros) + torch.maximum(min_lim - joint_rot_aa, zeros)
+                )
+
+                loss_components["joint_limit_regularization"] = joint_limit_reg
+                total_loss = total_loss + loss_weights["joint_limit_regularization"] * joint_limit_reg
+            except Exception as e:
+                print(f"Warning: joint_limit_regularization skipped ({e})")
 
         # Batched 2D keypoint loss (only for valid samples with available 2D keypoints)
         if (

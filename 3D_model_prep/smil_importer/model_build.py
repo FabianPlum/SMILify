@@ -10,6 +10,7 @@ from .core_mesh import (
     export_J_regressor_to_npy,
     export_faces_to_npy,
     export_joint_hierarchy_to_npy,
+    export_joint_limits_to_npy,
     export_joint_locations_to_npy,
     export_vertex_groups_to_npy,
     export_y_axis_vertices_to_npy,
@@ -461,6 +462,17 @@ def export_smpl_model(obj, export_path, pkl_data=None):
 
     pkl_data["kintree_table"] = export_joint_hierarchy_to_npy(armature_obj, joint_hierarchy_npy_path)[1]
     pkl_data["J"], pkl_data["J_names"] = export_joint_locations_to_npy(armature_obj, joint_locations_npy_path)[1:]
+
+    # Issue #56: export user-defined per-joint rotation limits (if enabled in the panel).
+    # Written in the same bone order as J / J_names, so limits line up with the joints.
+    if bpy.context.scene.smpl_tool.export_joint_limits:
+        joint_limits_npy_path = bpy.path.abspath("//test_joint_limits.npy")
+        pkl_data["joint_limits"] = export_joint_limits_to_npy(
+            armature_obj,
+            joint_limits_npy_path,
+            default_range=bpy.context.scene.smpl_tool.joint_limit_default_range,
+        )[1]
+        print("joint_limits:", pkl_data["joint_limits"].shape)
 
     # Check if model has static joint locations
     if obj.get("static_joint_locs", False) or bpy.context.scene.smpl_tool.force_static_joint_locs:

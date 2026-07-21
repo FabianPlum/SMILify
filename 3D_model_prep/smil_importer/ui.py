@@ -55,6 +55,9 @@ class SMPL_PT_Panel(bpy.types.Panel):
             layout.operator("smpl.clear_morph_pca", text="Clear Transformation PCA components")
 
         layout.separator()
+        layout.prop(smpl_tool, "export_joint_limits")
+        if smpl_tool.export_joint_limits:
+            layout.prop(smpl_tool, "joint_limit_default_range")
         layout.prop(smpl_tool, "output_filename")
         layout.operator("smpl.export_model", text="Export SMIL Model")
 
