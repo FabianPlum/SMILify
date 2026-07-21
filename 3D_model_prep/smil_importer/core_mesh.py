@@ -15,7 +15,6 @@ from mathutils import Vector
 # (e.g. diagnostics/probe_joint_limits_axis_remap.py).
 from .axis_remap import (
     rot3 as _rot3,
-    is_signed_permutation as _is_signed_permutation,
     remap_bounds_to_model_frame as _remap_bounds_to_model_frame,
 )
 
