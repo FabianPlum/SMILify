@@ -1460,7 +1460,19 @@ class SMPL_OT_ApplyPoseCorrectivesOperator(bpy.types.Operator):
                 self.report({"ERROR"}, "No SMPL data found. Please import a SMPL model first.")
                 return {"CANCELLED"}
 
-            apply_pose_correctives(obj, data["posedirs"], data["v_template"])
+            # Bone/joint order must match the posedirs basis (kintree/joint index
+            # order). Reproduce the importer's naming: use stored J_names if present,
+            # otherwise the "J_{i}" fallback that create_armature_and_weights assigns.
+            joint_names = data.get("J_names")
+            if joint_names is None:
+                joints = data.get("J")
+                if joints is not None and hasattr(joints, "__len__"):
+                    num_joints = len(joints)
+                else:
+                    num_joints = int(np.asarray(data["kintree_table"]).shape[1])
+                joint_names = [f"J_{i}" for i in range(num_joints)]
+
+            apply_pose_correctives(obj, data["posedirs"], data["v_template"], joint_names)
             self.report({"INFO"}, "Applied pose correctives successfully.")
             return {"FINISHED"}
         except Exception as e:

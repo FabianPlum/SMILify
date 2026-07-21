@@ -71,14 +71,43 @@ def load_npz_file(filepath):
         return None
 
 
-def apply_pose_correctives(obj, posedirs, base_vertices):
+def apply_pose_correctives(obj, posedirs, base_vertices, joint_names=None):
     """
-    Apply pose-dependent corrective shape keys based on current armature pose.
+    Apply pose-dependent corrective shape keys based on the current armature pose.
+
+    This reproduces the SMPL/SMAL pose-blend-shape term used in
+    ``smal_model/smal_torch.py``::
+
+        pose_feature = flatten( R_local[j] - I  for j in 1..J-1 )   # model frame
+        v_offset     = reshape( pose_feature @ posedirs_mat , [V, 3] )
+        v_posed      = v_template + v_offset                        # BEFORE skinning
+
+    The correctives are written back into the REST mesh (``obj.data.vertices.co``);
+    the Armature modifier then applies linear-blend skinning on top, exactly like
+    the reference pipeline where correctives are added to the un-posed vertices.
+
+    Two things must match the reference for the offsets to be correct (issue #24):
+
+    1. **Rotation frame.** ``pose_bone.matrix_basis`` is the pose rotation expressed
+       in the bone's *local* rest frame ``B`` (the armature builder points every
+       bone along +Z via ``tail = head + [0, 0, 0.1]``, so ``B != I``). The SMPL
+       posedirs expect the joint rotation in the *model* frame, so we conjugate:
+       ``R_model = B @ matrix_basis @ B.T``. Feeding ``matrix_basis`` directly (the
+       previous behaviour) applied the correction in the wrong basis.
+
+    2. **Joint order.** The pose_feature blocks must follow the kintree/joint-index
+       order the posedirs were built in, so we look bones up by ``joint_names`` in
+       order and skip the root (joint 0), matching ``Rs[:, 1:]`` in smal_torch.
 
     Args:
-    - obj (bpy.types.Object): The mesh object to apply corrections to
-    - posedirs (numpy.ndarray): Array of shape (num_vertices, 3, num_joints * 9) containing pose-dependent deformations
-    - base_vertices (numpy.ndarray): Array of shape (num_vertices, 3) containing base vertex positions
+    - obj (bpy.types.Object): The mesh object to apply corrections to.
+    - posedirs (numpy.ndarray): Array of shape (num_vertices, 3, (num_joints-1) * 9)
+      containing the pose-dependent deformation basis.
+    - base_vertices (numpy.ndarray): Array of shape (num_vertices, 3) with the base
+      (rest / v_template) vertex positions. Correctives are added on top of these,
+      so re-running is idempotent.
+    - joint_names (list[str] | None): Bone names in joint-index order (index 0 is the
+      root). If None, falls back to the armature's pose-bone order (legacy behaviour).
     """
     # Find the armature
     armature = obj.find_armature()
@@ -90,73 +119,74 @@ def apply_pose_correctives(obj, posedirs, base_vertices):
     bpy.context.view_layer.objects.active = armature
     bpy.ops.object.mode_set(mode="POSE")
 
-    # Get pose bones (excluding root)
-    pose_bones = armature.pose.bones[1:]  # Skip root bone
+    # Select the pose bones in joint-index order (skipping the root, joint 0) so the
+    # pose_feature blocks line up with the posedirs basis. Fall back to collection
+    # order only if we were not told the joint order.
+    if joint_names is not None:
+        pose_bones = []
+        for name in joint_names[1:]:
+            pb = armature.pose.bones.get(name)
+            if pb is None:
+                print(f"Warning: pose bone '{name}' not found; skipping.")
+                continue
+            pose_bones.append(pb)
+    else:
+        pose_bones = list(armature.pose.bones[1:])  # legacy fallback: skip root bone
 
-    # Store current vertex positions (these are the skinned positions without correctives)
-    if "base_skinned_positions" not in obj:
-        # Get current deformed vertex positions (from regular skinning)
-        world_matrix = np.array(obj.matrix_world)
-        world_matrix_inv = np.array(obj.matrix_world.inverted())
-        base_skinned_positions = np.array([np.array(obj.matrix_world @ v.co) for v in obj.data.vertices])
-        # Store these positions for future resets
-        obj["base_skinned_positions"] = base_skinned_positions.tobytes()
-        obj["world_matrix"] = world_matrix.tobytes()
-        obj["world_matrix_inv"] = world_matrix_inv.tobytes()
-
-    # Prepare pose feature vector
+    # Prepare pose feature vector: (R_model - I) flattened per non-root joint.
     pose_feature = []
     for bone in pose_bones:
-        # Get bone's current rotation matrix in local space and convert to numpy
-        R = np.array(bone.matrix_basis.to_3x3())
-        # Compute difference from identity
-        R_diff = R - np.eye(3)
-        # Flatten and add to pose feature vector
-        pose_feature.extend(R_diff.flatten())
+        # Pose rotation in the bone's LOCAL rest frame.
+        # Use the quaternion to discard any accidental pose scale/shear.
+        M_basis = np.array(bone.matrix_basis.to_quaternion().to_matrix())
+        # Bone rest orientation (bone-local -> armature/model space).
+        B = np.array(bone.bone.matrix_local.to_3x3())
+        # Conjugate the local rotation into the model frame the posedirs live in.
+        R_model = B @ M_basis @ B.T
+        # Compute difference from identity, flatten (row-major), append.
+        pose_feature.extend((R_model - np.eye(3)).flatten())
 
     pose_feature = np.array(pose_feature)
     print(f"Generated pose feature vector of length: {len(pose_feature)}")
 
-    # Reshape posedirs if needed
+    # Reshape posedirs to (num_vertices * 3, num_pose_basis) if given as (V, 3, P).
     if len(posedirs.shape) == 3:
         num_vertices, _, num_pose_basis = posedirs.shape
         posedirs_reshaped = np.reshape(posedirs, [-1, num_pose_basis])
     else:
         posedirs_reshaped = posedirs
+        num_pose_basis = posedirs_reshaped.shape[-1]
 
     print(f"Posedirs shape: {posedirs_reshaped.shape}")
     print(f"Pose feature shape: {pose_feature.shape}")
 
-    # Calculate vertex offsets
+    if pose_feature.shape[0] != num_pose_basis:
+        print(
+            f"Warning: pose feature length ({pose_feature.shape[0]}) does not match "
+            f"posedirs basis size ({num_pose_basis}). Correctives not applied."
+        )
+        bpy.ops.object.mode_set(mode="OBJECT")
+        return
+
+    # Corrective offsets in the model (== object-local) frame. Identical math to
+    # smal_torch: pose_feature @ posedirs_mat, where posedirs_mat = posedirs_reshaped.T.
     vertex_offsets = np.reshape(np.matmul(pose_feature, posedirs_reshaped.T), [-1, 3])
 
-    # Switch to object mode to modify vertices
+    # Switch to object mode to modify the rest mesh.
     bpy.ops.object.mode_set(mode="OBJECT")
     bpy.context.view_layer.objects.active = obj
 
-    # Restore base skinned positions
-    base_skinned_positions = np.frombuffer(obj["base_skinned_positions"]).reshape(-1, 3)
-    world_matrix = np.frombuffer(obj["world_matrix"]).reshape(4, 4)
-    world_matrix_inv = np.frombuffer(obj["world_matrix_inv"]).reshape(4, 4)
-
-    # Apply offsets to vertices
+    # Add the correctives to the base rest vertices (object-local space). The
+    # Armature modifier applies skinning afterwards, mirroring v_posed -> LBS.
+    base_vertices = np.asarray(base_vertices, dtype=np.float64)
     for idx, offset in enumerate(vertex_offsets):
-        # Get the base skinned position
-        skinned_pos = base_skinned_positions[idx]
-        # Add corrective offset to the skinned position
-        final_pos = skinned_pos + offset
-        # Update vertex position (convert back to local space)
-        local_pos = world_matrix_inv @ np.append(final_pos, 1.0)
-        obj.data.vertices[idx].co = local_pos[:3]
+        obj.data.vertices[idx].co = base_vertices[idx] + offset
 
-        # Print debug info for first vertex
         if idx == 0:
             print("First vertex:")
-            print(f"  Base position: {base_vertices[idx]}")
-            print(f"  Base skinned position: {skinned_pos}")
-            print(f"  Pose offset: {offset}")
-            print(f"  Final position: {final_pos}")
-            print(f"  Local position: {local_pos[:3]}")
+            print(f"  Base (rest) position: {base_vertices[idx]}")
+            print(f"  Pose offset:          {offset}")
+            print(f"  Final rest position:  {base_vertices[idx] + offset}")
 
     obj.data.update()
     print("Applied pose-dependent corrective shape keys")
