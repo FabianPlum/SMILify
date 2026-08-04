@@ -158,11 +158,21 @@ distortion** — and it is the fit that visually looks like an ant:
 
 ![3D deform comparison](out/renders3d/render3d_deform.png)
 
-Read the columns: baseline and A4 are washed in bright orange (free-form deformation
-everywhere), meshes bloated and smeared, legs turned into thick ribbons. `M4b_ceiling_free`
-is entirely black — no free-form deformation at all — with a clean silhouette, distinct
-legs, proper gaster and head. **The surface metrics reward the shrink-wrap; the pose+shape
-fit is the one with real anatomy.**
+Read the columns: the stock baseline is washed in bright orange (free-form deformation
+everywhere), meshes bloated and smeared, legs turned into thick ribbons.
+`M4b_ceiling_free` is entirely black — no free-form deformation at all — with a clean
+silhouette, distinct legs, proper gaster and head. **The surface metrics reward the
+shrink-wrap; the pose+shape fit is the one with real anatomy.**
+
+**An honest caveat on the recommended arm.** `M7_handoff_midline` sits in the middle
+column-wise and, visually, still looks much closer to the baseline than to M4b — its gaster
+is noticeably darker (less deformed), consistent with the measured −52% deform magnitude,
+but the thorax is still heavily orange and the overall mesh still reads as melted rather
+than as an ant. The metrics say M7 is better than the baseline on 9 of 11 axes and I believe
+them, but nobody should look at this figure and conclude the problem is solved. **The
+free-form regime still produces meshes that do not look like ants; M7 reduces that, it does
+not remove it.** Removing it requires §6 — a shape space big enough that the offsets are not
+needed — not more loss engineering.
 
 ![3D error comparison](out/renders3d/render3d_error.png)
 
