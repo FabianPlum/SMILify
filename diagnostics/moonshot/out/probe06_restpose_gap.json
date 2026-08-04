@@ -1,0 +1,317 @@
+{
+ "template_leg_elevations": {
+  "l1_r": -23.710267527137557,
+  "l2_r": -21.170797310413636,
+  "l3_r": -15.887968753537638,
+  "l1_l": -23.310449166438485,
+  "l2_l": -23.533902708166277,
+  "l3_l": -15.973417263112689
+ },
+ "template_profile": {
+  "frac_below": 0.3054,
+  "frac_deep": 0.03835,
+  "reach_below": 0.654746922508032
+ },
+ "target_rows": [
+  {
+   "frac_below": 0.27405,
+   "frac_deep": 0.04315,
+   "reach_below": 0.5144512215197863,
+   "file": "Acanthostichus_aff.brevicornis_CASENT0744328_processed.obj"
+  },
+  {
+   "frac_below": 0.2695,
+   "frac_deep": 0.1008,
+   "reach_below": 0.7122476649318932,
+   "file": "Acromyrmex_coronatus_CASENT0744365_processed.obj"
+  },
+  {
+   "frac_below": 0.34305,
+   "frac_deep": 0.09345,
+   "reach_below": 0.5019240098066962,
+   "file": "Acromyrmex_lobicornis_CASENT0878007_processed.obj"
+  },
+  {
+   "frac_below": 0.2828,
+   "frac_deep": 0.09695,
+   "reach_below": 0.5579543494368978,
+   "file": "Anochetus_risii_CASENT0877608_processed.obj"
+  },
+  {
+   "frac_below": 0.34695,
+   "frac_deep": 0.11035,
+   "reach_below": 0.6585429699390044,
+   "file": "Anochetus_risii_CASENT0877609_processed.obj"
+  },
+  {
+   "frac_below": 0.32685,
+   "frac_deep": 0.1248,
+   "reach_below": 0.6594078484704368,
+   "file": "Aphaenogaster_pallida_CASENT0745235_processed.obj"
+  },
+  {
+   "frac_below": 0.3125,
+   "frac_deep": 0.0578,
+   "reach_below": 0.7046629773253479,
+   "file": "Atopomyrmex_mocquerysi_CASENT0744784_processed.obj"
+  },
+  {
+   "frac_below": 0.142,
+   "frac_deep": 0.0068,
+   "reach_below": 0.37827000762055973,
+   "file": "Carebara_trechideros_CASENT0877591_processed.obj"
+  },
+  {
+   "frac_below": 0.2911,
+   "frac_deep": 0.0661,
+   "reach_below": 0.562952191211867,
+   "file": "Centromyrmex_brachycola_CASENT0744052_processed.obj"
+  },
+  {
+   "frac_below": 0.33405,
+   "frac_deep": 0.06665,
+   "reach_below": 0.5618024889044956,
+   "file": "Cephalotes_minutus_CASENT0709253_processed.obj"
+  },
+  {
+   "frac_below": 0.3328,
+   "frac_deep": 0.0461,
+   "reach_below": 0.5260781486948085,
+   "file": "Cephalotes_simillimus_CASENT0744408_processed.obj"
+  },
+  {
+   "frac_below": 0.2723,
+   "frac_deep": 0.03175,
+   "reach_below": 0.5875705715291405,
+   "file": "Cephalotes_spinosus_CASENT0744158_processed.obj"
+  },
+  {
+   "frac_below": 0.2142,
+   "frac_deep": 0.0353,
+   "reach_below": 0.714072253774785,
+   "file": "Crematogaster_nawai_OKENT0105046_processed.obj"
+  },
+  {
+   "frac_below": 0.30875,
+   "frac_deep": 0.1003,
+   "reach_below": 0.642417794639265,
+   "file": "Cryptopone_sauteri_CASENT0743771_processed.obj"
+  },
+  {
+   "frac_below": 0.33175,
+   "frac_deep": 0.0331,
+   "reach_below": 0.5351083074600687,
+   "file": "Cyphoidris_afrc-tz01_CASENT0744810_processed.obj"
+  },
+  {
+   "frac_below": 0.2957,
+   "frac_deep": 0.0625,
+   "reach_below": 0.5025042296543465,
+   "file": "Cyphomyrmex_cf.minutus_CASENT0744280_processed.obj"
+  },
+  {
+   "frac_below": 0.28195,
+   "frac_deep": 0.1036,
+   "reach_below": 0.6802067133527261,
+   "file": "Dilobocondyla_fouqueti_CASENT0745576_processed.obj"
+  },
+  {
+   "frac_below": 0.3408,
+   "frac_deep": 0.13905,
+   "reach_below": 0.5855188120323702,
+   "file": "Dorylus_fulvus_CASENT0745678_processed.obj"
+  },
+  {
+   "frac_below": 0.2814,
+   "frac_deep": 0.0,
+   "reach_below": 0.2641606584666045,
+   "file": "Eciton_hamatum_CASENT0744580_processed.obj"
+  },
+  {
+   "frac_below": 0.31805,
+   "frac_deep": 0.1022,
+   "reach_below": 0.6273543983349054,
+   "file": "Ectatomma_brunneum_CASENT0744575_processed.obj"
+  },
+  {
+   "frac_below": 0.2626,
+   "frac_deep": 0.03245,
+   "reach_below": 0.6441278013649301,
+   "file": "Eurhopalothrix_procera_CASENT0745605_processed.obj"
+  },
+  {
+   "frac_below": 0.39095,
+   "frac_deep": 0.1331,
+   "reach_below": 0.5672247808280771,
+   "file": "Heteroponera_panamensis_CASENT0744055_processed.obj"
+  },
+  {
+   "frac_below": 0.21285,
+   "frac_deep": 0.00035,
+   "reach_below": 0.3096448091625407,
+   "file": "Labidus_praedator_CASENT0744236_processed.obj"
+  },
+  {
+   "frac_below": 0.31745,
+   "frac_deep": 0.1151,
+   "reach_below": 0.7415475130813531,
+   "file": "Labidus_praedator_CASENT0744237_processed.obj"
+  },
+  {
+   "frac_below": 0.2311,
+   "frac_deep": 0.04135,
+   "reach_below": 0.7683623961766263,
+   "file": "Lasius_nr._fuliginosus_CASENT0878037_processed.obj"
+  },
+  {
+   "frac_below": 0.37555,
+   "frac_deep": 0.1846,
+   "reach_below": 0.6312137464679605,
+   "file": "Lioponera_daikoku_OKENT0105067_processed.obj"
+  },
+  {
+   "frac_below": 0.3036,
+   "frac_deep": 0.04415,
+   "reach_below": 0.5325888761806981,
+   "file": "Mayriella_sp._CASENT0745610_processed.obj"
+  },
+  {
+   "frac_below": 0.3641,
+   "frac_deep": 0.13225,
+   "reach_below": 0.5846257020745226,
+   "file": "Mesoponera_ambigua_CASENT0745584_processed.obj"
+  },
+  {
+   "frac_below": 0.32765,
+   "frac_deep": 0.05535,
+   "reach_below": 0.6078469390432694,
+   "file": "Myrmecina_ryukyuensis_OKENT0105085_processed.obj"
+  },
+  {
+   "frac_below": 0.29735,
+   "frac_deep": 0.04745,
+   "reach_below": 0.6504905216457547,
+   "file": "Myrmecina_sp._CASENT0745613_processed.obj"
+  },
+  {
+   "frac_below": 0.4001,
+   "frac_deep": 0.08895,
+   "reach_below": 0.485889659498436,
+   "file": "Nesomyrmex_angulatus_CASENT0744820_processed.obj"
+  },
+  {
+   "frac_below": 0.369,
+   "frac_deep": 0.1337,
+   "reach_below": 0.606948555669905,
+   "file": "Odontomachus_troglodytes_CASENT0744970_processed.obj"
+  },
+  {
+   "frac_below": 0.3653,
+   "frac_deep": 0.05335,
+   "reach_below": 0.666858302821403,
+   "file": "Oxyopomyrmex_saulcyi_CASENT0745218_processed.obj"
+  },
+  {
+   "frac_below": 0.32965,
+   "frac_deep": 0.07555,
+   "reach_below": 0.6796134731347542,
+   "file": "Polyrhachis_decemdentata_CASENT0744779_processed.obj"
+  },
+  {
+   "frac_below": 0.35985,
+   "frac_deep": 0.0997,
+   "reach_below": 0.6004300791624029,
+   "file": "Polyrhachis_dives_CASENT0878093_processed.obj"
+  },
+  {
+   "frac_below": 0.28825,
+   "frac_deep": 0.0972,
+   "reach_below": 0.6388654474384163,
+   "file": "Ponera_kohmoku_OKENT0105440_processed.obj"
+  },
+  {
+   "frac_below": 0.25055,
+   "frac_deep": 0.0695,
+   "reach_below": 0.5997609350945746,
+   "file": "Ponera_tamon_OKENT0105154_processed.obj"
+  },
+  {
+   "frac_below": 0.3059,
+   "frac_deep": 0.11035,
+   "reach_below": 0.5448306811998547,
+   "file": "Pseudolasius_sp._CASENT0878065_processed.obj"
+  },
+  {
+   "frac_below": 0.3216,
+   "frac_deep": 0.0963,
+   "reach_below": 0.6309147130837649,
+   "file": "Pseudomyrmex_cf.solis_CASENT0744065_processed.obj"
+  },
+  {
+   "frac_below": 0.2973,
+   "frac_deep": 0.0314,
+   "reach_below": 0.6182380678503204,
+   "file": "Solenopsis_invicta_CASENT0744384_processed.obj"
+  },
+  {
+   "frac_below": 0.3504,
+   "frac_deep": 0.1233,
+   "reach_below": 0.6383367894583626,
+   "file": "Stigmatomma_FHG02_CASENT0745561_processed.obj"
+  },
+  {
+   "frac_below": 0.3775,
+   "frac_deep": 0.15655,
+   "reach_below": 0.5951537784464849,
+   "file": "Strumigenys_alberti_CASENT0878103_processed.obj"
+  },
+  {
+   "frac_below": 0.3528,
+   "frac_deep": 0.0821,
+   "reach_below": 0.6311860641602125,
+   "file": "Strumigenys_canina_OKENT0105288_processed.obj"
+  },
+  {
+   "frac_below": 0.2978,
+   "frac_deep": 0.1193,
+   "reach_below": 0.5834326199555301,
+   "file": "Strumigenys_crassicornis_CASENT0744273_processed.obj"
+  },
+  {
+   "frac_below": 0.32085,
+   "frac_deep": 0.0255,
+   "reach_below": 0.6145923126389483,
+   "file": "Strumigenys_sp._appretiata_group_CASENT0744156_processed.obj"
+  },
+  {
+   "frac_below": 0.2512,
+   "frac_deep": 0.0596,
+   "reach_below": 0.6580972719886317,
+   "file": "Strumigenys_stenorhina_OKENT0105268_processed.obj"
+  },
+  {
+   "frac_below": 0.33545,
+   "frac_deep": 0.08125,
+   "reach_below": 0.6611745412698414,
+   "file": "Syllophopsis_sechellensis_OKENT0105212_processed.obj"
+  },
+  {
+   "frac_below": 0.34855,
+   "frac_deep": 0.05775,
+   "reach_below": 0.5398754289241118,
+   "file": "Temnothorax_congruus_OKENT0105443_processed.obj"
+  },
+  {
+   "frac_below": 0.31365,
+   "frac_deep": 0.0269,
+   "reach_below": 0.5544770784888228,
+   "file": "Temnothorax_sp._OKENT0105336_processed.obj"
+  },
+  {
+   "frac_below": 0.32245,
+   "frac_deep": 0.08045,
+   "reach_below": 0.5737453625389494,
+   "file": "Tetramorium_kraepelini_CASENT0744084_processed.obj"
+  }
+ ]
+}

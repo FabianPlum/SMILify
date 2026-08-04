@@ -1,0 +1,48 @@
+# M2_softnn — replace hard-NN chamfer with a softnn correspondence operator.
+# Arm E1 established the failure is a multimodal ASSIGNMENT problem (10x pose lr made the
+# fit worse than its own init), so this changes the assignment, not the optimizer.
+# Schedule and all weights are identical to C0_control, so this isolates the operator.
+# See fitter_3d/correspondence.py for the operator and its citations.
+stages:
+  Stage_0_init:
+    scheme: 'init_rot_lock'
+    nits: 100
+    lr: 0.05
+    n_sample: 6000
+    edge_mode: 'shrink'
+    lr_decay: false
+    corr_mode: 'softnn'
+    corr_tau: 0.03
+  Stage_1_default:
+    scheme: 'default'
+    nits: 300
+    lr: 0.02
+    n_sample: 6000
+    edge_mode: 'shrink'
+    lr_decay: false
+    corr_mode: 'softnn'
+    corr_tau: 0.03
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.8, w_normal: 0.02, w_laplacian: 0.01}
+    custom_lrs: {joint_rot: 0.002}
+  Stage_2_deform_coarse:
+    scheme: 'deform'
+    nits: 1000
+    lr: 0.002
+    n_sample: 6000
+    edge_mode: 'shrink'
+    lr_decay: false
+    corr_mode: 'softnn'
+    corr_tau: 0.03
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.8, w_normal: 0.005, w_laplacian: 0.01}
+  Stage_3_deform_fine:
+    scheme: 'deform'
+    nits: 1000
+    lr: 0.0005
+    n_sample: 6000
+    edge_mode: 'shrink'
+    lr_decay: false
+    corr_mode: 'softnn'
+    corr_tau: 0.03
+    loss_weights: {w_chamfer: 0.5, w_edge: 0.2, w_normal: 0.002, w_laplacian: 0.001}
+args:
+  results_dir: diagnostics/moonshot/runs/M2_softnn

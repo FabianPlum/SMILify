@@ -1,0 +1,40 @@
+# E2 — POSE BUDGET + OFFSET PENALTY.
+# Adds intervention (2): an explicit cost on ||deform_verts||. The baseline has no such
+# term, which is why free-form offsets grow to 4% mean / 38% max of specimen half-extent
+# and take over the fit. Making offsets expensive should force pose+shape to explain more
+# of the target, preserving correspondence.
+stages:
+  A_init:
+    scheme: 'init_rot_lock'
+    nits: 150
+    lr: 0.05
+    n_sample: 6000
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.0, w_normal: 0.0, w_laplacian: 0.0}
+  B_pose_coarse:
+    scheme: 'default'
+    nits: 800
+    lr: 0.02
+    n_sample: 6000
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.2, w_normal: 0.02, w_laplacian: 0.01}
+    custom_lrs: {joint_rot: 0.02}
+  C_pose_fine:
+    scheme: 'pose'
+    nits: 600
+    lr: 0.008
+    n_sample: 8000
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.2, w_normal: 0.02, w_laplacian: 0.01}
+    custom_lrs: {joint_rot: 0.008}
+  D_deform_coarse:
+    scheme: 'deform'
+    nits: 500
+    lr: 0.002
+    n_sample: 8000
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.2, w_normal: 0.005, w_laplacian: 0.01, w_offset: 5.0}
+  E_deform_fine:
+    scheme: 'deform'
+    nits: 350
+    lr: 0.0005
+    n_sample: 8000
+    loss_weights: {w_chamfer: 0.5, w_edge: 0.1, w_normal: 0.002, w_laplacian: 0.001, w_offset: 2.0}
+args:
+  results_dir: diagnostics/moonshot/runs/E2_offsetpenalty

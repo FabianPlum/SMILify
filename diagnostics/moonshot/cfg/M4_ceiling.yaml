@@ -1,0 +1,47 @@
+# M4 — THE CORRESPONDENCE-PRESERVING CEILING.
+# Question: with deform_verts NEVER enabled, how well can pose + shape alone explain these
+# scans? This bounds what is achievable without the free-form deformation that destroys
+# correspondence. If the ceiling is close to the baseline's Stage_3 surface numbers, the
+# deform stages are unnecessary; if it is far below, free-form offsets are doing real work
+# and the question becomes how to make them anatomically cheap rather than how to remove them.
+# Deliberately generous: 4000 iterations, all of them pose/shape-bearing.
+stages:
+  S0_init:
+    scheme: 'init_rot_lock'
+    nits: 200
+    lr: 0.05
+    n_sample: 8000
+    edge_mode: 'rest'
+    lr_decay: false
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.0, w_normal: 0.0, w_laplacian: 0.0}
+  S1_shape:
+    scheme: 'shape'
+    nits: 800
+    lr: 0.02
+    n_sample: 8000
+    edge_mode: 'rest'
+    lr_decay: true
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.05, w_normal: 0.01, w_laplacian: 0.005,
+                   w_beta_prior: 0.002, w_sym: 0.5}
+  S2_pose:
+    scheme: 'default_with_betas_trans'
+    nits: 1500
+    lr: 0.015
+    n_sample: 10000
+    edge_mode: 'rest'
+    lr_decay: true
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.05, w_normal: 0.01, w_laplacian: 0.005,
+                   w_beta_prior: 0.002, w_sym: 0.5}
+    custom_lrs: {joint_rot: 0.01}
+  S3_pose_fine:
+    scheme: 'pose'
+    nits: 1500
+    lr: 0.005
+    n_sample: 12000
+    edge_mode: 'rest'
+    lr_decay: true
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.05, w_normal: 0.01, w_laplacian: 0.005,
+                   w_beta_prior: 0.002, w_sym: 0.5}
+    custom_lrs: {joint_rot: 0.003}
+args:
+  results_dir: diagnostics/moonshot/runs/M4_ceiling

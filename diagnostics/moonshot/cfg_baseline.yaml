@@ -1,0 +1,38 @@
+# Baseline = fitter_3d/ants_cfg.yaml verbatim, only results_dir changed.
+stages:
+  Stage_0_init:
+    scheme: 'init_rot_lock'
+    nits: 100
+    lr: 0.05
+  Stage_1_default:
+      scheme: 'default'
+      nits: 300
+      lr: 0.02
+      loss_weights:
+          w_chamfer: 1.
+          w_edge: 0.8
+          w_normal: 0.02
+          w_laplacian: 0.01
+      custom_lrs:
+        joint_rot: 0.002
+  Stage_2_deform_coarse:
+    scheme: 'deform'
+    nits: 1000
+    lr: 0.002
+    loss_weights:
+      w_chamfer: 1.
+      w_edge: 0.8
+      w_normal: 0.005
+      w_laplacian: 0.01
+  Stage_3_deform_fine:
+    scheme: 'deform'
+    nits: 1000
+    lr: 0.0005
+    loss_weights:
+      w_chamfer: 0.5
+      w_edge: 0.2
+      w_normal: 0.002
+      w_laplacian: 0.001
+args:
+  results_dir: diagnostics/moonshot/runs/baseline
+  shape_family_id: -1

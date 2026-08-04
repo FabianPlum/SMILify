@@ -1,0 +1,604 @@
+{
+ "rows": [
+  {
+   "file": "Acanthomyrmex_cf.ferox_CASENT0878066_processed.obj",
+   "roll_deg": 4.219501294858882,
+   "degeneracy_e3_over_e2": 0.702531012133497,
+   "evals": [
+    1049304.6441106515,
+    488524.47748706123,
+    343203.5956209729
+   ]
+  },
+  {
+   "file": "Acromyrmex_cf.coronatus_CASENT0744044_processed.obj",
+   "roll_deg": 6.528522136018703,
+   "degeneracy_e3_over_e2": 0.35667611362915536,
+   "evals": [
+    64997.629711902715,
+    40595.825818695084,
+    14479.561382578288
+   ]
+  },
+  {
+   "file": "Acropyga_butteli_CASENT0878079_processed.obj",
+   "roll_deg": 10.223408304202326,
+   "degeneracy_e3_over_e2": 0.6467697131905218,
+   "evals": [
+    259182.8641921379,
+    45757.58777476846,
+    29594.621921377122
+   ]
+  },
+  {
+   "file": "Aenictus_afrc-gh01_CASENT0744678_processed.obj",
+   "roll_deg": 15.960320009052653,
+   "degeneracy_e3_over_e2": 0.39764641533558626,
+   "evals": [
+    227727.4719260355,
+    139611.19496989934,
+    55515.8912204981
+   ]
+  },
+  {
+   "file": "Allomerus_octoarticulatus_CASENT0744406_processed.obj",
+   "roll_deg": 1.160806077909339,
+   "degeneracy_e3_over_e2": 0.7862777758421221,
+   "evals": [
+    161731.36745780846,
+    65175.464004468035,
+    51246.01887691142
+   ]
+  },
+  {
+   "file": "Aphaenogaster_gonacantha_CASENT0745599_processed.obj",
+   "roll_deg": 1.5117558541360256,
+   "degeneracy_e3_over_e2": 0.6121992793869948,
+   "evals": [
+    245749.85895706498,
+    51322.98105547271,
+    31419.89201815278
+   ]
+  },
+  {
+   "file": "Aphaenogaster_trinacriae_CASENT0745222_processed.obj",
+   "roll_deg": 25.09869031677826,
+   "degeneracy_e3_over_e2": 0.8918738422532207,
+   "evals": [
+    900361.3340582481,
+    251108.77283012038,
+    223957.34604749063
+   ]
+  },
+  {
+   "file": "Atta_sp._CASENT0744324_processed.obj",
+   "roll_deg": 75.21158845172921,
+   "degeneracy_e3_over_e2": 0.7310884154807893,
+   "evals": [
+    281253.174137094,
+    178567.8584666407,
+    130548.89270217418
+   ]
+  },
+  {
+   "file": "Blepharidatta_brasiliensis_CASENT0745136_processed.obj",
+   "roll_deg": 73.14584447952254,
+   "degeneracy_e3_over_e2": 0.7891491683990591,
+   "evals": [
+    214004.50032514532,
+    77689.66796404951,
+    61308.736867028696
+   ]
+  },
+  {
+   "file": "Bothroponera_pachyderma_CASENT0744926_processed.obj",
+   "roll_deg": 37.72655518647338,
+   "degeneracy_e3_over_e2": 0.6158673113241754,
+   "evals": [
+    105307.73208785767,
+    39266.90813202939,
+    24183.20513528634
+   ]
+  },
+  {
+   "file": "Camponotus_blandus_CASENT0744254_processed.obj",
+   "roll_deg": 4.600615791383352,
+   "degeneracy_e3_over_e2": 0.7984846752627855,
+   "evals": [
+    2557191.230722456,
+    605708.0912698613,
+    483648.6285616569
+   ]
+  },
+  {
+   "file": "Camponotus_quadrinotatus_OKENT0105286_processed.obj",
+   "roll_deg": 18.911065507720085,
+   "degeneracy_e3_over_e2": 0.9431879805296779,
+   "evals": [
+    2615974.2992500723,
+    238145.73787855692,
+    224616.19758142612
+   ]
+  },
+  {
+   "file": "Carebara_atoma_CASENT0741393_processed.obj",
+   "roll_deg": 12.40381148997665,
+   "degeneracy_e3_over_e2": 0.6481737330969979,
+   "evals": [
+    71371.62600655215,
+    11108.232163046703,
+    7200.064309230121
+   ]
+  },
+  {
+   "file": "Centromyrmex_brachycola_CASENT0744052_processed.obj",
+   "roll_deg": 72.4576904612811,
+   "degeneracy_e3_over_e2": 0.6338939477177459,
+   "evals": [
+    110581.32128676964,
+    10899.12329001951,
+    6908.888288972894
+   ]
+  },
+  {
+   "file": "Cephalotes_duckei_CASENT0744396_processed.obj",
+   "roll_deg": 6.164811952192805,
+   "degeneracy_e3_over_e2": 0.4932335580752688,
+   "evals": [
+    48260.095143618324,
+    8457.525901013027,
+    4171.535592670399
+   ]
+  },
+  {
+   "file": "Cephalotes_pallens_CASENT0744464_processed.obj",
+   "roll_deg": 0.619080870667461,
+   "degeneracy_e3_over_e2": 0.24264964153517993,
+   "evals": [
+    31315.576798803,
+    4127.522282475402,
+    1001.541802271124
+   ]
+  },
+  {
+   "file": "Cephalotes_simillimus_CASENT0744408_processed.obj",
+   "roll_deg": 0.04339382825369548,
+   "degeneracy_e3_over_e2": 0.5722783643728767,
+   "evals": [
+    34159.68784485474,
+    5318.4632659289555,
+    3043.6414588030507
+   ]
+  },
+  {
+   "file": "Cladomyrma_sp._CASENT0745080_processed.obj",
+   "roll_deg": 18.488215205722963,
+   "degeneracy_e3_over_e2": 0.6524319812970231,
+   "evals": [
+    15962.131898185675,
+    2448.6089861501137,
+    1597.5508122556134
+   ]
+  },
+  {
+   "file": "Crematogaster_sp._CASENT0741249_processed.obj",
+   "roll_deg": 9.699487625255273,
+   "degeneracy_e3_over_e2": 0.9125768263880111,
+   "evals": [
+    16880.233774583343,
+    2263.4560236707935,
+    2065.5775147503196
+   ]
+  },
+  {
+   "file": "Cylindromyrmex_striatus_CASENT0741380_processed.obj",
+   "roll_deg": 82.64299157773081,
+   "degeneracy_e3_over_e2": 0.7863741020653741,
+   "evals": [
+    85704.50314018317,
+    17035.49150568112,
+    13396.269336022297
+   ]
+  },
+  {
+   "file": "Cyphomyrmex_minutus_CASENT0745116_processed.obj",
+   "roll_deg": 3.83470305714116,
+   "degeneracy_e3_over_e2": 0.6493149860691758,
+   "evals": [
+    10668.482413388127,
+    4226.16090548383,
+    2744.1096094703285
+   ]
+  },
+  {
+   "file": "Daceton_armigerum_CASENT0709536_processed.obj",
+   "roll_deg": 21.720368708204212,
+   "degeneracy_e3_over_e2": 0.6947453068834647,
+   "evals": [
+    321695.30591815966,
+    37768.990694416985,
+    26239.82903067145
+   ]
+  },
+  {
+   "file": "Dolichoderus_quadripunctatus_CASENT0745213_processed.obj",
+   "roll_deg": 1.0600084670831749,
+   "degeneracy_e3_over_e2": 0.49494327958519274,
+   "evals": [
+    45851.57424593641,
+    5492.922354459608,
+    2718.685004623057
+   ]
+  },
+  {
+   "file": "Dorylus_fulvus_CASENT0745670_processed.obj",
+   "roll_deg": 11.64704921175515,
+   "degeneracy_e3_over_e2": 0.4695427248731616,
+   "evals": [
+    80964.81599316915,
+    13863.414565898756,
+    6509.465451318381
+   ]
+  },
+  {
+   "file": "Dorylus_nigricans_molestus_CASENT0744680_processed.obj",
+   "roll_deg": 24.460005110611274,
+   "degeneracy_e3_over_e2": 0.7810125262303514,
+   "evals": [
+    26748.596869512483,
+    5527.1478599580905,
+    4316.771712954549
+   ]
+  },
+  {
+   "file": "Dorymyrmex_sp.1_insanus_group_CASENT0741329_processed.obj",
+   "roll_deg": 36.95570678412321,
+   "degeneracy_e3_over_e2": 0.8132246777876848,
+   "evals": [
+    41789.29037408865,
+    2796.0798021031983,
+    2273.841096134027
+   ]
+  },
+  {
+   "file": "Eciton_hamatum_CASENT0744582_processed.obj",
+   "roll_deg": 79.64243029076401,
+   "degeneracy_e3_over_e2": 0.7287513907016003,
+   "evals": [
+    286278.21621332876,
+    85971.66812183805,
+    62651.97270472592
+   ]
+  },
+  {
+   "file": "Ectomomyrmex_insulanus_CASENT0745604_processed.obj",
+   "roll_deg": 41.455097019096435,
+   "degeneracy_e3_over_e2": 0.9532840313375059,
+   "evals": [
+    32252.25622990419,
+    27332.580677188453,
+    26055.712694807826
+   ]
+  },
+  {
+   "file": "Eurhopalothrix_sp._CASENT0745608_processed.obj",
+   "roll_deg": 88.32983601911633,
+   "degeneracy_e3_over_e2": 0.6381645331864009,
+   "evals": [
+    9226.29562042579,
+    2704.6394769643557,
+    1726.0049892544696
+   ]
+  },
+  {
+   "file": "Formica_lemani_OKENT0105351_processed.obj",
+   "roll_deg": 56.94675029532748,
+   "degeneracy_e3_over_e2": 0.7902646669437687,
+   "evals": [
+    84136.966754241,
+    14350.061596466365,
+    11340.346648154058
+   ]
+  },
+  {
+   "file": "Fulakora_armigera_CASENT0744229_processed.obj",
+   "roll_deg": 3.095995139859142,
+   "degeneracy_e3_over_e2": 0.34117250902162943,
+   "evals": [
+    77741.6628426059,
+    11592.589279861422,
+    3955.0727706675657
+   ]
+  },
+  {
+   "file": "Goniomma_hispanicum_CASENT0745171_processed.obj",
+   "roll_deg": 13.741441725048531,
+   "degeneracy_e3_over_e2": 0.5090997251590639,
+   "evals": [
+    45329.470041687484,
+    9452.025901578303,
+    4812.023788689867
+   ]
+  },
+  {
+   "file": "Heteroponera_panamensis_CASENT0744055_processed.obj",
+   "roll_deg": 3.7086300572331816,
+   "degeneracy_e3_over_e2": 0.7525795460878756,
+   "evals": [
+    15371.968787563057,
+    7364.945535428717,
+    5542.70736801487
+   ]
+  },
+  {
+   "file": "Hypoponera_opacior_CASENT0878068_processed.obj",
+   "roll_deg": 89.63353728791347,
+   "degeneracy_e3_over_e2": 0.538492730902955,
+   "evals": [
+    253035.80550661567,
+    116102.55867310031,
+    62520.38388469835
+   ]
+  },
+  {
+   "file": "Hypoponera_sp._CASENT0744447_processed.obj",
+   "roll_deg": 80.31290071027102,
+   "degeneracy_e3_over_e2": 0.5210571431327735,
+   "evals": [
+    9077.433668588717,
+    5261.513896376677,
+    2741.5493993994187
+   ]
+  },
+  {
+   "file": "Platythyrea_MG01_CASENT0840864-D4_processed.obj",
+   "roll_deg": 68.19390210532924,
+   "degeneracy_e3_over_e2": 0.8364995991377284,
+   "evals": [
+    108657.32038818195,
+    14008.251201010036,
+    11717.896514265498
+   ]
+  },
+  {
+   "file": "Polyergus_rufescens_CASENT0878120_processed.obj",
+   "roll_deg": 57.384106806658686,
+   "degeneracy_e3_over_e2": 0.7562284521052199,
+   "evals": [
+    1624417.2598689026,
+    530383.349139923,
+    401090.9791424664
+   ]
+  },
+  {
+   "file": "Polyrhachis_wolfi_CASENT0878097_processed.obj",
+   "roll_deg": 1.8342185680452077,
+   "degeneracy_e3_over_e2": 0.4757866026922268,
+   "evals": [
+    4004740.561089254,
+    1032740.8207465971,
+    491364.2465646054
+   ]
+  },
+  {
+   "file": "Poneracantha_triangularis_CASENT0744645_processed.obj",
+   "roll_deg": 70.42370233098251,
+   "degeneracy_e3_over_e2": 0.7102704144795665,
+   "evals": [
+    47911.5113041578,
+    12033.395417977872,
+    8546.96475112366
+   ]
+  },
+  {
+   "file": "Pristomyrmex_cribrarius_CASENT0744868_processed.obj",
+   "roll_deg": 49.74700153565121,
+   "degeneracy_e3_over_e2": 0.8240009671447204,
+   "evals": [
+    22231.663184592806,
+    5026.396941224182,
+    4141.75594082199
+   ]
+  },
+  {
+   "file": "Procryptocerus_hirsutus_CASENT0744064_processed.obj",
+   "roll_deg": 6.719825962735182,
+   "degeneracy_e3_over_e2": 0.6320100322706818,
+   "evals": [
+    41711.47562783814,
+    4537.198786193678,
+    2867.555151280764
+   ]
+  },
+  {
+   "file": "Pseudomyrmex_sp._CASENT0744024_processed.obj",
+   "roll_deg": 86.26416187402882,
+   "degeneracy_e3_over_e2": 0.47292501485922867,
+   "evals": [
+    30976.1354937159,
+    10062.329093854956,
+    4758.727136229804
+   ]
+  },
+  {
+   "file": "Sericomyrmex_bondari_CASENT0744099_processed.obj",
+   "roll_deg": 7.28466850254045,
+   "degeneracy_e3_over_e2": 0.6546910564307613,
+   "evals": [
+    14888.756399760889,
+    11950.316382063975,
+    7823.765256855297
+   ]
+  },
+  {
+   "file": "Solenopsis_afrc-zm02_CASENT0744886_processed.obj",
+   "roll_deg": 83.6817953693004,
+   "degeneracy_e3_over_e2": 0.5864759272345618,
+   "evals": [
+    12816.989336924824,
+    2886.6717728727517,
+    1692.9635046173833
+   ]
+  },
+  {
+   "file": "Stenamma_debile_CASENT0745007_processed.obj",
+   "roll_deg": 86.80757916576606,
+   "degeneracy_e3_over_e2": 0.8951990936800168,
+   "evals": [
+    28211.728987651295,
+    4750.0612993741415,
+    4252.250570124254
+   ]
+  },
+  {
+   "file": "Stigmatomma_sp._CASENT0745539_processed.obj",
+   "roll_deg": 26.689274861700685,
+   "degeneracy_e3_over_e2": 0.7527844785943935,
+   "evals": [
+    232828.97022356576,
+    13091.43363442296,
+    9855.028042542193
+   ]
+  },
+  {
+   "file": "Strumigenys_aff.trudifera_CASENT0744341_processed.obj",
+   "roll_deg": 3.2444677653623715,
+   "degeneracy_e3_over_e2": 0.5321724825902824,
+   "evals": [
+    17623.093838921784,
+    2656.7883594788323,
+    1413.8696569808137
+   ]
+  },
+  {
+   "file": "Strumigenys_canina_OKENT0105289_processed.obj",
+   "roll_deg": 72.52848707965893,
+   "degeneracy_e3_over_e2": 0.7533461471336518,
+   "evals": [
+    14375.33847357351,
+    2304.692141332823,
+    1736.230945002288
+   ]
+  },
+  {
+   "file": "Strumigenys_lewisi_OKENT0105441_processed.obj",
+   "roll_deg": 1.5015690803528534,
+   "degeneracy_e3_over_e2": 0.7346658276302382,
+   "evals": [
+    9736.247228617372,
+    2343.8390812223715,
+    1721.9384784383308
+   ]
+  },
+  {
+   "file": "Strumigenys_stenorhina_OKENT0105267_processed.obj",
+   "roll_deg": 44.96604364861209,
+   "degeneracy_e3_over_e2": 0.6900744979175297,
+   "evals": [
+    15406.253088226716,
+    2741.192564652746,
+    1891.6270827480096
+   ]
+  },
+  {
+   "file": "Tapinoma_cf.melanocephalum_CASENT0877585_processed.obj",
+   "roll_deg": 58.93519357846282,
+   "degeneracy_e3_over_e2": 0.7697289374196947,
+   "evals": [
+    281651.12196137325,
+    51333.62125800174,
+    39512.97374482673
+   ]
+  },
+  {
+   "file": "Temnothorax_affinis_CASENT0745855_processed.obj",
+   "roll_deg": 1.741165326225928,
+   "degeneracy_e3_over_e2": 0.3449105580076621,
+   "evals": [
+    606192.4019902244,
+    85883.55691026158,
+    29622.14553760113
+   ]
+  },
+  {
+   "file": "Temnothorax_indra_OKENT0105228_processed.obj",
+   "roll_deg": 0.6840448305338663,
+   "degeneracy_e3_over_e2": 0.7860386225373741,
+   "evals": [
+    20075.654990789044,
+    3608.933109146262,
+    2836.7608099428503
+   ]
+  },
+  {
+   "file": "Terataner_luteus_CASENT0744902_processed.obj",
+   "roll_deg": 89.28349026110676,
+   "degeneracy_e3_over_e2": 0.4043082116901816,
+   "evals": [
+    54097.18955744969,
+    15800.321309479648,
+    6388.199652765985
+   ]
+  },
+  {
+   "file": "Tetramorium_immigrans_CASENT0741336_processed.obj",
+   "roll_deg": 8.438895285107469,
+   "degeneracy_e3_over_e2": 0.9621001198694923,
+   "evals": [
+    46741.08000306322,
+    2352.0036039090983,
+    2262.8629492544214
+   ]
+  },
+  {
+   "file": "Tetramorium_pacificum_CASENT0745543_processed.obj",
+   "roll_deg": 41.74386043136207,
+   "degeneracy_e3_over_e2": 0.5160716894551677,
+   "evals": [
+    40982.41608045541,
+    4567.844864425368,
+    2357.3354163531108
+   ]
+  },
+  {
+   "file": "Tetramorium_semilaeve_CASENT0745233_processed.obj",
+   "roll_deg": 86.36855374545333,
+   "degeneracy_e3_over_e2": 0.6125117660931251,
+   "evals": [
+    15241.136964405381,
+    2531.9288729315363,
+    1550.836225581471
+   ]
+  },
+  {
+   "file": "Tetramorium_venator_CASENT0744916_processed.obj",
+   "roll_deg": 72.8258242229502,
+   "degeneracy_e3_over_e2": 0.43591302698043327,
+   "evals": [
+    14915.989038738822,
+    3670.545300777421,
+    1600.0385127306904
+   ]
+  },
+  {
+   "file": "Typhlomyrmex_rogenhoferi_CASENT0744314_processed.obj",
+   "roll_deg": 0.6643638924337547,
+   "degeneracy_e3_over_e2": 0.5627959082430709,
+   "evals": [
+    28113.384717672663,
+    2421.8077400791094,
+    1362.9834866679214
+   ]
+  },
+  {
+   "file": "Zasphinctus_sarowiwai_CASENT0254678_processed.obj",
+   "roll_deg": 2.2137228494102654,
+   "degeneracy_e3_over_e2": 0.8579677853434481,
+   "evals": [
+    63316.47180436545,
+    4279.040277614305,
+    3671.2787103801584
+   ]
+  }
+ ]
+}

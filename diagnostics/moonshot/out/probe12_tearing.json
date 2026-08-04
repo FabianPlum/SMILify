@@ -1,0 +1,134 @@
+[
+ {
+  "dihedral_mean": 12.527887392044068,
+  "dihedral_p99": 64.42652568817138,
+  "spike_frac": 0.0029904502793215216,
+  "arm": "A2_restedge"
+ },
+ {
+  "dihedral_mean": 12.83717131614685,
+  "dihedral_p99": 64.88400688171387,
+  "spike_frac": 0.004297448159195483,
+  "arm": "M2_mutual"
+ },
+ {
+  "dihedral_mean": 13.011125516891479,
+  "dihedral_p99": 65.4218147277832,
+  "spike_frac": 0.004271373397205025,
+  "arm": "B1_best_off0p2"
+ },
+ {
+  "dihedral_mean": 13.026359844207764,
+  "dihedral_p99": 65.9465488433838,
+  "spike_frac": 0.004768423701170832,
+  "arm": "A3b_priors_tuned"
+ },
+ {
+  "dihedral_mean": 13.059194326400757,
+  "dihedral_p99": 66.046657371521,
+  "spike_frac": 0.0047390895546413955,
+  "arm": "A3_priors"
+ },
+ {
+  "dihedral_mean": 12.849788475036622,
+  "dihedral_p99": 66.13502769470215,
+  "spike_frac": 0.0045891596470028165,
+  "arm": "M5_handoff"
+ },
+ {
+  "dihedral_mean": 12.859524488449097,
+  "dihedral_p99": 66.62185726165771,
+  "spike_frac": 0.0037873604684136807,
+  "arm": "M3_multistart"
+ },
+ {
+  "dihedral_mean": 13.39837942123413,
+  "dihedral_p99": 66.73260746002197,
+  "spike_frac": 0.00423877986613661,
+  "arm": "B1_best_off1p0"
+ },
+ {
+  "dihedral_mean": 12.634155225753783,
+  "dihedral_p99": 66.82764682769775,
+  "spike_frac": 0.0050242823548614975,
+  "arm": "A5_robust"
+ },
+ {
+  "dihedral_mean": 12.921965837478638,
+  "dihedral_p99": 68.06066913604737,
+  "spike_frac": 0.005109025374986231,
+  "arm": "A4_nofreeze"
+ },
+ {
+  "dihedral_mean": 13.073904418945313,
+  "dihedral_p99": 69.72231712341309,
+  "spike_frac": 0.005607705365400761,
+  "arm": "C0_control"
+ },
+ {
+  "dihedral_mean": 13.699763917922974,
+  "dihedral_p99": 70.70000133514404,
+  "spike_frac": 0.00543984908144921,
+  "arm": "baseline"
+ },
+ {
+  "dihedral_mean": 13.21415205001831,
+  "dihedral_p99": 72.5766387939453,
+  "spike_frac": 0.006288908771239221,
+  "arm": "M2_softnn"
+ },
+ {
+  "dihedral_mean": 12.543688535690308,
+  "dihedral_p99": 72.58479804992676,
+  "spike_frac": 0.005407255596946925,
+  "arm": "M4_ceiling"
+ },
+ {
+  "dihedral_mean": 13.893570756912231,
+  "dihedral_p99": 74.5549129486084,
+  "spike_frac": 0.006153645855374634,
+  "arm": "A1_offset"
+ },
+ {
+  "dihedral_mean": 12.89550495147705,
+  "dihedral_p99": 82.12269744873046,
+  "spike_frac": 0.007861543423496186,
+  "arm": "E3_robust"
+ },
+ {
+  "dihedral_mean": 13.231957721710206,
+  "dihedral_p99": 82.18082466125489,
+  "spike_frac": 0.0077050946652889255,
+  "arm": "E1_posebudget"
+ },
+ {
+  "dihedral_mean": 13.90500512123108,
+  "dihedral_p99": 97.09403419494629,
+  "spike_frac": 0.011456602485850453,
+  "arm": "M2_sinkhorn"
+ },
+ {
+  "dihedral_mean": 14.369594812393188,
+  "dihedral_p99": 102.37944183349609,
+  "spike_frac": 0.013743033772334457,
+  "arm": "M4b_ceiling_free"
+ },
+ {
+  "dihedral_mean": 15.76891040802002,
+  "dihedral_p99": 109.26485900878906,
+  "spike_frac": 0.019704378256574274,
+  "arm": "M1_nopart"
+ },
+ {
+  "dihedral_mean": 17.25666880607605,
+  "dihedral_p99": 125.05730972290038,
+  "spike_frac": 0.028426388883963226,
+  "arm": "M1_hier"
+ },
+ {
+  "dihedral_mean": 17.441672611236573,
+  "dihedral_p99": 142.6853820800781,
+  "spike_frac": 0.02788044847548008,
+  "arm": "M6_augmented"
+ }
+]

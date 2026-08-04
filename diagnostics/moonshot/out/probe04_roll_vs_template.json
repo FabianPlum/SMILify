@@ -1,0 +1,456 @@
+{
+ "mesh_dir": "/home/fabi/dev/SMILify/diagnostics/moonshot/bench50",
+ "n": 50,
+ "rows": [
+  {
+   "file": "Acanthostichus_aff.brevicornis_CASENT0744328_processed.obj",
+   "best_roll_deg": 290.0,
+   "best_roll_signed": -70.0,
+   "best_roll_abs": 70.0,
+   "cost_at_0": 0.024514764547348022,
+   "cost_at_best": 0.021388471126556396,
+   "improvement_frac": 0.1275269609362748
+  },
+  {
+   "file": "Acromyrmex_coronatus_CASENT0744365_processed.obj",
+   "best_roll_deg": 320.0,
+   "best_roll_signed": -40.0,
+   "best_roll_abs": 40.0,
+   "cost_at_0": 0.056527331471443176,
+   "cost_at_best": 0.046330489218235016,
+   "improvement_frac": 0.18038782280673313
+  },
+  {
+   "file": "Acromyrmex_lobicornis_CASENT0878007_processed.obj",
+   "best_roll_deg": 135.0,
+   "best_roll_signed": 135.0,
+   "best_roll_abs": 135.0,
+   "cost_at_0": 0.04198774695396423,
+   "cost_at_best": 0.03835666552186012,
+   "improvement_frac": 0.08647954928577765
+  },
+  {
+   "file": "Anochetus_risii_CASENT0877608_processed.obj",
+   "best_roll_deg": 5.0,
+   "best_roll_signed": 5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.0207047201693058,
+   "cost_at_best": 0.0206671804189682,
+   "improvement_frac": 0.0018131010721532182
+  },
+  {
+   "file": "Anochetus_risii_CASENT0877609_processed.obj",
+   "best_roll_deg": 0.0,
+   "best_roll_signed": 0.0,
+   "best_roll_abs": 0.0,
+   "cost_at_0": 0.07066072523593903,
+   "cost_at_best": 0.07066072523593903,
+   "improvement_frac": 0.0
+  },
+  {
+   "file": "Aphaenogaster_pallida_CASENT0745235_processed.obj",
+   "best_roll_deg": 130.0,
+   "best_roll_signed": 130.0,
+   "best_roll_abs": 130.0,
+   "cost_at_0": 0.03779236599802971,
+   "cost_at_best": 0.0332762710750103,
+   "improvement_frac": 0.11949754411393174
+  },
+  {
+   "file": "Atopomyrmex_mocquerysi_CASENT0744784_processed.obj",
+   "best_roll_deg": 335.0,
+   "best_roll_signed": -25.0,
+   "best_roll_abs": 25.0,
+   "cost_at_0": 0.05608829855918884,
+   "cost_at_best": 0.051923468708992004,
+   "improvement_frac": 0.07425487948795198
+  },
+  {
+   "file": "Carebara_trechideros_CASENT0877591_processed.obj",
+   "best_roll_deg": 120.0,
+   "best_roll_signed": 120.0,
+   "best_roll_abs": 120.0,
+   "cost_at_0": 0.0649135410785675,
+   "cost_at_best": 0.030553419142961502,
+   "improvement_frac": 0.5293213305682792
+  },
+  {
+   "file": "Centromyrmex_brachycola_CASENT0744052_processed.obj",
+   "best_roll_deg": 70.0,
+   "best_roll_signed": 70.0,
+   "best_roll_abs": 70.0,
+   "cost_at_0": 0.02830415591597557,
+   "cost_at_best": 0.02304404228925705,
+   "improvement_frac": 0.1858424480960968
+  },
+  {
+   "file": "Cephalotes_minutus_CASENT0709253_processed.obj",
+   "best_roll_deg": 5.0,
+   "best_roll_signed": 5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.013414610177278519,
+   "cost_at_best": 0.013385426253080368,
+   "improvement_frac": 0.0021755327819799014
+  },
+  {
+   "file": "Cephalotes_simillimus_CASENT0744408_processed.obj",
+   "best_roll_deg": 355.0,
+   "best_roll_signed": -5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.024759188294410706,
+   "cost_at_best": 0.02465697005391121,
+   "improvement_frac": 0.004128497238440238
+  },
+  {
+   "file": "Cephalotes_spinosus_CASENT0744158_processed.obj",
+   "best_roll_deg": 5.0,
+   "best_roll_signed": 5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.021088797599077225,
+   "cost_at_best": 0.021000083535909653,
+   "improvement_frac": 0.004206691384408462
+  },
+  {
+   "file": "Crematogaster_nawai_OKENT0105046_processed.obj",
+   "best_roll_deg": 35.0,
+   "best_roll_signed": 35.0,
+   "best_roll_abs": 35.0,
+   "cost_at_0": 0.03208378702402115,
+   "cost_at_best": 0.02620670571923256,
+   "improvement_frac": 0.18317916461633457
+  },
+  {
+   "file": "Cryptopone_sauteri_CASENT0743771_processed.obj",
+   "best_roll_deg": 0.0,
+   "best_roll_signed": 0.0,
+   "best_roll_abs": 0.0,
+   "cost_at_0": 0.025378793478012085,
+   "cost_at_best": 0.025378793478012085,
+   "improvement_frac": 0.0
+  },
+  {
+   "file": "Cyphoidris_afrc-tz01_CASENT0744810_processed.obj",
+   "best_roll_deg": 235.0,
+   "best_roll_signed": -125.0,
+   "best_roll_abs": 125.0,
+   "cost_at_0": 0.08235243707895279,
+   "cost_at_best": 0.07584089040756226,
+   "improvement_frac": 0.07906926500727349
+  },
+  {
+   "file": "Cyphomyrmex_cf.minutus_CASENT0744280_processed.obj",
+   "best_roll_deg": 250.0,
+   "best_roll_signed": -110.0,
+   "best_roll_abs": 110.0,
+   "cost_at_0": 0.10021404922008514,
+   "cost_at_best": 0.0715709701180458,
+   "improvement_frac": 0.28581899768499347
+  },
+  {
+   "file": "Dilobocondyla_fouqueti_CASENT0745576_processed.obj",
+   "best_roll_deg": 75.0,
+   "best_roll_signed": 75.0,
+   "best_roll_abs": 75.0,
+   "cost_at_0": 0.052185460925102234,
+   "cost_at_best": 0.0396001972258091,
+   "improvement_frac": 0.24116417630871928
+  },
+  {
+   "file": "Dorylus_fulvus_CASENT0745678_processed.obj",
+   "best_roll_deg": 355.0,
+   "best_roll_signed": -5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.027313057333230972,
+   "cost_at_best": 0.027223452925682068,
+   "improvement_frac": 0.003280643629736955
+  },
+  {
+   "file": "Eciton_hamatum_CASENT0744580_processed.obj",
+   "best_roll_deg": 265.0,
+   "best_roll_signed": -95.0,
+   "best_roll_abs": 95.0,
+   "cost_at_0": 0.12971508502960205,
+   "cost_at_best": 0.06986892223358154,
+   "improvement_frac": 0.46136625344972887
+  },
+  {
+   "file": "Ectatomma_brunneum_CASENT0744575_processed.obj",
+   "best_roll_deg": 40.0,
+   "best_roll_signed": 40.0,
+   "best_roll_abs": 40.0,
+   "cost_at_0": 0.05872441083192825,
+   "cost_at_best": 0.05511649698019028,
+   "improvement_frac": 0.06143805958418175
+  },
+  {
+   "file": "Eurhopalothrix_procera_CASENT0745605_processed.obj",
+   "best_roll_deg": 110.0,
+   "best_roll_signed": 110.0,
+   "best_roll_abs": 110.0,
+   "cost_at_0": 0.038248464465141296,
+   "cost_at_best": 0.03566468507051468,
+   "improvement_frac": 0.06755249996980689
+  },
+  {
+   "file": "Heteroponera_panamensis_CASENT0744055_processed.obj",
+   "best_roll_deg": 305.0,
+   "best_roll_signed": -55.0,
+   "best_roll_abs": 55.0,
+   "cost_at_0": 0.08752284944057465,
+   "cost_at_best": 0.07296374440193176,
+   "improvement_frac": 0.1663463327771118
+  },
+  {
+   "file": "Labidus_praedator_CASENT0744236_processed.obj",
+   "best_roll_deg": 255.0,
+   "best_roll_signed": -105.0,
+   "best_roll_abs": 105.0,
+   "cost_at_0": 0.032771188765764236,
+   "cost_at_best": 0.02048352360725403,
+   "improvement_frac": 0.37495329346572315
+  },
+  {
+   "file": "Labidus_praedator_CASENT0744237_processed.obj",
+   "best_roll_deg": 85.0,
+   "best_roll_signed": 85.0,
+   "best_roll_abs": 85.0,
+   "cost_at_0": 0.059950388967990875,
+   "cost_at_best": 0.029736045747995377,
+   "improvement_frac": 0.5039891106649491
+  },
+  {
+   "file": "Lasius_nr._fuliginosus_CASENT0878037_processed.obj",
+   "best_roll_deg": 325.0,
+   "best_roll_signed": -35.0,
+   "best_roll_abs": 35.0,
+   "cost_at_0": 0.025652140378952026,
+   "cost_at_best": 0.023363284766674042,
+   "improvement_frac": 0.08922669135851236
+  },
+  {
+   "file": "Lioponera_daikoku_OKENT0105067_processed.obj",
+   "best_roll_deg": 65.0,
+   "best_roll_signed": 65.0,
+   "best_roll_abs": 65.0,
+   "cost_at_0": 0.09908774495124817,
+   "cost_at_best": 0.05808816850185394,
+   "improvement_frac": 0.4137704059121165
+  },
+  {
+   "file": "Mayriella_sp._CASENT0745610_processed.obj",
+   "best_roll_deg": 0.0,
+   "best_roll_signed": 0.0,
+   "best_roll_abs": 0.0,
+   "cost_at_0": 0.029065903276205063,
+   "cost_at_best": 0.029065903276205063,
+   "improvement_frac": 0.0
+  },
+  {
+   "file": "Mesoponera_ambigua_CASENT0745584_processed.obj",
+   "best_roll_deg": 355.0,
+   "best_roll_signed": -5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.053873877972364426,
+   "cost_at_best": 0.05350998789072037,
+   "improvement_frac": 0.006754480934725401
+  },
+  {
+   "file": "Myrmecina_ryukyuensis_OKENT0105085_processed.obj",
+   "best_roll_deg": 345.0,
+   "best_roll_signed": -15.0,
+   "best_roll_abs": 15.0,
+   "cost_at_0": 0.024771390482783318,
+   "cost_at_best": 0.02408790774643421,
+   "improvement_frac": 0.027591617710121762
+  },
+  {
+   "file": "Myrmecina_sp._CASENT0745613_processed.obj",
+   "best_roll_deg": 5.0,
+   "best_roll_signed": 5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.03441992402076721,
+   "cost_at_best": 0.034037910401821136,
+   "improvement_frac": 0.011098618890488778
+  },
+  {
+   "file": "Nesomyrmex_angulatus_CASENT0744820_processed.obj",
+   "best_roll_deg": 290.0,
+   "best_roll_signed": -70.0,
+   "best_roll_abs": 70.0,
+   "cost_at_0": 0.045643605291843414,
+   "cost_at_best": 0.03278733417391777,
+   "improvement_frac": 0.281666424808539
+  },
+  {
+   "file": "Odontomachus_troglodytes_CASENT0744970_processed.obj",
+   "best_roll_deg": 30.0,
+   "best_roll_signed": 30.0,
+   "best_roll_abs": 30.0,
+   "cost_at_0": 0.03358576074242592,
+   "cost_at_best": 0.030257636681199074,
+   "improvement_frac": 0.09909330584323256
+  },
+  {
+   "file": "Oxyopomyrmex_saulcyi_CASENT0745218_processed.obj",
+   "best_roll_deg": 355.0,
+   "best_roll_signed": -5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.0282538291066885,
+   "cost_at_best": 0.028143584728240967,
+   "improvement_frac": 0.003901926993018961
+  },
+  {
+   "file": "Polyrhachis_decemdentata_CASENT0744779_processed.obj",
+   "best_roll_deg": 275.0,
+   "best_roll_signed": -85.0,
+   "best_roll_abs": 85.0,
+   "cost_at_0": 0.06186044216156006,
+   "cost_at_best": 0.03735052049160004,
+   "improvement_frac": 0.3962131665006176
+  },
+  {
+   "file": "Polyrhachis_dives_CASENT0878093_processed.obj",
+   "best_roll_deg": 190.0,
+   "best_roll_signed": -170.0,
+   "best_roll_abs": 170.0,
+   "cost_at_0": 0.05375828221440315,
+   "cost_at_best": 0.053644657135009766,
+   "improvement_frac": 0.002113629281163004
+  },
+  {
+   "file": "Ponera_kohmoku_OKENT0105440_processed.obj",
+   "best_roll_deg": 315.0,
+   "best_roll_signed": -45.0,
+   "best_roll_abs": 45.0,
+   "cost_at_0": 0.02304098568856716,
+   "cost_at_best": 0.021908476948738098,
+   "improvement_frac": 0.04915192236723663
+  },
+  {
+   "file": "Ponera_tamon_OKENT0105154_processed.obj",
+   "best_roll_deg": 125.0,
+   "best_roll_signed": 125.0,
+   "best_roll_abs": 125.0,
+   "cost_at_0": 0.023006703704595566,
+   "cost_at_best": 0.017717530950903893,
+   "improvement_frac": 0.22989702573668414
+  },
+  {
+   "file": "Pseudolasius_sp._CASENT0878065_processed.obj",
+   "best_roll_deg": 80.0,
+   "best_roll_signed": 80.0,
+   "best_roll_abs": 80.0,
+   "cost_at_0": 0.06270548701286316,
+   "cost_at_best": 0.044841453433036804,
+   "improvement_frac": 0.28488788510903035
+  },
+  {
+   "file": "Pseudomyrmex_cf.solis_CASENT0744065_processed.obj",
+   "best_roll_deg": 275.0,
+   "best_roll_signed": -85.0,
+   "best_roll_abs": 85.0,
+   "cost_at_0": 0.030163250863552094,
+   "cost_at_best": 0.02507178857922554,
+   "improvement_frac": 0.16879686832690988
+  },
+  {
+   "file": "Solenopsis_invicta_CASENT0744384_processed.obj",
+   "best_roll_deg": 280.0,
+   "best_roll_signed": -80.0,
+   "best_roll_abs": 80.0,
+   "cost_at_0": 0.0543338768184185,
+   "cost_at_best": 0.038719840347766876,
+   "improvement_frac": 0.28737202984489896
+  },
+  {
+   "file": "Stigmatomma_FHG02_CASENT0745561_processed.obj",
+   "best_roll_deg": 315.0,
+   "best_roll_signed": -45.0,
+   "best_roll_abs": 45.0,
+   "cost_at_0": 0.05305153504014015,
+   "cost_at_best": 0.044483721256256104,
+   "improvement_frac": 0.16149982799557866
+  },
+  {
+   "file": "Strumigenys_alberti_CASENT0878103_processed.obj",
+   "best_roll_deg": 270.0,
+   "best_roll_signed": -90.0,
+   "best_roll_abs": 90.0,
+   "cost_at_0": 0.04722245782613754,
+   "cost_at_best": 0.04237208515405655,
+   "improvement_frac": 0.10271326176919833
+  },
+  {
+   "file": "Strumigenys_canina_OKENT0105288_processed.obj",
+   "best_roll_deg": 100.0,
+   "best_roll_signed": 100.0,
+   "best_roll_abs": 100.0,
+   "cost_at_0": 0.04442868381738663,
+   "cost_at_best": 0.03919430077075958,
+   "improvement_frac": 0.11781539755131419
+  },
+  {
+   "file": "Strumigenys_crassicornis_CASENT0744273_processed.obj",
+   "best_roll_deg": 45.0,
+   "best_roll_signed": 45.0,
+   "best_roll_abs": 45.0,
+   "cost_at_0": 0.044163864105939865,
+   "cost_at_best": 0.03420185297727585,
+   "improvement_frac": 0.22556928227039277
+  },
+  {
+   "file": "Strumigenys_sp._appretiata_group_CASENT0744156_processed.obj",
+   "best_roll_deg": 350.0,
+   "best_roll_signed": -10.0,
+   "best_roll_abs": 10.0,
+   "cost_at_0": 0.0235856082290411,
+   "cost_at_best": 0.023396659642457962,
+   "improvement_frac": 0.00801118142675176
+  },
+  {
+   "file": "Strumigenys_stenorhina_OKENT0105268_processed.obj",
+   "best_roll_deg": 0.0,
+   "best_roll_signed": 0.0,
+   "best_roll_abs": 0.0,
+   "cost_at_0": 0.017420150339603424,
+   "cost_at_best": 0.017420150339603424,
+   "improvement_frac": 0.0
+  },
+  {
+   "file": "Syllophopsis_sechellensis_OKENT0105212_processed.obj",
+   "best_roll_deg": 5.0,
+   "best_roll_signed": 5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.024806376546621323,
+   "cost_at_best": 0.024773551151156425,
+   "improvement_frac": 0.0013232644196626145
+  },
+  {
+   "file": "Temnothorax_congruus_OKENT0105443_processed.obj",
+   "best_roll_deg": 355.0,
+   "best_roll_signed": -5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.019710280001163483,
+   "cost_at_best": 0.019642017781734467,
+   "improvement_frac": 0.003463280045995625
+  },
+  {
+   "file": "Temnothorax_sp._OKENT0105336_processed.obj",
+   "best_roll_deg": 355.0,
+   "best_roll_signed": -5.0,
+   "best_roll_abs": 5.0,
+   "cost_at_0": 0.024897370487451553,
+   "cost_at_best": 0.02477230690419674,
+   "improvement_frac": 0.005023164326443512
+  },
+  {
+   "file": "Tetramorium_kraepelini_CASENT0744084_processed.obj",
+   "best_roll_deg": 50.0,
+   "best_roll_signed": 50.0,
+   "best_roll_abs": 50.0,
+   "cost_at_0": 0.02863810583949089,
+   "cost_at_best": 0.025582877919077873,
+   "improvement_frac": 0.1066840082768313
+  }
+ ]
+}

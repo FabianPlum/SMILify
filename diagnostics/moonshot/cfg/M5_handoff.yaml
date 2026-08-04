@@ -1,0 +1,40 @@
+# M5 — HAND THE HIERARCHICAL POSE TO A PROPER SURFACE STAGE.
+#
+# M1_hier produced by far the best LEG POSE of anything tested: part_leg_distal 0.0209
+# using pose alone (deform_mag = 0), vs 0.0461 at the control's pose checkpoint. But it was
+# starved of surface-convergence budget (600 deform iterations at w_offset=3.0 vs the
+# baseline's 2000 unconstrained), so its global surface numbers were poor and the two
+# effects were confounded.
+#
+# This arm separates them: start from M1_hier's final state (--init_from) and run the
+# baseline's own deform budget, but with scheme 'all' (the A4 finding: strictly better on
+# every metric) and a GENTLE offset penalty (A1's w_offset=5.0 was far too strong -- it cost
+# 43% of F-score and 371% of leg accuracy).
+#
+# If M5 lands up-and-left of C0_control on the accuracy/integrity trade-off, the
+# hierarchical pose is genuinely worth its cost. If it lands on the same frontier, the
+# hierarchy bought nothing that the deform stages could not recover on their own -- which
+# would itself be a clean negative result.
+stages:
+  Stage_2_deform_coarse:
+    scheme: 'all'
+    nits: 1000
+    lr: 0.002
+    n_sample: 6000
+    edge_mode: 'shrink'
+    lr_decay: false
+    loss_weights: {w_chamfer: 1.0, w_edge: 0.8, w_normal: 0.005, w_laplacian: 0.01,
+                   w_offset: 0.2, w_sym: 0.5, w_beta_prior: 0.002}
+    custom_lrs: {joint_rot: 0.002}
+  Stage_3_deform_fine:
+    scheme: 'all'
+    nits: 1000
+    lr: 0.0005
+    n_sample: 6000
+    edge_mode: 'shrink'
+    lr_decay: false
+    loss_weights: {w_chamfer: 0.5, w_edge: 0.2, w_normal: 0.002, w_laplacian: 0.001,
+                   w_offset: 0.08, w_sym: 0.5, w_beta_prior: 0.002}
+    custom_lrs: {joint_rot: 0.002}
+args:
+  results_dir: diagnostics/moonshot/runs/M5_handoff

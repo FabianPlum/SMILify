@@ -1,0 +1,12 @@
+# Fit outputs: ~2.9GB of .npz checkpoints across ~20 experiment arms. Regenerable from the
+# configs in cfg/ via queue_runner_v2.sh; the scored metrics.csv files are what matters and
+# are small enough to keep, so they are re-included below.
+runs/**/*.npz
+runs/*.log
+runs/**/meshes/
+runs/**/*.png
+!runs/**/metrics.csv
+
+# Benchmark set is symlinks into /media/fabi/Data/... -- the manifest in
+# out/bench50_manifest.json is the portable record of which 50 specimens were used.
+bench50/

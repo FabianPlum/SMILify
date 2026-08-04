@@ -1,0 +1,45 @@
+{
+ "run_dir": "/home/fabi/dev/SMILify/diagnostics/moonshot/runs/baseline",
+ "stages": [
+  "Stage_0_init",
+  "Stage_1_default",
+  "Stage_2_deform_coarse"
+ ],
+ "deltas": {
+  "global_rot": [
+   0.0,
+   0.16836157820881012,
+   0.0
+  ],
+  "joint_rot": [
+   0.0,
+   1.9229032003497553,
+   0.0
+  ],
+  "betas": [
+   7.464396206430873e-14,
+   1.122964195885942,
+   0.0
+  ],
+  "log_beta_scales": [
+   12.548540739696794,
+   9.776902065964826,
+   0.0
+  ],
+  "trans": [
+   0.1374646673346046,
+   0.0694183620832039,
+   0.0
+  ],
+  "betas_trans": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "deform_verts": [
+   0.0,
+   0.0,
+   4.872807837201257
+  ]
+ }
+}
