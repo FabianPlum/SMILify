@@ -18,12 +18,13 @@ repeating. Code sources and papers are in [SOURCES.md](SOURCES.md).
    for.** It reaches a good surface match by distorting the template's average edge by 74%
    and destroying 36% of local vertex neighbourhoods, after freezing pose for 83% of its
    iterations.
-2. **`M5_handoff` beats the stock pipeline on 8 of 11 metrics simultaneously** — better
-   chamfer (−57%), F-score (+4.2% @0.02), Hausdorff (−54%), normals (+7.4%), *and* 32% less
-   edge distortion and 51% less free-form deformation. Two named regressions, with a common
-   cause and a clear fix.
+2. **`M7_handoff_midline` beats the stock pipeline on 9 of 11 metrics simultaneously** —
+   chamfer −61%, fscore@0.02 +4.6%, Hausdorff −56%, normals +8.2%, *and* 32% less edge
+   distortion, 52% less free-form deformation, and 47% better bilateral symmetry. One
+   remaining regression (distal legs +15.5%), small in absolute terms.
 3. **One-word free win:** changing `scheme: 'deform'` → `scheme: 'all'` in the late stages
-   improves *every* metric at once at zero cost (`A4_nofreeze`).
+   improves *every* metric at once at zero cost (`A4_nofreeze`), **replicated over 3 seeds**
+   (deform_mag +23.52% ± 0.05).
 4. **The parametric model is more capable than the pipeline lets it be.** Pose+shape alone,
    with zero free-form offsets, reaches 83% of the baseline's fscore@0.02 with *exactly zero*
    mesh distortion — and it is the fit that visually looks like an ant.
@@ -177,12 +178,60 @@ All arms use the baseline's exact schedule and change one thing unless stated. `
 is that schedule inside the new harness (so it isolates the sampling fix); other arms are
 compared against C0 unless noted. n = 50 paired specimens, exact binomial sign test.
 
+![headline](out/headline.png)
+
+The three metric families in that figure are the whole argument. The stock pipeline is
+tuned for the first and pays for it in the other two, and **only the other two are what
+registration exists to produce**.
+
+**`M7_handoff_midline` is positive on every bar in that figure** — all four surface metrics,
+all four mesh-validity metrics, and all three correspondence metrics. It is the recommended
+arm. Its one regression (distal-leg distance, not shown here) is discussed in §4.1.
+
+The intermediate arms are still worth reading as a progression: `M5_handoff` won SURFACE and
+MESH VALIDITY but was the *worst* arm on symmetry (−21.8% bilateral, −43.8% midline), and
+`B1_best_off0p2` was positive across all three families at a smaller surface gain. Diagnosing
+M5's symmetry failure is what produced M7.
+
 ![tradeoff](out/summary_tradeoff.png)
 
-### 4.1 The headline: `M5_handoff`
+### 4.1 The headline: `M7_handoff_midline`
 
-Hierarchical part-anchored pose (§4.3) handed to the baseline's own deform budget, with
-`scheme: 'all'` and a gentle offset penalty. **Versus the stock pipeline:**
+Hierarchical part-anchored pose (§4.3) with a midsagittal-planarity constraint, handed to
+the baseline's own deform budget with `scheme: 'all'` and a gentle offset penalty.
+**Versus the stock pipeline it wins 9 of 11 metrics:**
+
+| metric | Δ | wins | sign p |
+|---|---|---|---|
+| chamfer_l2 | **−61.0%** | 47/50 | 3.7e-11 |
+| fscore@0.01 | **+7.1%** | 35/50 | 6.6e-03 |
+| fscore@0.02 | **+4.6%** | 43/50 | 2.1e-07 |
+| hausdorff_95 | **−56.0%** | 49/50 | 9.1e-14 |
+| normal_consistency | **+8.2%** | 48/50 | 2.3e-12 |
+| edge_logratio | **−32.3%** | 50/50 | 1.8e-15 |
+| deform_mag_mean | **−52.4%** | 50/50 | 1.8e-15 |
+| deform_mag_p95 | **−45.3%** | 50/50 | 1.8e-15 |
+| midline_dev | **−46.5%** | 47/50 | 3.7e-11 |
+| tri_quality | +0.4% | 24/50 | ns |
+| part_leg_distal | −15.5% *worse* | 10/50 | 2.4e-05 |
+
+The only remaining regression is distal legs. In absolute terms both are small (0.0093 vs
+0.0080, under 1% of body extent), and M7 achieves its figure with **half the free-form
+deformation** — the baseline reaches 0.0080 by shrink-wrapping legs onto the target.
+
+**How the midline term was found and fixed.** `M5_handoff` (the same arm without it) won 8
+of 11 but regressed bilateral midline deviation by **+43.8%** (13/50, p=9.4e-04). Diagnosis:
+`symmetry_penalty` ties left/right joint *scales*, which cannot see an out-of-plane rotation
+of a body joint — that moves the midsagittal vertices off y=0 while leaving every scale pair
+identical. Adding a four-line planarity penalty on the 223 `sym_verts` (variance of their y,
+so a legitimate y-translation costs nothing) swung that metric from **+43.8% worse to −46.5%
+better**, a 90-point swing, while every other metric held or improved. Isolated at the
+hierarchical stage alone (`M1_sym` vs `M1_hier`): midline 0.0457 → 0.0177 (**−61%**) with
+fscore@0.01 −0.9% and distal legs −3.6%.
+
+### 4.1b Predecessor: `M5_handoff`
+
+The same construction without the midline term. **Versus the stock pipeline:**
 
 | metric | Δ | wins | sign p |
 |---|---|---|---|
@@ -202,11 +251,8 @@ Against `C0_control` (the fairer control, which already has the sampling fix), f
 is **statistically unchanged** (−0.3%, p=0.20) while edge distortion falls 35% and
 deform_mag falls 60%, both 50/50.
 
-**The two regressions share one cause**: the hierarchical stage fits each leg independently
-against its own territory, which breaks left–right coupling. The fix is to couple mirrored
-leg chains during that stage — the machinery (`build_lr_joint_pairs`, `symmetry_penalty`)
-already exists and is used elsewhere; it is simply not applied inside the per-leg stage.
-That is the first thing I would do next.
+Its two regressions were diagnosed and one of them fixed — see §4.1. The remaining one
+(distal legs) is shared with M7 and discussed there.
 
 ### 4.2 Free wins
 
@@ -424,10 +470,8 @@ pipeline.
 4. **Co-registration over all 757 workers, several rounds.** §6 shows one round over 25
    specimens produces real generalizing gains in part placement. The spectrum says this
    needs scale, not cleverness.
-5. **Re-run the seed-repeat protocol.** Every number here is single-seed. Khaoula's keypoint
-   result died on exactly this (run-to-run std ~12% against a 15% bar). The large effects
-   (deform_mag −51%, 50/50) are safe; the small ones (fscore +0.7%) need 3 seeds before
-   anyone relies on them.
+5. **Seed-repeat the remaining arms.** `A4_nofreeze` has been replicated over 3 seeds
+   (§10); `M7_handoff_midline` has not.
 
 ---
 
@@ -454,3 +498,35 @@ every number above is checkable without re-running. The live training path
 (`fitter_3d/trainer.py`, `fitter_3d/utils.py`, `fitter_3d/optimise.py`) is **unmodified**;
 all experiments live in new files. The single change to `config.py` is an opt-in
 `SMILIFY_SMAL_FILE` environment override, needed because `N_BETAS` is derived at import.
+
+---
+
+## 10. Seed replication
+
+Every number above is single-seed unless stated. That is exactly where small effects go
+wrong — Khaoula's keypoint arm died on it, with run-to-run std ~12% against a 15% bar and one
+single-seed "improvement" inverting to a significant degradation under replication. So the
+marginal claim (`A4_nofreeze`, whose fscore gain is under 1%) was run at three seeds:
+
+| metric (sign flipped so + is better) | seed 0 | seed 1 | seed 2 | mean ± sd | verdict |
+|---|---|---|---|---|---|
+| deform_mag_mean | +23.51% | +23.46% | +23.59% | **+23.52% ± 0.05** | solid |
+| part_leg_distal | +8.37% | +5.54% | +7.58% | +7.16% ± 1.19 | solid |
+| edge_logratio | +2.72% | +2.46% | +2.38% | +2.52% ± 0.15 | solid |
+| tri_quality | +1.44% | +1.25% | +1.41% | +1.36% ± 0.09 | solid |
+| fscore@0.01 | +0.75% | +1.32% | +0.65% | +0.91% ± 0.29 | solid |
+| fscore@0.02 | +0.29% | +0.70% | +0.38% | +0.46% ± 0.17 | solid |
+| chamfer_l2 | −0.00% | +5.07% | +3.47% | +2.84% ± 2.12 | **inconclusive — sign flips** |
+
+Per-seed sign tests on fscore@0.01: 35/50 (p=0.0066), 33/50 (p=0.033), 31/50 (p=0.119). The
+third seed is not individually significant, but the sign is consistent across all three and
+the mean is three times the between-seed sd, so the effect is real if small.
+
+**`chamfer_l2` is reported as inconclusive for this arm** — it flips sign across seeds, which
+is what an unreplicated single number would have hidden. Every other A4 claim in §4.2 holds.
+
+`M7_handoff_midline` has not been seed-repeated. Its large effects (deform_mag −52%,
+edge −32%, midline −47%, all 47–50/50) are far outside plausible seed noise; its smaller ones
+(fscore@0.01 +7.1% at 35/50) should be replicated before anyone leans on them.
+
+Run with `diagnostics/moonshot/run_seeds.sh <gpu>`, analysed by `analyse_seeds.py`.

@@ -18,6 +18,12 @@
   "arm": "B1_best_off0p2"
  },
  {
+  "dihedral_mean": 12.777633047103881,
+  "dihedral_p99": 65.50546951293946,
+  "spike_frac": 0.004383820819202811,
+  "arm": "M7_handoff_midline"
+ },
+ {
   "dihedral_mean": 13.026359844207764,
   "dihedral_p99": 65.9465488433838,
   "spike_frac": 0.004768423701170832,
@@ -54,10 +60,34 @@
   "arm": "A5_robust"
  },
  {
+  "dihedral_mean": 12.919318056106567,
+  "dihedral_p99": 67.7172716140747,
+  "spike_frac": 0.005144878185819835,
+  "arm": "A4_nofreeze_s2"
+ },
+ {
   "dihedral_mean": 12.921965837478638,
   "dihedral_p99": 68.06066913604737,
   "spike_frac": 0.005109025374986231,
   "arm": "A4_nofreeze"
+ },
+ {
+  "dihedral_mean": 12.977835083007813,
+  "dihedral_p99": 68.06546955108642,
+  "spike_frac": 0.005151396919973195,
+  "arm": "A4_nofreeze_s1"
+ },
+ {
+  "dihedral_mean": 12.99803705215454,
+  "dihedral_p99": 68.40168743133545,
+  "spike_frac": 0.005285030067898333,
+  "arm": "C0_control_s2"
+ },
+ {
+  "dihedral_mean": 13.036656141281128,
+  "dihedral_p99": 69.28645534515381,
+  "spike_frac": 0.005601186736021191,
+  "arm": "C0_control_s1"
  },
  {
   "dihedral_mean": 13.073904418945313,
@@ -118,6 +148,12 @@
   "dihedral_p99": 109.26485900878906,
   "spike_frac": 0.019704378256574274,
   "arm": "M1_nopart"
+ },
+ {
+  "dihedral_mean": 17.774378776550293,
+  "dihedral_p99": 123.63810997009277,
+  "spike_frac": 0.028644765308126808,
+  "arm": "M1_sym"
  },
  {
   "dihedral_mean": 17.25666880607605,

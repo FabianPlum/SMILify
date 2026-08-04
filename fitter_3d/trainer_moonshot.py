@@ -74,6 +74,7 @@ default_weights = dict(
     w_normal_align=0.0,  # NEW: point-to-plane / normal agreement along correspondence
     w_beta_prior=0.0,  # NEW: Mahalanobis shape prior (see note 6)
     w_sym=0.0,  # NEW: left/right symmetry on per-joint scale & translation (note 7)
+    w_midline=0.0,  # NEW: keep midsagittal vertices on y=0 (see midline_penalty)
 )
 
 
@@ -113,6 +114,30 @@ def build_lr_joint_pairs(joint_names):
             if twin in idx:
                 pairs.append((i, idx[twin]))
     return torch.tensor(pairs, dtype=torch.long)
+
+
+def midline_penalty(verts, sym_verts):
+    """Keep the template's midsagittal vertices on the y = 0 plane.
+
+    Added to fix the one regression of the M5 arm: it improved 8 of 11 metrics against the
+    stock pipeline but worsened bilateral midline deviation by 43.8% (13/50, p=9.4e-04).
+
+    `symmetry_penalty` ties left/right joint SCALES, which does not constrain the midline
+    itself -- an out-of-plane rotation of a body joint (thorax, gaster, head) moves the
+    midsagittal vertices off y=0 while leaving every left/right scale pair identical. That
+    is what the hierarchical body stage was doing.
+
+    This is legitimate because the constraint is on SHAPE, not pose: the specimens are
+    ethanol-preserved and their limb pose is asymmetric, but their body midline is still a
+    plane. `sym_verts` (223 indices, shipped in the model) is exactly that vertex set --
+    verified here to have y-mean 0.0 and y-std exactly 0.0 on the template.
+
+    Penalises the VARIANCE of the midline y, not its absolute value, so a legitimate global
+    y-translation costs nothing and only non-planarity is charged. (Absolute-y would be
+    almost right, since the targets are canonically aligned, but it would fight `trans`.)
+    """
+    y = verts[:, sym_verts.long(), 1]
+    return (y - y.mean(dim=1, keepdim=True)).pow(2).mean()
 
 
 def symmetry_penalty(log_beta_scales, betas_trans, pairs):
@@ -349,6 +374,17 @@ class MoonshotStage:
 
         # left/right joint twins, for the symmetry penalty. Read from the model file so
         # this stays correct if the template changes.
+        self.sym_verts = None
+        if self.loss_weights.get("w_midline", 0.0) > 0:
+            import pickle as _p
+
+            with open(config.SMAL_FILE, "rb") as _f:
+                _u = _p._Unpickler(_f)
+                _u.encoding = "latin1"
+                self.sym_verts = torch.tensor(
+                    np.asarray(_u.load()["sym_verts"]).astype(np.int64), device=device
+                )
+
         self.lr_pairs = None
         if self.loss_weights.get("w_sym", 0.0) > 0:
             import pickle as _pkl
@@ -467,6 +503,11 @@ class MoonshotStage:
             l_s = symmetry_penalty(f.log_beta_scales, f.betas_trans, self.lr_pairs)
             comp["sym"] = l_s
             loss = loss + lw["w_sym"] * l_s
+
+        if lw.get("w_midline", 0.0) > 0 and self.sym_verts is not None:
+            l_m = midline_penalty(src_mesh.verts_padded(), self.sym_verts)
+            comp["mid"] = l_m
+            loss = loss + lw["w_midline"] * l_m
 
         return loss, comp
 

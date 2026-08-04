@@ -47,6 +47,11 @@ def main():
     ap.add_argument("--leg_its", type=int, default=1200)
     ap.add_argument("--joint_its", type=int, default=900)
     ap.add_argument("--deform_its", type=int, default=600)
+    ap.add_argument("--midline", type=float, default=0.0,
+                    help="weight for the midsagittal-planarity penalty. The M5 arm improved 8 of "
+                         "11 metrics over the stock pipeline but regressed bilateral midline "
+                         "deviation 43.8%; per-leg independent fitting plus out-of-plane body "
+                         "rotation is the cause, and symmetry_penalty (joint scales) cannot see it.")
     ap.add_argument("--no_partition", action="store_true",
                     help="ablation: run the same schedule with a GLOBAL data term, so the "
                          "benefit of partitioning is separable from the benefit of staging")
@@ -93,25 +98,29 @@ def main():
         HierarchicalStage(
             "H0_body", args.body_its, active_groups=["body"], partitioned=False,
             lr=0.02, joint_lr=0.01, robust_kernel="gm", robust_scale=0.25,
-            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5}, **common,
+            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5,
+                          "w_midline": args.midline}, **common,
         ),
         # 2) legs only, partitioned -- the multimodality fix
         HierarchicalStage(
             "H1_legs", args.leg_its, active_groups=leg_groups, partitioned=partitioned,
             lr=0.008, joint_lr=0.015, reassign_every=50,
-            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5}, **common,
+            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5,
+                          "w_midline": args.midline}, **common,
         ),
         # 3) everything, still partitioned
         HierarchicalStage(
             "H2_joint", args.joint_its, active_groups=None, partitioned=partitioned,
             lr=0.005, joint_lr=0.005, reassign_every=50,
-            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5}, **common,
+            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5,
+                          "w_midline": args.midline}, **common,
         ),
         # 4) small, expensive free-form pass
         HierarchicalStage(
             "H3_deform", args.deform_its, active_groups=None, partitioned=partitioned,
             lr=0.002, joint_lr=0.001, reassign_every=100, optimise_deform=True,
-            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5, "w_offset": 3.0},
+            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5, "w_offset": 3.0,
+                          "w_midline": args.midline},
             **common,
         ),
     ]

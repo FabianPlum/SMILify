@@ -59,6 +59,7 @@ from fitter_3d.trainer_moonshot import (
     robust_chamfer,
     build_lr_joint_pairs,
     symmetry_penalty,
+    midline_penalty,
 )
 
 nn = torch.nn
@@ -212,7 +213,7 @@ class HierarchicalStage:
 
         self.lw = dict(
             w_chamfer=1.0, w_edge=0.05, w_normal=0.01, w_laplacian=0.005,
-            w_beta_prior=0.002, w_sym=0.5, w_offset=0.0,
+            w_beta_prior=0.002, w_sym=0.5, w_offset=0.0, w_midline=0.0,
         )
         if loss_weights:
             self.lw.update(loss_weights)
@@ -247,6 +248,18 @@ class HierarchicalStage:
         self.src_mesh = get_meshes(self.src_verts, self.faces, device=device)
 
         self.lr_pairs = build_lr_joint_pairs(joint_names).to(device)
+        # midsagittal vertex set, for the planarity constraint (see midline_penalty).
+        # Loaded only when the term is active so the default path is unchanged.
+        self.sym_verts = None
+        if self.lw.get("w_midline", 0.0) > 0:
+            import pickle as _p
+
+            with open(config.SMAL_FILE, "rb") as _f:
+                _u = _p._Unpickler(_f)
+                _u.encoding = "latin1"
+                self.sym_verts = torch.tensor(
+                    np.asarray(_u.load()["sym_verts"]).astype(np.int64), device=device
+                )
         self.history = []
         self.churn_history = []
 
@@ -319,6 +332,11 @@ class HierarchicalStage:
             l_s = symmetry_penalty(self.smal.log_beta_scales, self.smal.betas_trans, self.lr_pairs)
             comp["sym"] = l_s
             loss = loss + self.lw["w_sym"] * l_s
+
+        if self.lw.get("w_midline", 0.0) > 0 and self.sym_verts is not None:
+            l_m = midline_penalty(mesh.verts_padded(), self.sym_verts)
+            comp["mid"] = l_m
+            loss = loss + self.lw["w_midline"] * l_m
 
         if self.optimise_deform and self.lw.get("w_offset", 0) > 0:
             l_o = self.smal.deform_verts.pow(2).sum(-1).mean()
