@@ -121,6 +121,17 @@ def main():
         "target points are labelled by nearest neighbour into it",
     )
     ap.add_argument(
+        "--beta_prior",
+        type=float,
+        default=0.002,
+        help="shape-prior weight for EVERY hierarchical stage. The 0.002 default was carried "
+        "over uncritically and pins |betas| at ~0.02: the prior gradient overtakes the chamfer "
+        "gradient at |betas|~0.02 and is 4.9x larger at 0.1 (measured). The stock baseline sets "
+        "NO beta prior and reaches |betas| 0.26. A3b already established 1.5e-4 as the tuned "
+        "value; this argument exists because the hierarchical pipeline never received that fix. "
+        "See REPORT.md §6.8.",
+    )
+    ap.add_argument(
         "--joint_lr_mult",
         type=float,
         default=1.0,
@@ -294,7 +305,7 @@ def main():
             robust_scale=0.25,
             loss_weights={
                 "w_edge": 0.05,
-                "w_beta_prior": 0.002,
+                "w_beta_prior": args.beta_prior,
                 "w_sym": 0.5,
                 "w_midline": args.midline,
                 "w_jresid": args.jresid,
@@ -312,7 +323,7 @@ def main():
             reassign_every=50,
             loss_weights={
                 "w_edge": 0.05,
-                "w_beta_prior": 0.002,
+                "w_beta_prior": args.beta_prior,
                 "w_sym": 0.5,
                 "w_midline": args.midline,
                 "w_jresid": args.jresid,
@@ -330,7 +341,7 @@ def main():
             reassign_every=50,
             loss_weights={
                 "w_edge": 0.05,
-                "w_beta_prior": 0.002,
+                "w_beta_prior": args.beta_prior,
                 "w_sym": 0.5,
                 "w_midline": args.midline,
                 "w_jresid": args.jresid,
@@ -349,7 +360,7 @@ def main():
             optimise_deform=True,
             loss_weights={
                 "w_edge": 0.05,
-                "w_beta_prior": 0.002,
+                "w_beta_prior": args.beta_prior,
                 "w_sym": 0.5,
                 "w_offset": 3.0,
                 "w_midline": args.midline,

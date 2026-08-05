@@ -717,6 +717,69 @@ claim* — that this is why the shape space is unused — is refuted by its own 
 
 ---
 
+## 6.8 The measured cause: a beta prior I had already fixed once, and never propagated
+
+Three mechanisms were proposed for the frozen shape space and all three were refuted by their
+own pre-registered tests: unused `scaledirs` (§6.7), free-form offsets absorbing the variation
+(Spearman +0.196, p=0.14, wrong sign), and the pose:shape learning-rate ratio
+(joint_lr ×0.1 left betas sd at 0.00041 against 0.00042). Slowing pose only pushed the slack
+into `log_beta_scales`, which *rose* from 0.172 to 0.265.
+
+So instead of proposing a fourth mechanism, the gradients were measured.
+
+**Gradient magnitudes at the template start point**, chamfer only, 8 specimens:
+
+| param | numel | \|grad\| mean | lr (H0) |
+|---|---|---|---|
+| betas | 104 | 6.05e-05 | 0.02 |
+| log_beta_scales | 1320 | 1.35e-04 | 0.005 |
+| joint_rot | 1296 | 1.89e-04 | 0.01 |
+
+Betas have a *comparable* gradient and a **4× higher learning rate** than the parameters that
+out-move them by 400×. Under Adam, which normalises by gradient magnitude, they should move
+freely. Something was pushing back — and it was the term hardcoded into every hierarchical
+stage.
+
+**The beta prior, measured against the chamfer:**
+
+| \|betas\| | chamfer grad | prior grad at w=0.002 | ratio |
+|---|---|---|---|
+| 0.001 | 6.21e-05 | 3.00e-06 | 0.05 |
+| 0.010 | 6.16e-05 | 3.00e-05 | 0.49 |
+| **0.100** | 6.15e-05 | 3.00e-04 | **4.87** |
+| 0.300 | 6.94e-05 | 8.99e-04 | 12.94 |
+
+The prior overtakes the data term at **|betas| ≈ 0.02** and is five times larger by 0.1. The
+hierarchical arms settle at 0.005–0.009, exactly where this predicts. The stock baseline sets
+**no beta prior at all** in `ants_cfg.yaml` and reaches |betas| 0.26.
+
+**This is the same defect as §7.2, made twice.** That entry records finding a mis-scaled
+`w_beta_prior` that silently froze shape, and fixing it — for the moonshot YAML arms, where
+`M4b_ceiling_free` (prior off) and `A3b_priors_tuned` (1.5e-4) established the tuned value.
+The hierarchical pipeline was then written from scratch with `w_beta_prior: 0.002` hardcoded
+into all four stages, and **never received the fix**. Everything built on it inherited a
+closed shape space: `M1_sym`, `M5`, `M7` (the recommended arm, replicated over three seeds),
+`M8`, `M9`, the fittability gate's fits, the rebuilt shape space, and the CPL / SOFT / LR arms
+that were trying to diagnose the very symptom this caused.
+
+`--beta_prior` is added and `BP_a` (1.5e-4) and `BP_b` (0) are running. Outcome 1 — betas sd
+rising — is near-mechanical given the gradient curve and only confirms the fix is wired.
+**Outcome 2 is the one that matters: probe-19 gen/spread must move off 0.99 toward the
+synthetic control's 0.42.** A shape space that is merely open is not yet a shape space that
+transfers.
+
+**What this costs the rest of the report.** §2's headline arm and §6.2's gate were both
+measured with shape effectively disabled. Their *relative* comparisons remain valid — every
+arm and its control shared the defect — so M7 really does beat the stock pipeline on the
+metrics shown, and the gate really does separate fittable specimens. But every absolute
+statement about what the parametric model can achieve, including §2.3's ceiling and §4's
+"shape capacity is not the binding constraint", was measured on a model that was only allowed
+to use 2% of its shape range in the hierarchical path. §4's conclusion happens to survive
+because it was measured on `M4b`/`M6`, which are moonshot arms and *did* have the prior fixed
+— but that is luck, not design.
+
+---
+
 ## 7. Claims of mine that were wrong
 
 Kept because the pattern matters more than the individual errors: **every one produced
