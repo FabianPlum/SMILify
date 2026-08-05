@@ -27,7 +27,11 @@ lessons, because the *pattern* in how they failed is the most transferable thing
 3. **A one-word free win:** `scheme: 'deform'` → `scheme: 'all'` in the late stages improves
    almost everything at zero cost, replicated over 3 seeds (deform_mag **+23.52 ± 0.05%**).
    `chamfer_l2` is **inconclusive** for this arm — it flips sign across seeds.
-4. **The registrations contain no learnable shape structure.** A leave-one-out shape model
+4. **`scaledirs` — the model's per-joint scale blendshapes — is never used by the fitter.**
+   Instead 165 free per-specimen `log_beta_scales` carry 70–400× more inter-specimen variation
+   than the shape space does, so shape is stored in a pose-space parameter that cannot
+   transfer. One defect explaining four separate observations, and concretely fixable (§6.6).
+5. **The registrations contain no learnable shape structure.** A leave-one-out shape model
    built from them reconstructs a held-out specimen no better than the population mean does
    (gen/spread 0.99–1.00), while the same metric reaches 0.42 at 10 modes and 0.00 at 20 on
    synthetic data with exact correspondence. This pipeline produces *surface fits*, not
@@ -552,6 +556,96 @@ explains it, so uncertainty reduces influence rather than becoming a wrong commi
 temperatures are running, and the pre-registered primary outcome is **probe 19 generalisation,
 not surface metrics** — the claim is about correspondence, so it must be judged by the
 instrument that measures correspondence.
+
+---
+
+## 6.6 The actual root cause: shape is stored in a parameter that cannot transfer
+
+§6.4 reported that the registrations carry no learnable shape structure. Chasing *why*
+produced the strongest and most actionable finding of this work, and it also **qualifies
+§6.4's headline**.
+
+**Step 1 — the soft partition does not help.** Pre-registered primary outcome was probe-19
+generalisation, not surface metrics. All three land in the same place:
+
+| arm | spread | gen@10 | gen/spread |
+|---|---|---|---|
+| hard (control) | 0.01996 | 0.01970 | 0.9870 |
+| soft t=0.03 | 0.02019 | 0.01993 | 0.9871 |
+| soft t=0.08 | 0.02031 | 0.02000 | 0.9846 |
+
+Hard, frozen (§5.3) and soft assignments are indistinguishable. Per the pre-registration, the
+problem is **upstream of the partition** — which is where the rest of this section looks.
+
+**Step 2 — the variance is 100% free-form, which weakens §6.4 as stated.** Decomposing the
+rest-space shape across the 50 specimens:
+
+| component | variance | probe-19 gen@20/spread |
+|---|---|---|
+| parametric, `shapedirs·betas` | **0.0002** | 0.0008 (perfectly learnable) |
+| free-form, `deform_verts` | **416.91** | 0.9794 (no structure) |
+| free-form share of total | **100.0%** | |
+
+So probe-19's null was measuring `deform_verts`, whose non-generalisation is close to
+tautological for 30k per-specimen free parameters. **§6.4's finding is real but its
+explanation was wrong**: the registrations lack learnable structure not because correspondence
+is scrambled, but because *the parametric shape channel is carrying no signal at all.*
+
+**Step 3 — the shape space is essentially unused.** Standard deviation of the fitted betas
+across specimens, against a model prior sd of 0.28–1.52 per beta:
+
+| run | betas sd | \|z\| mean | max \|z\| |
+|---|---|---|---|
+| **M7_handoff_midline** (the recommended arm) | **0.00042** | **0.0006** | 0.004 |
+| **M1_sym** (its hierarchical base) | **0.00189** | 0.0026 | 0.037 |
+| baseline | 0.25636 | 0.3738 | 2.057 |
+| M4b_ceiling_free | 0.28360 | 0.4137 | 2.197 |
+
+**Every specimen in the hierarchical arms receives essentially the same shape.** Betas shrink
+monotonically down the schedule (H0 0.0087 → H1 0.0068 → H2 0.0059 → H3 0.0019). This is a
+defect in the arm this report recommends, and it went unnoticed because no surface metric can
+see it.
+
+**Step 4 — what carries the variation instead.** Standard deviation across specimens:
+
+| run | betas | `log_beta_scales` | ratio |
+|---|---|---|---|
+| M1_sym | 0.00189 | **0.13152** | 70× |
+| M7_handoff_midline | 0.00042 | **0.17160** | 400× |
+| baseline | 0.25636 | **0.91702** | 3.6× |
+| M4b_ceiling_free | 0.28360 | **0.96504** | 3.4× |
+
+In *every* arm, per-joint scaling carries more inter-specimen variation than the shape space —
+by 70–400× in the hierarchical arms. The baseline drives per-joint scales from **0.106 to
+4.542** (p05–p95), i.e. individual joints scaled by a tenth to four and a half times.
+
+`log_beta_scales` is applied **during skinning**, per joint, per specimen. It is a pose-space
+quantity. It is not part of the shape space, does not transfer between specimens, and is
+invisible to any PCA over rest-space geometry — including probe 19's, and including the
+`smil_importer` PCA that would be used to build a production model.
+
+**Step 5 — and the model was built to prevent exactly this.** `SMIL_OmniAnt.pkl` ships
+`scaledirs` with shape **(13, 55, 3)**: per-joint scale *blendshapes*, indexed by beta. The
+model is designed so that betas drive joint scaling, keeping size variation inside the shape
+space where it transfers.
+
+**`scaledirs` is never referenced anywhere in the fitting path.** `smal_model/smal_torch.py`
+does not use it. It is written by the Blender add-on (`smil_importer/model_build.py`) and
+checked by one test, and that is all. The fitter instead optimises `log_beta_scales` as 165
+free per-specimen parameters, which duplicate what `scaledirs·betas` was meant to supply — and
+being free and essentially unregularised (`w_sym` only ties left to right), they win.
+
+**The complete chain.** `scaledirs` unused → `log_beta_scales` free → per-joint scaling
+out-competes betas by 70–400× → shape variation is stored per-specimen in a pose-space
+parameter → the rest-space geometry carries no transferable shape → a shape space rebuilt from
+the registrations is null (§6.5) → enlarging the shape space changes nothing (§4) → and no
+downstream product that needs cross-specimen correspondence can be built.
+
+This is one defect, it explains four previously separate observations, and it is concretely
+fixable: **wire `scaledirs` into the forward pass so betas drive joint scaling, and penalise
+or remove free `log_beta_scales`.** That is the next experiment, and probe 19 is the
+instrument to judge it by — a successful fix should move gen/spread off 0.99 toward the 0.42
+the synthetic control achieves.
 
 ---
 
