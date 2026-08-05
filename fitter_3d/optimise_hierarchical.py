@@ -81,11 +81,29 @@ def main():
         "field calls debris from every data term. Requires --split_distal.",
     )
     ap.add_argument(
+        "--pf_init",
+        type=int,
+        default=0,
+        help="iterations of correspondence-free part-anchor pose init before H0. Matches "
+        "each part's centroid and second moment to the target points the field assigned "
+        "it, so there is no nearest-neighbour choice to make and no multimodality. "
+        "Attacks the trapped-pose finding at the initialisation rather than the objective.",
+    )
+    ap.add_argument("--pf_init_mu", type=float, default=1.0, help="weight on the second-moment term of --pf_init")
+    ap.add_argument(
         "--pf_body",
         action="store_true",
         help="also restrict the H0 body stage to the part field's body points. Only "
         "possible with a target-derived partition, since the fit-derived one does not "
         "exist until a fit does.",
+    )
+    ap.add_argument(
+        "--pf_keep_debris",
+        action="store_true",
+        help="reassign points the field calls debris to their nearest non-debris class "
+        "instead of dropping them. Probe 16: 90.8%% of predicted debris is INTERIOR to the "
+        "animal and sits on the leg-body junction, taught by the debris-bridge augmentation. "
+        "Dropping it blinds the fit at the coxae.",
     )
     ap.add_argument(
         "--pf_min_conf",
@@ -186,6 +204,7 @@ def main():
             debris_id=debris_id,
             ref_conf=torch.stack(ref_c),
             min_conf=args.pf_min_conf,
+            keep_debris=args.pf_keep_debris,
         )
         n_ref = len(targets) * args.pf_ref_pts
         print(
@@ -195,7 +214,13 @@ def main():
             f"debris {100 * np.mean(dbg):.1f}% mean "
             f"({100 * np.min(dbg):.1f}-{100 * np.max(dbg):.1f}%); "
             f"low-confidence abstentions {100 * partition.n_lowconf / n_ref:.1f}% "
-            f"(min_conf {args.pf_min_conf}) -- both are EXCLUDED from every data term",
+            f"(min_conf {args.pf_min_conf}); "
+            + (
+                f"debris REASSIGNED to nearest non-debris class ({100 * partition.n_reassigned / n_ref:.1f}% "
+                f"of points), nothing excluded"
+                if args.pf_keep_debris
+                else "both are EXCLUDED from every data term"
+            ),
             flush=True,
         )
 
@@ -284,6 +309,37 @@ def main():
             **common,
         ),
     ]
+
+    # ---------------------------------------------------------------- part-anchor init
+    # Runs BEFORE H0. Report section 5 found pose to be trapped rather than under-optimised
+    # (raising the pose lr made the fit worse than its own init), and every fix so far has
+    # attacked the objective rather than the starting point -- because until the part field
+    # there was nothing specimen-specific to start from. This puts pose in the right basin
+    # using an objective with no correspondence in it at all. See fitter_3d/part_anchor_init.
+    if args.pf_init > 0:
+        if partition is None:
+            raise SystemExit(
+                "--pf_init requires --part_field: with a fit-derived partition "
+                "the anchors would be computed from the fit's own current "
+                "opinion and the objective would already be satisfied."
+            )
+        from fitter_3d.part_anchor_init import PartAnchorInit
+
+        tgt0 = sample_points_from_meshes(targets, args.n_sample).detach()
+        partition.update(None, tgt0)
+        init = PartAnchorInit(
+            smal,
+            partition,
+            vg,
+            gnames,
+            device,
+            n_it=args.pf_init,
+            mu=args.pf_init_mu,
+            faces=torch.tensor(np.asarray(dd["f"], dtype=np.int64), device=device),
+        )
+        init.run(tgt0)
+        del tgt0
+        torch.cuda.empty_cache()
 
     for st in stages:
         st.run()

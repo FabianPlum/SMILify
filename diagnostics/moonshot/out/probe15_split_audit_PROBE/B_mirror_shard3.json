@@ -1,0 +1,97 @@
+[
+ {
+  "g1": 0.9750333428382874,
+  "g2": 0.9669333100318909,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9201042208575773,
+  "debris_frac": 0.012633333333333333,
+  "leg_pts": {
+   "l1_l": 2109,
+   "l1_r": 2603,
+   "l2_l": 1753,
+   "l2_r": 2007,
+   "l3_l": 2329,
+   "l3_r": 2348
+  },
+  "file": "Anochetus_risii_CASENT0877608_processed.obj",
+  "name": "Anochetus_risii_CASENT0877608",
+  "split": "train"
+ },
+ {
+  "g1": 0.9071333408355713,
+  "g2": 0.8655333518981934,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9123006952233698,
+  "debris_frac": 0.1057,
+  "leg_pts": {
+   "l1_l": 2364,
+   "l1_r": 2227,
+   "l2_l": 1947,
+   "l2_r": 1727,
+   "l3_l": 737,
+   "l3_r": 1209
+  },
+  "file": "Cryptopone_sauteri_CASENT0743771_processed.obj",
+  "name": "Cryptopone_sauteri_CASENT0743771",
+  "split": "train"
+ },
+ {
+  "g1": 0.9613000154495239,
+  "g2": 0.9517333507537842,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.956500369627225,
+  "debris_frac": 0.029566666666666668,
+  "leg_pts": {
+   "l1_l": 2282,
+   "l1_r": 1927,
+   "l2_l": 1969,
+   "l2_r": 2091,
+   "l3_l": 2359,
+   "l3_r": 2474
+  },
+  "file": "Labidus_praedator_CASENT0744237_processed.obj",
+  "name": "Labidus_praedator_CASENT0744237",
+  "split": "train"
+ },
+ {
+  "g1": 0.9244666695594788,
+  "g2": 0.897266685962677,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9606778738657255,
+  "debris_frac": 0.085,
+  "leg_pts": {
+   "l1_l": 1757,
+   "l1_r": 2409,
+   "l2_l": 1787,
+   "l2_r": 2748,
+   "l3_l": 1751,
+   "l3_r": 584
+  },
+  "file": "Polyrhachis_decemdentata_CASENT0744779_processed.obj",
+  "name": "Polyrhachis_decemdentata_CASENT0744779",
+  "split": "train"
+ },
+ {
+  "g1": 0.9128333330154419,
+  "g2": 0.8886333107948303,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8737609673218466,
+  "debris_frac": 0.06613333333333334,
+  "leg_pts": {
+   "l1_l": 1972,
+   "l1_r": 1586,
+   "l2_l": 2132,
+   "l2_r": 3039,
+   "l3_l": 1763,
+   "l3_r": 919
+  },
+  "file": "Strumigenys_crassicornis_CASENT0744273_processed.obj",
+  "name": "Strumigenys_crassicornis_CASENT0744273",
+  "split": "test"
+ }
+]

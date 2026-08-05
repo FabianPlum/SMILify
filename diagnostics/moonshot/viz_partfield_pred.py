@@ -78,7 +78,9 @@ def main():
     ap.add_argument("--net", default=os.path.join(DATA, "net_B_mirror.pt"))
     ap.add_argument("--mesh_dir", default=os.path.join(HERE, "bench50"))
     ap.add_argument("--fit_npz", default=os.path.join(HERE, "runs", "M7_handoff_midline", "Stage_3_deform_fine.npz"))
-    ap.add_argument("--n_pts", type=int, default=25000)
+    # 25k points x 14 classes x ~40 axes is minutes of matplotlib per figure and adds
+    # nothing visible at print size; 12k reads identically and halves the wall clock.
+    ap.add_argument("--n_pts", type=int, default=12000)
     args = ap.parse_args()
 
     dev = torch.device("cuda")
@@ -94,7 +96,9 @@ def main():
     short = [f.split("_CASENT")[0].split("_OKENT")[0][:24] for f in files]
 
     def field(i, n=None):
-        p = sample_points_from_meshes(meshes[i], n or args.n_pts)[0]
+        # int() is load-bearing: pytorch3d's Meshes.__getitem__ rejects numpy int64, which
+        # is what rng.choice and files.index return.
+        p = sample_points_from_meshes(meshes[int(i)], n or args.n_pts)[0]
         pn, c, s = normalise(p)
         return pn.cpu().numpy(), predict_field(net, pn, seed=0).argmax(-1).cpu().numpy(), p, c, s
 

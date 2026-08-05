@@ -1,0 +1,97 @@
+[
+ {
+  "g1": 0.9582333564758301,
+  "g2": 0.9218666553497314,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7999728370450159,
+  "debris_frac": 0.031,
+  "leg_pts": {
+   "l1_l": 2351,
+   "l1_r": 2199,
+   "l2_l": 1245,
+   "l2_r": 3401,
+   "l3_l": 1120,
+   "l3_r": 2358
+  },
+  "file": "Acanthostichus_aff.brevicornis_CASENT0744328_processed.obj",
+  "name": "Acanthostichus_aff.brevicornis_CASENT0744328",
+  "split": "train"
+ },
+ {
+  "g1": 0.9121999740600586,
+  "g2": 0.8654666543006897,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8526522830465083,
+  "debris_frac": 0.08393333333333333,
+  "leg_pts": {
+   "l1_l": 2412,
+   "l1_r": 1899,
+   "l2_l": 649,
+   "l2_r": 2432,
+   "l3_l": 826,
+   "l3_r": 940
+  },
+  "file": "Cephalotes_simillimus_CASENT0744408_processed.obj",
+  "name": "Cephalotes_simillimus_CASENT0744408",
+  "split": "test"
+ },
+ {
+  "g1": 0.9435666799545288,
+  "g2": 0.9056333303451538,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8188811514383175,
+  "debris_frac": 0.09826666666666667,
+  "leg_pts": {
+   "l1_l": 2558,
+   "l1_r": 1878,
+   "l2_l": 1902,
+   "l2_r": 1414,
+   "l3_l": 3465,
+   "l3_r": 1918
+  },
+  "file": "Eurhopalothrix_procera_CASENT0745605_processed.obj",
+  "name": "Eurhopalothrix_procera_CASENT0745605",
+  "split": "train"
+ },
+ {
+  "g1": 0.8648999929428101,
+  "g2": 0.7691333293914795,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.870130295744112,
+  "debris_frac": 0.2272,
+  "leg_pts": {
+   "l1_l": 2073,
+   "l1_r": 1403,
+   "l2_l": 1470,
+   "l2_r": 2128,
+   "l3_l": 1414,
+   "l3_r": 1725
+  },
+  "file": "Nesomyrmex_angulatus_CASENT0744820_processed.obj",
+  "name": "Nesomyrmex_angulatus_CASENT0744820",
+  "split": "test"
+ },
+ {
+  "g1": 0.9060999751091003,
+  "g2": 0.8361999988555908,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7312171210813116,
+  "debris_frac": 0.08596666666666666,
+  "leg_pts": {
+   "l1_l": 1777,
+   "l1_r": 3091,
+   "l2_l": 2489,
+   "l2_r": 1961,
+   "l3_l": 1435,
+   "l3_r": 1946
+  },
+  "file": "Stigmatomma_FHG02_CASENT0745561_processed.obj",
+  "name": "Stigmatomma_FHG02_CASENT0745561",
+  "split": "test"
+ }
+]

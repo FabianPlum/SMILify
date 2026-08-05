@@ -1,0 +1,92 @@
+==============================================================================
+TEMPLATE  SMIL_OmniAnt.pkl
+==============================================================================
+  verts (10229, 3)  faces (20454, 3)
+  bbox extent (current norm) = [1.911  1.5333 0.5208]
+  template: pca_sd = [0.4221 0.2489 0.1108]   sd ratios = [1.    0.59  0.263]
+  pca axes (rows)=
+[[-0.999  0.    -0.051]
+ [ 0.     1.    -0.   ]
+ [ 0.051 -0.    -0.999]]
+  vertex-mean vs area-weighted centroid offset = 2.09% of bbox diag
+  per-vertex area share: min 0.007  p5 0.167  median 0.932  p95 2.162  max 4.9
+  -> vertex-based chamfer over-weights the densest 10% of verts by 3.8x relative to area-uniform sampling
+
+==============================================================================
+TARGETS  (first 8 of /media/fabi/Data/SMILify_DATASETS_BACKUP/ALL_ANTS_CLEAN)
+==============================================================================
+  total scans in dir: 81
+
+  01.obj  V=12054 F=10878
+    raw extent = [0.6 0.4 0.2]
+    bbox extent (current norm) = [1.8684 1.4521 0.5004]
+  target  : pca_sd = [0.4205 0.3121 0.1085]   sd ratios = [1.    0.742 0.258]
+    rotation template-PCA -> target-PCA: 2.2 deg (sign/permutation ambiguous)
+    vertex-mean vs area-weighted centroid offset = 0.90% of bbox diag
+    bbox extent (area-weighted norm) = [3.8062 2.9581 1.0195]
+
+  02.obj  V=25540 F=28436
+    raw extent = [0.6 0.5 0.2]
+    bbox extent (current norm) = [1.8258 1.5617 0.6969]
+  target  : pca_sd = [0.404  0.2935 0.1342]   sd ratios = [1.    0.726 0.332]
+    rotation template-PCA -> target-PCA: 3.9 deg (sign/permutation ambiguous)
+    vertex-mean vs area-weighted centroid offset = 0.79% of bbox diag
+    bbox extent (area-weighted norm) = [3.6082 3.0861 1.3773]
+
+  03.obj  V=29073 F=38538
+    raw extent = [0.6 0.5 0.2]
+    bbox extent (current norm) = [1.752  1.3315 0.5789]
+  target  : pca_sd = [0.3878 0.253  0.103 ]   sd ratios = [1.    0.652 0.266]
+    rotation template-PCA -> target-PCA: 3.4 deg (sign/permutation ambiguous)
+    vertex-mean vs area-weighted centroid offset = 0.69% of bbox diag
+    bbox extent (area-weighted norm) = [3.605  2.7396 1.191 ]
+
+  04.obj  V=11128 F=10611
+    raw extent = [0.7 0.5 0.2]
+    bbox extent (current norm) = [1.7808 1.3108 0.5711]
+  target  : pca_sd = [0.4129 0.2863 0.1154]   sd ratios = [1.    0.693 0.279]
+    rotation template-PCA -> target-PCA: 179.7 deg (sign/permutation ambiguous)
+    vertex-mean vs area-weighted centroid offset = 1.38% of bbox diag
+    bbox extent (area-weighted norm) = [3.7525 2.7622 1.2035]
+
+  05.obj  V=11795 F=10132
+    raw extent = [0.7 0.7 0.2]
+    bbox extent (current norm) = [1.865  1.7413 0.5561]
+  target  : pca_sd = [0.4395 0.3452 0.1179]   sd ratios = [1.    0.785 0.268]
+    rotation template-PCA -> target-PCA: 178.9 deg (sign/permutation ambiguous)
+    vertex-mean vs area-weighted centroid offset = 0.44% of bbox diag
+    bbox extent (area-weighted norm) = [3.7184 3.4719 1.1088]
+
+  06.obj  V=13748 F=12098
+    raw extent = [0.9 0.6 0.2]
+    bbox extent (current norm) = [1.892  1.2374 0.5138]
+  target  : pca_sd = [0.4177 0.2899 0.1085]   sd ratios = [1.    0.694 0.26 ]
+    rotation template-PCA -> target-PCA: 179.0 deg (sign/permutation ambiguous)
+    vertex-mean vs area-weighted centroid offset = 0.71% of bbox diag
+    bbox extent (area-weighted norm) = [4.053  2.6507 1.1007]
+
+  07.obj  V=22657 F=23614
+    raw extent = [0.9 0.7 0.3]
+    bbox extent (current norm) = [1.8474 1.5179 0.5977]
+  target  : pca_sd = [0.4216 0.3198 0.1245]   sd ratios = [1.    0.759 0.295]
+    rotation template-PCA -> target-PCA: 178.8 deg (sign/permutation ambiguous)
+    vertex-mean vs area-weighted centroid offset = 0.74% of bbox diag
+    bbox extent (area-weighted norm) = [3.8918 3.1977 1.2591]
+
+  08.obj  V=15246 F=13240
+    raw extent = [0.9 0.6 0.3]
+    bbox extent (current norm) = [1.7488 1.2156 0.5298]
+  target  : pca_sd = [0.3982 0.2897 0.1136]   sd ratios = [1.    0.728 0.285]
+    rotation template-PCA -> target-PCA: 1.9 deg (sign/permutation ambiguous)
+    vertex-mean vs area-weighted centroid offset = 1.74% of bbox diag
+    bbox extent (area-weighted norm) = [3.6981 2.5706 1.1204]
+
+  cross-target principal-axis consistency (angle of axis 1 between scan pairs, deg):
+[[0.  3.5 3.8 7.5 6.7 8.9 4.9 2.1]
+ [3.5 0.  1.4 5.6 6.6 7.1 6.  5.2]
+ [3.8 1.4 0.  4.2 5.2 5.7 4.9 5.1]
+ [7.5 5.6 4.2 0.  3.5 1.5 5.3 7.8]
+ [6.7 6.6 5.2 3.5 0.  3.8 2.5 6.1]
+ [8.9 7.1 5.7 1.5 3.8 0.  6.  9. ]
+ [4.9 6.  4.9 5.3 2.5 6.  0.  3.8]
+ [2.1 5.2 5.1 7.8 6.1 9.  3.8 0. ]]

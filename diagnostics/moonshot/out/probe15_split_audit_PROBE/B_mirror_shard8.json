@@ -1,0 +1,97 @@
+[
+ {
+  "g1": 0.9452000260353088,
+  "g2": 0.933899998664856,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9062320179949981,
+  "debris_frac": 0.019066666666666666,
+  "leg_pts": {
+   "l1_l": 1635,
+   "l1_r": 1611,
+   "l2_l": 1751,
+   "l2_r": 1640,
+   "l3_l": 1603,
+   "l3_r": 2257
+  },
+  "file": "Centromyrmex_brachycola_CASENT0744052_processed.obj",
+  "name": "Centromyrmex_brachycola_CASENT0744052",
+  "split": "train"
+ },
+ {
+  "g1": 0.9279666543006897,
+  "g2": 0.8866333365440369,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9543734110532904,
+  "debris_frac": 0.009133333333333334,
+  "leg_pts": {
+   "l1_l": 2086,
+   "l1_r": 2431,
+   "l2_l": 1714,
+   "l2_r": 1524,
+   "l3_l": 4013,
+   "l3_r": 2736
+  },
+  "file": "Eciton_hamatum_CASENT0744580_processed.obj",
+  "name": "Eciton_hamatum_CASENT0744580",
+  "split": "train"
+ },
+ {
+  "g1": 0.9284999966621399,
+  "g2": 0.9049333333969116,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8543971096049251,
+  "debris_frac": 0.08036666666666667,
+  "leg_pts": {
+   "l1_l": 2216,
+   "l1_r": 1908,
+   "l2_l": 2212,
+   "l2_r": 1998,
+   "l3_l": 1602,
+   "l3_r": 1120
+  },
+  "file": "Myrmecina_ryukyuensis_OKENT0105085_processed.obj",
+  "name": "Myrmecina_ryukyuensis_OKENT0105085",
+  "split": "train"
+ },
+ {
+  "g1": 0.9237333536148071,
+  "g2": 0.8767333626747131,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.818312583713924,
+  "debris_frac": 0.07403333333333334,
+  "leg_pts": {
+   "l1_l": 1918,
+   "l1_r": 1733,
+   "l2_l": 2779,
+   "l2_r": 2119,
+   "l3_l": 2204,
+   "l3_r": 1329
+  },
+  "file": "Pseudomyrmex_cf.solis_CASENT0744065_processed.obj",
+  "name": "Pseudomyrmex_cf.solis_CASENT0744065",
+  "split": "train"
+ },
+ {
+  "g1": 0.9085000157356262,
+  "g2": 0.895466685295105,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8882790203083063,
+  "debris_frac": 0.1646,
+  "leg_pts": {
+   "l1_l": 1637,
+   "l1_r": 1620,
+   "l2_l": 1397,
+   "l2_r": 1319,
+   "l3_l": 797,
+   "l3_r": 1945
+  },
+  "file": "Temnothorax_sp._OKENT0105336_processed.obj",
+  "name": "Temnothorax_sp._OKENT0105336",
+  "split": "train"
+ }
+]

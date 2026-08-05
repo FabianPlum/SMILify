@@ -1,0 +1,97 @@
+[
+ {
+  "g1": 0.9614999890327454,
+  "g2": 0.9297000169754028,
+  "six_legs": true,
+  "order": 0.8571428571428571,
+  "coherence": 0.6985096222409121,
+  "debris_frac": 0.0011666666666666668,
+  "leg_pts": {
+   "l1_l": 1735,
+   "l1_r": 1422,
+   "l2_l": 4289,
+   "l2_r": 4212,
+   "l3_l": 1979,
+   "l3_r": 1726
+  },
+  "file": "Atopomyrmex_mocquerysi_CASENT0744784_processed.obj",
+  "name": "Atopomyrmex_mocquerysi_CASENT0744784",
+  "split": "train"
+ },
+ {
+  "g1": 0.9430666565895081,
+  "g2": 0.9046666622161865,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.6904175050392354,
+  "debris_frac": 0.052833333333333336,
+  "leg_pts": {
+   "l1_l": 2648,
+   "l1_r": 3610,
+   "l2_l": 3330,
+   "l2_r": 3115,
+   "l3_l": 1356,
+   "l3_r": 1841
+  },
+  "file": "Dilobocondyla_fouqueti_CASENT0745576_processed.obj",
+  "name": "Dilobocondyla_fouqueti_CASENT0745576",
+  "split": "train"
+ },
+ {
+  "g1": 0.8519333600997925,
+  "g2": 0.7961333394050598,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.930846774624248,
+  "debris_frac": 0.2483,
+  "leg_pts": {
+   "l1_l": 1944,
+   "l1_r": 1602,
+   "l2_l": 1861,
+   "l2_r": 1014,
+   "l3_l": 1584,
+   "l3_r": 1068
+  },
+  "file": "Mayriella_sp._CASENT0745610_processed.obj",
+  "name": "Mayriella_sp._CASENT0745610",
+  "split": "test"
+ },
+ {
+  "g1": 0.9613000154495239,
+  "g2": 0.9440333247184753,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7484181660205933,
+  "debris_frac": 0.0253,
+  "leg_pts": {
+   "l1_l": 2341,
+   "l1_r": 2470,
+   "l2_l": 2333,
+   "l2_r": 2267,
+   "l3_l": 1464,
+   "l3_r": 2032
+  },
+  "file": "Ponera_tamon_OKENT0105154_processed.obj",
+  "name": "Ponera_tamon_OKENT0105154",
+  "split": "train"
+ },
+ {
+  "g1": 0.9663666486740112,
+  "g2": 0.9445666670799255,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7709951318067613,
+  "debris_frac": 0.013666666666666667,
+  "leg_pts": {
+   "l1_l": 2958,
+   "l1_r": 2537,
+   "l2_l": 1662,
+   "l2_r": 2487,
+   "l3_l": 1562,
+   "l3_r": 1136
+  },
+  "file": "Syllophopsis_sechellensis_OKENT0105212_processed.obj",
+  "name": "Syllophopsis_sechellensis_OKENT0105212",
+  "split": "train"
+ }
+]

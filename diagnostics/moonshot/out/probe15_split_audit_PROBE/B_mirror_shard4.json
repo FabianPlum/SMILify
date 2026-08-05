@@ -1,0 +1,97 @@
+[
+ {
+  "g1": 0.9110666513442993,
+  "g2": 0.8473333120346069,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7509537087344437,
+  "debris_frac": 0.05623333333333334,
+  "leg_pts": {
+   "l1_l": 646,
+   "l1_r": 1766,
+   "l2_l": 1811,
+   "l2_r": 2935,
+   "l3_l": 3247,
+   "l3_r": 2103
+  },
+  "file": "Anochetus_risii_CASENT0877609_processed.obj",
+  "name": "Anochetus_risii_CASENT0877609",
+  "split": "train"
+ },
+ {
+  "g1": 0.7696999907493591,
+  "g2": 0.6968666911125183,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.5605470141359147,
+  "debris_frac": 0.479,
+  "leg_pts": {
+   "l1_l": 1018,
+   "l1_r": 716,
+   "l2_l": 2304,
+   "l2_r": 2553,
+   "l3_l": 1087,
+   "l3_r": 940
+  },
+  "file": "Cyphoidris_afrc-tz01_CASENT0744810_processed.obj",
+  "name": "Cyphoidris_afrc-tz01_CASENT0744810",
+  "split": "train"
+ },
+ {
+  "g1": 0.9387000203132629,
+  "g2": 0.9093000292778015,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8427121229114959,
+  "debris_frac": 0.014366666666666666,
+  "leg_pts": {
+   "l1_l": 1776,
+   "l1_r": 930,
+   "l2_l": 552,
+   "l2_r": 1610,
+   "l3_l": 3516,
+   "l3_r": 3298
+  },
+  "file": "Lasius_nr._fuliginosus_CASENT0878037_processed.obj",
+  "name": "Lasius_nr._fuliginosus_CASENT0878037",
+  "split": "test"
+ },
+ {
+  "g1": 0.9290000200271606,
+  "g2": 0.9065333604812622,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8418662840605208,
+  "debris_frac": 0.041166666666666664,
+  "leg_pts": {
+   "l1_l": 2281,
+   "l1_r": 2332,
+   "l2_l": 1574,
+   "l2_r": 1727,
+   "l3_l": 2233,
+   "l3_r": 2328
+  },
+  "file": "Polyrhachis_dives_CASENT0878093_processed.obj",
+  "name": "Polyrhachis_dives_CASENT0878093",
+  "split": "train"
+ },
+ {
+  "g1": 0.9118000268936157,
+  "g2": 0.8661333322525024,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8876601049519959,
+  "debris_frac": 0.11663333333333334,
+  "leg_pts": {
+   "l1_l": 2674,
+   "l1_r": 1990,
+   "l2_l": 1773,
+   "l2_r": 2342,
+   "l3_l": 2206,
+   "l3_r": 1336
+  },
+  "file": "Strumigenys_sp._appretiata_group_CASENT0744156_processed.obj",
+  "name": "Strumigenys_sp._appretiata_group_CASENT0744156",
+  "split": "train"
+ }
+]

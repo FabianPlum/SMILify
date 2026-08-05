@@ -1,0 +1,90 @@
+scan                                     identity      rot24  rot24+icp   gain%
+01.obj                                     0.0353     0.0438     0.0333    5.6%
+02.obj                                     0.0463     0.0469     0.0431    6.9%
+03.obj                                     0.0476     0.0563     0.0514   -8.1%
+04.obj                                     0.0511     0.0621     0.0484    5.4%
+05.obj                                     0.0433     0.0459     0.0358   17.3%
+06.obj                                     0.0582     0.0626     0.0502   13.7%
+07.obj                                     0.0413     0.0428     0.0350   15.5%
+08.obj                                     0.0781     0.0756     0.0644   17.6%
+09.obj                                     0.0822     0.0799     0.0674   18.1%
+10.obj                                     0.0795     0.0810     0.0688   13.4%
+11.obj                                     0.0531     0.0691     0.0484    8.8%
+12.obj                                     0.0647     0.0810     0.0617    4.6%
+13.obj                                     0.0850     0.0924     0.0824    3.1%
+14.obj                                     0.0749     0.0749     0.0668   10.9%
+15.obj                                     0.0650     0.0683     0.0522   19.7%
+16.obj                                     0.0455     0.0488     0.0454    0.2%
+17.obj                                     0.0739     0.0797     0.0657   11.1%
+18.obj                                     0.0582     0.0668     0.0527    9.5%
+19.obj                                     0.0438     0.0407     0.0365   16.5%
+20.obj                                     0.0558     0.0606     0.0480   14.0%
+acanthomyrmex.obj                          0.0346     0.0336     0.0226   34.8%
+acanthostichus.obj                         0.0341     0.0329     0.0297   13.0%
+acromyrmex.obj                             0.0434     0.0417     0.0437   -0.6%
+aenictus-binghamii.obj                     0.0190     0.0191     0.0191   -0.5%
+amblyopone.obj                             0.0144     0.0147     0.0130    9.6%
+ancyridris.obj                             0.0262     0.0264     0.0227   13.5%
+ankylomyrma.obj                            0.0343     0.0345     0.0318    7.2%
+apomyrma.obj                               0.0403     0.0385     0.0392    2.6%
+atta-vollenweideri.obj                     0.0572     0.0504     0.0515    9.9%
+basiceros.obj                              0.0287     0.0271     0.0193   32.5%
+brachyponera-chinensis.obj                 0.0179     0.0174     0.0145   18.9%
+cataulacus.obj                             0.0277     0.0278     0.0270    2.7%
+cephalotes-varians.obj                     0.0294     0.0301     0.0273    7.2%
+cephalotes.obj                             0.0366     0.0368     0.0360    1.8%
+colobopsis-conica.obj                      0.0160     0.0161     0.0158    1.2%
+cyphomyrmex.obj                            0.0187     0.0190     0.0183    2.4%
+daceton.obj                                0.0332     0.0334     0.0317    4.7%
+diacamma-indicum.obj                       0.0354     0.0355     0.0319    9.9%
+dolichoderus-attelaboides.obj              0.0306     0.0315     0.0309   -1.1%
+dolichoderus-sibiricus.obj                 0.0228     0.0233     0.0219    4.2%
+dolichoderus.obj                           0.0307     0.0305     0.0293    4.6%
+dorylus-helvolus.obj                       0.0281     0.0270     0.0163   42.0%
+dorylus-nigricans.obj                      0.0491     0.0492     0.0510   -3.7%
+ectatomma-tuberculatum (1).obj             0.0443     0.0448     0.0452   -1.9%
+ectatomma-tuberculatum.obj                 0.0420     0.0422     0.0427   -1.8%
+ection-burchellii.obj                      0.0323     0.0306     0.0302    6.7%
+formica-japonica.obj                       0.0154     0.0151     0.0136   12.0%
+fulakora.obj                               0.0334     0.0306     0.0302    9.5%
+gerontoformica.obj                         0.0348     0.0343     0.0325    6.5%
+harpegnathos.obj                           0.0340     0.0339     0.0317    6.6%
+iroponera.obj                              0.0433     0.0432     0.0394    9.1%
+labidus-coecus.obj                         0.0302     0.0276     0.0221   26.8%
+leptogenys-wheeleri.obj                    0.0153     0.0138     0.0113   25.9%
+manica-andrannae.obj                       0.0189     0.0149     0.0144   23.6%
+martialis-heureka.obj                      0.0303     0.0303     0.0274    9.5%
+meranoplus.obj                             0.0344     0.0342     0.0342    0.6%
+messor-barbarus.obj                        0.0355     0.0356     0.0302   15.0%
+nomamyrmex.obj                             0.0242     0.0241     0.0186   23.2%
+notoncus.obj                               0.0258     0.0257     0.0243    5.9%
+odontomachus.obj                           0.0338     0.0337     0.0286   15.2%
+ophthalmopone-berthoudi.obj                0.0117     0.0119     0.0114    2.6%
+pachycondyla-crassinoda.obj                0.0215     0.0194     0.0194    9.8%
+paraponera-clavata.obj                     0.0542     0.0514     0.0513    5.5%
+pheidole-barumtaum-major.obj               0.0387     0.0389     0.0219   43.5%
+pheidole-caldwell-queen.obj                0.0466     0.0475     0.0475   -2.0%
+pheidole-cervicornis-minor-worker.obj      0.0214     0.0239     0.0181   15.5%
+pheidole-drogon-minor-worker.obj           0.0334     0.0349     0.0307    8.3%
+plectroctena-strigosa.obj                  0.0198     0.0185     0.0180    9.1%
+polyrhachis-bihamata.obj                   0.0377     0.0406     0.0386   -2.5%
+pristmyrmex.obj                            0.0281     0.0268     0.0262    6.8%
+proatta.obj                                0.0494     0.0476     0.0412   16.7%
+protanilla-lini.obj                        0.0610     0.0613     0.0541   11.2%
+santschiella-kohli.obj                     0.0182     0.0184     0.0175    3.6%
+simopone.obj                               0.0696     0.0698     0.0651    6.5%
+stigmatomma-liebe.obj                      0.0377     0.0370     0.0353    6.5%
+streblognathus.obj                         0.0270     0.0273     0.0261    3.5%
+strumigenys-oasis.obj                      0.0420     0.0417     0.0411    2.2%
+tapinoma.obj                               0.0150     0.0187     0.0145    2.9%
+tatuidris.obj                              0.0195     0.0185     0.0179    8.0%
+terataner-nymeria.obj                      0.0275     0.0275     0.0245   10.8%
+tetraponera.obj                            0.0321     0.0297     0.0275   14.3%
+
+n = 81
+  identity (CURRENT)  median 0.0346   mean 0.0387   p90 0.0647
+  24-way rot search   median 0.0345   mean 0.0395   p90 0.0691
+  rot24 + rigid ICP   median 0.0317   mean 0.0349   p90 0.0541
+  median symmetric-chamfer reduction, current -> rot24+ICP: 8.4%
+  scans where identity is already the best of the 24: 46 / 81
+  scans where rot24+ICP improves by >25%: 6 / 81

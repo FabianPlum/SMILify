@@ -1,0 +1,40 @@
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/400 anchor_loss=0.001052
+    [H_init]  200/400 anchor_loss=0.000001
+    [H_init]  399/400 anchor_loss=0.000000
+
+=== ARM A_default (min_pts=40) : anchored ['body', 'l1p_l', 'l1p_r', 'l2p_l', 'l2p_r', 'l3p_l', 'l3p_r'] ===
+group    anchored  mean disp %ext  max disp %ext  mean |jrot| deg
+body         True            8.90          58.97            31.43
+l1d_l       False            5.62           7.08             5.02
+l1d_r       False            3.93           4.70             4.79
+l1p_l        True            1.57           4.29            11.50
+l1p_r        True            1.65           3.35            13.32
+l2d_l       False            5.30           6.09             2.35
+l2d_r       False            4.21           5.41             2.18
+l2p_l        True            1.72           4.12            12.25
+l2p_r        True            1.51           2.69            11.75
+l3d_l       False            6.09           7.75             3.30
+l3d_r       False            5.67           7.54             2.28
+l3p_l        True            2.42           4.48             7.29
+l3p_r        True            1.83           3.44             6.11
+    [H_init] correspondence-free part-anchor init: 13 anchors over 1 specimens (13.0/specimen of 13 parts)
+    [H_init]    0/400 anchor_loss=0.000574
+    [H_init]  200/400 anchor_loss=0.000002
+    [H_init]  399/400 anchor_loss=0.000001
+
+=== ARM B_minpts5 (min_pts=5) : anchored ['body', 'l1d_l', 'l1d_r', 'l1p_l', 'l1p_r', 'l2d_l', 'l2d_r', 'l2p_l', 'l2p_r', 'l3d_l', 'l3d_r', 'l3p_l', 'l3p_r'] ===
+group    anchored  mean disp %ext  max disp %ext  mean |jrot| deg
+body         True            9.35          59.31            43.89
+l1d_l        True            0.54           0.95             4.16
+l1d_r        True            0.43           0.56             2.86
+l1p_l        True            0.40           1.14             3.48
+l1p_r        True            0.67           1.19             3.42
+l2d_l        True            0.47           1.06             7.44
+l2d_r        True            0.84           1.26             9.91
+l2p_l        True            1.31           2.08             4.31
+l2p_r        True            1.06           1.83             3.23
+l3d_l        True            0.88           1.50            16.44
+l3d_r        True            0.54           0.87             9.81
+l3p_l        True            1.75           3.25             4.49
+l3p_r        True            1.06           1.98             3.95

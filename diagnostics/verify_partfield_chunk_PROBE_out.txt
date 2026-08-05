@@ -1,0 +1,17 @@
+net: 14 classes, width 1.0, trained args:
+    {'epochs': 60, 'batch': 16, 'lr': 0.0015, 'mirror_aug': True, 'real_weight': 0.0, 'max_debris': 0.25, 'seed': 0, 'width': 1.0, 'rot_aug_deg': 12.0}
+clouds: (50, 30000, 3)
+
+=== STAGE 1: same points, alone (1328) vs inside a full chunk (4096) ===
+  [0] Acanthostichus_aff.brevicornis_CASENT074   argmax agree  85.54%  mean-conf delta -0.0201  KL(full||short) 0.2288   (fwd 4096 1.25s, 1328 1.38s)
+  MEAN argmax agreement short-vs-full on the identical points: 85.54%
+
+=== STAGE 2: ball-query neighbour counts at r=0.08, nsample=32 ===
+  N= 4096 npoint= 1024: true nbrs within r  mean  47.27  median   45.0  frac<32 0.081   unique pts per group after pad-by-repeat: mean 31.51/32
+  N= 1328 npoint= 1024: true nbrs within r  mean  16.26  median   16.0  frac<32 0.995   unique pts per group after pad-by-repeat: mean 16.25/32
+
+=== STAGE 3: end-to-end label effect over the full 30k cloud ===
+  [0] Acanthostichus_aff.brevicornis_CASEN   current-vs-padded (seed1)  95.92%  | same-cloud seed1-vs-seed2 agreement: current  95.05%  padded  95.51%  (delta +0.46pp)  unseen 0/0  [120s]
+
+  MEAN current-vs-padded label change: 4.077% of points
+  MEAN same-cloud self-agreement: current 95.047%  padded 95.507%  delta +0.460pp

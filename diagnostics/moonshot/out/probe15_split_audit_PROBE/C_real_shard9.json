@@ -1,0 +1,97 @@
+[
+ {
+  "g1": 0.9717000126838684,
+  "g2": 0.9446333050727844,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9288270732202127,
+  "debris_frac": 0.0041,
+  "leg_pts": {
+   "l1_l": 1670,
+   "l1_r": 1499,
+   "l2_l": 1627,
+   "l2_r": 2956,
+   "l3_l": 2080,
+   "l3_r": 1294
+  },
+  "file": "Cephalotes_minutus_CASENT0709253_processed.obj",
+  "name": "Cephalotes_minutus_CASENT0709253",
+  "split": "train"
+ },
+ {
+  "g1": 0.9175999760627747,
+  "g2": 0.8325999975204468,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8975765000189441,
+  "debris_frac": 0.0625,
+  "leg_pts": {
+   "l1_l": 2284,
+   "l1_r": 2057,
+   "l2_l": 2022,
+   "l2_r": 1869,
+   "l3_l": 1808,
+   "l3_r": 2384
+  },
+  "file": "Ectatomma_brunneum_CASENT0744575_processed.obj",
+  "name": "Ectatomma_brunneum_CASENT0744575",
+  "split": "test"
+ },
+ {
+  "g1": 0.9085666537284851,
+  "g2": 0.8704000115394592,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7751011685488098,
+  "debris_frac": 0.0307,
+  "leg_pts": {
+   "l1_l": 4000,
+   "l1_r": 2560,
+   "l2_l": 1761,
+   "l2_r": 1483,
+   "l3_l": 1561,
+   "l3_r": 2069
+  },
+  "file": "Myrmecina_sp._CASENT0745613_processed.obj",
+  "name": "Myrmecina_sp._CASENT0745613",
+  "split": "test"
+ },
+ {
+  "g1": 0.9251000285148621,
+  "g2": 0.8631333112716675,
+  "six_legs": true,
+  "order": 0.8571428571428571,
+  "coherence": 0.8068171726648169,
+  "debris_frac": 0.20823333333333333,
+  "leg_pts": {
+   "l1_l": 2235,
+   "l1_r": 1604,
+   "l2_l": 2489,
+   "l2_r": 3080,
+   "l3_l": 2363,
+   "l3_r": 3100
+  },
+  "file": "Solenopsis_invicta_CASENT0744384_processed.obj",
+  "name": "Solenopsis_invicta_CASENT0744384",
+  "split": "train"
+ },
+ {
+  "g1": 0.9317333102226257,
+  "g2": 0.8926666378974915,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9542216738041275,
+  "debris_frac": 0.25606666666666666,
+  "leg_pts": {
+   "l1_l": 2064,
+   "l1_r": 3331,
+   "l2_l": 1779,
+   "l2_r": 1488,
+   "l3_l": 1563,
+   "l3_r": 1845
+  },
+  "file": "Tetramorium_kraepelini_CASENT0744084_processed.obj",
+  "name": "Tetramorium_kraepelini_CASENT0744084",
+  "split": "train"
+ }
+]

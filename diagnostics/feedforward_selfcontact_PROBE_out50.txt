@@ -1,0 +1,56 @@
+scan                                                      nV r=0.01  r=0.02  r=0.04 
+Acanthostichus_aff.brevicornis_CASENT0744328_proce     49249    1.6%    1.5%    1.5%
+Acromyrmex_coronatus_CASENT0744365_processed.obj       49011    3.4%    2.8%    2.8%
+Acromyrmex_lobicornis_CASENT0878007_processed.obj      48717    9.0%    7.5%    7.4%
+Anochetus_risii_CASENT0877608_processed.obj            49619    3.9%    3.8%    3.8%
+Anochetus_risii_CASENT0877609_processed.obj            49700    3.9%    3.4%    3.4%
+Aphaenogaster_pallida_CASENT0745235_processed.obj      48818    2.7%    2.4%    2.4%
+Atopomyrmex_mocquerysi_CASENT0744784_processed.obj     48718    2.1%    2.1%    2.1%
+Carebara_trechideros_CASENT0877591_processed.obj       49482    2.3%    2.3%    2.3%
+Centromyrmex_brachycola_CASENT0744052_processed.ob     49624    8.7%    8.5%    8.5%
+Cephalotes_minutus_CASENT0709253_processed.obj         49537    6.9%    7.2%    7.2%
+Cephalotes_simillimus_CASENT0744408_processed.obj      49955    9.9%   10.9%   10.8%
+Cephalotes_spinosus_CASENT0744158_processed.obj        49920    8.8%    9.5%    9.4%
+Crematogaster_nawai_OKENT0105046_processed.obj         49362   10.6%   13.2%   13.2%
+Cryptopone_sauteri_CASENT0743771_processed.obj         45245    9.6%    8.5%    8.5%
+Cyphoidris_afrc-tz01_CASENT0744810_processed.obj       44695    7.7%    6.7%    6.4%
+Cyphomyrmex_cf.minutus_CASENT0744280_processed.obj     35499    7.6%    9.1%    8.7%
+Dilobocondyla_fouqueti_CASENT0745576_processed.obj     49932    7.6%    7.1%    7.0%
+Dorylus_fulvus_CASENT0745678_processed.obj             48578    7.9%    8.0%    8.0%
+Eciton_hamatum_CASENT0744580_processed.obj             49214    1.7%    1.8%    1.8%
+Ectatomma_brunneum_CASENT0744575_processed.obj         47518    3.1%    3.7%    3.8%
+Eurhopalothrix_procera_CASENT0745605_processed.obj     49966    4.8%    4.6%    4.5%
+Heteroponera_panamensis_CASENT0744055_processed.ob     49997    8.2%    7.6%    7.6%
+Labidus_praedator_CASENT0744236_processed.obj          49481    3.6%    3.5%    3.5%
+Labidus_praedator_CASENT0744237_processed.obj          49803    6.7%    6.0%    6.0%
+Lasius_nr._fuliginosus_CASENT0878037_processed.obj     49243    4.4%    4.2%    4.2%
+Lioponera_daikoku_OKENT0105067_processed.obj           28137   10.1%    9.4%    8.9%
+Mayriella_sp._CASENT0745610_processed.obj              13048   11.6%   11.4%   12.9%
+Mesoponera_ambigua_CASENT0745584_processed.obj         49971   10.0%    8.4%    8.4%
+Myrmecina_ryukyuensis_OKENT0105085_processed.obj       24528    9.5%    8.4%    8.4%
+Myrmecina_sp._CASENT0745613_processed.obj              39524    5.6%    4.5%    4.4%
+Nesomyrmex_angulatus_CASENT0744820_processed.obj       46202   12.2%   13.0%   13.0%
+Odontomachus_troglodytes_CASENT0744970_processed.o     47596    1.2%    1.2%    1.2%
+Oxyopomyrmex_saulcyi_CASENT0745218_processed.obj       38227   12.9%   16.0%   15.8%
+Polyrhachis_decemdentata_CASENT0744779_processed.o     49584   14.1%   14.4%   14.2%
+Polyrhachis_dives_CASENT0878093_processed.obj          49352    7.8%    6.4%    6.2%
+Ponera_kohmoku_OKENT0105440_processed.obj              49930   15.7%   15.3%   15.3%
+Ponera_tamon_OKENT0105154_processed.obj                29187   12.2%   12.1%   12.1%
+Pseudolasius_sp._CASENT0878065_processed.obj           47880   12.5%   11.8%   11.6%
+Pseudomyrmex_cf.solis_CASENT0744065_processed.obj      49917    6.8%    6.8%    6.8%
+Solenopsis_invicta_CASENT0744384_processed.obj         48991    7.9%   10.7%   10.6%
+Stigmatomma_FHG02_CASENT0745561_processed.obj          33675    9.7%    8.4%    8.4%
+Strumigenys_alberti_CASENT0878103_processed.obj        49918    2.0%    1.9%    1.9%
+Strumigenys_canina_OKENT0105288_processed.obj          22492    8.4%    7.9%    7.9%
+Strumigenys_crassicornis_CASENT0744273_processed.o     49711   10.9%    9.1%    8.9%
+Strumigenys_sp._appretiata_group_CASENT0744156_pro     13074   10.1%    9.9%    9.6%
+Strumigenys_stenorhina_OKENT0105268_processed.obj      22993   12.4%   11.5%   11.5%
+Syllophopsis_sechellensis_OKENT0105212_processed.o     48538    6.8%    6.5%    6.5%
+Temnothorax_congruus_OKENT0105443_processed.obj        47496   11.6%   11.8%   11.9%
+Temnothorax_sp._OKENT0105336_processed.obj             40263   14.1%   16.1%   16.1%
+Tetramorium_kraepelini_CASENT0744084_processed.obj     29027   11.9%   13.5%   13.4%
+
+POOLED contamination rate (Euclidean-near but geodesic-far neighbours):
+  ball radius 1% of body length: 7.39%  (16414/222169)
+  ball radius 2% of body length: 7.80%  (24393/312645)
+  ball radius 4% of body length: 7.82%  (25012/319978)

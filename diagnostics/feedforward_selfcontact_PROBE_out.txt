@@ -1,0 +1,18 @@
+scan                                                      nV r=0.01  r=0.02  r=0.04 
+Acanthostichus_aff.brevicornis_CASENT0744328_proce     49249    1.6%    1.5%    1.5%
+Acromyrmex_coronatus_CASENT0744365_processed.obj       49011    3.4%    2.8%    2.8%
+Acromyrmex_lobicornis_CASENT0878007_processed.obj      48717    9.0%    7.5%    7.4%
+Anochetus_risii_CASENT0877608_processed.obj            49619    3.9%    3.8%    3.8%
+Anochetus_risii_CASENT0877609_processed.obj            49700    3.9%    3.4%    3.4%
+Aphaenogaster_pallida_CASENT0745235_processed.obj      48818    2.7%    2.4%    2.4%
+Atopomyrmex_mocquerysi_CASENT0744784_processed.obj     48718    2.1%    2.1%    2.1%
+Carebara_trechideros_CASENT0877591_processed.obj       49482    2.3%    2.3%    2.3%
+Centromyrmex_brachycola_CASENT0744052_processed.ob     49624    8.7%    8.5%    8.5%
+Cephalotes_minutus_CASENT0709253_processed.obj         49537    6.9%    7.2%    7.2%
+Cephalotes_simillimus_CASENT0744408_processed.obj      49955    9.9%   10.9%   10.8%
+Cephalotes_spinosus_CASENT0744158_processed.obj        49920    8.8%    9.5%    9.4%
+
+POOLED contamination rate (Euclidean-near but geodesic-far neighbours):
+  ball radius 1% of body length: 5.07%  (3259/64244)
+  ball radius 2% of body length: 5.14%  (3920/76320)
+  ball radius 4% of body length: 5.13%  (3943/76798)

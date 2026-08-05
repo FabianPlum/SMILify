@@ -1,0 +1,952 @@
+[
+ {
+  "g1": 0.9477333426475525,
+  "g2": 0.9094333052635193,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.759200037531308,
+  "debris_frac": 0.026166666666666668,
+  "leg_pts": {
+   "l1_l": 1833,
+   "l1_r": 1607,
+   "l2_l": 1513,
+   "l2_r": 828,
+   "l3_l": 1203,
+   "l3_r": 2140
+  },
+  "file": "Acanthostichus_aff.brevicornis_CASENT0744328_processed.obj",
+  "name": "Acanthostichus_aff.brevicornis_CASENT0744328",
+  "split": "train"
+ },
+ {
+  "g1": 0.9209333062171936,
+  "g2": 0.8186666369438171,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7666524450835982,
+  "debris_frac": 0.0353,
+  "leg_pts": {
+   "l1_l": 2068,
+   "l1_r": 928,
+   "l2_l": 2683,
+   "l2_r": 2925,
+   "l3_l": 3022,
+   "l3_r": 3092
+  },
+  "file": "Acromyrmex_coronatus_CASENT0744365_processed.obj",
+  "name": "Acromyrmex_coronatus_CASENT0744365",
+  "split": "test"
+ },
+ {
+  "g1": 0.8982333540916443,
+  "g2": 0.814300000667572,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8010061441921169,
+  "debris_frac": 0.0727,
+  "leg_pts": {
+   "l1_l": 1656,
+   "l1_r": 2762,
+   "l2_l": 883,
+   "l2_r": 1713,
+   "l3_l": 1768,
+   "l3_r": 1192
+  },
+  "file": "Acromyrmex_lobicornis_CASENT0878007_processed.obj",
+  "name": "Acromyrmex_lobicornis_CASENT0878007",
+  "split": "train"
+ },
+ {
+  "g1": 0.9750333428382874,
+  "g2": 0.9669333100318909,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9201042208575773,
+  "debris_frac": 0.012633333333333333,
+  "leg_pts": {
+   "l1_l": 2109,
+   "l1_r": 2603,
+   "l2_l": 1753,
+   "l2_r": 2007,
+   "l3_l": 2329,
+   "l3_r": 2348
+  },
+  "file": "Anochetus_risii_CASENT0877608_processed.obj",
+  "name": "Anochetus_risii_CASENT0877608",
+  "split": "train"
+ },
+ {
+  "g1": 0.9110666513442993,
+  "g2": 0.8473333120346069,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7509537087344437,
+  "debris_frac": 0.05623333333333334,
+  "leg_pts": {
+   "l1_l": 646,
+   "l1_r": 1766,
+   "l2_l": 1811,
+   "l2_r": 2935,
+   "l3_l": 3247,
+   "l3_r": 2103
+  },
+  "file": "Anochetus_risii_CASENT0877609_processed.obj",
+  "name": "Anochetus_risii_CASENT0877609",
+  "split": "train"
+ },
+ {
+  "g1": 0.9748666882514954,
+  "g2": 0.966866672039032,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9739728227750842,
+  "debris_frac": 0.0159,
+  "leg_pts": {
+   "l1_l": 2208,
+   "l1_r": 1984,
+   "l2_l": 1417,
+   "l2_r": 1641,
+   "l3_l": 2143,
+   "l3_r": 2034
+  },
+  "file": "Aphaenogaster_pallida_CASENT0745235_processed.obj",
+  "name": "Aphaenogaster_pallida_CASENT0745235",
+  "split": "train"
+ },
+ {
+  "g1": 0.9570666551589966,
+  "g2": 0.8838000297546387,
+  "six_legs": true,
+  "order": 0.8571428571428571,
+  "coherence": 0.6865680923759424,
+  "debris_frac": 0.0093,
+  "leg_pts": {
+   "l1_l": 1951,
+   "l1_r": 1297,
+   "l2_l": 3954,
+   "l2_r": 4146,
+   "l3_l": 1628,
+   "l3_r": 791
+  },
+  "file": "Atopomyrmex_mocquerysi_CASENT0744784_processed.obj",
+  "name": "Atopomyrmex_mocquerysi_CASENT0744784",
+  "split": "train"
+ },
+ {
+  "g1": 0.9508666396141052,
+  "g2": 0.8868333101272583,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7963856703080766,
+  "debris_frac": 0.011633333333333334,
+  "leg_pts": {
+   "l1_l": 1205,
+   "l1_r": 1449,
+   "l2_l": 3306,
+   "l2_r": 2804,
+   "l3_l": 1611,
+   "l3_r": 3413
+  },
+  "file": "Carebara_trechideros_CASENT0877591_processed.obj",
+  "name": "Carebara_trechideros_CASENT0877591",
+  "split": "train"
+ },
+ {
+  "g1": 0.9452000260353088,
+  "g2": 0.933899998664856,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9062320179949981,
+  "debris_frac": 0.019066666666666666,
+  "leg_pts": {
+   "l1_l": 1635,
+   "l1_r": 1611,
+   "l2_l": 1751,
+   "l2_r": 1640,
+   "l3_l": 1603,
+   "l3_r": 2257
+  },
+  "file": "Centromyrmex_brachycola_CASENT0744052_processed.obj",
+  "name": "Centromyrmex_brachycola_CASENT0744052",
+  "split": "train"
+ },
+ {
+  "g1": 0.92330002784729,
+  "g2": 0.8974000215530396,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9282268742463772,
+  "debris_frac": 0.065,
+  "leg_pts": {
+   "l1_l": 1673,
+   "l1_r": 1828,
+   "l2_l": 1478,
+   "l2_r": 2248,
+   "l3_l": 2070,
+   "l3_r": 1271
+  },
+  "file": "Cephalotes_minutus_CASENT0709253_processed.obj",
+  "name": "Cephalotes_minutus_CASENT0709253",
+  "split": "train"
+ },
+ {
+  "g1": 0.8686666488647461,
+  "g2": 0.8514333367347717,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9450890238297739,
+  "debris_frac": 0.1723,
+  "leg_pts": {
+   "l1_l": 2014,
+   "l1_r": 1685,
+   "l2_l": 1061,
+   "l2_r": 1762,
+   "l3_l": 868,
+   "l3_r": 1337
+  },
+  "file": "Cephalotes_simillimus_CASENT0744408_processed.obj",
+  "name": "Cephalotes_simillimus_CASENT0744408",
+  "split": "test"
+ },
+ {
+  "g1": 0.8952999711036682,
+  "g2": 0.8769000172615051,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9408667911547407,
+  "debris_frac": 0.1114,
+  "leg_pts": {
+   "l1_l": 3008,
+   "l1_r": 2562,
+   "l2_l": 2282,
+   "l2_r": 2547,
+   "l3_l": 935,
+   "l3_r": 708
+  },
+  "file": "Cephalotes_spinosus_CASENT0744158_processed.obj",
+  "name": "Cephalotes_spinosus_CASENT0744158",
+  "split": "train"
+ },
+ {
+  "g1": 0.9140333533287048,
+  "g2": 0.8809666633605957,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8950856424458288,
+  "debris_frac": 0.0564,
+  "leg_pts": {
+   "l1_l": 2332,
+   "l1_r": 3101,
+   "l2_l": 1835,
+   "l2_r": 2260,
+   "l3_l": 2502,
+   "l3_r": 1375
+  },
+  "file": "Crematogaster_nawai_OKENT0105046_processed.obj",
+  "name": "Crematogaster_nawai_OKENT0105046",
+  "split": "train"
+ },
+ {
+  "g1": 0.9071333408355713,
+  "g2": 0.8655333518981934,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9123006952233698,
+  "debris_frac": 0.1057,
+  "leg_pts": {
+   "l1_l": 2364,
+   "l1_r": 2227,
+   "l2_l": 1947,
+   "l2_r": 1727,
+   "l3_l": 737,
+   "l3_r": 1209
+  },
+  "file": "Cryptopone_sauteri_CASENT0743771_processed.obj",
+  "name": "Cryptopone_sauteri_CASENT0743771",
+  "split": "train"
+ },
+ {
+  "g1": 0.7696999907493591,
+  "g2": 0.6968666911125183,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.5605470141359147,
+  "debris_frac": 0.479,
+  "leg_pts": {
+   "l1_l": 1018,
+   "l1_r": 716,
+   "l2_l": 2304,
+   "l2_r": 2553,
+   "l3_l": 1087,
+   "l3_r": 940
+  },
+  "file": "Cyphoidris_afrc-tz01_CASENT0744810_processed.obj",
+  "name": "Cyphoidris_afrc-tz01_CASENT0744810",
+  "split": "train"
+ },
+ {
+  "g1": 0.7820666432380676,
+  "g2": 0.7314000129699707,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.839562628952006,
+  "debris_frac": 0.5538333333333333,
+  "leg_pts": {
+   "l1_l": 2879,
+   "l1_r": 2246,
+   "l2_l": 754,
+   "l2_r": 1627,
+   "l3_l": 1197,
+   "l3_r": 512
+  },
+  "file": "Cyphomyrmex_cf.minutus_CASENT0744280_processed.obj",
+  "name": "Cyphomyrmex_cf.minutus_CASENT0744280",
+  "split": "test"
+ },
+ {
+  "g1": 0.9239333271980286,
+  "g2": 0.8915333151817322,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.6093881267053952,
+  "debris_frac": 0.030833333333333334,
+  "leg_pts": {
+   "l1_l": 2097,
+   "l1_r": 1695,
+   "l2_l": 3127,
+   "l2_r": 2924,
+   "l3_l": 1354,
+   "l3_r": 1497
+  },
+  "file": "Dilobocondyla_fouqueti_CASENT0745576_processed.obj",
+  "name": "Dilobocondyla_fouqueti_CASENT0745576",
+  "split": "train"
+ },
+ {
+  "g1": 0.9472333192825317,
+  "g2": 0.897266685962677,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.846382550221145,
+  "debris_frac": 0.043633333333333336,
+  "leg_pts": {
+   "l1_l": 1648,
+   "l1_r": 1501,
+   "l2_l": 1165,
+   "l2_r": 1869,
+   "l3_l": 2126,
+   "l3_r": 2112
+  },
+  "file": "Dorylus_fulvus_CASENT0745678_processed.obj",
+  "name": "Dorylus_fulvus_CASENT0745678",
+  "split": "test"
+ },
+ {
+  "g1": 0.9279666543006897,
+  "g2": 0.8866333365440369,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9543734110532904,
+  "debris_frac": 0.009133333333333334,
+  "leg_pts": {
+   "l1_l": 2086,
+   "l1_r": 2431,
+   "l2_l": 1714,
+   "l2_r": 1524,
+   "l3_l": 4013,
+   "l3_r": 2736
+  },
+  "file": "Eciton_hamatum_CASENT0744580_processed.obj",
+  "name": "Eciton_hamatum_CASENT0744580",
+  "split": "train"
+ },
+ {
+  "g1": 0.9276000261306763,
+  "g2": 0.9190666675567627,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9811776906071422,
+  "debris_frac": 0.0363,
+  "leg_pts": {
+   "l1_l": 2119,
+   "l1_r": 2242,
+   "l2_l": 1563,
+   "l2_r": 1667,
+   "l3_l": 2411,
+   "l3_r": 2131
+  },
+  "file": "Ectatomma_brunneum_CASENT0744575_processed.obj",
+  "name": "Ectatomma_brunneum_CASENT0744575",
+  "split": "test"
+ },
+ {
+  "g1": 0.9049333333969116,
+  "g2": 0.8794999718666077,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9337117999120134,
+  "debris_frac": 0.06653333333333333,
+  "leg_pts": {
+   "l1_l": 2311,
+   "l1_r": 1824,
+   "l2_l": 1330,
+   "l2_r": 1872,
+   "l3_l": 1887,
+   "l3_r": 1732
+  },
+  "file": "Eurhopalothrix_procera_CASENT0745605_processed.obj",
+  "name": "Eurhopalothrix_procera_CASENT0745605",
+  "split": "train"
+ },
+ {
+  "g1": 0.7857666611671448,
+  "g2": 0.7428333163261414,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.691138322401022,
+  "debris_frac": 0.23863333333333334,
+  "leg_pts": {
+   "l1_l": 2925,
+   "l1_r": 2107,
+   "l2_l": 1632,
+   "l2_r": 2697,
+   "l3_l": 697,
+   "l3_r": 185
+  },
+  "file": "Heteroponera_panamensis_CASENT0744055_processed.obj",
+  "name": "Heteroponera_panamensis_CASENT0744055",
+  "split": "train"
+ },
+ {
+  "g1": 0.9356666803359985,
+  "g2": 0.8561999797821045,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7979421755689812,
+  "debris_frac": 0.024,
+  "leg_pts": {
+   "l1_l": 947,
+   "l1_r": 3062,
+   "l2_l": 2754,
+   "l2_r": 1392,
+   "l3_l": 2867,
+   "l3_r": 1485
+  },
+  "file": "Labidus_praedator_CASENT0744236_processed.obj",
+  "name": "Labidus_praedator_CASENT0744236",
+  "split": "train"
+ },
+ {
+  "g1": 0.9613000154495239,
+  "g2": 0.9517333507537842,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.956500369627225,
+  "debris_frac": 0.029566666666666668,
+  "leg_pts": {
+   "l1_l": 2282,
+   "l1_r": 1927,
+   "l2_l": 1969,
+   "l2_r": 2091,
+   "l3_l": 2359,
+   "l3_r": 2474
+  },
+  "file": "Labidus_praedator_CASENT0744237_processed.obj",
+  "name": "Labidus_praedator_CASENT0744237",
+  "split": "train"
+ },
+ {
+  "g1": 0.9387000203132629,
+  "g2": 0.9093000292778015,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8427121229114959,
+  "debris_frac": 0.014366666666666666,
+  "leg_pts": {
+   "l1_l": 1776,
+   "l1_r": 930,
+   "l2_l": 552,
+   "l2_r": 1610,
+   "l3_l": 3516,
+   "l3_r": 3298
+  },
+  "file": "Lasius_nr._fuliginosus_CASENT0878037_processed.obj",
+  "name": "Lasius_nr._fuliginosus_CASENT0878037",
+  "split": "test"
+ },
+ {
+  "g1": 0.8734333515167236,
+  "g2": 0.7925666570663452,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.855598509707267,
+  "debris_frac": 0.1324,
+  "leg_pts": {
+   "l1_l": 1952,
+   "l1_r": 1982,
+   "l2_l": 2465,
+   "l2_r": 1789,
+   "l3_l": 1029,
+   "l3_r": 1512
+  },
+  "file": "Lioponera_daikoku_OKENT0105067_processed.obj",
+  "name": "Lioponera_daikoku_OKENT0105067",
+  "split": "train"
+ },
+ {
+  "g1": 0.8539666533470154,
+  "g2": 0.8394333124160767,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.924040511909476,
+  "debris_frac": 0.24936666666666665,
+  "leg_pts": {
+   "l1_l": 1824,
+   "l1_r": 1594,
+   "l2_l": 1667,
+   "l2_r": 1363,
+   "l3_l": 694,
+   "l3_r": 757
+  },
+  "file": "Mayriella_sp._CASENT0745610_processed.obj",
+  "name": "Mayriella_sp._CASENT0745610",
+  "split": "test"
+ },
+ {
+  "g1": 0.9175000190734863,
+  "g2": 0.9066666960716248,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9023151153035626,
+  "debris_frac": 0.028866666666666665,
+  "leg_pts": {
+   "l1_l": 2089,
+   "l1_r": 2768,
+   "l2_l": 1766,
+   "l2_r": 1197,
+   "l3_l": 2478,
+   "l3_r": 2221
+  },
+  "file": "Mesoponera_ambigua_CASENT0745584_processed.obj",
+  "name": "Mesoponera_ambigua_CASENT0745584",
+  "split": "test"
+ },
+ {
+  "g1": 0.9284999966621399,
+  "g2": 0.9049333333969116,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8543971096049251,
+  "debris_frac": 0.08036666666666667,
+  "leg_pts": {
+   "l1_l": 2216,
+   "l1_r": 1908,
+   "l2_l": 2212,
+   "l2_r": 1998,
+   "l3_l": 1602,
+   "l3_r": 1120
+  },
+  "file": "Myrmecina_ryukyuensis_OKENT0105085_processed.obj",
+  "name": "Myrmecina_ryukyuensis_OKENT0105085",
+  "split": "train"
+ },
+ {
+  "g1": 0.907800018787384,
+  "g2": 0.8740666508674622,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8179392259441598,
+  "debris_frac": 0.06496666666666667,
+  "leg_pts": {
+   "l1_l": 3646,
+   "l1_r": 2765,
+   "l2_l": 1652,
+   "l2_r": 1586,
+   "l3_l": 1202,
+   "l3_r": 1574
+  },
+  "file": "Myrmecina_sp._CASENT0745613_processed.obj",
+  "name": "Myrmecina_sp._CASENT0745613",
+  "split": "test"
+ },
+ {
+  "g1": 0.8576333522796631,
+  "g2": 0.8546333312988281,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9475499144790686,
+  "debris_frac": 0.1962,
+  "leg_pts": {
+   "l1_l": 2129,
+   "l1_r": 1774,
+   "l2_l": 934,
+   "l2_r": 1168,
+   "l3_l": 563,
+   "l3_r": 760
+  },
+  "file": "Nesomyrmex_angulatus_CASENT0744820_processed.obj",
+  "name": "Nesomyrmex_angulatus_CASENT0744820",
+  "split": "test"
+ },
+ {
+  "g1": 0.947700023651123,
+  "g2": 0.8834999799728394,
+  "six_legs": true,
+  "order": 0.8571428571428571,
+  "coherence": 0.8058238884737681,
+  "debris_frac": 0.028166666666666666,
+  "leg_pts": {
+   "l1_l": 1020,
+   "l1_r": 1131,
+   "l2_l": 2535,
+   "l2_r": 1754,
+   "l3_l": 2747,
+   "l3_r": 2696
+  },
+  "file": "Odontomachus_troglodytes_CASENT0744970_processed.obj",
+  "name": "Odontomachus_troglodytes_CASENT0744970",
+  "split": "train"
+ },
+ {
+  "g1": 0.9118000268936157,
+  "g2": 0.9143999814987183,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9068506239423901,
+  "debris_frac": 0.11523333333333333,
+  "leg_pts": {
+   "l1_l": 2193,
+   "l1_r": 2523,
+   "l2_l": 1412,
+   "l2_r": 1316,
+   "l3_l": 1689,
+   "l3_r": 1873
+  },
+  "file": "Oxyopomyrmex_saulcyi_CASENT0745218_processed.obj",
+  "name": "Oxyopomyrmex_saulcyi_CASENT0745218",
+  "split": "train"
+ },
+ {
+  "g1": 0.9244666695594788,
+  "g2": 0.897266685962677,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9606778738657255,
+  "debris_frac": 0.085,
+  "leg_pts": {
+   "l1_l": 1757,
+   "l1_r": 2409,
+   "l2_l": 1787,
+   "l2_r": 2748,
+   "l3_l": 1751,
+   "l3_r": 584
+  },
+  "file": "Polyrhachis_decemdentata_CASENT0744779_processed.obj",
+  "name": "Polyrhachis_decemdentata_CASENT0744779",
+  "split": "train"
+ },
+ {
+  "g1": 0.9290000200271606,
+  "g2": 0.9065333604812622,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8418662840605208,
+  "debris_frac": 0.041166666666666664,
+  "leg_pts": {
+   "l1_l": 2281,
+   "l1_r": 2332,
+   "l2_l": 1574,
+   "l2_r": 1727,
+   "l3_l": 2233,
+   "l3_r": 2328
+  },
+  "file": "Polyrhachis_dives_CASENT0878093_processed.obj",
+  "name": "Polyrhachis_dives_CASENT0878093",
+  "split": "train"
+ },
+ {
+  "g1": 0.9046000242233276,
+  "g2": 0.8955000042915344,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8287458354590399,
+  "debris_frac": 0.0797,
+  "leg_pts": {
+   "l1_l": 1713,
+   "l1_r": 1806,
+   "l2_l": 1696,
+   "l2_r": 1412,
+   "l3_l": 871,
+   "l3_r": 1306
+  },
+  "file": "Ponera_kohmoku_OKENT0105440_processed.obj",
+  "name": "Ponera_kohmoku_OKENT0105440",
+  "split": "test"
+ },
+ {
+  "g1": 0.9344666600227356,
+  "g2": 0.9154333472251892,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.831656063268338,
+  "debris_frac": 0.0724,
+  "leg_pts": {
+   "l1_l": 2319,
+   "l1_r": 2348,
+   "l2_l": 1619,
+   "l2_r": 1889,
+   "l3_l": 1307,
+   "l3_r": 2106
+  },
+  "file": "Ponera_tamon_OKENT0105154_processed.obj",
+  "name": "Ponera_tamon_OKENT0105154",
+  "split": "train"
+ },
+ {
+  "g1": 0.8680999875068665,
+  "g2": 0.8269666433334351,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8718969760068127,
+  "debris_frac": 0.1157,
+  "leg_pts": {
+   "l1_l": 1453,
+   "l1_r": 1439,
+   "l2_l": 1830,
+   "l2_r": 2270,
+   "l3_l": 1822,
+   "l3_r": 512
+  },
+  "file": "Pseudolasius_sp._CASENT0878065_processed.obj",
+  "name": "Pseudolasius_sp._CASENT0878065",
+  "split": "train"
+ },
+ {
+  "g1": 0.9237333536148071,
+  "g2": 0.8767333626747131,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.818312583713924,
+  "debris_frac": 0.07403333333333334,
+  "leg_pts": {
+   "l1_l": 1918,
+   "l1_r": 1733,
+   "l2_l": 2779,
+   "l2_r": 2119,
+   "l3_l": 2204,
+   "l3_r": 1329
+  },
+  "file": "Pseudomyrmex_cf.solis_CASENT0744065_processed.obj",
+  "name": "Pseudomyrmex_cf.solis_CASENT0744065",
+  "split": "train"
+ },
+ {
+  "g1": 0.8356666564941406,
+  "g2": 0.7824333310127258,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.6932285102849267,
+  "debris_frac": 0.18556666666666666,
+  "leg_pts": {
+   "l1_l": 2435,
+   "l1_r": 1585,
+   "l2_l": 1226,
+   "l2_r": 1887,
+   "l3_l": 2544,
+   "l3_r": 1168
+  },
+  "file": "Solenopsis_invicta_CASENT0744384_processed.obj",
+  "name": "Solenopsis_invicta_CASENT0744384",
+  "split": "train"
+ },
+ {
+  "g1": 0.9277666807174683,
+  "g2": 0.8830333352088928,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8417432306408387,
+  "debris_frac": 0.0412,
+  "leg_pts": {
+   "l1_l": 1528,
+   "l1_r": 3254,
+   "l2_l": 1931,
+   "l2_r": 1925,
+   "l3_l": 1552,
+   "l3_r": 1694
+  },
+  "file": "Stigmatomma_FHG02_CASENT0745561_processed.obj",
+  "name": "Stigmatomma_FHG02_CASENT0745561",
+  "split": "test"
+ },
+ {
+  "g1": 0.9075333476066589,
+  "g2": 0.8889333605766296,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8782135400361516,
+  "debris_frac": 0.0623,
+  "leg_pts": {
+   "l1_l": 2289,
+   "l1_r": 2356,
+   "l2_l": 1941,
+   "l2_r": 2008,
+   "l3_l": 1739,
+   "l3_r": 1959
+  },
+  "file": "Strumigenys_alberti_CASENT0878103_processed.obj",
+  "name": "Strumigenys_alberti_CASENT0878103",
+  "split": "test"
+ },
+ {
+  "g1": 0.9248666763305664,
+  "g2": 0.8948666453361511,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7614259386014727,
+  "debris_frac": 0.06606666666666666,
+  "leg_pts": {
+   "l1_l": 2157,
+   "l1_r": 1808,
+   "l2_l": 1361,
+   "l2_r": 1322,
+   "l3_l": 1914,
+   "l3_r": 1949
+  },
+  "file": "Strumigenys_canina_OKENT0105288_processed.obj",
+  "name": "Strumigenys_canina_OKENT0105288",
+  "split": "train"
+ },
+ {
+  "g1": 0.9128333330154419,
+  "g2": 0.8886333107948303,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8737609673218466,
+  "debris_frac": 0.06613333333333334,
+  "leg_pts": {
+   "l1_l": 1972,
+   "l1_r": 1586,
+   "l2_l": 2132,
+   "l2_r": 3039,
+   "l3_l": 1763,
+   "l3_r": 919
+  },
+  "file": "Strumigenys_crassicornis_CASENT0744273_processed.obj",
+  "name": "Strumigenys_crassicornis_CASENT0744273",
+  "split": "test"
+ },
+ {
+  "g1": 0.9118000268936157,
+  "g2": 0.8661333322525024,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8876601049519959,
+  "debris_frac": 0.11663333333333334,
+  "leg_pts": {
+   "l1_l": 2674,
+   "l1_r": 1990,
+   "l2_l": 1773,
+   "l2_r": 2342,
+   "l3_l": 2206,
+   "l3_r": 1336
+  },
+  "file": "Strumigenys_sp._appretiata_group_CASENT0744156_processed.obj",
+  "name": "Strumigenys_sp._appretiata_group_CASENT0744156",
+  "split": "train"
+ },
+ {
+  "g1": 0.9573333263397217,
+  "g2": 0.949733316898346,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9836480838935628,
+  "debris_frac": 0.053233333333333334,
+  "leg_pts": {
+   "l1_l": 2182,
+   "l1_r": 2291,
+   "l2_l": 1874,
+   "l2_r": 1861,
+   "l3_l": 1823,
+   "l3_r": 1747
+  },
+  "file": "Strumigenys_stenorhina_OKENT0105268_processed.obj",
+  "name": "Strumigenys_stenorhina_OKENT0105268",
+  "split": "test"
+ },
+ {
+  "g1": 0.9621000289916992,
+  "g2": 0.9279000163078308,
+  "six_legs": true,
+  "order": 0.8571428571428571,
+  "coherence": 0.8184032887934244,
+  "debris_frac": 0.027866666666666668,
+  "leg_pts": {
+   "l1_l": 2870,
+   "l1_r": 2315,
+   "l2_l": 1776,
+   "l2_r": 2263,
+   "l3_l": 870,
+   "l3_r": 1031
+  },
+  "file": "Syllophopsis_sechellensis_OKENT0105212_processed.obj",
+  "name": "Syllophopsis_sechellensis_OKENT0105212",
+  "split": "train"
+ },
+ {
+  "g1": 0.9267666935920715,
+  "g2": 0.9157000184059143,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9361059069147358,
+  "debris_frac": 0.18606666666666666,
+  "leg_pts": {
+   "l1_l": 1700,
+   "l1_r": 2060,
+   "l2_l": 1249,
+   "l2_r": 1077,
+   "l3_l": 1468,
+   "l3_r": 1431
+  },
+  "file": "Temnothorax_congruus_OKENT0105443_processed.obj",
+  "name": "Temnothorax_congruus_OKENT0105443",
+  "split": "train"
+ },
+ {
+  "g1": 0.9085000157356262,
+  "g2": 0.895466685295105,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8882790203083063,
+  "debris_frac": 0.1646,
+  "leg_pts": {
+   "l1_l": 1637,
+   "l1_r": 1620,
+   "l2_l": 1397,
+   "l2_r": 1319,
+   "l3_l": 797,
+   "l3_r": 1945
+  },
+  "file": "Temnothorax_sp._OKENT0105336_processed.obj",
+  "name": "Temnothorax_sp._OKENT0105336",
+  "split": "train"
+ },
+ {
+  "g1": 0.8669666647911072,
+  "g2": 0.8589333295822144,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9164982967694438,
+  "debris_frac": 0.18486666666666668,
+  "leg_pts": {
+   "l1_l": 1489,
+   "l1_r": 2040,
+   "l2_l": 1287,
+   "l2_r": 1850,
+   "l3_l": 1674,
+   "l3_r": 603
+  },
+  "file": "Tetramorium_kraepelini_CASENT0744084_processed.obj",
+  "name": "Tetramorium_kraepelini_CASENT0744084",
+  "split": "train"
+ }
+]

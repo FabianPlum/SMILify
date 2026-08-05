@@ -1,0 +1,97 @@
+[
+ {
+  "g1": 0.9371333122253418,
+  "g2": 0.8619999885559082,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8542265795206972,
+  "debris_frac": 0.14576666666666666,
+  "leg_pts": {
+   "l1_l": 3825,
+   "l1_r": 3886,
+   "l2_l": 1530,
+   "l2_r": 2168,
+   "l3_l": 1158,
+   "l3_r": 1097
+  },
+  "file": "Acromyrmex_lobicornis_CASENT0878007_processed.obj",
+  "name": "Acromyrmex_lobicornis_CASENT0878007",
+  "split": "train"
+ },
+ {
+  "g1": 0.951033353805542,
+  "g2": 0.9264000058174133,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9156949651179552,
+  "debris_frac": 0.06573333333333334,
+  "leg_pts": {
+   "l1_l": 2246,
+   "l1_r": 3002,
+   "l2_l": 1535,
+   "l2_r": 2474,
+   "l3_l": 3421,
+   "l3_r": 2675
+  },
+  "file": "Crematogaster_nawai_OKENT0105046_processed.obj",
+  "name": "Crematogaster_nawai_OKENT0105046",
+  "split": "train"
+ },
+ {
+  "g1": 0.9549333453178406,
+  "g2": 0.9081000089645386,
+  "six_legs": true,
+  "order": 0.8571428571428571,
+  "coherence": 0.7792498255315118,
+  "debris_frac": 0.04003333333333333,
+  "leg_pts": {
+   "l1_l": 3759,
+   "l1_r": 4077,
+   "l2_l": 3187,
+   "l2_r": 1410,
+   "l3_l": 2405,
+   "l3_r": 2184
+  },
+  "file": "Labidus_praedator_CASENT0744236_processed.obj",
+  "name": "Labidus_praedator_CASENT0744236",
+  "split": "train"
+ },
+ {
+  "g1": 0.9281666874885559,
+  "g2": 0.8953666687011719,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8325816256559889,
+  "debris_frac": 0.19296666666666668,
+  "leg_pts": {
+   "l1_l": 1934,
+   "l1_r": 2554,
+   "l2_l": 1263,
+   "l2_r": 1305,
+   "l3_l": 1976,
+   "l3_r": 2462
+  },
+  "file": "Oxyopomyrmex_saulcyi_CASENT0745218_processed.obj",
+  "name": "Oxyopomyrmex_saulcyi_CASENT0745218",
+  "split": "train"
+ },
+ {
+  "g1": 0.9366333484649658,
+  "g2": 0.8772666454315186,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7749131565175184,
+  "debris_frac": 0.109,
+  "leg_pts": {
+   "l1_l": 2229,
+   "l1_r": 1765,
+   "l2_l": 2753,
+   "l2_r": 2132,
+   "l3_l": 2269,
+   "l3_r": 3620
+  },
+  "file": "Strumigenys_canina_OKENT0105288_processed.obj",
+  "name": "Strumigenys_canina_OKENT0105288",
+  "split": "train"
+ }
+]

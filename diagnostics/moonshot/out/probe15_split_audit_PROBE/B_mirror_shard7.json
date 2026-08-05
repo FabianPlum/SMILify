@@ -1,0 +1,97 @@
+[
+ {
+  "g1": 0.9508666396141052,
+  "g2": 0.8868333101272583,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7963856703080766,
+  "debris_frac": 0.011633333333333334,
+  "leg_pts": {
+   "l1_l": 1205,
+   "l1_r": 1449,
+   "l2_l": 3306,
+   "l2_r": 2804,
+   "l3_l": 1611,
+   "l3_r": 3413
+  },
+  "file": "Carebara_trechideros_CASENT0877591_processed.obj",
+  "name": "Carebara_trechideros_CASENT0877591",
+  "split": "train"
+ },
+ {
+  "g1": 0.9472333192825317,
+  "g2": 0.897266685962677,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.846382550221145,
+  "debris_frac": 0.043633333333333336,
+  "leg_pts": {
+   "l1_l": 1648,
+   "l1_r": 1501,
+   "l2_l": 1165,
+   "l2_r": 1869,
+   "l3_l": 2126,
+   "l3_r": 2112
+  },
+  "file": "Dorylus_fulvus_CASENT0745678_processed.obj",
+  "name": "Dorylus_fulvus_CASENT0745678",
+  "split": "test"
+ },
+ {
+  "g1": 0.9175000190734863,
+  "g2": 0.9066666960716248,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9023151153035626,
+  "debris_frac": 0.028866666666666665,
+  "leg_pts": {
+   "l1_l": 2089,
+   "l1_r": 2768,
+   "l2_l": 1766,
+   "l2_r": 1197,
+   "l3_l": 2478,
+   "l3_r": 2221
+  },
+  "file": "Mesoponera_ambigua_CASENT0745584_processed.obj",
+  "name": "Mesoponera_ambigua_CASENT0745584",
+  "split": "test"
+ },
+ {
+  "g1": 0.8680999875068665,
+  "g2": 0.8269666433334351,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8718969760068127,
+  "debris_frac": 0.1157,
+  "leg_pts": {
+   "l1_l": 1453,
+   "l1_r": 1439,
+   "l2_l": 1830,
+   "l2_r": 2270,
+   "l3_l": 1822,
+   "l3_r": 512
+  },
+  "file": "Pseudolasius_sp._CASENT0878065_processed.obj",
+  "name": "Pseudolasius_sp._CASENT0878065",
+  "split": "train"
+ },
+ {
+  "g1": 0.9267666935920715,
+  "g2": 0.9157000184059143,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9361059069147358,
+  "debris_frac": 0.18606666666666666,
+  "leg_pts": {
+   "l1_l": 1700,
+   "l1_r": 2060,
+   "l2_l": 1249,
+   "l2_r": 1077,
+   "l3_l": 1468,
+   "l3_r": 1431
+  },
+  "file": "Temnothorax_congruus_OKENT0105443_processed.obj",
+  "name": "Temnothorax_congruus_OKENT0105443",
+  "split": "train"
+ }
+]

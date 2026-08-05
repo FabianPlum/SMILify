@@ -1,0 +1,62 @@
+[
+ {
+  "name": "Acanthostichus_aff.brevicornis_CASENT074",
+  "debris_frac": 0.030633334070444107,
+  "n_distal": 5129,
+  "n_prox": 12104,
+  "n_body": 12767,
+  "dbg_on_distal": 0.05576135590672493,
+  "dbg_on_prox": 0.030733641237020493,
+  "dbg_on_body": 0.020443329587578773,
+  "med_dist_debris": 0.036245573312044144,
+  "med_dist_keep": 0.029690470546483994
+ },
+ {
+  "name": "Crematogaster_nawai_OKENT0105046_process",
+  "debris_frac": 0.05896666646003723,
+  "n_distal": 4036,
+  "n_prox": 12461,
+  "n_body": 13503,
+  "dbg_on_distal": 0.002477700589224696,
+  "dbg_on_prox": 0.029050638899207115,
+  "dbg_on_body": 0.10345849394798279,
+  "med_dist_debris": 0.044263806194067,
+  "med_dist_keep": 0.03325098380446434
+ },
+ {
+  "name": "Lioponera_daikoku_OKENT0105067_processed",
+  "debris_frac": 0.13393333554267883,
+  "n_distal": 7416,
+  "n_prox": 10663,
+  "n_body": 11921,
+  "dbg_on_distal": 0.18783710896968842,
+  "dbg_on_prox": 0.08159054815769196,
+  "dbg_on_body": 0.1472191959619522,
+  "med_dist_debris": 0.06802447140216827,
+  "med_dist_keep": 0.07206545770168304
+ },
+ {
+  "name": "Pseudolasius_sp._CASENT0878065_processed",
+  "debris_frac": 0.10783333331346512,
+  "n_distal": 6950,
+  "n_prox": 11887,
+  "n_body": 11163,
+  "dbg_on_distal": 0.15237410366535187,
+  "dbg_on_prox": 0.08942542225122452,
+  "dbg_on_body": 0.09970437735319138,
+  "med_dist_debris": 0.06297146528959274,
+  "med_dist_keep": 0.059461068361997604
+ },
+ {
+  "name": "Cyphomyrmex_cf.minutus_CASENT0744280_pro",
+  "debris_frac": 0.5428333282470703,
+  "n_distal": 6151,
+  "n_prox": 13427,
+  "n_body": 10422,
+  "dbg_on_distal": 0.38188913464546204,
+  "dbg_on_prox": 0.5276681184768677,
+  "dbg_on_body": 0.6573594212532043,
+  "med_dist_debris": 0.08442360162734985,
+  "med_dist_keep": 0.11584777384996414
+ }
+]

@@ -1,0 +1,13 @@
+6 target meshes loaded.
+specimen                                 G1 cur  G1 skip   G1 pad   d_skip    d_pad
+Acanthostichus_aff.brevicornis_CASENT0   94.620   94.483   94.803   -0.137   +0.183   unseen 0/0   [211s]
+Acromyrmex_coronatus_CASENT0744365       91.523   91.810   92.483   +0.287   +0.960   unseen 0/0   [117s]
+Acromyrmex_lobicornis_CASENT0878007      90.007   90.640   90.833   +0.633   +0.827   unseen 0/0   [49s]
+Anochetus_risii_CASENT0877608            97.570   97.643   97.627   +0.073   +0.057   unseen 0/0   [55s]
+Anochetus_risii_CASENT0877609            90.927   92.073   92.517   +1.147   +1.590   unseen 0/0   [51s]
+Aphaenogaster_pallida_CASENT0745235      97.583   97.877   97.793   +0.293   +0.210   unseen 0/0   [46s]
+
+MEAN over 6 specimens (probe15 gate is 90%):
+  G1 current   93.705%
+  G1 skip      94.088%   delta  +0.383pp   wins 5/6
+  G1 pad       94.343%   delta  +0.638pp   wins 6/6

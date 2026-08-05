@@ -1,0 +1,90 @@
+step |  max|dlbs| this step   max|lbs| cumulative   (lr*0.5 = 0.025)
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/1 anchor_loss=0.001052
+  1  |      0.02500                0.02500
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/1 anchor_loss=0.004958
+  2  |      0.02483                0.04983
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/1 anchor_loss=0.000739
+  3  |      0.02388                0.07243
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/1 anchor_loss=0.002022
+  4  |      0.02416                0.09659
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/1 anchor_loss=0.002624
+  5  |      0.02406                0.12065
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/1 anchor_loss=0.001506
+  6  |      0.02411                0.14413
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/1 anchor_loss=0.000688
+  7  |      0.02357                0.16654
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/1 anchor_loss=0.000708
+  8  |      0.02126                0.18767
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/400 anchor_loss=0.001052
+    [H_init]  399/400 anchor_loss=0.000000
+
+=== ARM A_pipeline (area_sampled=True, scales_free=True) ===
+  anchor_loss  1.052250e-03 -> 1.273920e-07
+  RAW per-joint scale exp(lbs): 0.635..1.785  |lbs| mean 0.0958
+  ACCUM (get_joint_scales):     0.150..11.677
+  symmetry_penalty(lbs)         0.00658
+  joint_rot max deg             69.7
+  MIDLINE joints (invisible to symmetry_penalty):
+        b_t  raw 1.068,0.969,1.367   accum 0.816,1.168,1.746
+      b_a_1  raw 1.785,0.948,0.837   accum 1.457,1.107,1.462
+      b_a_2  raw 1.763,0.940,0.836   accum 2.569,1.040,1.222
+      b_a_3  raw 1.721,0.914,1.325   accum 4.420,0.951,1.620
+      b_a_4  raw 1.630,0.926,1.540   accum 7.207,0.881,2.495
+      b_a_5  raw 1.620,1.021,1.332   accum 11.677,0.899,3.324
+        b_h  raw 0.649,0.879,1.198   accum 0.530,1.027,2.092
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/400 anchor_loss=0.001052
+    [H_init]  399/400 anchor_loss=0.000025
+
+=== ARM B_scales_frozen (area_sampled=True, scales_free=False) ===
+  anchor_loss  1.052250e-03 -> 2.505116e-05
+  RAW per-joint scale exp(lbs): 1.000..1.000  |lbs| mean 0.0000
+  ACCUM (get_joint_scales):     1.000..1.000
+  symmetry_penalty(lbs)         0.00000
+  joint_rot max deg             222.6
+  MIDLINE joints (invisible to symmetry_penalty):
+        b_t  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+      b_a_1  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+      b_a_2  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+      b_a_3  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+      b_a_4  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+      b_a_5  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+        b_h  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+    [H_init] correspondence-free part-anchor init: 13 anchors over 1 specimens (13.0/specimen of 13 parts)
+    [H_init]    0/400 anchor_loss=0.000000
+    [H_init]  399/400 anchor_loss=0.000000
+
+=== ARM C_same_density (area_sampled=False, scales_free=True) ===
+  anchor_loss  0.000000e+00 -> 0.000000e+00
+  RAW per-joint scale exp(lbs): 1.000..1.000  |lbs| mean 0.0000
+  ACCUM (get_joint_scales):     1.000..1.000
+  symmetry_penalty(lbs)         0.00000
+  joint_rot max deg             0.0
+  MIDLINE joints (invisible to symmetry_penalty):
+        b_t  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+      b_a_1  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+      b_a_2  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+      b_a_3  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+      b_a_4  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+      b_a_5  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+        b_h  raw 1.000,1.000,1.000   accum 1.000,1.000,1.000
+
+final anchor_loss  A(free scales) 1.274e-07   B(frozen scales) 2.505e-05   ratio 196.65x
+
+########## PROBE 2 ##########
+ideal case: target IS the rest mesh, perfect labels -> every number below should stay at its it=0 value
+  it=   0  chamfer=8.929e-05  meanDisp= 0.00%ext  gasterExtent=1.000x  headExtent=1.000x  maxRawScale=1.000 minRawScale=1.000  sym=0.00000  restEdge=0.0000
+  it=  10  chamfer=1.136e-02  meanDisp= 6.86%ext  gasterExtent=1.209x  headExtent=0.984x  maxRawScale=1.255 minRawScale=0.809  sym=0.00184  restEdge=0.0299
+  it=  50  chamfer=8.353e-03  meanDisp= 6.38%ext  gasterExtent=1.552x  headExtent=0.912x  maxRawScale=1.571 minRawScale=0.667  sym=0.00642  restEdge=0.0761
+  it= 100  chamfer=8.673e-03  meanDisp= 6.08%ext  gasterExtent=1.616x  headExtent=0.920x  maxRawScale=1.685 minRawScale=0.661  sym=0.00570  restEdge=0.0824
+  it= 200  chamfer=9.456e-03  meanDisp= 5.98%ext  gasterExtent=1.677x  headExtent=0.909x  maxRawScale=1.776 minRawScale=0.643  sym=0.00619  restEdge=0.0892
+  it= 400  chamfer=9.409e-03  meanDisp= 5.92%ext  gasterExtent=1.693x  headExtent=0.926x  maxRawScale=1.785 minRawScale=0.635  sym=0.00658  restEdge=0.0895

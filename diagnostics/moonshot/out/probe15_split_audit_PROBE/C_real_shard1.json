@@ -1,0 +1,97 @@
+[
+ {
+  "g1": 0.9269000291824341,
+  "g2": 0.7780333161354065,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8401327286381846,
+  "debris_frac": 0.024166666666666666,
+  "leg_pts": {
+   "l1_l": 2472,
+   "l1_r": 2954,
+   "l2_l": 4267,
+   "l2_r": 2313,
+   "l3_l": 1318,
+   "l3_r": 1889
+  },
+  "file": "Acromyrmex_coronatus_CASENT0744365_processed.obj",
+  "name": "Acromyrmex_coronatus_CASENT0744365",
+  "split": "test"
+ },
+ {
+  "g1": 0.9565333127975464,
+  "g2": 0.9366333484649658,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9977318091090547,
+  "debris_frac": 0.015533333333333333,
+  "leg_pts": {
+   "l1_l": 3674,
+   "l1_r": 2655,
+   "l2_l": 2019,
+   "l2_r": 2844,
+   "l3_l": 1032,
+   "l3_r": 816
+  },
+  "file": "Cephalotes_spinosus_CASENT0744158_processed.obj",
+  "name": "Cephalotes_spinosus_CASENT0744158",
+  "split": "train"
+ },
+ {
+  "g1": 0.8030666708946228,
+  "g2": 0.7016000151634216,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.6147649675898544,
+  "debris_frac": 0.22473333333333334,
+  "leg_pts": {
+   "l1_l": 2748,
+   "l1_r": 2115,
+   "l2_l": 1167,
+   "l2_r": 2357,
+   "l3_l": 1337,
+   "l3_r": 1316
+  },
+  "file": "Heteroponera_panamensis_CASENT0744055_processed.obj",
+  "name": "Heteroponera_panamensis_CASENT0744055",
+  "split": "train"
+ },
+ {
+  "g1": 0.9743333458900452,
+  "g2": 0.9526000022888184,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7025573582249108,
+  "debris_frac": 0.0099,
+  "leg_pts": {
+   "l1_l": 1470,
+   "l1_r": 931,
+   "l2_l": 2129,
+   "l2_r": 2022,
+   "l3_l": 3819,
+   "l3_r": 2221
+  },
+  "file": "Odontomachus_troglodytes_CASENT0744970_processed.obj",
+  "name": "Odontomachus_troglodytes_CASENT0744970",
+  "split": "train"
+ },
+ {
+  "g1": 0.9014999866485596,
+  "g2": 0.8636999726295471,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.8129854893899585,
+  "debris_frac": 0.05216666666666667,
+  "leg_pts": {
+   "l1_l": 2325,
+   "l1_r": 2041,
+   "l2_l": 1474,
+   "l2_r": 2162,
+   "l3_l": 3261,
+   "l3_r": 2059
+  },
+  "file": "Strumigenys_alberti_CASENT0878103_processed.obj",
+  "name": "Strumigenys_alberti_CASENT0878103",
+  "split": "test"
+ }
+]

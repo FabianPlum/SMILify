@@ -1,0 +1,72 @@
+########## probe_orient.py
+keys: ['J', 'J_names', 'J_regressor', 'bs_style', 'bs_type', 'f', 'kintree_table', 'posedirs', 'scaledirs', 'shape_cov', 'shape_mean_betas', 'shapedirs', 'sym_verts', 'transdirs', 'v_template', 'weights']
+template verts (10229, 3)
+template extent (bbox): [1.78880531 1.43524396 0.48746346]
+template PCA eigvals (asc): [0.0107593  0.05429695 0.15610985]  sqrt: [0.10372704 0.23301705 0.39510739]
+template PCA ratios: [0.26252872 0.58975625 1.        ]
+  axis0 (eig 0.01076) skew=-0.5021
+  axis1 (eig 0.0543) skew=-0.0000
+  axis2 (eig 0.1561) skew=0.2753
+Jnames ['b_t', 'b_a_1', 'b_a_2', 'b_a_3', 'b_a_4', 'b_a_5', 'l_1_co_r', 'l_1_tr_r', 'l_1_fe_r', 'l_1_ti_r']
+J shape (55, 3) J extent [1.8232143  1.3957945  0.44885045]
+
+########## probe_target.py
+target verts (12054, 3) faces (10878, 3)
+raw extent [0.570766 0.443583 0.152879]
+PIPELINE-normalised extent [1.86839717 1.45206481 0.50044798]
+vertex centroid [ 0.0188483  -0.00043228  0.08392162] area centroid [0.01535786 0.00059406 0.0894959 ] delta 0.006656511291474735
+area-weighted PCA sqrt-eigvals [0.03036754 0.07914075 0.12370036] ratios [0.24549272 0.63977787 1.        ]
+  aw-axis0 skew=-0.7299
+  aw-axis1 skew=-0.1546
+  aw-axis2 skew=+0.2025
+area-PCA-aligned bbox extent [0.1571966  0.45005641 0.58274953]
+sqrt(area)= 0.3769579547101887
+area-wtd RMS radius (gyration)= 0.1499574099282118
+bbox diag= 0.7388583716017569
+max abs coord (pipeline scale)= 0.3054842991538079
+p99 radius= 0.36278814586473734
+vertex-centroid vs area-centroid rel offset (of gyration): 0.04438934557926392
+
+########## probe_scale_pose_dep.py
+POSE(=rotation)-DEPENDENCE of scale measures over 200 random SO(3) rotations
+measure          mean     CV%   min/max
+maxabs        0.34101   9.329    0.6266
+sqrtA         0.37696   0.000    1.0000
+Rg            0.14996   0.000    1.0000
+csize        17.93645   0.000    1.0000
+diag          0.84029   4.837    0.8203
+p99           0.36279   0.000    1.0000
+
+axis-aligned bbox aspect (min/max extent) under rotation: mean 0.587  range 0.245-0.956
+canonical-orientation bbox aspect (min/max): 0.268  extent [0.5708 0.4436 0.1529]
+
+########## probe_symm_skew.py
+
+== TEMPLATE SMIL_model.obj ==  PCA sqrt-eig (desc) [0.376  0.1839 0.0833]  aligned bbox [1.7998 1.4351 0.5154]
+  axis0: skew=+0.0745   mirror-residual(mean NN dist / Rg)=0.1701
+  axis1: skew=-0.0000   mirror-residual(mean NN dist / Rg)=0.0000
+  axis2: skew=-0.3272   mirror-residual(mean NN dist / Rg)=0.1589
+
+== TARGET Atta_vollenweideri ==  PCA sqrt-eig (desc) [0.1237 0.0791 0.0304]  aligned bbox [0.5827 0.4501 0.1572]
+  axis0: skew=+0.2025   mirror-residual(mean NN dist / Rg)=0.1822
+  axis1: skew=-0.1546   mirror-residual(mean NN dist / Rg)=0.0918
+  axis2: skew=-0.7299   mirror-residual(mean NN dist / Rg)=0.1824
+
+-- 8 random rotations of the target: does PCA recover flat aspect + same symmetric axis? --
+ rot0: aligned-ext [0.583 0.45  0.157] aspect 0.270 | mirror-res [0.1822 0.0918 0.1824] -> symaxis 1 | skew [0.203 0.155 0.73 ]
+ rot1: aligned-ext [0.583 0.45  0.157] aspect 0.270 | mirror-res [0.1822 0.0918 0.1824] -> symaxis 1 | skew [0.203 0.155 0.73 ]
+ rot2: aligned-ext [0.583 0.45  0.157] aspect 0.270 | mirror-res [0.1822 0.0918 0.1824] -> symaxis 1 | skew [-0.203  0.155 -0.73 ]
+ rot3: aligned-ext [0.583 0.45  0.157] aspect 0.270 | mirror-res [0.1822 0.0918 0.1824] -> symaxis 1 | skew [-0.203 -0.155  0.73 ]
+ rot4: aligned-ext [0.583 0.45  0.157] aspect 0.270 | mirror-res [0.1822 0.0918 0.1824] -> symaxis 1 | skew [-0.203 -0.155  0.73 ]
+ rot5: aligned-ext [0.583 0.45  0.157] aspect 0.270 | mirror-res [0.1822 0.0918 0.1824] -> symaxis 1 | skew [-0.203  0.155 -0.73 ]
+ rot6: aligned-ext [0.583 0.45  0.157] aspect 0.270 | mirror-res [0.1822 0.0918 0.1824] -> symaxis 1 | skew [ 0.203 -0.155 -0.73 ]
+ rot7: aligned-ext [0.583 0.45  0.157] aspect 0.270 | mirror-res [0.1822 0.0918 0.1824] -> symaxis 1 | skew [0.203 0.155 0.73 ]
+
+########## probe_ap_cues.py
+TEMPLATE SMIL_model        skewAP=+0.0745  area(+tail)/area(-tail)= 1.024  transRad +tail=0.406 -tail=0.395  reach +2.11/-2.10
+     skewML=-0.0000
+     skewDV=-0.3272
+TARGET Atta_vollenw.       skewAP=+0.2025  area(+tail)/area(-tail)= 0.991  transRad +tail=0.656 -tail=0.426  reach +2.09/-1.79
+     skewML=-0.1546
+     skewDV=-0.7299
+

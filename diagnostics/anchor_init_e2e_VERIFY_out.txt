@@ -1,0 +1,39 @@
+    [H_init] correspondence-free part-anchor init: 7 anchors over 1 specimens (7.0/specimen of 13 parts)
+    [H_init]    0/400 anchor_loss=0.001052
+    [H_init]  100/400 anchor_loss=0.000006
+    [H_init]  200/400 anchor_loss=0.000001
+    [H_init]  300/400 anchor_loss=0.000000
+    [H_init]  399/400 anchor_loss=0.000000
+
+=== ARM A_area (area_sampled=True, min_pts=40) ===
+  anchor_loss  1.052250e-03 -> 1.273920e-07
+  chamfer      8.929407e-05 -> 9.408666e-03   (105.4x)
+  vertex displacement: mean 5.92% of extent, max 58.97%
+  joint rot top5 (deg): ma_r=69.7, an_2_l=66.1, an_3_r=63.4, an_1_l=59.2, ma_l=52.3
+  per-joint scale range: 0.150..11.677
+    [H_init] correspondence-free part-anchor init: 13 anchors over 1 specimens (13.0/specimen of 13 parts)
+    [H_init]    0/400 anchor_loss=0.000000
+    [H_init]  100/400 anchor_loss=0.000000
+    [H_init]  200/400 anchor_loss=0.000000
+    [H_init]  300/400 anchor_loss=0.000000
+    [H_init]  399/400 anchor_loss=0.000000
+
+=== ARM B_control_same_density (area_sampled=False, min_pts=40) ===
+  anchor_loss  0.000000e+00 -> 0.000000e+00
+  chamfer      0.000000e+00 -> 0.000000e+00   (0.0x)
+  vertex displacement: mean 0.00% of extent, max 0.00%
+  joint rot top5 (deg): l_3_tr_l=0.0, l_2_ta_l=0.0, l_2_pt_l=0.0, l_3_co_l=0.0, l_2_ti_l=0.0
+  per-joint scale range: 1.000..1.000
+    [H_init] correspondence-free part-anchor init: 13 anchors over 1 specimens (13.0/specimen of 13 parts)
+    [H_init]    0/400 anchor_loss=0.000608
+    [H_init]  100/400 anchor_loss=0.000002
+    [H_init]  200/400 anchor_loss=0.000002
+    [H_init]  300/400 anchor_loss=0.000001
+    [H_init]  399/400 anchor_loss=0.000001
+
+=== ARM C_area_minpts10 (area_sampled=True, min_pts=10) ===
+  anchor_loss  6.075180e-04 -> 1.127063e-06
+  chamfer      8.957479e-05 -> 9.225594e-03   (103.0x)
+  vertex displacement: mean 5.20% of extent, max 59.57%
+  joint rot top5 (deg): ma_l=93.8, ma_r=90.0, an_2_r=82.2, an_3_l=78.5, an_3_r=78.3
+  per-joint scale range: 0.097..5.102

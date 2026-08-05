@@ -1,0 +1,147 @@
+{
+ "tag": "B_mirror",
+ "mean_frac": 0.09480249723419547,
+ "mean_interior": 0.9076668583748063,
+ "rows": [
+  {
+   "name": "Acanthostichus_aff.brevicornis_CASENT0744328",
+   "debris_frac": 0.020649999380111694,
+   "d_to_body_median": 0.10544286668300629,
+   "d_to_leg_median": 0.011097217909991741,
+   "interior_frac": 0.9951573849878934
+  },
+  {
+   "name": "Acromyrmex_lobicornis_CASENT0878007",
+   "debris_frac": 0.06194999814033508,
+   "d_to_body_median": 0.01681336760520935,
+   "d_to_leg_median": 0.14467816054821014,
+   "interior_frac": 0.9943502824858758
+  },
+  {
+   "name": "Aphaenogaster_pallida_CASENT0745235",
+   "debris_frac": 0.018149999901652336,
+   "d_to_body_median": 0.030596371740102768,
+   "d_to_leg_median": 0.2907020151615143,
+   "interior_frac": 0.7355371900826446
+  },
+  {
+   "name": "Carebara_trechideros_CASENT0877591",
+   "debris_frac": 0.011099999770522118,
+   "d_to_body_median": 0.10473605245351791,
+   "d_to_leg_median": 0.014719410799443722,
+   "interior_frac": 1.0
+  },
+  {
+   "name": "Cephalotes_simillimus_CASENT0744408",
+   "debris_frac": 0.14925000071525574,
+   "d_to_body_median": 0.03314518183469772,
+   "d_to_leg_median": 0.07901205122470856,
+   "interior_frac": 0.9557788944723619
+  },
+  {
+   "name": "Crematogaster_nawai_OKENT0105046",
+   "debris_frac": 0.055549997836351395,
+   "d_to_body_median": 0.028769465163350105,
+   "d_to_leg_median": 0.08875516057014465,
+   "interior_frac": 0.9963996399639964
+  },
+  {
+   "name": "Cyphomyrmex_cf.minutus_CASENT0744280",
+   "debris_frac": 0.5501999855041504,
+   "d_to_body_median": 0.15239958465099335,
+   "d_to_leg_median": 0.06557385623455048,
+   "interior_frac": 0.923209741912032
+  },
+  {
+   "name": "Eciton_hamatum_CASENT0744580",
+   "debris_frac": 0.009800000116229057,
+   "d_to_body_median": 0.009026678279042244,
+   "d_to_leg_median": 0.07600372284650803,
+   "interior_frac": 0.9744897959183674
+  },
+  {
+   "name": "Eurhopalothrix_procera_CASENT0745605",
+   "debris_frac": 0.0632999986410141,
+   "d_to_body_median": 0.01950003392994404,
+   "d_to_leg_median": 0.0787254273891449,
+   "interior_frac": 0.9984202211690363
+  },
+  {
+   "name": "Labidus_praedator_CASENT0744237",
+   "debris_frac": 0.02654999867081642,
+   "d_to_body_median": 0.018519435077905655,
+   "d_to_leg_median": 0.07287300378084183,
+   "interior_frac": 1.0
+  },
+  {
+   "name": "Lioponera_daikoku_OKENT0105067",
+   "debris_frac": 0.1232999935746193,
+   "d_to_body_median": 0.04727741330862045,
+   "d_to_leg_median": 0.06472940742969513,
+   "interior_frac": 0.8118410381184104
+  },
+  {
+   "name": "Myrmecina_ryukyuensis_OKENT0105085",
+   "debris_frac": 0.07490000128746033,
+   "d_to_body_median": 0.03499656543135643,
+   "d_to_leg_median": 0.06315288692712784,
+   "interior_frac": 0.9732977303070761
+  },
+  {
+   "name": "Nesomyrmex_angulatus_CASENT0744820",
+   "debris_frac": 0.1821499913930893,
+   "d_to_body_median": 0.03534693270921707,
+   "d_to_leg_median": 0.07352204620838165,
+   "interior_frac": 0.9415317046390338
+  },
+  {
+   "name": "Polyrhachis_decemdentata_CASENT0744779",
+   "debris_frac": 0.07684999704360962,
+   "d_to_body_median": 0.02652270346879959,
+   "d_to_leg_median": 0.10081224888563156,
+   "interior_frac": 0.9746258945998699
+  },
+  {
+   "name": "Ponera_tamon_OKENT0105154",
+   "debris_frac": 0.07784999907016754,
+   "d_to_body_median": 0.02091045305132866,
+   "d_to_leg_median": 0.08735029399394989,
+   "interior_frac": 0.9839434810533076
+  },
+  {
+   "name": "Pseudomyrmex_cf.solis_CASENT0744065",
+   "debris_frac": 0.07819999754428864,
+   "d_to_body_median": 0.03127603232860565,
+   "d_to_leg_median": 0.4256199300289154,
+   "interior_frac": 0.840153452685422
+  },
+  {
+   "name": "Strumigenys_alberti_CASENT0878103",
+   "debris_frac": 0.05884999781847,
+   "d_to_body_median": 0.02997681312263012,
+   "d_to_leg_median": 0.04185609146952629,
+   "interior_frac": 0.9762107051826678
+  },
+  {
+   "name": "Strumigenys_crassicornis_CASENT0744273",
+   "debris_frac": 0.0568000003695488,
+   "d_to_body_median": 0.021219708025455475,
+   "d_to_leg_median": 0.1261870563030243,
+   "interior_frac": 0.9964788732394366
+  },
+  {
+   "name": "Syllophopsis_sechellensis_OKENT0105212",
+   "debris_frac": 0.029199998825788498,
+   "d_to_body_median": 0.10013921558856964,
+   "d_to_leg_median": 0.30256664752960205,
+   "interior_frac": 0.18835616438356165
+  },
+  {
+   "name": "Tetramorium_kraepelini_CASENT0744084",
+   "debris_frac": 0.17144998908042908,
+   "d_to_body_median": 0.03128046169877052,
+   "d_to_leg_median": 0.2473268210887909,
+   "interior_frac": 0.8935549722951298
+  }
+ ]
+}

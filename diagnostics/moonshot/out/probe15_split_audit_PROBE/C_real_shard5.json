@@ -1,0 +1,97 @@
+[
+ {
+  "g1": 0.987666666507721,
+  "g2": 0.9836666584014893,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.989628383332286,
+  "debris_frac": 0.0009666666666666667,
+  "leg_pts": {
+   "l1_l": 1979,
+   "l1_r": 1968,
+   "l2_l": 1549,
+   "l2_r": 1582,
+   "l3_l": 2119,
+   "l3_r": 2154
+  },
+  "file": "Aphaenogaster_pallida_CASENT0745235_processed.obj",
+  "name": "Aphaenogaster_pallida_CASENT0745235",
+  "split": "train"
+ },
+ {
+  "g1": 0.7394000291824341,
+  "g2": 0.6310333609580994,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.936315843737284,
+  "debris_frac": 0.2866666666666667,
+  "leg_pts": {
+   "l1_l": 4056,
+   "l1_r": 3067,
+   "l2_l": 2766,
+   "l2_r": 2498,
+   "l3_l": 2279,
+   "l3_r": 2402
+  },
+  "file": "Cyphomyrmex_cf.minutus_CASENT0744280_processed.obj",
+  "name": "Cyphomyrmex_cf.minutus_CASENT0744280",
+  "split": "test"
+ },
+ {
+  "g1": 0.854200005531311,
+  "g2": 0.727400004863739,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.7346627400632112,
+  "debris_frac": 0.15416666666666667,
+  "leg_pts": {
+   "l1_l": 2020,
+   "l1_r": 2127,
+   "l2_l": 1849,
+   "l2_r": 1552,
+   "l3_l": 3091,
+   "l3_r": 1566
+  },
+  "file": "Lioponera_daikoku_OKENT0105067_processed.obj",
+  "name": "Lioponera_daikoku_OKENT0105067",
+  "split": "train"
+ },
+ {
+  "g1": 0.9090333580970764,
+  "g2": 0.8676333427429199,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9071855676156996,
+  "debris_frac": 0.08643333333333333,
+  "leg_pts": {
+   "l1_l": 1691,
+   "l1_r": 1797,
+   "l2_l": 1273,
+   "l2_r": 1802,
+   "l3_l": 1247,
+   "l3_r": 946
+  },
+  "file": "Ponera_kohmoku_OKENT0105440_processed.obj",
+  "name": "Ponera_kohmoku_OKENT0105440",
+  "split": "test"
+ },
+ {
+  "g1": 0.9657666683197021,
+  "g2": 0.9350666403770447,
+  "six_legs": true,
+  "order": 1.0,
+  "coherence": 0.9606797658348746,
+  "debris_frac": 0.0442,
+  "leg_pts": {
+   "l1_l": 2349,
+   "l1_r": 2242,
+   "l2_l": 1802,
+   "l2_r": 1884,
+   "l3_l": 1882,
+   "l3_r": 1739
+  },
+  "file": "Strumigenys_stenorhina_OKENT0105268_processed.obj",
+  "name": "Strumigenys_stenorhina_OKENT0105268",
+  "split": "test"
+ }
+]

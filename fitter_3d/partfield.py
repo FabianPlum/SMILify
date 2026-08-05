@@ -219,7 +219,9 @@ class PartFieldPartition:
     could never give: it had to assign every point to *some* part.
     """
 
-    def __init__(self, ref_pts, ref_label, n_groups, device, debris_id=None, ref_conf=None, min_conf=0.0):
+    def __init__(
+        self, ref_pts, ref_label, n_groups, device, debris_id=None, ref_conf=None, min_conf=0.0, keep_debris=False
+    ):
         self.ref_pts = ref_pts.to(device)  # (B, R, 3) dense reference clouds
         self.ref_label = ref_label.to(device).clone()  # (B, R) int64
         self.n_groups = n_groups
@@ -227,6 +229,29 @@ class PartFieldPartition:
         self.debris_id = debris_id
         self.assign = None
         self.probe_pts = None
+
+        # keep_debris REASSIGNS debris points to their nearest non-debris neighbour instead
+        # of dropping them. Probe 16 is why this exists: 90.8% of the points this field calls
+        # debris lie INSIDE the animal's convex hull, a median 0.031 from the nearest body
+        # point. They are not debris. They are the leg-body junction, and the network learned
+        # to call it debris because the synthetic augmentation puts debris "bridges" exactly
+        # there. Dropping them blinds the fit at the coxae -- the one region the whole
+        # hierarchical schedule is built to place -- so the drop must be separable from the
+        # partition itself before either can be blamed for a downstream result.
+        self.n_reassigned = 0
+        if keep_debris and debris_id is not None:
+            from pytorch3d.ops import knn_points as _knn
+
+            for b in range(self.ref_label.shape[0]):
+                d = self.ref_label[b] == debris_id
+                nd = ~d
+                if not bool(d.any()) or int(nd.sum()) < 1:
+                    continue
+                src = nd.nonzero(as_tuple=True)[0]
+                j = _knn(self.ref_pts[b][d].unsqueeze(0), self.ref_pts[b][nd].unsqueeze(0), K=1).idx[0, :, 0]
+                self.ref_label[b][d] = self.ref_label[b][src[j]]
+                self.n_reassigned += int(d.sum())
+            self.debris_id = None  # no debris labels survive, so nothing is excluded
         # A frozen partition cannot self-correct, so where the field is UNSURE it should
         # abstain rather than commit. Points below min_conf are dropped from every data term
         # exactly like debris. This is the cheap stand-in for a fully soft partition: the

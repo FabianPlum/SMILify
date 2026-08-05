@@ -1,0 +1,743 @@
+arm                      when   metric                       wins/n         p  P(verdict flips)  P(sig flips dir)
+A1_offset                pose   chamfer_l2                   28/50   4.80e-01             0.000             0.000
+A1_offset                pose   fscore@0.01                  25/50   1.00e+00             0.004             0.000
+A1_offset                pose   fscore@0.02                  28/50   4.80e-01             0.009             0.003
+A1_offset                pose   hausdorff_95                 30/50   2.03e-01             0.001             0.000
+A1_offset                pose   normal_consistency           24/50   8.88e-01             0.011             0.000
+A1_offset                pose   part_leg_distal_dist_mean    22/50   4.80e-01             0.000             0.000
+A1_offset                pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+A1_offset                pose   tri_quality_mean             20/50   2.03e-01   0.000 (determ.)                 -
+A1_offset                pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+A1_offset                pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+A1_offset                pose   midline_dev_mean             20/50   2.03e-01   0.000 (determ.)                 -
+A1_offset                final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+A1_offset                final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+A1_offset                final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+A1_offset                final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+A1_offset                final  normal_consistency            0/50   1.78e-15             0.000             0.000
+A1_offset                final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+A1_offset                final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+A1_offset                final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+A1_offset                final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+A1_offset                final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+A1_offset                final  midline_dev_mean             40/50   2.39e-05   0.000 (determ.)                 -
+A2_restedge              pose   chamfer_l2                    1/50   9.06e-14             0.000             0.000
+A2_restedge              pose   fscore@0.01                   4/50   4.46e-10             0.000             0.000
+A2_restedge              pose   fscore@0.02                   2/50   2.27e-12             0.000             0.000
+A2_restedge              pose   hausdorff_95                  1/50   9.06e-14             0.000             0.000
+A2_restedge              pose   normal_consistency           32/50   6.49e-02             0.637             0.000
+A2_restedge              pose   part_leg_distal_dist_mean    40/50   2.39e-05             0.000             0.000
+A2_restedge              pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+A2_restedge              pose   tri_quality_mean             49/50   9.06e-14   0.000 (determ.)                 -
+A2_restedge              pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+A2_restedge              pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+A2_restedge              pose   midline_dev_mean             31/50   1.19e-01   0.000 (determ.)                 -
+A2_restedge              final  chamfer_l2                    3/50   3.71e-11             0.000             0.000
+A2_restedge              final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+A2_restedge              final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+A2_restedge              final  hausdorff_95                  3/50   3.71e-11             0.000             0.000
+A2_restedge              final  normal_consistency           32/50   6.49e-02             0.116             0.000
+A2_restedge              final  part_leg_distal_dist_mean     1/50   9.06e-14             0.000             0.000
+A2_restedge              final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+A2_restedge              final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+A2_restedge              final  deform_mag_mean               4/50   4.46e-10   0.000 (determ.)                 -
+A2_restedge              final  deform_mag_p95                8/50   1.16e-06   0.000 (determ.)                 -
+A2_restedge              final  midline_dev_mean             34/50   1.53e-02   0.000 (determ.)                 -
+A3_priors                pose   chamfer_l2                    7/50   2.10e-07             0.000             0.000
+A3_priors                pose   fscore@0.01                   9/50   5.61e-06             0.000             0.000
+A3_priors                pose   fscore@0.02                   5/50   4.21e-09             0.000             0.000
+A3_priors                pose   hausdorff_95                 13/50   9.36e-04             0.000             0.000
+A3_priors                pose   normal_consistency           19/50   1.19e-01             0.019             0.000
+A3_priors                pose   part_leg_distal_dist_mean    41/50   5.61e-06             0.000             0.000
+A3_priors                pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+A3_priors                pose   tri_quality_mean             29/50   3.22e-01   0.000 (determ.)                 -
+A3_priors                pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+A3_priors                pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+A3_priors                pose   midline_dev_mean             22/50   4.80e-01   0.000 (determ.)                 -
+A3_priors                final  chamfer_l2                   27/50   6.72e-01             0.000             0.000
+A3_priors                final  fscore@0.01                  28/50   4.80e-01             0.002             0.000
+A3_priors                final  fscore@0.02                  29/50   3.22e-01             0.006             0.001
+A3_priors                final  hausdorff_95                 29/50   3.22e-01             0.000             0.000
+A3_priors                final  normal_consistency           30/50   2.03e-01             0.000             0.000
+A3_priors                final  part_leg_distal_dist_mean    21/50   3.22e-01             0.000             0.000
+A3_priors                final  edge_logratio_absmean        45/50   4.21e-09   0.000 (determ.)                 -
+A3_priors                final  tri_quality_mean             11/50   9.02e-05   0.000 (determ.)                 -
+A3_priors                final  deform_mag_mean              12/50   3.06e-04   0.000 (determ.)                 -
+A3_priors                final  deform_mag_p95               17/50   3.28e-02   0.000 (determ.)                 -
+A3_priors                final  midline_dev_mean             22/50   4.80e-01   0.000 (determ.)                 -
+A3b_priors_tuned         pose   chamfer_l2                    8/50   1.16e-06             0.000             0.000
+A3b_priors_tuned         pose   fscore@0.01                  11/50   9.02e-05             0.000             0.000
+A3b_priors_tuned         pose   fscore@0.02                   8/50   1.16e-06             0.000             0.000
+A3b_priors_tuned         pose   hausdorff_95                  9/50   5.61e-06             0.000             0.000
+A3b_priors_tuned         pose   normal_consistency           22/50   4.80e-01             0.002             0.000
+A3b_priors_tuned         pose   part_leg_distal_dist_mean    37/50   9.36e-04             0.000             0.000
+A3b_priors_tuned         pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+A3b_priors_tuned         pose   tri_quality_mean             32/50   6.49e-02   0.000 (determ.)                 -
+A3b_priors_tuned         pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+A3b_priors_tuned         pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+A3b_priors_tuned         pose   midline_dev_mean             22/50   4.80e-01   0.000 (determ.)                 -
+A3b_priors_tuned         final  chamfer_l2                   25/50   1.00e+00             0.000             0.000
+A3b_priors_tuned         final  fscore@0.01                  27/50   6.72e-01             0.000             0.000
+A3b_priors_tuned         final  fscore@0.02                  26/50   8.88e-01             0.004             0.003
+A3b_priors_tuned         final  hausdorff_95                 29/50   3.22e-01             0.000             0.000
+A3b_priors_tuned         final  normal_consistency           26/50   8.88e-01             0.000             0.000
+A3b_priors_tuned         final  part_leg_distal_dist_mean    21/50   3.22e-01             0.000             0.000
+A3b_priors_tuned         final  edge_logratio_absmean        46/50   4.46e-10   0.000 (determ.)                 -
+A3b_priors_tuned         final  tri_quality_mean             14/50   2.60e-03   0.000 (determ.)                 -
+A3b_priors_tuned         final  deform_mag_mean              18/50   6.49e-02   0.000 (determ.)                 -
+A3b_priors_tuned         final  deform_mag_p95               15/50   6.60e-03   0.000 (determ.)                 -
+A3b_priors_tuned         final  midline_dev_mean             21/50   3.22e-01   0.000 (determ.)                 -
+A4_nofreeze              pose   chamfer_l2                   28/50   4.80e-01             0.013             0.000
+A4_nofreeze              pose   fscore@0.01                  23/50   6.72e-01             0.001             0.000
+A4_nofreeze              pose   fscore@0.02                  30/50   2.03e-01             0.044             0.001
+A4_nofreeze              pose   hausdorff_95                 23/50   6.72e-01             0.000             0.000
+A4_nofreeze              pose   normal_consistency           25/50   1.00e+00             0.001             0.000
+A4_nofreeze              pose   part_leg_distal_dist_mean    17/50   3.28e-02             0.193             0.000
+A4_nofreeze              pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze              pose   tri_quality_mean             27/50   6.72e-01   0.000 (determ.)                 -
+A4_nofreeze              pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze              pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze              pose   midline_dev_mean             23/50   6.72e-01   0.000 (determ.)                 -
+A4_nofreeze              final  chamfer_l2                   35/50   6.60e-03             0.524             0.504
+A4_nofreeze              final  fscore@0.01                  35/50   6.60e-03             0.601             0.000
+A4_nofreeze              final  fscore@0.02                  39/50   9.02e-05             0.880             0.000
+A4_nofreeze              final  hausdorff_95                 34/50   1.53e-02             0.081             0.000
+A4_nofreeze              final  normal_consistency           40/50   2.39e-05             0.000             0.000
+A4_nofreeze              final  part_leg_distal_dist_mean    27/50   6.72e-01             0.001             0.000
+A4_nofreeze              final  edge_logratio_absmean        39/50   9.02e-05   0.000 (determ.)                 -
+A4_nofreeze              final  tri_quality_mean             40/50   2.39e-05   0.000 (determ.)                 -
+A4_nofreeze              final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze              final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze              final  midline_dev_mean             18/50   6.49e-02   0.000 (determ.)                 -
+A4_nofreeze_s1           pose   chamfer_l2                   29/50   3.22e-01             0.006             0.000
+A4_nofreeze_s1           pose   fscore@0.01                  26/50   8.88e-01             0.000             0.000
+A4_nofreeze_s1           pose   fscore@0.02                  24/50   8.88e-01             0.001             0.000
+A4_nofreeze_s1           pose   hausdorff_95                 32/50   6.49e-02             0.141             0.000
+A4_nofreeze_s1           pose   normal_consistency           23/50   6.72e-01             0.001             0.000
+A4_nofreeze_s1           pose   part_leg_distal_dist_mean    29/50   3.22e-01             0.000             0.000
+A4_nofreeze_s1           pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze_s1           pose   tri_quality_mean             25/50   1.00e+00   0.000 (determ.)                 -
+A4_nofreeze_s1           pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze_s1           pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze_s1           pose   midline_dev_mean             25/50   1.00e+00   0.000 (determ.)                 -
+A4_nofreeze_s1           final  chamfer_l2                   35/50   6.60e-03             0.001             0.000
+A4_nofreeze_s1           final  fscore@0.01                  34/50   1.53e-02             0.561             0.000
+A4_nofreeze_s1           final  fscore@0.02                  35/50   6.60e-03             0.812             0.000
+A4_nofreeze_s1           final  hausdorff_95                 36/50   2.60e-03             0.000             0.000
+A4_nofreeze_s1           final  normal_consistency           39/50   9.02e-05             0.000             0.000
+A4_nofreeze_s1           final  part_leg_distal_dist_mean    31/50   1.19e-01             0.001             0.000
+A4_nofreeze_s1           final  edge_logratio_absmean        35/50   6.60e-03   0.000 (determ.)                 -
+A4_nofreeze_s1           final  tri_quality_mean             41/50   5.61e-06   0.000 (determ.)                 -
+A4_nofreeze_s1           final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze_s1           final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze_s1           final  midline_dev_mean             19/50   1.19e-01   0.000 (determ.)                 -
+A4_nofreeze_s2           pose   chamfer_l2                   29/50   3.22e-01             0.066             0.000
+A4_nofreeze_s2           pose   fscore@0.01                  33/50   3.28e-02             0.654             0.000
+A4_nofreeze_s2           pose   fscore@0.02                  31/50   1.19e-01             0.224             0.000
+A4_nofreeze_s2           pose   hausdorff_95                 24/50   8.88e-01             0.000             0.000
+A4_nofreeze_s2           pose   normal_consistency           23/50   6.72e-01             0.001             0.000
+A4_nofreeze_s2           pose   part_leg_distal_dist_mean    26/50   8.88e-01             0.000             0.000
+A4_nofreeze_s2           pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze_s2           pose   tri_quality_mean             24/50   8.88e-01   0.000 (determ.)                 -
+A4_nofreeze_s2           pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze_s2           pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze_s2           pose   midline_dev_mean             28/50   4.80e-01   0.000 (determ.)                 -
+A4_nofreeze_s2           final  chamfer_l2                   40/50   2.39e-05             0.000             0.000
+A4_nofreeze_s2           final  fscore@0.01                  37/50   9.36e-04             0.385             0.000
+A4_nofreeze_s2           final  fscore@0.02                  38/50   3.06e-04             0.679             0.000
+A4_nofreeze_s2           final  hausdorff_95                 40/50   2.39e-05             0.000             0.000
+A4_nofreeze_s2           final  normal_consistency           40/50   2.39e-05             0.000             0.000
+A4_nofreeze_s2           final  part_leg_distal_dist_mean    34/50   1.53e-02             0.441             0.000
+A4_nofreeze_s2           final  edge_logratio_absmean        35/50   6.60e-03   0.000 (determ.)                 -
+A4_nofreeze_s2           final  tri_quality_mean             40/50   2.39e-05   0.000 (determ.)                 -
+A4_nofreeze_s2           final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze_s2           final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+A4_nofreeze_s2           final  midline_dev_mean             19/50   1.19e-01   0.000 (determ.)                 -
+A5_robust                pose   chamfer_l2                    4/50   4.46e-10             0.000             0.000
+A5_robust                pose   fscore@0.01                  48/50   2.27e-12             0.000             0.000
+A5_robust                pose   fscore@0.02                  43/50   2.10e-07             0.000             0.000
+A5_robust                pose   hausdorff_95                  4/50   4.46e-10             0.000             0.000
+A5_robust                pose   normal_consistency           43/50   2.10e-07             0.000             0.000
+A5_robust                pose   part_leg_distal_dist_mean    29/50   3.22e-01             0.000             0.000
+A5_robust                pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+A5_robust                pose   tri_quality_mean             42/50   1.16e-06   0.000 (determ.)                 -
+A5_robust                pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+A5_robust                pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+A5_robust                pose   midline_dev_mean             32/50   6.49e-02   0.000 (determ.)                 -
+A5_robust                final  chamfer_l2                    4/50   4.46e-10             0.000             0.000
+A5_robust                final  fscore@0.01                  39/50   9.02e-05             0.001             0.000
+A5_robust                final  fscore@0.02                  25/50   1.00e+00             0.030             0.000
+A5_robust                final  hausdorff_95                 28/50   4.80e-01             0.000             0.000
+A5_robust                final  normal_consistency           46/50   4.46e-10             0.000             0.000
+A5_robust                final  part_leg_distal_dist_mean     5/50   4.21e-09             0.000             0.000
+A5_robust                final  edge_logratio_absmean        38/50   3.06e-04   0.000 (determ.)                 -
+A5_robust                final  tri_quality_mean             43/50   2.10e-07   0.000 (determ.)                 -
+A5_robust                final  deform_mag_mean              47/50   3.71e-11   0.000 (determ.)                 -
+A5_robust                final  deform_mag_p95               45/50   4.21e-09   0.000 (determ.)                 -
+A5_robust                final  midline_dev_mean             30/50   2.03e-01   0.000 (determ.)                 -
+B1_best_off0p2           pose   chamfer_l2                    6/50   3.24e-08             0.000             0.000
+B1_best_off0p2           pose   fscore@0.01                   9/50   5.61e-06             0.000             0.000
+B1_best_off0p2           pose   fscore@0.02                   7/50   2.10e-07             0.000             0.000
+B1_best_off0p2           pose   hausdorff_95                 10/50   2.39e-05             0.000             0.000
+B1_best_off0p2           pose   normal_consistency           22/50   4.80e-01             0.001             0.000
+B1_best_off0p2           pose   part_leg_distal_dist_mean    39/50   9.02e-05             0.000             0.000
+B1_best_off0p2           pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off0p2           pose   tri_quality_mean             30/50   2.03e-01   0.000 (determ.)                 -
+B1_best_off0p2           pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off0p2           pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off0p2           pose   midline_dev_mean             19/50   1.19e-01   0.000 (determ.)                 -
+B1_best_off0p2           final  chamfer_l2                   23/50   6.72e-01             0.000             0.000
+B1_best_off0p2           final  fscore@0.01                   7/50   2.10e-07             0.000             0.000
+B1_best_off0p2           final  fscore@0.02                  17/50   3.28e-02             0.716             0.000
+B1_best_off0p2           final  hausdorff_95                 24/50   8.88e-01             0.000             0.000
+B1_best_off0p2           final  normal_consistency           28/50   4.80e-01             0.000             0.000
+B1_best_off0p2           final  part_leg_distal_dist_mean    14/50   2.60e-03             0.001             0.000
+B1_best_off0p2           final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off0p2           final  tri_quality_mean             47/50   3.71e-11   0.000 (determ.)                 -
+B1_best_off0p2           final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off0p2           final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off0p2           final  midline_dev_mean             30/50   2.03e-01   0.000 (determ.)                 -
+B1_best_off1p0           pose   chamfer_l2                    6/50   3.24e-08             0.000             0.000
+B1_best_off1p0           pose   fscore@0.01                  11/50   9.02e-05             0.000             0.000
+B1_best_off1p0           pose   fscore@0.02                   6/50   3.24e-08             0.000             0.000
+B1_best_off1p0           pose   hausdorff_95                 11/50   9.02e-05             0.000             0.000
+B1_best_off1p0           pose   normal_consistency           21/50   3.22e-01             0.000             0.000
+B1_best_off1p0           pose   part_leg_distal_dist_mean    39/50   9.02e-05             0.000             0.000
+B1_best_off1p0           pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off1p0           pose   tri_quality_mean             29/50   3.22e-01   0.000 (determ.)                 -
+B1_best_off1p0           pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off1p0           pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off1p0           pose   midline_dev_mean             21/50   3.22e-01   0.000 (determ.)                 -
+B1_best_off1p0           final  chamfer_l2                    9/50   5.61e-06             0.000             0.000
+B1_best_off1p0           final  fscore@0.01                   2/50   2.27e-12             0.000             0.000
+B1_best_off1p0           final  fscore@0.02                   4/50   4.46e-10             0.000             0.000
+B1_best_off1p0           final  hausdorff_95                 12/50   3.06e-04             0.000             0.000
+B1_best_off1p0           final  normal_consistency           13/50   9.36e-04             0.001             0.000
+B1_best_off1p0           final  part_leg_distal_dist_mean     8/50   1.16e-06             0.000             0.000
+B1_best_off1p0           final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off1p0           final  tri_quality_mean             48/50   2.27e-12   0.000 (determ.)                 -
+B1_best_off1p0           final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off1p0           final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+B1_best_off1p0           final  midline_dev_mean             26/50   8.88e-01   0.000 (determ.)                 -
+C0_control_s1            pose   chamfer_l2                   29/50   3.22e-01             0.009             0.000
+C0_control_s1            pose   fscore@0.01                  28/50   4.80e-01             0.013             0.000
+C0_control_s1            pose   fscore@0.02                  31/50   1.19e-01             0.069             0.000
+C0_control_s1            pose   hausdorff_95                 31/50   1.19e-01             0.004             0.000
+C0_control_s1            pose   normal_consistency           27/50   6.72e-01             0.000             0.000
+C0_control_s1            pose   part_leg_distal_dist_mean    23/50   6.72e-01             0.000             0.000
+C0_control_s1            pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+C0_control_s1            pose   tri_quality_mean             26/50   8.88e-01   0.000 (determ.)                 -
+C0_control_s1            pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+C0_control_s1            pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+C0_control_s1            pose   midline_dev_mean             25/50   1.00e+00   0.000 (determ.)                 -
+C0_control_s1            final  chamfer_l2                   25/50   1.00e+00             0.000             0.000
+C0_control_s1            final  fscore@0.01                  28/50   4.80e-01             0.005             0.004
+C0_control_s1            final  fscore@0.02                  26/50   8.88e-01             0.016             0.003
+C0_control_s1            final  hausdorff_95                 24/50   8.88e-01             0.000             0.000
+C0_control_s1            final  normal_consistency           28/50   4.80e-01             0.001             0.000
+C0_control_s1            final  part_leg_distal_dist_mean    26/50   8.88e-01             0.000             0.000
+C0_control_s1            final  edge_logratio_absmean        26/50   8.88e-01   0.000 (determ.)                 -
+C0_control_s1            final  tri_quality_mean             30/50   2.03e-01   0.000 (determ.)                 -
+C0_control_s1            final  deform_mag_mean              24/50   8.88e-01   0.000 (determ.)                 -
+C0_control_s1            final  deform_mag_p95               22/50   4.80e-01   0.000 (determ.)                 -
+C0_control_s1            final  midline_dev_mean             21/50   3.22e-01   0.000 (determ.)                 -
+C0_control_s2            pose   chamfer_l2                   23/50   6.72e-01             0.000             0.000
+C0_control_s2            pose   fscore@0.01                  27/50   6.72e-01             0.000             0.000
+C0_control_s2            pose   fscore@0.02                  26/50   8.88e-01             0.031             0.000
+C0_control_s2            pose   hausdorff_95                 22/50   4.80e-01             0.000             0.000
+C0_control_s2            pose   normal_consistency           26/50   8.88e-01             0.000             0.000
+C0_control_s2            pose   part_leg_distal_dist_mean    29/50   3.22e-01             0.000             0.000
+C0_control_s2            pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+C0_control_s2            pose   tri_quality_mean             25/50   1.00e+00   0.000 (determ.)                 -
+C0_control_s2            pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+C0_control_s2            pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+C0_control_s2            pose   midline_dev_mean             28/50   4.80e-01   0.000 (determ.)                 -
+C0_control_s2            final  chamfer_l2                   29/50   3.22e-01             0.000             0.000
+C0_control_s2            final  fscore@0.01                  26/50   8.88e-01             0.011             0.001
+C0_control_s2            final  fscore@0.02                  27/50   6.72e-01             0.017             0.001
+C0_control_s2            final  hausdorff_95                 26/50   8.88e-01             0.000             0.000
+C0_control_s2            final  normal_consistency           23/50   6.72e-01             0.000             0.000
+C0_control_s2            final  part_leg_distal_dist_mean    25/50   1.00e+00             0.000             0.000
+C0_control_s2            final  edge_logratio_absmean        22/50   4.80e-01   0.000 (determ.)                 -
+C0_control_s2            final  tri_quality_mean             31/50   1.19e-01   0.000 (determ.)                 -
+C0_control_s2            final  deform_mag_mean              24/50   8.88e-01   0.000 (determ.)                 -
+C0_control_s2            final  deform_mag_p95               23/50   6.72e-01   0.000 (determ.)                 -
+C0_control_s2            final  midline_dev_mean             23/50   6.72e-01   0.000 (determ.)                 -
+E1_posebudget            pose   chamfer_l2                    1/50   9.06e-14             0.000             0.000
+E1_posebudget            pose   fscore@0.01                   2/50   2.27e-12             0.000             0.000
+E1_posebudget            pose   fscore@0.02                   2/50   2.27e-12             0.000             0.000
+E1_posebudget            pose   hausdorff_95                  1/50   9.06e-14             0.000             0.000
+E1_posebudget            pose   normal_consistency           11/50   9.02e-05             0.000             0.000
+E1_posebudget            pose   part_leg_distal_dist_mean    41/50   5.61e-06             0.000             0.000
+E1_posebudget            pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+E1_posebudget            pose   tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+E1_posebudget            pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+E1_posebudget            pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+E1_posebudget            pose   midline_dev_mean             27/50   6.72e-01   0.000 (determ.)                 -
+E1_posebudget            final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+E1_posebudget            final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+E1_posebudget            final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+E1_posebudget            final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+E1_posebudget            final  normal_consistency            4/50   4.46e-10             0.000             0.000
+E1_posebudget            final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+E1_posebudget            final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+E1_posebudget            final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+E1_posebudget            final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+E1_posebudget            final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+E1_posebudget            final  midline_dev_mean             31/50   1.19e-01   0.000 (determ.)                 -
+E3_robust                pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+E3_robust                pose   fscore@0.01                   9/50   5.61e-06             0.000             0.000
+E3_robust                pose   fscore@0.02                   3/50   3.71e-11             0.000             0.000
+E3_robust                pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+E3_robust                pose   normal_consistency           12/50   3.06e-04             0.000             0.000
+E3_robust                pose   part_leg_distal_dist_mean    40/50   2.39e-05             0.000             0.000
+E3_robust                pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+E3_robust                pose   tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+E3_robust                pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+E3_robust                pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+E3_robust                pose   midline_dev_mean             13/50   9.36e-04   0.000 (determ.)                 -
+E3_robust                final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+E3_robust                final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+E3_robust                final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+E3_robust                final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+E3_robust                final  normal_consistency            4/50   4.46e-10             0.000             0.000
+E3_robust                final  part_leg_distal_dist_mean     7/50   2.10e-07             0.000             0.000
+E3_robust                final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+E3_robust                final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+E3_robust                final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+E3_robust                final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+E3_robust                final  midline_dev_mean             19/50   1.19e-01   0.000 (determ.)                 -
+M1_hier                  pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M1_hier                  pose   fscore@0.01                   2/50   2.27e-12             0.000             0.000
+M1_hier                  pose   fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M1_hier                  pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M1_hier                  pose   normal_consistency           14/50   2.60e-03             0.000             0.000
+M1_hier                  pose   part_leg_distal_dist_mean    10/50   2.39e-05             0.000             0.000
+M1_hier                  pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M1_hier                  pose   tri_quality_mean             49/50   9.06e-14   0.000 (determ.)                 -
+M1_hier                  pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M1_hier                  pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M1_hier                  pose   midline_dev_mean             17/50   3.28e-02   0.000 (determ.)                 -
+M1_hier                  final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M1_hier                  final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M1_hier                  final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M1_hier                  final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M1_hier                  final  normal_consistency            2/50   2.27e-12             0.000             0.000
+M1_hier                  final  part_leg_distal_dist_mean     1/50   9.06e-14             0.000             0.000
+M1_hier                  final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M1_hier                  final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M1_hier                  final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M1_hier                  final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M1_hier                  final  midline_dev_mean             22/50   4.80e-01   0.000 (determ.)                 -
+M1_nopart                pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M1_nopart                pose   fscore@0.01                   2/50   2.27e-12             0.000             0.000
+M1_nopart                pose   fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M1_nopart                pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M1_nopart                pose   normal_consistency           13/50   9.36e-04             0.000             0.000
+M1_nopart                pose   part_leg_distal_dist_mean    10/50   2.39e-05             0.000             0.000
+M1_nopart                pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M1_nopart                pose   tri_quality_mean             49/50   9.06e-14   0.000 (determ.)                 -
+M1_nopart                pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M1_nopart                pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M1_nopart                pose   midline_dev_mean             18/50   6.49e-02   0.000 (determ.)                 -
+M1_nopart                final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M1_nopart                final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M1_nopart                final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M1_nopart                final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M1_nopart                final  normal_consistency            4/50   4.46e-10             0.000             0.000
+M1_nopart                final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+M1_nopart                final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M1_nopart                final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M1_nopart                final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M1_nopart                final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M1_nopart                final  midline_dev_mean             28/50   4.80e-01   0.000 (determ.)                 -
+M1_sym                   pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M1_sym                   pose   fscore@0.01                   1/50   9.06e-14             0.000             0.000
+M1_sym                   pose   fscore@0.02                   1/50   9.06e-14             0.000             0.000
+M1_sym                   pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M1_sym                   pose   normal_consistency           13/50   9.36e-04             0.000             0.000
+M1_sym                   pose   part_leg_distal_dist_mean    15/50   6.60e-03             0.000             0.000
+M1_sym                   pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M1_sym                   pose   tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M1_sym                   pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M1_sym                   pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M1_sym                   pose   midline_dev_mean             42/50   1.16e-06   0.000 (determ.)                 -
+M1_sym                   final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M1_sym                   final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M1_sym                   final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M1_sym                   final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M1_sym                   final  normal_consistency            3/50   3.71e-11             0.000             0.000
+M1_sym                   final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+M1_sym                   final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M1_sym                   final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M1_sym                   final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M1_sym                   final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M1_sym                   final  midline_dev_mean             47/50   3.71e-11   0.000 (determ.)                 -
+M2_mutual                pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M2_mutual                pose   fscore@0.01                   4/50   4.46e-10             0.000             0.000
+M2_mutual                pose   fscore@0.02                   3/50   3.71e-11             0.000             0.000
+M2_mutual                pose   hausdorff_95                  1/50   9.06e-14             0.000             0.000
+M2_mutual                pose   normal_consistency            1/50   9.06e-14             0.000             0.000
+M2_mutual                pose   part_leg_distal_dist_mean     1/50   9.06e-14             0.000             0.000
+M2_mutual                pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M2_mutual                pose   tri_quality_mean             34/50   1.53e-02   0.000 (determ.)                 -
+M2_mutual                pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M2_mutual                pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M2_mutual                pose   midline_dev_mean             21/50   3.22e-01   0.000 (determ.)                 -
+M2_mutual                final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M2_mutual                final  fscore@0.01                   9/50   5.61e-06             0.000             0.000
+M2_mutual                final  fscore@0.02                   1/50   9.06e-14             0.000             0.000
+M2_mutual                final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M2_mutual                final  normal_consistency            5/50   4.21e-09             0.000             0.000
+M2_mutual                final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+M2_mutual                final  edge_logratio_absmean        27/50   6.72e-01   0.000 (determ.)                 -
+M2_mutual                final  tri_quality_mean             30/50   2.03e-01   0.000 (determ.)                 -
+M2_mutual                final  deform_mag_mean              19/50   1.19e-01   0.000 (determ.)                 -
+M2_mutual                final  deform_mag_p95                4/50   4.46e-10   0.000 (determ.)                 -
+M2_mutual                final  midline_dev_mean             19/50   1.19e-01   0.000 (determ.)                 -
+M2_sinkhorn              pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M2_sinkhorn              pose   fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M2_sinkhorn              pose   fscore@0.02                   1/50   9.06e-14             0.000             0.000
+M2_sinkhorn              pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M2_sinkhorn              pose   normal_consistency            1/50   9.06e-14             0.000             0.000
+M2_sinkhorn              pose   part_leg_distal_dist_mean     2/50   2.27e-12             0.000             0.000
+M2_sinkhorn              pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M2_sinkhorn              pose   tri_quality_mean              3/50   3.71e-11   0.000 (determ.)                 -
+M2_sinkhorn              pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M2_sinkhorn              pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M2_sinkhorn              pose   midline_dev_mean              9/50   5.61e-06   0.000 (determ.)                 -
+M2_sinkhorn              final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M2_sinkhorn              final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M2_sinkhorn              final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M2_sinkhorn              final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M2_sinkhorn              final  normal_consistency            0/50   1.78e-15             0.000             0.000
+M2_sinkhorn              final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+M2_sinkhorn              final  edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M2_sinkhorn              final  tri_quality_mean              1/50   9.06e-14   0.000 (determ.)                 -
+M2_sinkhorn              final  deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M2_sinkhorn              final  deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M2_sinkhorn              final  midline_dev_mean              6/50   3.24e-08   0.000 (determ.)                 -
+M2_softnn                pose   chamfer_l2                   19/50   1.19e-01             0.040             0.000
+M2_softnn                pose   fscore@0.01                  19/50   1.19e-01             0.092             0.000
+M2_softnn                pose   fscore@0.02                  21/50   3.22e-01             0.025             0.000
+M2_softnn                pose   hausdorff_95                 22/50   4.80e-01             0.004             0.000
+M2_softnn                pose   normal_consistency           23/50   6.72e-01             0.000             0.000
+M2_softnn                pose   part_leg_distal_dist_mean    25/50   1.00e+00             0.000             0.000
+M2_softnn                pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M2_softnn                pose   tri_quality_mean             16/50   1.53e-02   0.000 (determ.)                 -
+M2_softnn                pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M2_softnn                pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M2_softnn                pose   midline_dev_mean             28/50   4.80e-01   0.000 (determ.)                 -
+M2_softnn                final  chamfer_l2                   11/50   9.02e-05             0.000             0.000
+M2_softnn                final  fscore@0.01                   7/50   2.10e-07             0.000             0.000
+M2_softnn                final  fscore@0.02                   8/50   1.16e-06             0.331             0.000
+M2_softnn                final  hausdorff_95                 15/50   6.60e-03             0.000             0.000
+M2_softnn                final  normal_consistency            8/50   1.16e-06             0.000             0.000
+M2_softnn                final  part_leg_distal_dist_mean    15/50   6.60e-03             0.000             0.000
+M2_softnn                final  edge_logratio_absmean         2/50   2.27e-12   0.000 (determ.)                 -
+M2_softnn                final  tri_quality_mean              3/50   3.71e-11   0.000 (determ.)                 -
+M2_softnn                final  deform_mag_mean              11/50   9.02e-05   0.000 (determ.)                 -
+M2_softnn                final  deform_mag_p95               10/50   2.39e-05   0.000 (determ.)                 -
+M2_softnn                final  midline_dev_mean             25/50   1.00e+00   0.000 (determ.)                 -
+M4_ceiling               pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M4_ceiling               pose   fscore@0.01                   1/50   9.06e-14             0.000             0.000
+M4_ceiling               pose   fscore@0.02                   1/50   9.06e-14             0.000             0.000
+M4_ceiling               pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M4_ceiling               pose   normal_consistency            2/50   2.27e-12             0.000             0.000
+M4_ceiling               pose   part_leg_distal_dist_mean     2/50   2.27e-12             0.000             0.000
+M4_ceiling               pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M4_ceiling               pose   tri_quality_mean              3/50   3.71e-11   0.000 (determ.)                 -
+M4_ceiling               pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M4_ceiling               pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M4_ceiling               pose   midline_dev_mean             43/50   2.10e-07   0.000 (determ.)                 -
+M4_ceiling               final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M4_ceiling               final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M4_ceiling               final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M4_ceiling               final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M4_ceiling               final  normal_consistency            4/50   4.46e-10             0.000             0.000
+M4_ceiling               final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+M4_ceiling               final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M4_ceiling               final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M4_ceiling               final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M4_ceiling               final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M4_ceiling               final  midline_dev_mean             37/50   9.36e-04   0.000 (determ.)                 -
+M4b_ceiling_free         pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M4b_ceiling_free         pose   fscore@0.01                   1/50   9.06e-14             0.000             0.000
+M4b_ceiling_free         pose   fscore@0.02                   1/50   9.06e-14             0.000             0.000
+M4b_ceiling_free         pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M4b_ceiling_free         pose   normal_consistency            1/50   9.06e-14             0.000             0.000
+M4b_ceiling_free         pose   part_leg_distal_dist_mean     1/50   9.06e-14             0.000             0.000
+M4b_ceiling_free         pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M4b_ceiling_free         pose   tri_quality_mean              3/50   3.71e-11   0.000 (determ.)                 -
+M4b_ceiling_free         pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M4b_ceiling_free         pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M4b_ceiling_free         pose   midline_dev_mean             45/50   4.21e-09   0.000 (determ.)                 -
+M4b_ceiling_free         final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M4b_ceiling_free         final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M4b_ceiling_free         final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M4b_ceiling_free         final  hausdorff_95                  1/50   9.06e-14             0.000             0.000
+M4b_ceiling_free         final  normal_consistency            3/50   3.71e-11             0.000             0.000
+M4b_ceiling_free         final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+M4b_ceiling_free         final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M4b_ceiling_free         final  tri_quality_mean             49/50   9.06e-14   0.000 (determ.)                 -
+M4b_ceiling_free         final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M4b_ceiling_free         final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M4b_ceiling_free         final  midline_dev_mean             18/50   6.49e-02   0.000 (determ.)                 -
+M5_handoff               pose   chamfer_l2                   50/50   1.78e-15             0.000             0.000
+M5_handoff               pose   fscore@0.01                  50/50   1.78e-15             0.000             0.000
+M5_handoff               pose   fscore@0.02                  50/50   1.78e-15             0.000             0.000
+M5_handoff               pose   hausdorff_95                 50/50   1.78e-15             0.000             0.000
+M5_handoff               pose   normal_consistency           49/50   9.06e-14             0.000             0.000
+M5_handoff               pose   part_leg_distal_dist_mean    50/50   1.78e-15             0.000             0.000
+M5_handoff               pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M5_handoff               pose   tri_quality_mean             44/50   3.24e-08   0.000 (determ.)                 -
+M5_handoff               pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M5_handoff               pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M5_handoff               pose   midline_dev_mean             12/50   3.06e-04   0.000 (determ.)                 -
+M5_handoff               final  chamfer_l2                   29/50   3.22e-01             0.000             0.000
+M5_handoff               final  fscore@0.01                  16/50   1.53e-02             0.081             0.000
+M5_handoff               final  fscore@0.02                  20/50   2.03e-01             0.075             0.001
+M5_handoff               final  hausdorff_95                 30/50   2.03e-01             0.000             0.000
+M5_handoff               final  normal_consistency           42/50   1.16e-06             0.000             0.000
+M5_handoff               final  part_leg_distal_dist_mean    19/50   1.19e-01             0.045             0.000
+M5_handoff               final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M5_handoff               final  tri_quality_mean             44/50   3.24e-08   0.000 (determ.)                 -
+M5_handoff               final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M5_handoff               final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M5_handoff               final  midline_dev_mean             17/50   3.28e-02   0.000 (determ.)                 -
+M6_augmented             pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M6_augmented             pose   fscore@0.01                   1/50   9.06e-14             0.000             0.000
+M6_augmented             pose   fscore@0.02                   1/50   9.06e-14             0.000             0.000
+M6_augmented             pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M6_augmented             pose   normal_consistency            0/50   1.78e-15             0.000             0.000
+M6_augmented             pose   part_leg_distal_dist_mean     9/50   5.61e-06             0.000             0.000
+M6_augmented             pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M6_augmented             pose   tri_quality_mean              1/50   9.06e-14   0.000 (determ.)                 -
+M6_augmented             pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M6_augmented             pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M6_augmented             pose   midline_dev_mean             40/50   2.39e-05   0.000 (determ.)                 -
+M6_augmented             final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M6_augmented             final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M6_augmented             final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M6_augmented             final  hausdorff_95                  4/50   4.46e-10             0.000             0.000
+M6_augmented             final  normal_consistency            0/50   1.78e-15             0.000             0.000
+M6_augmented             final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+M6_augmented             final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M6_augmented             final  tri_quality_mean             44/50   3.24e-08   0.000 (determ.)                 -
+M6_augmented             final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M6_augmented             final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M6_augmented             final  midline_dev_mean             23/50   6.72e-01   0.000 (determ.)                 -
+M7_handoff_midline       pose   chamfer_l2                   50/50   1.78e-15             0.000             0.000
+M7_handoff_midline       pose   fscore@0.01                  50/50   1.78e-15             0.000             0.000
+M7_handoff_midline       pose   fscore@0.02                  50/50   1.78e-15             0.000             0.000
+M7_handoff_midline       pose   hausdorff_95                 50/50   1.78e-15             0.000             0.000
+M7_handoff_midline       pose   normal_consistency           50/50   1.78e-15             0.000             0.000
+M7_handoff_midline       pose   part_leg_distal_dist_mean    50/50   1.78e-15             0.000             0.000
+M7_handoff_midline       pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline       pose   tri_quality_mean             44/50   3.24e-08   0.000 (determ.)                 -
+M7_handoff_midline       pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline       pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline       pose   midline_dev_mean             42/50   1.16e-06   0.000 (determ.)                 -
+M7_handoff_midline       final  chamfer_l2                   32/50   6.49e-02             0.598             0.000
+M7_handoff_midline       final  fscore@0.01                  18/50   6.49e-02             0.568             0.000
+M7_handoff_midline       final  fscore@0.02                  22/50   4.80e-01             0.005             0.004
+M7_handoff_midline       final  hausdorff_95                 34/50   1.53e-02             0.002             0.000
+M7_handoff_midline       final  normal_consistency           42/50   1.16e-06             0.000             0.000
+M7_handoff_midline       final  part_leg_distal_dist_mean    24/50   8.88e-01             0.000             0.000
+M7_handoff_midline       final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline       final  tri_quality_mean             45/50   4.21e-09   0.000 (determ.)                 -
+M7_handoff_midline       final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline       final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline       final  midline_dev_mean             45/50   4.21e-09   0.000 (determ.)                 -
+M7_handoff_midline_s1    pose   chamfer_l2                   50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s1    pose   fscore@0.01                  50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s1    pose   fscore@0.02                  50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s1    pose   hausdorff_95                 50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s1    pose   normal_consistency           50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s1    pose   part_leg_distal_dist_mean    50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s1    pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s1    pose   tri_quality_mean             43/50   2.10e-07   0.000 (determ.)                 -
+M7_handoff_midline_s1    pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s1    pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s1    pose   midline_dev_mean             43/50   2.10e-07   0.000 (determ.)                 -
+M7_handoff_midline_s1    final  chamfer_l2                   34/50   1.53e-02             0.246             0.000
+M7_handoff_midline_s1    final  fscore@0.01                  17/50   3.28e-02             0.245             0.000
+M7_handoff_midline_s1    final  fscore@0.02                  23/50   6.72e-01             0.018             0.017
+M7_handoff_midline_s1    final  hausdorff_95                 32/50   6.49e-02             0.411             0.000
+M7_handoff_midline_s1    final  normal_consistency           40/50   2.39e-05             0.000             0.000
+M7_handoff_midline_s1    final  part_leg_distal_dist_mean    17/50   3.28e-02             0.345             0.000
+M7_handoff_midline_s1    final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s1    final  tri_quality_mean             44/50   3.24e-08   0.000 (determ.)                 -
+M7_handoff_midline_s1    final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s1    final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s1    final  midline_dev_mean             47/50   3.71e-11   0.000 (determ.)                 -
+M7_handoff_midline_s2    pose   chamfer_l2                   50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s2    pose   fscore@0.01                  50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s2    pose   fscore@0.02                  50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s2    pose   hausdorff_95                 50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s2    pose   normal_consistency           50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s2    pose   part_leg_distal_dist_mean    50/50   1.78e-15             0.000             0.000
+M7_handoff_midline_s2    pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s2    pose   tri_quality_mean             44/50   3.24e-08   0.000 (determ.)                 -
+M7_handoff_midline_s2    pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s2    pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s2    pose   midline_dev_mean             41/50   5.61e-06   0.000 (determ.)                 -
+M7_handoff_midline_s2    final  chamfer_l2                   30/50   2.03e-01             0.060             0.000
+M7_handoff_midline_s2    final  fscore@0.01                  16/50   1.53e-02             0.167             0.000
+M7_handoff_midline_s2    final  fscore@0.02                  22/50   4.80e-01             0.011             0.011
+M7_handoff_midline_s2    final  hausdorff_95                 34/50   1.53e-02             0.015             0.000
+M7_handoff_midline_s2    final  normal_consistency           42/50   1.16e-06             0.000             0.000
+M7_handoff_midline_s2    final  part_leg_distal_dist_mean    24/50   8.88e-01             0.000             0.000
+M7_handoff_midline_s2    final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s2    final  tri_quality_mean             46/50   4.46e-10   0.000 (determ.)                 -
+M7_handoff_midline_s2    final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s2    final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M7_handoff_midline_s2    final  midline_dev_mean             44/50   3.24e-08   0.000 (determ.)                 -
+M8_handoff               pose   chamfer_l2                   50/50   1.78e-15             0.000             0.000
+M8_handoff               pose   fscore@0.01                  50/50   1.78e-15             0.000             0.000
+M8_handoff               pose   fscore@0.02                  50/50   1.78e-15             0.000             0.000
+M8_handoff               pose   hausdorff_95                 50/50   1.78e-15             0.000             0.000
+M8_handoff               pose   normal_consistency           50/50   1.78e-15             0.000             0.000
+M8_handoff               pose   part_leg_distal_dist_mean    50/50   1.78e-15             0.000             0.000
+M8_handoff               pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M8_handoff               pose   tri_quality_mean             44/50   3.24e-08   0.000 (determ.)                 -
+M8_handoff               pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M8_handoff               pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M8_handoff               pose   midline_dev_mean             39/50   9.02e-05   0.000 (determ.)                 -
+M8_handoff               final  chamfer_l2                   28/50   4.80e-01             0.000             0.000
+M8_handoff               final  fscore@0.01                  13/50   9.36e-04             0.002             0.000
+M8_handoff               final  fscore@0.02                  17/50   3.28e-02             0.677             0.000
+M8_handoff               final  hausdorff_95                 29/50   3.22e-01             0.000             0.000
+M8_handoff               final  normal_consistency           39/50   9.02e-05             0.000             0.000
+M8_handoff               final  part_leg_distal_dist_mean    20/50   2.03e-01             0.009             0.000
+M8_handoff               final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M8_handoff               final  tri_quality_mean             43/50   2.10e-07   0.000 (determ.)                 -
+M8_handoff               final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M8_handoff               final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M8_handoff               final  midline_dev_mean             45/50   4.21e-09   0.000 (determ.)                 -
+M8a_split_only           pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M8a_split_only           pose   fscore@0.01                   1/50   9.06e-14             0.000             0.000
+M8a_split_only           pose   fscore@0.02                   1/50   9.06e-14             0.000             0.000
+M8a_split_only           pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M8a_split_only           pose   normal_consistency           13/50   9.36e-04             0.000             0.000
+M8a_split_only           pose   part_leg_distal_dist_mean    15/50   6.60e-03             0.000             0.000
+M8a_split_only           pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M8a_split_only           pose   tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M8a_split_only           pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M8a_split_only           pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M8a_split_only           pose   midline_dev_mean             43/50   2.10e-07   0.000 (determ.)                 -
+M8a_split_only           final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M8a_split_only           final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M8a_split_only           final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M8a_split_only           final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M8a_split_only           final  normal_consistency            0/50   1.78e-15             0.000             0.000
+M8a_split_only           final  part_leg_distal_dist_mean     1/50   9.06e-14             0.000             0.000
+M8a_split_only           final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M8a_split_only           final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M8a_split_only           final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M8a_split_only           final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M8a_split_only           final  midline_dev_mean             45/50   4.21e-09   0.000 (determ.)                 -
+M8b_robust_only          pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M8b_robust_only          pose   fscore@0.01                   1/50   9.06e-14             0.000             0.000
+M8b_robust_only          pose   fscore@0.02                   1/50   9.06e-14             0.000             0.000
+M8b_robust_only          pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M8b_robust_only          pose   normal_consistency           14/50   2.60e-03             0.000             0.000
+M8b_robust_only          pose   part_leg_distal_dist_mean    15/50   6.60e-03             0.000             0.000
+M8b_robust_only          pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M8b_robust_only          pose   tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M8b_robust_only          pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M8b_robust_only          pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M8b_robust_only          pose   midline_dev_mean             44/50   3.24e-08   0.000 (determ.)                 -
+M8b_robust_only          final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M8b_robust_only          final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M8b_robust_only          final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M8b_robust_only          final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M8b_robust_only          final  normal_consistency            4/50   4.46e-10             0.000             0.000
+M8b_robust_only          final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+M8b_robust_only          final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M8b_robust_only          final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M8b_robust_only          final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M8b_robust_only          final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M8b_robust_only          final  midline_dev_mean             46/50   4.46e-10   0.000 (determ.)                 -
+M9a_field                pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M9a_field                pose   fscore@0.01                   1/50   9.06e-14             0.000             0.000
+M9a_field                pose   fscore@0.02                   1/50   9.06e-14             0.000             0.000
+M9a_field                pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M9a_field                pose   normal_consistency           13/50   9.36e-04             0.000             0.000
+M9a_field                pose   part_leg_distal_dist_mean    15/50   6.60e-03             0.000             0.000
+M9a_field                pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M9a_field                pose   tri_quality_mean             49/50   9.06e-14   0.000 (determ.)                 -
+M9a_field                pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M9a_field                pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M9a_field                pose   midline_dev_mean             40/50   2.39e-05   0.000 (determ.)                 -
+M9a_field                final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M9a_field                final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M9a_field                final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M9a_field                final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M9a_field                final  normal_consistency            2/50   2.27e-12             0.000             0.000
+M9a_field                final  part_leg_distal_dist_mean     0/50   1.78e-15             0.000             0.000
+M9a_field                final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M9a_field                final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M9a_field                final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M9a_field                final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M9a_field                final  midline_dev_mean             45/50   4.21e-09   0.000 (determ.)                 -
+M9c_anchorinit           pose   chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M9c_anchorinit           pose   fscore@0.01                   1/50   9.06e-14             0.000             0.000
+M9c_anchorinit           pose   fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M9c_anchorinit           pose   hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M9c_anchorinit           pose   normal_consistency           24/50   8.88e-01             0.000             0.000
+M9c_anchorinit           pose   part_leg_distal_dist_mean     7/50   2.10e-07             0.000             0.000
+M9c_anchorinit           pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+M9c_anchorinit           pose   tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M9c_anchorinit           pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+M9c_anchorinit           pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+M9c_anchorinit           pose   midline_dev_mean             35/50   6.60e-03   0.000 (determ.)                 -
+M9c_anchorinit           final  chamfer_l2                    0/50   1.78e-15             0.000             0.000
+M9c_anchorinit           final  fscore@0.01                   0/50   1.78e-15             0.000             0.000
+M9c_anchorinit           final  fscore@0.02                   0/50   1.78e-15             0.000             0.000
+M9c_anchorinit           final  hausdorff_95                  0/50   1.78e-15             0.000             0.000
+M9c_anchorinit           final  normal_consistency            2/50   2.27e-12             0.000             0.000
+M9c_anchorinit           final  part_leg_distal_dist_mean     1/50   9.06e-14             0.000             0.000
+M9c_anchorinit           final  edge_logratio_absmean        50/50   1.78e-15   0.000 (determ.)                 -
+M9c_anchorinit           final  tri_quality_mean             50/50   1.78e-15   0.000 (determ.)                 -
+M9c_anchorinit           final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+M9c_anchorinit           final  deform_mag_p95               50/50   1.78e-15   0.000 (determ.)                 -
+M9c_anchorinit           final  midline_dev_mean             47/50   3.71e-11   0.000 (determ.)                 -
+baseline                 pose   chamfer_l2                    8/50   1.16e-06             0.000             0.000
+baseline                 pose   fscore@0.01                   8/50   1.16e-06             0.000             0.000
+baseline                 pose   fscore@0.02                  10/50   2.39e-05             0.000             0.000
+baseline                 pose   hausdorff_95                 12/50   3.06e-04             0.000             0.000
+baseline                 pose   normal_consistency           12/50   3.06e-04             0.000             0.000
+baseline                 pose   part_leg_distal_dist_mean    50/50   1.78e-15             0.000             0.000
+baseline                 pose   edge_logratio_absmean         0/50   1.78e-15   0.000 (determ.)                 -
+baseline                 pose   tri_quality_mean             27/50   6.72e-01   0.000 (determ.)                 -
+baseline                 pose   deform_mag_mean               0/50   1.78e-15   0.000 (determ.)                 -
+baseline                 pose   deform_mag_p95                0/50   1.78e-15   0.000 (determ.)                 -
+baseline                 pose   midline_dev_mean             30/50   2.03e-01   0.000 (determ.)                 -
+baseline                 final  chamfer_l2                    4/50   4.46e-10             0.000             0.000
+baseline                 final  fscore@0.01                   6/50   3.24e-08             0.000             0.000
+baseline                 final  fscore@0.02                   6/50   3.24e-08             0.000             0.000
+baseline                 final  hausdorff_95                  3/50   3.71e-11             0.000             0.000
+baseline                 final  normal_consistency           10/50   2.39e-05             0.000             0.000
+baseline                 final  part_leg_distal_dist_mean    43/50   2.10e-07             0.000             0.000
+baseline                 final  edge_logratio_absmean        40/50   2.39e-05   0.000 (determ.)                 -
+baseline                 final  tri_quality_mean             49/50   9.06e-14   0.000 (determ.)                 -
+baseline                 final  deform_mag_mean              50/50   1.78e-15   0.000 (determ.)                 -
+baseline                 final  deform_mag_p95               48/50   2.27e-12   0.000 (determ.)                 -
+baseline                 final  midline_dev_mean             31/50   1.19e-01   0.000 (determ.)                 -
+
+726 arm x stage x metric verdicts examined
+sampled metrics: 396   mean P(flip) = 0.0306   max P(flip) = 0.880
+worst 12:
+   A4_nofreeze              final  fscore@0.02                P(flip)=0.880  P(sig wrong dir)=0.0000
+   A4_nofreeze_s1           final  fscore@0.02                P(flip)=0.812  P(sig wrong dir)=0.0000
+   B1_best_off0p2           final  fscore@0.02                P(flip)=0.716  P(sig wrong dir)=0.0000
+   A4_nofreeze_s2           final  fscore@0.02                P(flip)=0.679  P(sig wrong dir)=0.0000
+   M8_handoff               final  fscore@0.02                P(flip)=0.677  P(sig wrong dir)=0.0000
+   A4_nofreeze_s2           pose   fscore@0.01                P(flip)=0.654  P(sig wrong dir)=0.0000
+   A2_restedge              pose   normal_consistency         P(flip)=0.637  P(sig wrong dir)=0.0000
+   A4_nofreeze              final  fscore@0.01                P(flip)=0.601  P(sig wrong dir)=0.0000
+   M7_handoff_midline       final  chamfer_l2                 P(flip)=0.598  P(sig wrong dir)=0.0000
+   M7_handoff_midline       final  fscore@0.01                P(flip)=0.568  P(sig wrong dir)=0.0000
+   A4_nofreeze_s1           final  fscore@0.01                P(flip)=0.561  P(sig wrong dir)=0.0000
+   A4_nofreeze              final  chamfer_l2                 P(flip)=0.524  P(sig wrong dir)=0.5040

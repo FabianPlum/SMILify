@@ -1,0 +1,54 @@
+SMAL_FILE: 3D_model_prep/SMIL_OmniAnt.pkl
+groups: ['body', 'l1d_l', 'l1d_r', 'l1p_l', 'l1p_r', 'l2d_l', 'l2d_r', 'l2p_l', 'l2p_r', 'l3d_l', 'l3d_r', 'l3p_l', 'l3p_r']
+
+=== PART 1: template, PERFECT labels, area-uniform sampling ===
+group     nverts  mean n@8000   area%  P(n>=40)   n@30000
+body        5524       4972.6  62.158     1.000   18647.2
+l1d_l        128         32.0   0.400     0.095     120.1
+l1d_r        128         31.2   0.389     0.100     116.8
+l1p_l        624        494.6   6.182     1.000    1854.6
+l1p_r        625        496.1   6.201     1.000    1860.3
+l2d_l        109         22.8   0.286     0.000      85.7
+l2d_r        109         23.5   0.293     0.000      88.0
+l2p_l        560        422.9   5.286     1.000    1585.9
+l2p_r        560        421.0   5.262     1.000    1578.7
+l3d_l        174         36.6   0.457     0.325     137.1
+l3d_r        174         35.9   0.448     0.240     134.5
+l3p_l        757        504.6   6.307     1.000    1892.2
+l3p_r        757        506.4   6.330     1.000    1898.9
+anchors kept per draw: mean 7.76 / 13  (min 7, max 10)
+
+=== PART 2: real bench targets + real part field (14 specimens) ===
+14 target meshes loaded.
+  [1/14] Acanthostichus_aff.brevicornis_CASENT074 debris 2.6%
+  [2/14] Acromyrmex_coronatus_CASENT0744365_proce debris 3.6%
+  [3/14] Acromyrmex_lobicornis_CASENT0878007_proc debris 6.8%
+  [4/14] Anochetus_risii_CASENT0877608_processed. debris 1.2%
+  [5/14] Anochetus_risii_CASENT0877609_processed. debris 5.9%
+  [6/14] Aphaenogaster_pallida_CASENT0745235_proc debris 1.7%
+  [7/14] Atopomyrmex_mocquerysi_CASENT0744784_pro debris 1.1%
+  [8/14] Carebara_trechideros_CASENT0877591_proce debris 1.1%
+  [9/14] Centromyrmex_brachycola_CASENT0744052_pr debris 1.8%
+  [10/14] Cephalotes_minutus_CASENT0709253_process debris 6.6%
+  [11/14] Cephalotes_simillimus_CASENT0744408_proc debris 17.1%
+  [12/14] Cephalotes_spinosus_CASENT0744158_proces debris 10.9%
+  [13/14] Crematogaster_nawai_OKENT0105046_process debris 6.3%
+  [14/14] Cryptopone_sauteri_CASENT0743771_process debris 10.4%
+
+total anchors kept @8000/min_pts=40: 154 over 14 specimens (11.0/specimen of 13)   <-- compare run log
+if anchors came from the 30k ref cloud: 165 (11.8/specimen)
+
+group     kept@8k  kept@30k  median n@8k   min   max
+body           14        14       4355.0  3868  5243
+l1d_l          10        13         66.5     7   134
+l1d_r          13        13         73.5     1   282
+l1p_l          14        14        447.0   178   670
+l1p_r          14        14        410.5   168   757
+l2d_l           9        12         51.0     0   360
+l2d_r          11        12         59.0     0   274
+l2p_l          14        14        405.5   146   726
+l2p_r          14        14        499.0   216   843
+l3d_l           7         9         40.5     0   189
+l3d_r           6         8         22.0     0   206
+l3p_l          14        14        429.5   173   753
+l3p_r          14        14        418.5   140   799

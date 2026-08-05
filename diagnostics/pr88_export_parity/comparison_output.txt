@@ -1,0 +1,41 @@
+numpy 1.26.4
+
+=== C: load test in this env ===
+[PASS] load /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/stick/new_a/export.pkl
+[PASS] load /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/stick/legacy/export.pkl
+[FAIL] load /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/stick/new_52/export.pkl: ModuleNotFoundError: No module named 'numpy._core.numeric'
+[PASS] load /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/mouse/new_a/export.pkl
+[PASS] load /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/mouse/legacy/export.pkl
+[FAIL] load /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/mouse/new_52/export.pkl: ModuleNotFoundError: No module named 'numpy._core.numeric'
+
+=== stick_A_port ===
+  A: /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/stick/new_a/export.pkl
+  B: /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/stick/legacy/export.pkl
+  sha256 A: 988ee4023353c6c1255393ad7a1e59f5c8aa0aae218f70680f34423ae55b4de7
+  sha256 B: 988ee4023353c6c1255393ad7a1e59f5c8aa0aae218f70680f34423ae55b4de7
+  BYTE-IDENTICAL
+
+=== stick_B_env ===
+  A: /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/stick/new_52/export.pkl
+  B: /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/stick/new_a/export.pkl
+  sha256 A: 76b2bb06eb7050ef9d48710d5ddba277ff31f7136d27c01b2e8f4d55451dfa56
+  sha256 B: 988ee4023353c6c1255393ad7a1e59f5c8aa0aae218f70680f34423ae55b4de7
+  bytes differ -> semantic comparison:
+  (cannot compare semantically, load failed)
+
+=== mouse_A_port ===
+  A: /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/mouse/new_a/export.pkl
+  B: /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/mouse/legacy/export.pkl
+  sha256 A: 4b1ff24354581613169e79901b0446ad4546e03be2308ef4698b091cece634e7
+  sha256 B: 4b1ff24354581613169e79901b0446ad4546e03be2308ef4698b091cece634e7
+  BYTE-IDENTICAL
+
+=== mouse_B_env ===
+  A: /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/mouse/new_52/export.pkl
+  B: /home/fabi/dev/SMILify/diagnostics/pr88_export_parity/mouse/new_a/export.pkl
+  sha256 A: 37ac63f3352d6cdb93a29c32eb4ef8ba0e5de983836b2d0e6f23313f121e9c5a
+  sha256 B: 4b1ff24354581613169e79901b0446ad4546e03be2308ef4698b091cece634e7
+  bytes differ -> semantic comparison:
+  (cannot compare semantically, load failed)
+
+=== 4 failing comparison(s)/load(s) ===

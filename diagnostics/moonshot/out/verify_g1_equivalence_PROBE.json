@@ -1,0 +1,502 @@
+[
+ {
+  "name": "Acanthostichus_aff.brevicornis_CASENT0744328",
+  "best0": 6,
+  "best1": 6,
+  "agree": true,
+  "g1_named": 0.53585,
+  "g1_oracle": 0.8166,
+  "g1_named_fix": 0.0048,
+  "g1_oracle_fix": 0.8045
+ },
+ {
+  "name": "Acromyrmex_coronatus_CASENT0744365",
+  "best0": 7,
+  "best1": 1,
+  "agree": false,
+  "g1_named": 0.198,
+  "g1_oracle": 0.41265,
+  "g1_named_fix": 0.058,
+  "g1_oracle_fix": 0.7014
+ },
+ {
+  "name": "Acromyrmex_lobicornis_CASENT0878007",
+  "best0": 5,
+  "best1": 5,
+  "agree": true,
+  "g1_named": 0.8294,
+  "g1_oracle": 0.8294,
+  "g1_named_fix": 0.8372,
+  "g1_oracle_fix": 0.8372
+ },
+ {
+  "name": "Anochetus_risii_CASENT0877608",
+  "best0": 3,
+  "best1": 8,
+  "agree": false,
+  "g1_named": 0.00315,
+  "g1_oracle": 0.65305,
+  "g1_named_fix": 0.0941,
+  "g1_oracle_fix": 0.48225
+ },
+ {
+  "name": "Anochetus_risii_CASENT0877609",
+  "best0": 4,
+  "best1": 3,
+  "agree": false,
+  "g1_named": 0.79875,
+  "g1_oracle": 0.8275,
+  "g1_named_fix": 0.89095,
+  "g1_oracle_fix": 0.8921
+ },
+ {
+  "name": "Aphaenogaster_pallida_CASENT0745235",
+  "best0": 9,
+  "best1": 7,
+  "agree": false,
+  "g1_named": 0.57995,
+  "g1_oracle": 0.7062,
+  "g1_named_fix": 0.25655,
+  "g1_oracle_fix": 0.48965
+ },
+ {
+  "name": "Atopomyrmex_mocquerysi_CASENT0744784",
+  "best0": 6,
+  "best1": 5,
+  "agree": false,
+  "g1_named": 0.32145,
+  "g1_oracle": 0.68865,
+  "g1_named_fix": 0.57565,
+  "g1_oracle_fix": 0.6541
+ },
+ {
+  "name": "Carebara_trechideros_CASENT0877591",
+  "best0": 6,
+  "best1": 6,
+  "agree": true,
+  "g1_named": 0.97345,
+  "g1_oracle": 0.97345,
+  "g1_named_fix": 0.80725,
+  "g1_oracle_fix": 0.80725
+ },
+ {
+  "name": "Centromyrmex_brachycola_CASENT0744052",
+  "best0": 3,
+  "best1": 2,
+  "agree": false,
+  "g1_named": 0.93895,
+  "g1_oracle": 0.93895,
+  "g1_named_fix": 0.9646,
+  "g1_oracle_fix": 0.9646
+ },
+ {
+  "name": "Cephalotes_minutus_CASENT0709253",
+  "best0": 1,
+  "best1": 6,
+  "agree": false,
+  "g1_named": 0.25145,
+  "g1_oracle": 0.5241,
+  "g1_named_fix": 0.8179,
+  "g1_oracle_fix": 0.8179
+ },
+ {
+  "name": "Cephalotes_simillimus_CASENT0744408",
+  "best0": 1,
+  "best1": 4,
+  "agree": false,
+  "g1_named": 0.00535,
+  "g1_oracle": 0.60555,
+  "g1_named_fix": 0.0,
+  "g1_oracle_fix": 0.5489
+ },
+ {
+  "name": "Cephalotes_spinosus_CASENT0744158",
+  "best0": 5,
+  "best1": 12,
+  "agree": false,
+  "g1_named": 0.4656,
+  "g1_oracle": 0.6755,
+  "g1_named_fix": 0.26905,
+  "g1_oracle_fix": 0.60175
+ },
+ {
+  "name": "Crematogaster_nawai_OKENT0105046",
+  "best0": 4,
+  "best1": 4,
+  "agree": true,
+  "g1_named": 0.97595,
+  "g1_oracle": 0.97595,
+  "g1_named_fix": 0.2993,
+  "g1_oracle_fix": 0.9696
+ },
+ {
+  "name": "Cryptopone_sauteri_CASENT0743771",
+  "best0": 3,
+  "best1": 8,
+  "agree": false,
+  "g1_named": 0.2845,
+  "g1_oracle": 0.54215,
+  "g1_named_fix": 0.0855,
+  "g1_oracle_fix": 0.61605
+ },
+ {
+  "name": "Cyphoidris_afrc-tz01_CASENT0744810",
+  "best0": 4,
+  "best1": 6,
+  "agree": false,
+  "g1_named": 0.67185,
+  "g1_oracle": 0.70055,
+  "g1_named_fix": 0.34445,
+  "g1_oracle_fix": 0.4225
+ },
+ {
+  "name": "Cyphomyrmex_cf.minutus_CASENT0744280",
+  "best0": 7,
+  "best1": 5,
+  "agree": false,
+  "g1_named": 0.63845,
+  "g1_oracle": 0.7304,
+  "g1_named_fix": 0.25875,
+  "g1_oracle_fix": 0.60815
+ },
+ {
+  "name": "Dilobocondyla_fouqueti_CASENT0745576",
+  "best0": 1,
+  "best1": 9,
+  "agree": false,
+  "g1_named": 0.01855,
+  "g1_oracle": 0.67435,
+  "g1_named_fix": 0.0413,
+  "g1_oracle_fix": 0.3694
+ },
+ {
+  "name": "Dorylus_fulvus_CASENT0745678",
+  "best0": 2,
+  "best1": 4,
+  "agree": false,
+  "g1_named": 0.43255,
+  "g1_oracle": 0.8031,
+  "g1_named_fix": 0.98225,
+  "g1_oracle_fix": 0.98225
+ },
+ {
+  "name": "Eciton_hamatum_CASENT0744580",
+  "best0": 8,
+  "best1": 6,
+  "agree": false,
+  "g1_named": 0.6405,
+  "g1_oracle": 0.77605,
+  "g1_named_fix": 0.99275,
+  "g1_oracle_fix": 0.99275
+ },
+ {
+  "name": "Ectatomma_brunneum_CASENT0744575",
+  "best0": 3,
+  "best1": 2,
+  "agree": false,
+  "g1_named": 0.9474,
+  "g1_oracle": 0.9474,
+  "g1_named_fix": 0.23785,
+  "g1_oracle_fix": 0.8929
+ },
+ {
+  "name": "Eurhopalothrix_procera_CASENT0745605",
+  "best0": 9,
+  "best1": 6,
+  "agree": false,
+  "g1_named": 0.4701,
+  "g1_oracle": 0.71685,
+  "g1_named_fix": 0.0604,
+  "g1_oracle_fix": 0.4748
+ },
+ {
+  "name": "Heteroponera_panamensis_CASENT0744055",
+  "best0": 4,
+  "best1": 5,
+  "agree": false,
+  "g1_named": 0.16735,
+  "g1_oracle": 0.83505,
+  "g1_named_fix": 0.4014,
+  "g1_oracle_fix": 0.58185
+ },
+ {
+  "name": "Labidus_praedator_CASENT0744236",
+  "best0": 8,
+  "best1": 8,
+  "agree": true,
+  "g1_named": 0.42175,
+  "g1_oracle": 0.8015,
+  "g1_named_fix": 0.1437,
+  "g1_oracle_fix": 0.5102
+ },
+ {
+  "name": "Labidus_praedator_CASENT0744237",
+  "best0": 6,
+  "best1": 7,
+  "agree": false,
+  "g1_named": 0.26215,
+  "g1_oracle": 0.56095,
+  "g1_named_fix": 0.0505,
+  "g1_oracle_fix": 0.5326
+ },
+ {
+  "name": "Lasius_nr._fuliginosus_CASENT0878037",
+  "best0": 7,
+  "best1": 4,
+  "agree": false,
+  "g1_named": 0.57745,
+  "g1_oracle": 0.8186,
+  "g1_named_fix": 0.18415,
+  "g1_oracle_fix": 0.5806
+ },
+ {
+  "name": "Lioponera_daikoku_OKENT0105067",
+  "best0": 7,
+  "best1": 6,
+  "agree": false,
+  "g1_named": 0.73685,
+  "g1_oracle": 0.9543,
+  "g1_named_fix": 0.40975,
+  "g1_oracle_fix": 0.40975
+ },
+ {
+  "name": "Mayriella_sp._CASENT0745610",
+  "best0": 7,
+  "best1": 9,
+  "agree": false,
+  "g1_named": 0.33495,
+  "g1_oracle": 0.6639,
+  "g1_named_fix": 0.2087,
+  "g1_oracle_fix": 0.57755
+ },
+ {
+  "name": "Mesoponera_ambigua_CASENT0745584",
+  "best0": 7,
+  "best1": 7,
+  "agree": true,
+  "g1_named": 0.59205,
+  "g1_oracle": 0.67285,
+  "g1_named_fix": 0.68585,
+  "g1_oracle_fix": 0.68585
+ },
+ {
+  "name": "Myrmecina_ryukyuensis_OKENT0105085",
+  "best0": 7,
+  "best1": 9,
+  "agree": false,
+  "g1_named": 0.49825,
+  "g1_oracle": 0.8018,
+  "g1_named_fix": 0.42575,
+  "g1_oracle_fix": 0.7186
+ },
+ {
+  "name": "Myrmecina_sp._CASENT0745613",
+  "best0": 6,
+  "best1": 9,
+  "agree": false,
+  "g1_named": 0.70085,
+  "g1_oracle": 0.71165,
+  "g1_named_fix": 0.13385,
+  "g1_oracle_fix": 0.4275
+ },
+ {
+  "name": "Nesomyrmex_angulatus_CASENT0744820",
+  "best0": 6,
+  "best1": 5,
+  "agree": false,
+  "g1_named": 0.20135,
+  "g1_oracle": 0.6193,
+  "g1_named_fix": 0.0425,
+  "g1_oracle_fix": 0.7242
+ },
+ {
+  "name": "Odontomachus_troglodytes_CASENT0744970",
+  "best0": 5,
+  "best1": 5,
+  "agree": true,
+  "g1_named": 0.4485,
+  "g1_oracle": 0.80955,
+  "g1_named_fix": 0.0409,
+  "g1_oracle_fix": 0.59535
+ },
+ {
+  "name": "Oxyopomyrmex_saulcyi_CASENT0745218",
+  "best0": 5,
+  "best1": 6,
+  "agree": false,
+  "g1_named": 0.68875,
+  "g1_oracle": 0.90105,
+  "g1_named_fix": 0.98285,
+  "g1_oracle_fix": 0.98285
+ },
+ {
+  "name": "Polyrhachis_decemdentata_CASENT0744779",
+  "best0": 7,
+  "best1": 4,
+  "agree": false,
+  "g1_named": 0.2851,
+  "g1_oracle": 0.598,
+  "g1_named_fix": 0.07955,
+  "g1_oracle_fix": 0.58595
+ },
+ {
+  "name": "Polyrhachis_dives_CASENT0878093",
+  "best0": 7,
+  "best1": 2,
+  "agree": false,
+  "g1_named": 0.10425,
+  "g1_oracle": 0.4799,
+  "g1_named_fix": 0.0,
+  "g1_oracle_fix": 0.72465
+ },
+ {
+  "name": "Ponera_kohmoku_OKENT0105440",
+  "best0": 5,
+  "best1": 7,
+  "agree": false,
+  "g1_named": 0.4273,
+  "g1_oracle": 0.8547,
+  "g1_named_fix": 0.3746,
+  "g1_oracle_fix": 0.76235
+ },
+ {
+  "name": "Ponera_tamon_OKENT0105154",
+  "best0": 8,
+  "best1": 7,
+  "agree": false,
+  "g1_named": 0.4759,
+  "g1_oracle": 0.90645,
+  "g1_named_fix": 0.4765,
+  "g1_oracle_fix": 0.7184
+ },
+ {
+  "name": "Pseudolasius_sp._CASENT0878065",
+  "best0": 3,
+  "best1": 4,
+  "agree": false,
+  "g1_named": 0.8123,
+  "g1_oracle": 0.96465,
+  "g1_named_fix": 0.90995,
+  "g1_oracle_fix": 0.90995
+ },
+ {
+  "name": "Pseudomyrmex_cf.solis_CASENT0744065",
+  "best0": 3,
+  "best1": 5,
+  "agree": false,
+  "g1_named": 0.4886,
+  "g1_oracle": 0.7791,
+  "g1_named_fix": 0.96455,
+  "g1_oracle_fix": 0.96455
+ },
+ {
+  "name": "Solenopsis_invicta_CASENT0744384",
+  "best0": 7,
+  "best1": 6,
+  "agree": false,
+  "g1_named": 0.20075,
+  "g1_oracle": 0.7328,
+  "g1_named_fix": 0.0221,
+  "g1_oracle_fix": 0.72185
+ },
+ {
+  "name": "Stigmatomma_FHG02_CASENT0745561",
+  "best0": 8,
+  "best1": 8,
+  "agree": true,
+  "g1_named": 0.7807,
+  "g1_oracle": 0.7807,
+  "g1_named_fix": 0.2607,
+  "g1_oracle_fix": 0.7689
+ },
+ {
+  "name": "Strumigenys_alberti_CASENT0878103",
+  "best0": 3,
+  "best1": 3,
+  "agree": true,
+  "g1_named": 0.9958,
+  "g1_oracle": 0.9958,
+  "g1_named_fix": 0.99695,
+  "g1_oracle_fix": 0.99695
+ },
+ {
+  "name": "Strumigenys_canina_OKENT0105288",
+  "best0": 4,
+  "best1": 2,
+  "agree": false,
+  "g1_named": 0.00595,
+  "g1_oracle": 0.6911,
+  "g1_named_fix": 0.0022,
+  "g1_oracle_fix": 0.54595
+ },
+ {
+  "name": "Strumigenys_crassicornis_CASENT0744273",
+  "best0": 8,
+  "best1": 2,
+  "agree": false,
+  "g1_named": 0.0907,
+  "g1_oracle": 0.38325,
+  "g1_named_fix": 0.04095,
+  "g1_oracle_fix": 0.3374
+ },
+ {
+  "name": "Strumigenys_sp._appretiata_group_CASENT0744156",
+  "best0": 7,
+  "best1": 7,
+  "agree": true,
+  "g1_named": 0.8587,
+  "g1_oracle": 0.8587,
+  "g1_named_fix": 0.097,
+  "g1_oracle_fix": 0.6553
+ },
+ {
+  "name": "Strumigenys_stenorhina_OKENT0105268",
+  "best0": 7,
+  "best1": 8,
+  "agree": false,
+  "g1_named": 0.2761,
+  "g1_oracle": 0.58825,
+  "g1_named_fix": 0.12725,
+  "g1_oracle_fix": 0.6481
+ },
+ {
+  "name": "Syllophopsis_sechellensis_OKENT0105212",
+  "best0": 8,
+  "best1": 2,
+  "agree": false,
+  "g1_named": 0.19645,
+  "g1_oracle": 0.5191,
+  "g1_named_fix": 0.2241,
+  "g1_oracle_fix": 0.6162
+ },
+ {
+  "name": "Temnothorax_congruus_OKENT0105443",
+  "best0": 7,
+  "best1": 5,
+  "agree": false,
+  "g1_named": 0.28375,
+  "g1_oracle": 0.85965,
+  "g1_named_fix": 0.1704,
+  "g1_oracle_fix": 0.8746
+ },
+ {
+  "name": "Temnothorax_sp._OKENT0105336",
+  "best0": 6,
+  "best1": 7,
+  "agree": false,
+  "g1_named": 0.7825,
+  "g1_oracle": 0.96525,
+  "g1_named_fix": 0.9762,
+  "g1_oracle_fix": 0.9762
+ },
+ {
+  "name": "Tetramorium_kraepelini_CASENT0744084",
+  "best0": 6,
+  "best1": 8,
+  "agree": false,
+  "g1_named": 0.4842,
+  "g1_oracle": 0.6341,
+  "g1_named_fix": 0.3892,
+  "g1_oracle_fix": 0.55625
+ }
+]

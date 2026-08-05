@@ -1,0 +1,34 @@
+SMAL_FILE: 3D_model_prep/SMIL_OmniAnt.pkl
+groups: ['body', 'l1d_l', 'l1d_r', 'l1p_l', 'l1p_r', 'l2d_l', 'l2d_r', 'l2p_l', 'l2p_r', 'l3d_l', 'l3d_r', 'l3p_l', 'l3p_r']
+body vertex count: 5524 of 10229
+[c] body per-vertex area share rel. to uniform: p1=0.052 p50=0.926 p99=2.585 max=4.314  Kish ESS=4271/5524 = 77.3%
+3 target meshes loaded.
+meshes: ['Acanthostichus_aff.brevicornis_CASENT0744328_processed.obj', 'Acromyrmex_coronatus_CASENT0744365_processed.obj', 'Acromyrmex_lobicornis_CASENT0878007_processed.obj']
+  Acanthostichus_aff.brevicornis_CASENT0744328_processed.obj: debris 2.6%
+  Acromyrmex_coronatus_CASENT0744365_processed.obj: debris 3.7%
+  Acromyrmex_lobicornis_CASENT0878007_processed.obj: debris 7.3%
+fitted verts: (3, 10229, 3)  max|coord| template: 0.9113808870315552
+
+=== A) M9a control H0 (partitioned=False): GLOBAL area-sampled chamfer ===
+  global (what robust_kernel='gm' actually applies to): L2=0.04097  GM=0.01964  GM/L2=0.479
+      residual r: p50=0.0680 p95=0.3072 p99=0.4549 max=0.8652   frac r>c(0.25)=8.95%
+      GM gradient scaling: p50=0.867 p05=0.159 min=0.0059
+      share of TOTAL L2 loss from the worst 1% residuals = 17.0%
+
+=== B) M9b H0 (--pf_body, partitioned=True): body verts vs body-labelled tgt ===
+  b0: 5276 body-labelled target pts of 8000; src 5524 body verts
+  b1: 3780 body-labelled target pts of 8000; src 5524 body verts
+  b2: 4754 body-labelled target pts of 8000; src 5524 body verts
+  body-restricted, VERTEX source (code path actually taken): L2=0.02652  GM=0.01563  GM/L2=0.589
+      residual r: p50=0.0578 p95=0.2490 p99=0.3421 max=0.6150   frac r>c(0.25)=4.94%
+      GM gradient scaling: p50=0.901 p05=0.252 min=0.0201
+      share of TOTAL L2 loss from the worst 1% residuals = 12.3%
+
+=== C) same restriction but AREA-SAMPLED body source (isolates change (c)) ===
+  body-restricted, AREA source: L2=0.02577  GM=0.01525  GM/L2=0.592
+      residual r: p50=0.0538 p95=0.2258 p99=0.3341 max=0.6197   frac r>c(0.25)=3.90%
+      GM gradient scaling: p50=0.914 p05=0.303 min=0.0196
+      share of TOTAL L2 loss from the worst 1% residuals = 13.9%
+
+  vertex-source vs area-source L2 loss: 0.02652 vs 0.02577  ratio 1.029
+  vertex-source L2 vs GM on the SAME correspondence: 0.02652 vs 0.01563  ratio 1.697

@@ -1,0 +1,26 @@
+distal chains: {'1_r': 128, '2_r': 109, '3_r': 174, '1_l': 128, '2_l': 109, '3_l': 174}
+n distal verts total: 822  part_leg_distal group size: 822
+5 target meshes loaded.
+
+specimen                          variant    part_leg_distal within_tau chamfer_l2 fscore@.02 comp_mean  edge_lr  tri_q  folded  midline
+Acanthostichus_aff.brevicornis_C  as-fit             0.00950     0.9197    0.00286     0.4060   0.03576   0.0682 0.8397  0.0316  0.00086
+Acanthostichus_aff.brevicornis_C  retracted          0.04073     0.2822    0.00480     0.3811   0.04532   0.0750 0.8375  0.0336  0.00086
+Aphaenogaster_pallida_CASENT0745  as-fit             0.00973     0.9367    0.00479     0.4307   0.04246   0.0502 0.8453  0.0158  0.00145
+Aphaenogaster_pallida_CASENT0745  retracted          0.02445     0.5401    0.00590     0.4042   0.04777   0.0584 0.8432  0.0181  0.00145
+Crematogaster_nawai_OKENT0105046  as-fit             0.00978     0.9355    0.00370     0.3899   0.04199   0.0627 0.8387  0.0232  0.02406
+Crematogaster_nawai_OKENT0105046  retracted          0.02498     0.4599    0.00611     0.3709   0.05272   0.0694 0.8366  0.0257  0.02406
+Labidus_praedator_CASENT0744237_  as-fit             0.01265     0.8564    0.00321     0.4528   0.03736   0.0919 0.8024  0.0204  0.00925
+Labidus_praedator_CASENT0744237_  retracted          0.03743     0.3041    0.00644     0.4291   0.04656   0.1004 0.8006  0.0229  0.00925
+Strumigenys_alberti_CASENT087810  as-fit             0.01590     0.7421    0.00673     0.2324   0.06235   0.0907 0.8147  0.0239  0.01142
+Strumigenys_alberti_CASENT087810  retracted          0.04487     0.2530    0.01269     0.2187   0.08063   0.0980 0.8129  0.0259  0.01142
+
+metric                    as-fit   retracted      rel%   in HEADLINE?
+part_leg_distal          0.01151     0.03449   +199.6%   yes
+within_tau               0.87810     0.36788    -58.1%   NO
+chamfer_l2               0.00426     0.00719    +68.7%   yes
+fscore@0.02              0.38235     0.36080     -5.6%   yes
+comp_mean                0.04398     0.05460    +24.1%   NO
+edge_logratio            0.07273     0.08025    +10.3%   yes
+tri_quality              0.82815     0.82616     -0.2%   yes
+folded_face_frac         0.02298     0.02525     +9.9%   NO
+midline_dev              0.00941     0.00941     +0.0%   yes

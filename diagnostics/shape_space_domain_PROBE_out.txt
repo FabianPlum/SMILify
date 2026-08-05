@@ -1,0 +1,43 @@
+template 10229 verts / 20454 faces, bbox diag 2.3446
+offsets  (50, 10229, 3), mean |dv| = 0.03986 (1.70% of bbox diag)
+
+WHERE THE FOLDS ACTUALLY ARE (measured on the fits themselves)
+  template rest mesh                 folded  0.323%   p99 dihedral   64.4 deg
+  full fit  (model + free offsets)   folded  0.491%   p99 dihedral   67.3 deg
+  model-only (pose+shape, no offset) folded  2.084%   p99 dihedral  123.8 deg
+
+  per-vertex LBS rotation away from rest: mean 24.8 deg, p90 45.2 deg, max 135.4 deg
+
+PCA spectrum over all 50 specimens, posed-frame euclid offsets (what M6 used):
+   PC1:6.7%  PC2:5.6%  PC3:5.2%  PC4:4.6%  PC5:4.3%
+   cumulative @24 = 74.7%   components for 90% = 36
+
+PCA spectrum over all 50 specimens, rest-frame euclid offsets:
+   PC1:6.8%  PC2:5.5%  PC3:5.4%  PC4:4.6%  PC5:4.2%
+   cumulative @24 = 75.0%   components for 90% = 36
+
+PCA spectrum over all 50 specimens, rest-frame deformation gradients:
+   PC1:7.3%  PC2:5.0%  PC3:4.9%  PC4:4.2%  PC5:3.8%
+   cumulative @24 = 70.7%   components for 90% = 39
+
+arm                                           folded%   p99deg   recon RMSE   % bbox
+------------------------------------------------------------------------------------
+A  M6 as-built: euclid PCA, posed frame        4.710%    151.8     0.048055    2.05%
+B  + Laplacian-smoothed directions             3.126%    137.9     0.047682    2.03%
+C  euclid PCA, REST frame (H1 fix)             4.711%    152.2     0.047827    2.04%
+D  defgrad PCA + stitch, rest (H1+H2)          3.125%    136.3     0.049482    2.11%
+E  defgrad PCA + stitch + smoothing (H2+H3)    2.992%    135.5     0.048985    2.09%
+--- reference: raw fitted offsets, rest        6.838%    162.3     0.000000    0.00%
+--- reference: raw fitted offsets, posed       6.988%    162.8     0.000000    0.00%
+
+WHAT SIGNAL DO THE OFFSETS CARRY?  leave-one-out R^2 of a linear predictor
+   pose  (Rs - I, SMAL's own pose_feature)      LOO R^2 =  0.006   (permuted control  0.000)
+   shape (the 13 fitted betas)                  LOO R^2 =  0.003   (permuted control  0.000)
+   joint scales (log_beta_scales)               LOO R^2 =  0.010   (permuted control -0.000)
+   [isotropic-noise baseline for 'cumulative @24' with 50 samples: 49.0%]
+
+WHERE THE MODEL-ONLY FOLDS SIT (specimen 0, LBS-argmax part labels)
+   adjacent-face pairs spanning two different joints: 1.8% of all pairs
+   folded pairs that span two joints:                 7.3%
+   fold rate within a joint 1.480%   across joints 6.329%
+

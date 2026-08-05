@@ -1,0 +1,20 @@
+template: 10229 verts, 20454 faces, 55 joints
+
+part group         area %   vert %  ratio v/a  pts@3000
+thorax/root         15.4%    13.5%       0.87       463
+head                19.6%    21.2%       1.09       587
+gaster/petiole      23.0%    12.0%       0.52       691
+legs                37.3%    46.0%       1.23      1120
+antennae             2.0%     3.5%       1.81        59
+mandibles            2.7%     3.7%       1.38        81
+
+leg joints in rig: 36
+target points landing on ALL legs at 3000 samples: 1120
+  -> ~31.1 target points per leg segment
+target points landing on ALL antennae: 59 (~9.8 per antennal segment)
+
+points per leg segment vs sample budget:
+     3000 samples ->   31.1 per leg segment
+    10000 samples ->  103.7 per leg segment
+    30000 samples ->  311.1 per leg segment
+   100000 samples -> 1036.9 per leg segment

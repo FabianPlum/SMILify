@@ -27,7 +27,6 @@ and the deliverable's headline uses only (A).
 
 import os
 
-import numpy as np
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -56,13 +55,23 @@ def main():
         seed_regress = int((on > off).sum())
         # (C) mean of the per-seed percentages -- a third reading, reported for context
         c = g["pct_change"].mean()
-        rows.append(dict(spec=spec, A_mean_burden_pct=a, B_seeds_regressed=seed_regress,
-                         C_mean_of_pct=c, off_min=off.min(), off_max=off.max(),
-                         off_ratio=off.max() / off.min()))
+        rows.append(
+            dict(
+                spec=spec,
+                A_mean_burden_pct=a,
+                B_seeds_regressed=seed_regress,
+                C_mean_of_pct=c,
+                off_min=off.min(),
+                off_max=off.max(),
+                off_ratio=off.max() / off.min(),
+            )
+        )
 
     r = pd.DataFrame(rows)
-    print(f"\n  {'specimen':<14} {'(A) burden-avg':>15} {'(B) seeds regr':>15} "
-          f"{'(C) mean of %':>14} {'baseline spread':>17}")
+    print(
+        f"\n  {'specimen':<14} {'(A) burden-avg':>15} {'(B) seeds regr':>15} "
+        f"{'(C) mean of %':>14} {'baseline spread':>17}"
+    )
     print("  " + "-" * 80)
     for _, x in r.iterrows():
         mark = ""
@@ -70,8 +79,10 @@ def main():
             mark += " A-REGRESS"
         if x.B_seeds_regressed >= 2:
             mark += " B-REGRESS"
-        print(f"  {x.spec:<14} {x.A_mean_burden_pct:+14.1f}% {int(x.B_seeds_regressed):>10}/3     "
-              f"{x.C_mean_of_pct:+13.1f}% {x.off_ratio:14.1f}x  {mark}")
+        print(
+            f"  {x.spec:<14} {x.A_mean_burden_pct:+14.1f}% {int(x.B_seeds_regressed):>10}/3     "
+            f"{x.C_mean_of_pct:+13.1f}% {x.off_ratio:14.1f}x  {mark}"
+        )
 
     a_reg = r[r.A_mean_burden_pct > 0]
     b_reg = r[r.B_seeds_regressed >= 2]
@@ -84,8 +95,10 @@ def main():
     print(f"    (C) mean of per-seed%: {len(c_reg)}/10 regress  -> {sorted(c_reg.spec)}")
 
     print("\n  The deliverable reports (A): 2/10 regress, i.e. a ~20% regression rate.")
-    print("  Under (B) the rate is %d/10. The two disagree on: %s"
-          % (len(b_reg), sorted(set(b_reg.spec) ^ set(a_reg.spec))))
+    print(
+        "  Under (B) the rate is %d/10. The two disagree on: %s"
+        % (len(b_reg), sorted(set(b_reg.spec) ^ set(a_reg.spec)))
+    )
 
     print("\n  WHY THEY DISAGREE — baseline burden varies hugely between seeds on the")
     print("  specimens where the readings differ, so (A) is decided by one seed:")
@@ -94,18 +107,24 @@ def main():
         print(f"\n    {spec}:")
         for _, x in g.iterrows():
             flag = "REGRESS" if x["total_penetration_burden_on"] > x["total_penetration_burden_off"] else "improve"
-            print(f'      seed {int(x["seed"]):>2}: off {x["total_penetration_burden_off"]:6.2f} -> '
-                  f'on {x["total_penetration_burden_on"]:6.2f}  ({x["pct_change"]:+7.1f}%)  {flag}')
+            print(
+                f"      seed {int(x['seed']):>2}: off {x['total_penetration_burden_off']:6.2f} -> "
+                f"on {x['total_penetration_burden_on']:6.2f}  ({x['pct_change']:+7.1f}%)  {flag}"
+            )
         off = g["total_penetration_burden_off"].values
-        print(f"      -> baseline burden varies {off.min():.2f}..{off.max():.2f} "
-              f"({off.max()/off.min():.1f}x) across seeds; the largest-baseline seed sets the (A) verdict")
+        print(
+            f"      -> baseline burden varies {off.min():.2f}..{off.max():.2f} "
+            f"({off.max() / off.min():.1f}x) across seeds; the largest-baseline seed sets the (A) verdict"
+        )
 
     # how noisy is the per-seed measurement overall?
     print("\n  " + "=" * 80)
     print("  PER-SEED NOISE ON THE COMBINED METRIC")
     sd = df.groupby("spec")["pct_change"].std()
-    print(f"    per-specimen sd of the per-seed % change: median {sd.median():.0f} pp, "
-          f"max {sd.max():.0f} pp ({sd.idxmax()})")
+    print(
+        f"    per-specimen sd of the per-seed % change: median {sd.median():.0f} pp, "
+        f"max {sd.max():.0f} pp ({sd.idxmax()})"
+    )
     print("    A single-seed check on a new specimen is therefore not decisive -- which the")
     print("    deliverable also states. Worth carrying into the automatic flag's design:")
     print("    a 1-seed flag will mislabel specimens at this noise level.")
