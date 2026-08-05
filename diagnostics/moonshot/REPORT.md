@@ -392,6 +392,58 @@ failures, which is the most likely explanation for the folded geometry in §5.4.
 
 ---
 
+## 6.3 A shape space rebuilt from gated registrations
+
+`build_shape_space.py` is the headless equivalent of `smil_importer/pca.py`'s
+`apply_pca_and_create_shapekeys`: PCA over registrations in correspondence, emitting a mean
+shape, principal components as blendshapes, and the covariance of the projected betas.
+
+**What is PCA'd, and why it differs from §5.4.** The correct object is each specimen's
+*rest-space shaped geometry*, `v_shaped_i = v_template + deform_verts_i + shapedirs·betas_i`,
+which is exactly what `smal_torch.__call__` composes before skinning — so `deform_verts` lives
+in rest space and this expression is the specimen's shape with pose removed. §5.4 instead
+PCA'd raw offset *fields*, mixing shape with whatever the offsets were doing to hide pose
+error. (`log_beta_scales` and `betas_trans` act during skinning and are pose-space, so
+limb-length variation expressed through them is **not** captured here — a real limitation.)
+
+**Two bugs caught while building it**, both of the kind §7 is about:
+* The mirror map was initially derived by matching a *fitted specimen* against the template
+  (max match distance 7.68e-02) rather than from the template's own involution. Corrected, the
+  involution is exact — 0.00e+00, valid on 100% of vertices — and the mean shape's folding fell
+  from 2.285% to **0.675%**.
+* The fold tolerance was initially the original template's 0.540%, which rejected 49 of 50
+  directions — a standard the *mean of the registrations* (0.675%) already fails. Setting it
+  from the data instead (p90 of the inputs) is the defensible requirement: the shape space must
+  not generate meshes worse than the registrations it was built from.
+
+**The finding that matters.** Measuring the input registrations' own validity:
+
+| | folded adjacent-face fraction |
+|---|---|
+| original template | 0.540% |
+| gated registrations, median | **2.888%** |
+| gated registrations, p90 | 3.602% |
+| gated registrations, max | 3.954% |
+| **mean of the registrations** | **0.675%** |
+
+Even the best-gated registrations produce rest-space geometry folding **5.3× more than the
+template**. The free-form offsets are introducing self-intersecting geometry, in *every*
+specimen, not just the failures. But averaging removes almost all of it (0.675%), which says
+the folding is specimen-specific noise rather than shared shape — and is why a mean-shape
+plus fold-gated basis is recoverable at all.
+
+**Result.** 20 directions retained, all within the data-derived tolerance, written to
+`3D_model_prep/SMIL_OmniAnt_gated.pkl` and verified to load and drive (`N_BETAS=20`, PC1 at
+±3σ gives 0.089 max vertex displacement). The spectrum is **flat** — PC1 13.1%, PC1–10 50.8%,
+41 components for 95% — the same high-dimensional residual §5.4 found, which remains the
+strongest argument that these offsets encode correspondence error rather than biological shape.
+
+*Not yet done:* refitting with this model to test whether it improves anything. Given §4's
+finding that shape capacity is not the binding constraint, the prior should be that it will
+not, and the value of this artefact is mainly as the input to a second co-registration round.
+
+---
+
 ## 7. Claims of mine that were wrong
 
 Kept because the pattern matters more than the individual errors: **every one produced
