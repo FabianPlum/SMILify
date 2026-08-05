@@ -37,8 +37,15 @@ lessons, because the *pattern* in how they failed is the most transferable thing
 6. **Outlier rejection is contraindicated.** Robust kernels and ratio tests preferentially
    delete thin structures: distal legs are read as outliers at 36× the body's rate and retain
    5.8× fewer correspondences.
-7. **Worker mesh quality is modestly worse than the reference corpus, not catastrophically
-   so** — and it is fixable. Cleanup brings 6 of 7 quality metrics to reference levels (§6).
+7. **Mesh preprocessing is not the blocker.** Cleaning worker meshes to reference quality on
+   6 of 7 axes makes the *scoring target* easier while making the registration marginally
+   worse on every target-independent metric (§6.1).
+8. **Fittability is predictable from the scan alone.** `radial_med` (surface distance from the
+   principal axis) predicts fit quality at rho 0.80–0.81, validated on held-out specimens
+   (deform_mag **+38.9%**, p=4.5e-13). The reference corpus sits at the **6.6th percentile**
+   of the worker distribution — the workers are more compact than anything the template was
+   built to represent. Restricting to the top 50% gives fscore@0.01 **+14.7%**, deform_mag
+   **−19.3%**, chamfer **−35.8%** (§6.2).
 
 ---
 
@@ -311,6 +318,77 @@ on that exact corpus, so those scans are in-distribution by construction. It bou
 pipeline can do and says nothing about generalisation. The irreducible difference is **pose** —
 ethanol-preserved specimens are contracted and folded, the reference corpus is posed — and that
 is not recoverable by preprocessing. Mesh quality is the part that *can* be targeted.
+
+---
+
+## 6.2 A scan-only fittability gate that works
+
+Since preprocessing is not the lever, the next question is whether *which specimen* is
+predictable in advance. It is.
+
+**The score.** `radial_med` — the median distance of area-sampled surface points from the
+specimen's principal axis. No template, no fit, no labels.
+
+**Discovery** (bench50, n=50, Spearman): rho = **+0.81** vs chamfer_l2, **+0.80** vs
+deform_mag, **+0.66** vs edge_logratio. Consistently signed across *both* metric families,
+which matters because §3 rules out judging this on surface proximity alone.
+
+A competing hypothesis was tested first and **refuted**: self-contact (limbs touching, the
+configuration that collapsed the geodesic method) correlates −0.29 with deform_mag, i.e.
+contact predicts marginally *better* fits.
+
+**Not a normalisation artefact.** `radial_med` is computed in a frame divided by max|coord|,
+so it could merely track how far the extremities protrude. The frame-free ratio
+radial/extent — a plain aspect ratio — predicts nearly as well (rho +0.75 / +0.74 / +0.61).
+The signal is specimen **elongation**: stubby species are far from an elongated template.
+
+**Held-out validation.** The correlation was found on bench50, so the gate was tested on two
+disjoint 50-specimen sets drawn from the other 707 — `easy` (lowest radial_med, median 0.139)
+and `rand` (uniform, median 0.244) — fitted with an identical recipe, with the reading fixed
+before the run. Unpaired Mann-Whitney:
+
+| metric | easy | rand | easy better by | p | family |
+|---|---|---|---|---|---|
+| deform_mag | 0.01307 | 0.02141 | **+38.9%** | 4.5e-13 | target-independent |
+| edge_logratio | 0.33683 | 0.39013 | **+13.7%** | 5.6e-07 | target-independent |
+| midline_dev | 0.01240 | 0.01577 | +21.4% | 4.9e-02 | target-independent |
+| tri_quality | 0.68407 | 0.67451 | +1.4% | 1.8e-02 | target-independent |
+| fscore@0.01 | 0.86864 | 0.62836 | **+38.2%** | 1.6e-14 | surface |
+| chamfer_l2 | 0.00014 | 0.00035 | +58.8% | 2.3e-12 | surface |
+| hausdorff_95 | 0.01763 | 0.02567 | +31.3% | 3.9e-09 | surface |
+| normal_consistency | 0.79731 | 0.80914 | −1.5% | ns | surface |
+
+It wins on **both** families, so the pre-registered "size artefact" branch is excluded. Sanity
+check: `rand`'s fscore@0.02 (0.9166) reproduces bench50's M7 (0.9246), as a uniform draw
+should.
+
+**Quality versus coverage.** Pooling all 146 fitted specimens that have a rank (bench50 +
+both held-out sets) and cutting at corpus percentiles of `radial_med`:
+
+| coverage | cutoff | fscore@0.01 | deform_mag | edge_logratio | chamfer_l2 |
+|---|---|---|---|---|---|
+| top 10% | 0.163 | 0.8666 | 0.01325 | 0.3393 | 0.000145 |
+| top 25% | 0.196 | 0.8490 | 0.01385 | 0.3387 | 0.000156 |
+| **top 50%** | **0.237** | **0.8161** | **0.01494** | 0.3436 | 0.000176 |
+| top 75% | 0.285 | 0.7756 | 0.01636 | 0.3535 | 0.000212 |
+| all | 0.466 | 0.7113 | 0.01851 | 0.3689 | 0.000274 |
+
+Monotone in every metric. **Top 50% versus the whole corpus: fscore@0.01 +14.7%, deform_mag
+−19.3%, chamfer −35.8%.** This table is a pooled estimate across three differently-sampled
+sets, not a single controlled experiment; the controlled statement is the easy-vs-rand test
+above.
+
+**Why the score means something.** ALL_ANTS_CLEAN — the corpus OmniAnt's shape space was
+built from — has median `radial_med` **0.1521**, which is the **6.6th percentile** of the
+worker distribution (worker median 0.2367). The workers are systematically more compact than
+anything the template was constructed to represent, and `radial_med` measures exactly that
+axis. The gate is not selecting "good scans"; it is selecting **specimens the existing shape
+space can reach**.
+
+That reframes the recommended operating point: register the top 50% by `radial_med`, use those
+registrations to rebuild the shape space, and only then reconsider the remainder — because a
+shape space built from the current all-corpus fits is a shape space built substantially from
+failures, which is the most likely explanation for the folded geometry in §5.4.
 
 ---
 
