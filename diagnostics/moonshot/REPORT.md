@@ -27,7 +27,12 @@ lessons, because the *pattern* in how they failed is the most transferable thing
 3. **A one-word free win:** `scheme: 'deform'` → `scheme: 'all'` in the late stages improves
    almost everything at zero cost, replicated over 3 seeds (deform_mag **+23.52 ± 0.05%**).
    `chamfer_l2` is **inconclusive** for this arm — it flips sign across seeds.
-4. **Every per-part metric in this suite is source→target proximity, and shrink-wrapping games
+4. **The registrations contain no learnable shape structure.** A leave-one-out shape model
+   built from them reconstructs a held-out specimen no better than the population mean does
+   (gen/spread 0.99–1.00), while the same metric reaches 0.42 at 10 modes and 0.00 at 20 on
+   synthetic data with exact correspondence. This pipeline produces *surface fits*, not
+   *registrations*, and no amount of additional corpus fixes it (§6.4).
+5. **Every per-part metric in this suite is source→target proximity, and shrink-wrapping games
    it.** This invalidates how per-part regressions were reported throughout earlier drafts.
    See §3 — it is the single most important methodological point here.
 5. **The parametric model is more capable than the pipeline lets it be.** Pose+shape alone,
@@ -441,6 +446,73 @@ strongest argument that these offsets encode correspondence error rather than bi
 *Not yet done:* refitting with this model to test whether it improves anything. Given §4's
 finding that shape capacity is not the binding constraint, the prior should be that it will
 not, and the value of this artefact is mainly as the input to a second co-registration round.
+
+---
+
+## 6.4 The root cause: these registrations contain no learnable shape structure
+
+§3 said the suite was missing a metric for correspondence *correctness*. `probe_19` supplies
+one, using the classical shape-model evaluation framework (Davies TMI 2002, Styner IPMI 2003)
+that SOURCES.md had listed as not attempted.
+
+**The idea.** Correspondence correctness is not measurable on one specimen without ground
+truth, but it is measurable over a population. If template vertex *v* lands on the same
+anatomical point in every specimen, the registered shapes form a low-dimensional manifold and
+a shape model built from them **generalises**. If correspondence is scrambled, the model must
+encode the permutation as well as the shape, so the same biological variation is spread over
+far more directions and predicts nothing about a held-out specimen. Scrambled correspondence
+is *expensive to represent*, and that cost is measurable without any labels.
+
+**Leave-one-out reconstruction error**, on rest-space shaped geometry (pose removed), n=50 in
+every row. `k=0` is the population spread, i.e. the error from simply predicting the mean:
+
+| set | spread (k=0) | k=1 | k=10 | k=20 | in-sample PC1–10 |
+|---|---|---|---|---|---|
+| gated (top) | 0.01268 | 0.01282 | 0.01256 | 0.01241 | 39.7% |
+| uniform sample | 0.02104 | 0.02138 | 0.02110 | 0.02090 | 39.3% |
+| bench50 | 0.01996 | 0.02009 | 0.01970 | 0.01955 | 44.3% |
+
+**The first mode is worse than predicting the mean. Twenty modes improve held-out error by
+about 2%, while explaining 63–68% in-sample.** That is the signature of modes fitting
+per-specimen noise.
+
+**The instrument was validated before this was believed.** Fifty synthetic specimens sampled
+from the template's own shape space — exact correspondence by construction, exactly 13
+dimensional, same sample size:
+
+| | gen@10 / spread | gen@20 / spread | in-sample PC1–10 |
+|---|---|---|---|
+| exact correspondence | **0.42** | **0.00** | 91.9% |
+| + per-vertex noise 0.004 | 0.51 | 0.27 | 90.0% |
+| **real registrations** | **0.99** | 0.98 | 39.7% |
+
+The metric detects learnable structure when it is present, and reduces error to zero at 20
+modes on 13-dimensional data. On the real registrations it finds none.
+
+**The gate does not fix this.** Gated registrations appear to generalise better in absolute
+terms (0.01256 vs 0.02110), but that is entirely lower diversity: normalised by each
+population's own spread, all three sets sit at **0.99–1.00**. The gate improves the *fit*
+(§6.2, decisively) without improving *correspondence consistency* at all.
+
+**What this explains.** It is the common cause behind several separate observations:
+* why the offset PCA spectrum is flat (§5.4) — the residual is noise, not shape;
+* why enlarging the shape space 13 → 37 changed almost nothing (§4) — the added directions
+  were noise directions;
+* why co-registration produced folded blendshapes (§5.4) — it was extrapolating noise;
+* why six correspondence-side interventions all failed to move the surface metrics (§8) — the
+  surface metrics cannot see correspondence, and the correspondence was never established.
+
+**What it means for scale.** Registering all 757 workers and rebuilding the shape space —
+the plan §5.4 and this session both worked toward — **would not have worked**. More specimens
+do not fix inconsistent correspondence; they average it further toward the mean. That is worth
+stating plainly because it was the single most expensive item on the queue, and it was never
+run. The measurement above cost ten minutes and removes it.
+
+**The honest bottom line.** This pipeline currently produces *surface fits*, not
+*registrations*. The distinction is exactly the one §1 opened with, and it is now measured at
+the population level rather than inferred from edge distortion on single specimens. Nothing
+downstream that depends on cross-specimen correspondence — shape spaces, beta regressors,
+morphometrics — can be built on the current output at any corpus size.
 
 ---
 
