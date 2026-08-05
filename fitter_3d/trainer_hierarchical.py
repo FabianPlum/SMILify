@@ -473,6 +473,17 @@ class HierarchicalStage:
             comp["sym"] = l_s
             loss = loss + self.lw["w_sym"] * l_s
 
+        if self.lw.get("w_jresid", 0.0) > 0:
+            # Penalise the FREE per-joint scale/translation residual, so that once
+            # scaledirs/transdirs are coupled to the betas (config.COUPLE_JOINT_BLENDSHAPES)
+            # the shape space carries the variation and the free parameters only fine-tune.
+            # Without this the residual is unregularised and simply out-competes the betas,
+            # which is the defect measured in REPORT.md §6.6 (70-400x more inter-specimen
+            # variation in log_beta_scales than in betas).
+            l_j = self.smal.log_beta_scales.pow(2).mean() + self.smal.betas_trans.pow(2).mean()
+            comp["jres"] = l_j
+            loss = loss + self.lw["w_jresid"] * l_j
+
         if self.lw.get("w_midline", 0.0) > 0 and self.sym_verts is not None:
             l_m = midline_penalty(mesh.verts_padded(), self.sym_verts)
             comp["mid"] = l_m

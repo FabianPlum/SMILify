@@ -121,6 +121,14 @@ def main():
         "target points are labelled by nearest neighbour into it",
     )
     ap.add_argument(
+        "--jresid",
+        type=float,
+        default=0.0,
+        help="penalty on the FREE per-joint scale/translation residual. Only meaningful with "
+        "SMILIFY_COUPLE_JOINT_BLENDSHAPES=1, where it forces the betas to carry the variation "
+        "instead of the unregularised per-specimen parameters (REPORT.md §6.6).",
+    )
+    ap.add_argument(
         "--soft_partition",
         type=float,
         default=0.0,
@@ -274,7 +282,13 @@ def main():
             joint_lr=0.01,
             robust_kernel="gm",
             robust_scale=0.25,
-            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5, "w_midline": args.midline},
+            loss_weights={
+                "w_edge": 0.05,
+                "w_beta_prior": 0.002,
+                "w_sym": 0.5,
+                "w_midline": args.midline,
+                "w_jresid": args.jresid,
+            },
             **common,
         ),
         # 2) legs only, partitioned -- the multimodality fix
@@ -286,7 +300,13 @@ def main():
             lr=0.008,
             joint_lr=0.015,
             reassign_every=50,
-            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5, "w_midline": args.midline},
+            loss_weights={
+                "w_edge": 0.05,
+                "w_beta_prior": 0.002,
+                "w_sym": 0.5,
+                "w_midline": args.midline,
+                "w_jresid": args.jresid,
+            },
             **common,
         ),
         # 3) everything, still partitioned
@@ -298,7 +318,13 @@ def main():
             lr=0.005,
             joint_lr=0.005,
             reassign_every=50,
-            loss_weights={"w_edge": 0.05, "w_beta_prior": 0.002, "w_sym": 0.5, "w_midline": args.midline},
+            loss_weights={
+                "w_edge": 0.05,
+                "w_beta_prior": 0.002,
+                "w_sym": 0.5,
+                "w_midline": args.midline,
+                "w_jresid": args.jresid,
+            },
             **common,
         ),
         # 4) small, expensive free-form pass

@@ -124,6 +124,25 @@ class SMAL(nn.Module):
         shapedir = np.reshape(undo_chumpy(dd["shapedirs"]), [-1, self.num_betas]).T.copy()
         self.shapedirs = Variable(torch.Tensor(shapedir), requires_grad=False).to(device)
 
+        # PER-JOINT SCALE AND TRANSLATION BLENDSHAPES, indexed by the SAME betas.
+        # `scaledirs` and `transdirs` ship in the model as (n_betas, n_joints, 3) and were PCA
+        # -derived jointly with `shapedirs`, so size and joint-offset variation is meant to be
+        # part of the shape space and to transfer between specimens.
+        # They were never referenced by this file. The fitter instead optimised
+        # `log_beta_scales` / `betas_trans` as free per-specimen parameters, which duplicate
+        # what these supply; being unregularised they won, carrying 70-400x more inter-specimen
+        # variation than the betas themselves (see diagnostics/moonshot/REPORT.md §6.6). Shape
+        # then lived in a pose-space parameter that cannot transfer, so no shape space could be
+        # rebuilt from the registrations.
+        self.scaledirs = None
+        self.transdirs = None
+        for _k, _attr in (("scaledirs", "scaledirs"), ("transdirs", "transdirs")):
+            if _k in dd and dd[_k] is not None:
+                _a = np.asarray(undo_chumpy(dd[_k]), dtype=np.float32)
+                # (n_betas, n_joints, 3); tolerate a model whose beta count disagrees
+                if _a.ndim == 3 and _a.shape[0] >= 1:
+                    setattr(self, _attr, Variable(torch.Tensor(_a), requires_grad=False).to(device))
+
         if config.DEBUG:
             print("\nBETAS AND SHAPES:")
             print(self.num_betas)
@@ -303,6 +322,19 @@ class SMAL(nn.Module):
         # 4. Get the global joint location
         # DEBUG - delete once betas are provided
         # betas_logscale = None
+
+        # Couple per-joint scale and translation to the betas, as the model intends.
+        # The free parameters are kept as a RESIDUAL on top, so a specimen can still deviate
+        # carefully where the shape space cannot reach -- but the bulk of the variation is now
+        # driven by betas and therefore lives in the shape space, where it transfers.
+        if config.COUPLE_JOINT_BLENDSHAPES:
+            _nb = beta.shape[1]
+            if self.scaledirs is not None:
+                _sc = torch.einsum("bk,kjc->bjc", beta, self.scaledirs[:_nb])
+                betas_logscale = _sc if betas_logscale is None else betas_logscale + _sc
+            if self.transdirs is not None:
+                _tr = torch.einsum("bk,kjc->bjc", beta, self.transdirs[:_nb])
+                betas_trans = _tr if betas_trans is None else betas_trans + _tr
 
         self.J_transformed, A = batch_global_rigid_transformation(
             Rs,

@@ -59,6 +59,12 @@ ignore_hardcoded_body = True  # ignore model joints in config file and use what'
 PLOT_RESULTS = True  # only applies to 3D fitting (fitter_3d/optimise.py)
 DEBUG = False  # use to get A LOT of "useful" messages
 
+# Drive per-joint scale/translation from the betas via the model's own `scaledirs`/`transdirs`
+# blendshapes, keeping the free `log_beta_scales`/`betas_trans` as a residual on top.
+# OFF by default so every previously-scored experiment stays byte-comparable; see
+# diagnostics/moonshot/REPORT.md §6.6 for why it should probably be ON.
+COUPLE_JOINT_BLENDSHAPES = os.environ.get("SMILIFY_COUPLE_JOINT_BLENDSHAPES", "0") == "1"
+
 # DATALOADER
 IMG_RES = 512
 
