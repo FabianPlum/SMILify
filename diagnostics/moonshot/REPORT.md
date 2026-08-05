@@ -516,6 +516,45 @@ morphometrics — can be built on the current output at any corpus size.
 
 ---
 
+## 6.5 Two consequences of §6.4, one tested and one not run
+
+**The rebuilt shape space changes nothing (item 1, closed).** `SMIL_OmniAnt_gated.pkl` (20
+directions from gated registrations) against the original 13-direction model, on the
+`heldout_easy2` set — 50 specimens disjoint from bench50 *and* from both sets used earlier,
+so no specimen that helped build the shape space is used to test it. Paired, n=50:
+
+| metric | old (13) | gated (20) | Δ | p | |
+|---|---|---|---|---|---|
+| edge_logratio | 0.34022 | 0.34004 | +0.1% | 4.8e-01 | target-indep |
+| deform_mag | 0.01483 | 0.01472 | +0.8% | 6.5e-02 | target-indep |
+| midline_dev | 0.01399 | 0.01354 | +3.2% | 6.7e-01 | target-indep |
+| chamfer_l2 | 0.00017 | 0.00017 | −0.5% | 6.7e-01 | surface |
+| fscore@0.02 | 0.97121 | 0.97055 | −0.1% | 1.0e+00 | surface |
+
+Every metric within ±3.2%, nothing significant. Exactly what §6.4 predicts: a shape space
+built from registrations with no learnable structure adds nothing, and §4's "shape capacity is
+not the binding constraint" is confirmed a second time by an independent route.
+
+**Registering the full top 50% was not run, deliberately.** `run_top50.sh` is written, chunked
+and ready (379 workers, ~2.5 h across both GPUs). It is not launched, because its purpose was
+to feed a larger co-registration round and §6.4 shows that cannot work: more specimens do not
+fix inconsistent correspondence, they average it toward the mean. A ten-minute measurement
+removed the most expensive item on the queue. Running it would be spending hours to confirm
+something already measured — and *that* judgement, rather than the run, is the useful output.
+
+**What is being tried instead.** The soft partition (`--soft_partition <temperature>`),
+implemented in `trainer_hierarchical.py`. The hard partition gives each target point entirely
+to its argmin group, so a point equidistant between two legs commits fully to one and the fit
+is pulled toward that commitment; §5.3 already showed that *freezing* such a commitment is
+worse still. Softening is the E-step of the EM formulation used for robust statistical-shape-
+model fitting: each point contributes to every group in proportion to how well that group
+explains it, so uncertainty reduces influence rather than becoming a wrong commitment. Two
+temperatures are running, and the pre-registered primary outcome is **probe 19 generalisation,
+not surface metrics** — the claim is about correspondence, so it must be judged by the
+instrument that measures correspondence.
+
+---
+
 ## 7. Claims of mine that were wrong
 
 Kept because the pattern matters more than the individual errors: **every one produced

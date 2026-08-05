@@ -121,6 +121,17 @@ def main():
         "target points are labelled by nearest neighbour into it",
     )
     ap.add_argument(
+        "--soft_partition",
+        type=float,
+        default=0.0,
+        help="responsibility temperature (a LENGTH in target units) for a SOFT partition. "
+        "0 = the hard argmin assignment every previous arm used. Softening lets an ambiguous "
+        "target point contribute to several groups in proportion to how well each explains "
+        "it, so uncertainty reduces influence instead of becoming a wrong commitment -- the "
+        "E-step of EM-style robust shape-model fitting. Judge it with probe_19, not with "
+        "surface metrics.",
+    )
+    ap.add_argument(
         "--no_partition",
         action="store_true",
         help="ablation: run the same schedule with a GLOBAL data term, so the "
@@ -236,6 +247,7 @@ def main():
         n_sample=args.n_sample,
         split_distal=args.split_distal,
         part_scale=part_scale,
+        soft_partition=args.soft_partition,
         robust_mult=args.part_robust if args.part_robust > 0 else 3.0,
     )
     partitioned = not args.no_partition

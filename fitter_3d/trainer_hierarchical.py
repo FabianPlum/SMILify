@@ -202,6 +202,34 @@ class TargetPartition:
         self.probe_pts = probe_pts
         self.probe_assign = None
 
+    def soft_responsibilities(self, fitted_verts, tgt_pts, temp):
+        """E-step: posterior that each target point belongs to each anatomical group.
+
+        The hard assignment in `update` gives every point entirely to its argmin group, so a
+        point equidistant between two legs commits fully to one of them and the fit is then
+        pulled toward that commitment. Report §6.4 measured the population consequence: the
+        resulting registrations carry no learnable shape structure, i.e. correspondence is not
+        consistent across specimens. Softening lets an ambiguous point contribute to several
+        groups in proportion to how well each explains it, so uncertainty reduces influence
+        instead of becoming a wrong commitment -- the E-step of the EM formulation used for
+        robust statistical-shape-model fitting.
+
+        Returns (B, P, G) responsibilities summing to 1 over G.
+        """
+        with torch.no_grad():
+            B, P, _ = tgt_pts.shape
+            G = self.n_groups
+            d2 = torch.full((B, P, G), float("inf"), device=tgt_pts.device)
+            for g in range(G):
+                m = self.vg == g
+                if int(m.sum()) < 4:
+                    continue
+                for b in range(B):
+                    d2[b, :, g] = knn_points(tgt_pts[b : b + 1], fitted_verts[b : b + 1, m], K=1).dists[0, :, 0]
+            # temp is a LENGTH; squaring puts it in the same units as the squared distances
+            r = torch.softmax(-d2 / (2.0 * temp**2), dim=-1)
+            return r
+
     def update(self, fitted_verts, tgt_pts):
         """fitted_verts (B,V,3), tgt_pts (B,P,3). Returns churn on the fixed probe set."""
         with torch.no_grad():
@@ -263,6 +291,7 @@ class HierarchicalStage:
         robust_mult=3.0,
         partition=None,
         chamfer_groups=None,
+        soft_partition=0.0,
     ):
         self.name = name
         self.n_it = nits
@@ -281,6 +310,10 @@ class HierarchicalStage:
         self.part_scale = part_scale
         self.robust_mult = robust_mult
         self.chamfer_groups = set(chamfer_groups) if chamfer_groups is not None else None
+        # soft_partition > 0 is the responsibility temperature, as a LENGTH in target units.
+        # 0 keeps the hard argmin assignment every pre-existing arm uses.
+        self.soft_partition = float(soft_partition)
+        self.resp = None
 
         self.lw = dict(
             w_chamfer=1.0,
@@ -370,15 +403,30 @@ class HierarchicalStage:
             for b in range(B):
                 tmask = self.part.assign[b] == g
                 n_t = int(tmask.sum())
-                if n_t < 10:
+                if n_t < 10 and self.resp is None:
                     # This group claimed almost no target surface. Skip rather than force a
                     # match: forcing would drag the part onto whatever is nearest, which is
                     # exactly the leg-swap failure this design exists to prevent.
                     continue
-                tg = tgt_pts[b][tmask].unsqueeze(0)
                 sg = src_g[b].unsqueeze(0)
-                d_st = knn_points(sg, tg, K=1).dists[..., 0]
-                d_ts = knn_points(tg, sg, K=1).dists[..., 0]
+                if self.resp is not None:
+                    # SOFT: every target point contributes to this group in proportion to its
+                    # responsibility. The target->source direction is weighted exactly. The
+                    # source->target direction cannot be weighted inside a knn, so it searches
+                    # the points this group is at all responsible for (w above uniform), which
+                    # is a soft-derived subset rather than an argmin commitment.
+                    w = self.resp[b, :, g]
+                    sub = w > (1.0 / len(self.group_names))
+                    if int(sub.sum()) < 10:
+                        continue
+                    tg = tgt_pts[b][sub].unsqueeze(0)
+                    d_st = knn_points(sg, tg, K=1).dists[..., 0]
+                    d_ts_all = knn_points(tgt_pts[b].unsqueeze(0), sg, K=1).dists[..., 0]
+                    d_ts = (d_ts_all * w.unsqueeze(0)) / w.sum().clamp_min(1e-8) * w.numel()
+                else:
+                    tg = tgt_pts[b][tmask].unsqueeze(0)
+                    d_st = knn_points(sg, tg, K=1).dists[..., 0]
+                    d_ts = knn_points(tg, sg, K=1).dists[..., 0]
                 if self.part_scale is not None:
                     # PER-PART robust kernel: c is proportional to this part's own
                     # characteristic thickness, so a leg is not judged by the body's
@@ -453,6 +501,8 @@ class HierarchicalStage:
                 churn = self.part.update(fitted.detach(), tgt_pts)
                 if churn is not None:
                     self.churn_history.append(churn)
+                if self.soft_partition > 0 and hasattr(self.part, "soft_responsibilities"):
+                    self.resp = self.part.soft_responsibilities(fitted.detach(), tgt_pts, self.soft_partition)
 
             loss, comp = self.forward(mesh, fitted, tgt_pts)
             loss.backward()
