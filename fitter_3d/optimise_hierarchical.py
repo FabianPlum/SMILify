@@ -121,6 +121,16 @@ def main():
         "target points are labelled by nearest neighbour into it",
     )
     ap.add_argument(
+        "--joint_lr_mult",
+        type=float,
+        default=1.0,
+        help="multiplier on every stage's joint_rot learning rate. The stock baseline slows "
+        "pose 10x relative to shape (ants_cfg.yaml custom_lrs: joint_rot 0.002 against lr "
+        "0.02), which is what keeps its betas alive; the hierarchical stages give pose an "
+        "equal or HIGHER rate than shape, and pose (162 dof + 165 free joint scales) then "
+        "out-competes 13 betas. See REPORT.md §6.6.",
+    )
+    ap.add_argument(
         "--jresid",
         type=float,
         default=0.0,
@@ -279,7 +289,7 @@ def main():
             partitioned=bool(args.pf_body and partition is not None),
             chamfer_groups=["body"] if (args.pf_body and partition is not None) else None,
             lr=0.02,
-            joint_lr=0.01,
+            joint_lr=0.01 * args.joint_lr_mult,
             robust_kernel="gm",
             robust_scale=0.25,
             loss_weights={
@@ -298,7 +308,7 @@ def main():
             active_groups=leg_groups,
             partitioned=partitioned,
             lr=0.008,
-            joint_lr=0.015,
+            joint_lr=0.015 * args.joint_lr_mult,
             reassign_every=50,
             loss_weights={
                 "w_edge": 0.05,
@@ -316,7 +326,7 @@ def main():
             active_groups=None,
             partitioned=partitioned,
             lr=0.005,
-            joint_lr=0.005,
+            joint_lr=0.005 * args.joint_lr_mult,
             reassign_every=50,
             loss_weights={
                 "w_edge": 0.05,
@@ -334,7 +344,7 @@ def main():
             active_groups=None,
             partitioned=partitioned,
             lr=0.002,
-            joint_lr=0.001,
+            joint_lr=0.001 * args.joint_lr_mult,
             reassign_every=100,
             optimise_deform=True,
             loss_weights={

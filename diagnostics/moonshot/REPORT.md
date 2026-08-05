@@ -27,10 +27,11 @@ lessons, because the *pattern* in how they failed is the most transferable thing
 3. **A one-word free win:** `scheme: 'deform'` → `scheme: 'all'` in the late stages improves
    almost everything at zero cost, replicated over 3 seeds (deform_mag **+23.52 ± 0.05%**).
    `chamfer_l2` is **inconclusive** for this arm — it flips sign across seeds.
-4. **`scaledirs` — the model's per-joint scale blendshapes — is never used by the fitter.**
-   Instead 165 free per-specimen `log_beta_scales` carry 70–400× more inter-specimen variation
-   than the shape space does, so shape is stored in a pose-space parameter that cannot
-   transfer. One defect explaining four separate observations, and concretely fixable (§6.6).
+4. **The hierarchical pipeline freezes the shape space.** Every arm through it has betas sd
+   0.00038–0.00050; every arm that is not has 0.068–0.50 — a 100–1000× split with no overlap,
+   invisible to every surface metric. It is localised to the pose:shape learning-rate ratio
+   (§6.7). Separately, `scaledirs`/`transdirs` are never used by the fitter at all, which is a
+   real defect even though coupling them did not fix the freeze (§6.6, §6.7).
 5. **The registrations contain no learnable shape structure.** A leave-one-out shape model
    built from them reconstructs a held-out specimen no better than the population mean does
    (gen/spread 0.99–1.00), while the same metric reaches 0.42 at 10 modes and 0.00 at 20 on
@@ -646,6 +647,73 @@ fixable: **wire `scaledirs` into the forward pass so betas drive joint scaling, 
 or remove free `log_beta_scales`.** That is the next experiment, and probe 19 is the
 instrument to judge it by — a successful fix should move gen/spread off 0.99 toward the 0.42
 the synthetic control achieves.
+
+---
+
+## 6.7 Chasing the frozen shape space: three hypotheses, two refuted, one localised
+
+§6.6 proposed that unused `scaledirs` plus free `log_beta_scales` were starving the shape
+space. That was wired up, tested against pre-registered outcomes, and **it failed**.
+
+**The fix, and its failure.** `scaledirs`/`transdirs` are now coupled to the betas in
+`smal_torch.py` (opt-in via `SMILIFY_COUPLE_JOINT_BLENDSHAPES`, free parameters kept as a
+residual, `--jresid` penalising that residual). Verified genuinely active: beta0 at ±3σ moves
+vertices **59.3% further** with coupling on. Full test suite passes. Then:
+
+| arm | betas sd | log_scale sd | ratio | gen/spread |
+|---|---|---|---|---|
+| control (coupling off) | 0.00042 | 0.17160 | 411× | 0.9870 |
+| CPL_a coupling only | 0.00050 | 0.17021 | 342× | 0.9875 |
+| CPL_b coupling + jresid 5.0 | 0.00050 | 0.10003 | 202× | **0.9953** |
+
+Betas moved from 0.00042 to 0.00050. The ratio fell only because the penalty *shrank*
+`log_beta_scales`, not because betas grew, and gen/spread got slightly **worse**. Suppressing
+the competitor did not make the shape space take over, so `log_beta_scales` was not what was
+starving it.
+
+**Second hypothesis, also refuted.** If not the joint scales, then the 30k free-form offsets.
+Across all 58 scored arms, Spearman(deform_mag, betas sd) = **+0.196, p = 0.14** — not
+significant, and the *wrong sign*. Arms that deform more do not use the shape space less.
+
+**What the data actually shows.** Sorting every arm by betas sd gives a perfect, gapless split
+by *pipeline*:
+
+| | betas sd |
+|---|---|
+| every arm through `optimise_hierarchical` (M7×3, M5, M8, CPL×2, SOFT×2, GATE, B1) | **0.00038 – 0.00050** |
+| every arm that is not (baseline, A4×3, C0×3, A5, M2×3, A2) | **0.068 – 0.50** |
+
+A 100–1000× difference with no overlap. The freeze is a property of the hierarchical pipeline,
+not of any parameter competing inside the model.
+
+**The localised cause.** The stock baseline sets, in `ants_cfg.yaml`:
+
+```yaml
+Stage_1_default:
+  lr: 0.02
+  custom_lrs:
+    joint_rot: 0.002      # pose deliberately slowed 10x relative to shape
+```
+
+The hierarchical stages give `joint_rot` an lr *equal to or higher than* betas — H0 0.01
+against 0.02, H1 0.015 against 0.008. Pose carries 162 degrees of freedom plus 165 free
+per-joint scales; shape carries 13. At comparable step sizes pose simply wins, and the betas
+never develop.
+
+**Which means the pipeline built to un-freeze pose froze shape instead.** §1 diagnosed that
+the stock schedule cannot move pose for 83% of its iterations, and the hierarchical schedule
+fixed exactly that — and the fix's unexamined side effect was to let pose absorb the variation
+that the shape space was supposed to carry. Neither failure is visible in any surface metric,
+which is why both survived twenty-five arms.
+
+`--joint_lr_mult` is added and two arms are running (0.1× to reproduce the baseline's ratio,
+0.3× intermediate), with the pre-registered outcome that betas sd must rise toward the
+non-hierarchical arms' range. If it does not, the lr ratio is not the mechanism either.
+
+**Honest status of §6.6.** Its *observation* stands and is worth keeping — `scaledirs` and
+`transdirs` really are never used by the fitter, the model really was built to couple size
+variation to the betas, and coupling them is the right thing to do regardless. Its *causal
+claim* — that this is why the shape space is unused — is refuted by its own experiment.
 
 ---
 
