@@ -68,44 +68,108 @@ nn = torch.nn
 # --------------------------------------------------------------------------------------
 # anatomical grouping
 # --------------------------------------------------------------------------------------
-def anatomical_groups(joint_names):
-    """Map each joint index to one of: 'body', or one of the six leg chains 'l{k}_{side}'.
+# segments counted as DISTAL when split_distal is enabled
+DISTAL_SEGMENTS = ("ti", "ta", "pt")
+
+
+def anatomical_groups(joint_names, split_distal=False):
+    """Map each joint index to 'body', or to a leg group.
 
     Head, mandibles and antennae are folded into 'body' for the purpose of the partition:
     they are anterior and unambiguous relative to the legs, and splitting them further
     would create parts too small to carry a stable data term (pretarsus is 7-15 verts).
+
+    split_distal: give each leg TWO groups, proximal (coxa/trochanter/femur) and distal
+    (tibia/tarsus/pretarsus), instead of one.
+
+    WHY THIS EXISTS (probe 13, measured on the template):
+      coxa+trochanter+femur hold 94.0% of a leg chain's surface area; tarsus+pretarsus hold
+      2.4%. With one area-sampled chamfer over the whole chain, the distal tip is effectively
+      unconstrained -- at the fitter's n_sample=8000 the pretarsus expects ~0.3 samples and
+      the tarsus ~12.6, against the code's own n_t<10 skip threshold. That is why M7 still
+      regressed part_leg_distal (+15.5%) after every other metric improved.
+      Splitting the chain gives the distal half its own equally-weighted data term, so a
+      2.4%-of-area structure gets a 50%-of-leg vote.
+
+      Note this supersedes the 'couple mirrored leg chains' idea: the template is left/right
+      symmetric to <0.3% by area, so a mirror-coupling term has almost nothing to correct,
+      and coupling two equally under-constrained tips would not constrain either.
     """
     groups = {}
     for j, nm in enumerate(joint_names):
         if nm.startswith("l_"):
-            # 'l_2_fe_r' -> leg group 'l2_r'
+            # 'l_2_fe_r' -> leg 2, segment 'fe', side 'r'
             bits = nm.split("_")
-            groups[j] = f"l{bits[1]}_{bits[-1]}"
+            k, seg, side = bits[1], bits[2], bits[-1]
+            if split_distal:
+                half = "d" if seg in DISTAL_SEGMENTS else "p"
+                groups[j] = f"l{k}{half}_{side}"
+            else:
+                groups[j] = f"l{k}_{side}"
         else:
             groups[j] = "body"
     return groups
 
 
-def vertex_groups(weights, joint_names):
+def vertex_groups(weights, joint_names, split_distal=False):
     """Assign each template vertex to an anatomical group by dominant skinning weight."""
     dom = np.asarray(weights).argmax(axis=1)
-    jg = anatomical_groups(joint_names)
+    jg = anatomical_groups(joint_names, split_distal=split_distal)
     names = sorted(set(jg.values()))
     name2i = {n: i for i, n in enumerate(names)}
     vg = np.array([name2i[jg[d]] for d in dom], dtype=np.int64)
     return vg, names
 
 
-def joint_mask_for_groups(joint_names, allowed):
+def joint_mask_for_groups(joint_names, allowed, split_distal=False):
     """Boolean mask over joint_rot rows (i.e. joints EXCLUDING the global root) selecting
     the joints belonging to `allowed` groups."""
-    jg = anatomical_groups(joint_names)
+    jg = anatomical_groups(joint_names, split_distal=split_distal)
     # joint_rot has N_POSE = len(joint_names) - 1 rows; row i corresponds to joint i+1
     m = torch.zeros(len(joint_names) - 1, dtype=torch.bool)
     for j in range(1, len(joint_names)):
         if jg[j] in allowed:
             m[j - 1] = True
     return m
+
+
+def part_thickness(verts, vertex_group, n_groups):
+    """Characteristic 'tube radius' of each anatomical group on the TEMPLATE.
+
+    For each group, fit its principal axis and take the median distance of its vertices to
+    that axis. For a limb segment this is the radius; for the body it is the half-width.
+
+    WHY: finding 4 of the report -- robust kernels and correspondence filters delete thin
+    structures, because a single global scale that is sensible for the body treats a leg as
+    an outlier. Measured: distal legs are read as outliers at 36x the body's rate at c=0.10,
+    and retain 5.8x fewer correspondences under a mutual-NN + ratio filter.
+    A robust scale must therefore be proportional to the LOCAL structure size, not global.
+
+    Returned in template units; the caller scales it by a multiplier to get the kernel c.
+    """
+    out = torch.zeros(n_groups, dtype=torch.float32, device=verts.device)
+    for g in range(n_groups):
+        m = vertex_group == g
+        if int(m.sum()) < 8:
+            out[g] = float("nan")
+            continue
+        p = verts[m]
+        c = p.mean(0, keepdim=True)
+        d = p - c
+        # principal axis via SVD of the centred coordinates
+        try:
+            _, _, V = torch.linalg.svd(d.double(), full_matrices=False)
+            axis = V[0].float()
+        except Exception:
+            axis = torch.tensor([1.0, 0.0, 0.0], device=verts.device)
+        # perpendicular distance to that axis
+        perp = d - (d @ axis).unsqueeze(-1) * axis.unsqueeze(0)
+        out[g] = perp.norm(dim=-1).median()
+    # groups too small to measure inherit the median of the rest
+    good = ~torch.isnan(out)
+    if good.any():
+        out[~good] = out[good].median()
+    return out
 
 
 # --------------------------------------------------------------------------------------
@@ -185,6 +249,7 @@ class HierarchicalStage:
         joint_names,
         active_groups=None,
         partitioned=True,
+        split_distal=False,
         lr=0.01,
         joint_lr=0.01,
         n_sample=8000,
@@ -196,6 +261,8 @@ class HierarchicalStage:
         robust_kernel="l2",
         robust_scale=0.2,
         optimise_deform=False,
+        part_scale=None,
+        robust_mult=3.0,
     ):
         self.name = name
         self.n_it = nits
@@ -210,6 +277,9 @@ class HierarchicalStage:
         self.group_names = group_names
         self.robust_kernel = robust_kernel
         self.robust_scale = robust_scale
+        # per-part robust scale (item 2). None = disabled, keeping the previous behaviour.
+        self.part_scale = part_scale
+        self.robust_mult = robust_mult
 
         self.lw = dict(
             w_chamfer=1.0, w_edge=0.05, w_normal=0.01, w_laplacian=0.005,
@@ -225,7 +295,8 @@ class HierarchicalStage:
         if active_groups is None:
             self.joint_mask = torch.ones(smal.joint_rot.shape[1], dtype=torch.bool, device=device)
         else:
-            self.joint_mask = joint_mask_for_groups(joint_names, set(active_groups)).to(device)
+            self.joint_mask = joint_mask_for_groups(
+                joint_names, set(active_groups), split_distal=split_distal).to(device)
 
         params = [
             {"params": [smal.global_rot], "lr": lr},
@@ -292,6 +363,13 @@ class HierarchicalStage:
                 sg = src_g[b].unsqueeze(0)
                 d_st = knn_points(sg, tg, K=1).dists[..., 0]
                 d_ts = knn_points(tg, sg, K=1).dists[..., 0]
+                if self.part_scale is not None:
+                    # PER-PART robust kernel: c is proportional to this part's own
+                    # characteristic thickness, so a leg is not judged by the body's
+                    # tolerance. See part_thickness() for why a global scale fails.
+                    c2 = (self.robust_mult * self.part_scale[g]) ** 2
+                    d_st = d_st * c2 / (d_st + c2)
+                    d_ts = d_ts * c2 / (d_ts + c2)
                 total = total + d_st.mean() + d_ts.mean()
                 n_terms += 1
         return total / max(n_terms, 1)

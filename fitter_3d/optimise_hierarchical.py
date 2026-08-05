@@ -52,6 +52,15 @@ def main():
                          "11 metrics over the stock pipeline but regressed bilateral midline "
                          "deviation 43.8%; per-leg independent fitting plus out-of-plane body "
                          "rotation is the cause, and symmetry_penalty (joint scales) cannot see it.")
+    ap.add_argument("--split_distal", action="store_true",
+                    help="give each leg a separate DISTAL group (tibia/tarsus/pretarsus). "
+                         "probe 13: coxa+trochanter+femur hold 94%% of a leg chain's area and "
+                         "tarsus+pretarsus 2.4%%, so a single per-chain data term leaves the tip "
+                         "unconstrained -- the cause of M7's remaining part_leg_distal regression.")
+    ap.add_argument("--part_robust", type=float, default=0.0,
+                    help="if >0, use a PER-PART robust kernel whose scale is this multiple of "
+                         "each part's own template thickness. Measured body/distal-leg thickness "
+                         "ratio is 14.2x, so one global scale cannot serve both (finding 4).")
     ap.add_argument("--no_partition", action="store_true",
                     help="ablation: run the same schedule with a GLOBAL data term, so the "
                          "benefit of partitioning is separable from the benefit of staging")
@@ -74,11 +83,21 @@ def main():
         u.encoding = "latin1"
         dd = u.load()
     jnames = list(dd["J_names"])
-    vg, gnames = vertex_groups(np.asarray(dd["weights"]), jnames)
+    vg, gnames = vertex_groups(np.asarray(dd["weights"]), jnames, split_distal=args.split_distal)
     counts = {g: int((vg == i).sum()) for i, g in enumerate(gnames)}
     print(f"[hier] anatomical groups (template vertices): {counts}", flush=True)
 
     smal = SMAL3DFitter(batch_size=len(targets), device=device, shape_family=-1)
+
+    part_scale = None
+    if args.part_robust > 0:
+        from fitter_3d.trainer_hierarchical import part_thickness
+
+        v_t = torch.tensor(np.asarray(dd["v_template"]), dtype=torch.float32, device=device)
+        part_scale = part_thickness(v_t, torch.tensor(vg, device=device), len(gnames))
+        print(f"[hier] per-part robust scale = {args.part_robust} x thickness; "
+              f"thickness range {float(part_scale.min()):.5f}..{float(part_scale.max()):.5f} "
+              f"({float(part_scale.max()/part_scale.min()):.1f}x)", flush=True)
 
     common = dict(
         smal=smal,
@@ -89,9 +108,13 @@ def main():
         device=device,
         out_dir=args.results_dir,
         n_sample=args.n_sample,
+        split_distal=args.split_distal,
+        part_scale=part_scale,
+        robust_mult=args.part_robust if args.part_robust > 0 else 3.0,
     )
     partitioned = not args.no_partition
     leg_groups = [g for g in gnames if g != "body"]
+    print(f"[hier] {len(gnames)} groups, {len(leg_groups)} leg groups", flush=True)
 
     stages = [
         # 1) body only, global data term -- places the coxae
