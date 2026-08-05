@@ -27,7 +27,12 @@ lessons, because the *pattern* in how they failed is the most transferable thing
 3. **A one-word free win:** `scheme: 'deform'` → `scheme: 'all'` in the late stages improves
    almost everything at zero cost, replicated over 3 seeds (deform_mag **+23.52 ± 0.05%**).
    `chamfer_l2` is **inconclusive** for this arm — it flips sign across seeds.
-4. **The hierarchical pipeline freezes the shape space.** Every arm through it has betas sd
+4. **The shape space was closed by a `w_beta_prior` I introduced, applied in two separate
+   files.** Removing it entirely raises betas sd **757×** and produces the only movement in the
+   correspondence metric this investigation has achieved (gen/spread 0.9870 → 0.9353), for free
+   (deform_mag +4.9%, p=2.1e-07; everything else neutral). It remains ~a tenth of the way to
+   what exact correspondence achieves. Four other hypotheses were refuted first (§6.7, §6.8).
+5. **The hierarchical pipeline freezes the shape space.** Every arm through it has betas sd
    0.00038–0.00050; every arm that is not has 0.068–0.50 — a 100–1000× split with no overlap,
    invisible to every surface metric. It is localised to the pose:shape learning-rate ratio
    (§6.7). Separately, `scaledirs`/`transdirs` are never used by the fitter at all, which is a
@@ -762,11 +767,69 @@ closed shape space: `M1_sym`, `M5`, `M7` (the recommended arm, replicated over t
 `M8`, `M9`, the fittability gate's fits, the rebuilt shape space, and the CPL / SOFT / LR arms
 that were trying to diagnose the very symptom this caused.
 
-`--beta_prior` is added and `BP_a` (1.5e-4) and `BP_b` (0) are running. Outcome 1 — betas sd
-rising — is near-mechanical given the gradient curve and only confirms the fix is wired.
-**Outcome 2 is the one that matters: probe-19 gen/spread must move off 0.99 toward the
-synthetic control's 0.42.** A shape space that is merely open is not yet a shape space that
-transfers.
+### 6.8.1 The prior was applied in TWO files, and the fix had to reach both
+
+`--beta_prior` fixed the hierarchical stages and they responded exactly as the gradient curve
+predicted — betas sd at `H3_deform`:
+
+| hierarchical prior | H0 | H1 | H2 | H3 | after the moonshot handoff |
+|---|---|---|---|---|---|
+| 0.002 (control) | 0.00874 | 0.00677 | 0.00593 | 0.00189 | 0.00042 |
+| 1.5e-4 | 0.03831 | 0.02378 | 0.02052 | 0.01766 | 0.00044 |
+| **0** | 0.06260 | 0.03619 | 0.03172 | **0.12399** | **0.00043** |
+
+A 65× swing in the hierarchical stages — **and the handoff crushed all three back to 0.0004**,
+because `cfg/M7_handoff_midline.yaml` carries `w_beta_prior: 0.002` in both of its
+1000-iteration stages. The stock `ants_cfg.yaml` sets no beta prior at all; the 0.002 is a
+value I introduced, and it is the *untuned* one — `A3b_priors_tuned` had already established
+1.5e-4.
+
+### 6.8.2 The complete fix, and the first real movement in this investigation
+
+Prior corrected in both files (`cfg/M7_noprior.yaml`, `cfg/M7_tuned.yaml`):
+
+| arm | prior (hier / moonshot) | betas sd | gen@10/spread | gen@20/spread | PC1–10 |
+|---|---|---|---|---|---|
+| M7 control | 0.002 / 0.002 | 0.00042 | 0.9870 | 0.9794 | 44.3% |
+| BPX_tuned | 1.5e-4 / 1.5e-4 | 0.00433 | 0.9865 | 0.9795 | 44.4% |
+| **BPX_noprior** | **0 / 0** | **0.31807** | **0.9353** | **0.9208** | **47.5%** |
+| *synthetic control, exact correspondence* | | | *0.4200* | *0.0000* | *91.9%* |
+
+**`BPX_noprior` is the first arm in this entire investigation to move the correspondence
+metric.** betas sd rises **757×**, past the stock baseline's 0.256, and gen/spread finally
+comes off 0.99 — 0.9870 → **0.9353**, with gen@20 0.9794 → 0.9208.
+
+And it costs nothing. Against the M7 control, paired, n=50:
+
+| metric | M7 | BPX_noprior | Δ | wins | p |
+|---|---|---|---|---|---|
+| deform_mag | 0.02051 | 0.01951 | **+4.9%** | 43/50 | 2.1e-07 |
+| edge_logratio | 0.37630 | 0.37413 | +0.6% | 30/50 | ns |
+| fscore@0.01 | 0.64958 | 0.65390 | +0.7% | 32/50 | ns |
+| chamfer_l2 | 0.00032 | 0.00032 | +0.5% | 32/50 | ns |
+
+Everything else neutral. A free improvement, and the only intervention here that has moved
+correspondence at all.
+
+**Keeping it in proportion.** 0.9353 is real movement but it is roughly **a tenth of the gap**
+to the 0.42 that exact correspondence achieves. The registrations are less unusable, not
+usable. And `BPX_tuned` at 1.5e-4 barely moved (betas 0.00433, gen 0.9865), so even the value
+tuned in `A3b` is far too strong for this pipeline — the prior wants to be off, not small.
+
+**The scorecard for this hunt.** Five hypotheses for the frozen shape space, tested against
+pre-registered outcomes:
+
+| hypothesis | verdict |
+|---|---|
+| unused `scaledirs` / free joint-scale competition | refuted (0.00042 → 0.00050) |
+| free-form offsets absorbing the variation | refuted (Spearman +0.196, p=0.14, wrong sign) |
+| pose:shape learning-rate ratio | refuted (0.00042 → 0.00041) |
+| beta prior, hierarchical stages only | worked, then undone downstream |
+| **beta prior, both files** | **confirmed — 757×, and moves correspondence** |
+
+Four wrong guesses preceded the right measurement, and the gradient measurement that finally
+pointed correctly was itself incomplete: it identified the mechanism but I checked only one of
+the two places the prior is applied.
 
 **What this costs the rest of the report.** §2's headline arm and §6.2's gate were both
 measured with shape effectively disabled. Their *relative* comparisons remain valid — every
