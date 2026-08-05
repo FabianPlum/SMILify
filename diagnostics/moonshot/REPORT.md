@@ -540,3 +540,110 @@ edge −32%, midline −47%, all 47–50/50) are far outside plausible seed nois
 (fscore@0.01 +7.1% at 35/50) should be replicated before anyone leans on them.
 
 Run with `diagnostics/moonshot/run_seeds.sh <gpu>`, analysed by `analyse_seeds.py`.
+
+---
+
+## 11. Follow-up session — five queued next-steps, and what they returned
+
+### 11.1 M7 replicates at 3 seeds (item 5) — the recommended arm is confirmed
+
+| metric (sign flipped so + is better) | seed 0 | seed 1 | seed 2 | mean ± sd |
+|---|---|---|---|---|
+| chamfer_l2 | +61.03% | +60.78% | +60.23% | **+60.68 ± 0.34** |
+| deform_mag_mean | +52.37% | +52.24% | +52.03% | **+52.22 ± 0.14** |
+| edge_logratio | +32.33% | +32.22% | +31.93% | **+32.16 ± 0.17** |
+| midline_dev | +46.47% | +45.80% | +40.93% | +44.40 ± 2.47 |
+| fscore@0.01 | +7.06% | +6.63% | +6.71% | +6.80 ± 0.19 |
+| fscore@0.02 | +4.62% | +4.52% | +4.53% | +4.56 ± 0.05 |
+| part_leg_distal | −15.50% | −18.58% | −15.50% | **−16.53 ± 1.45** |
+
+Every sign is consistent and every mean dwarfs its between-seed sd. Unlike `A4_nofreeze`,
+nothing here is inconclusive. **The distal-leg regression is equally reproducible** — it is a
+real property of the arm, not noise.
+
+### 11.2 "Couple mirrored leg chains" (item 1) — REFUTED, by my own recommendation
+
+Probe 13 measured, on the template:
+
+| | share of leg-chain surface area |
+|---|---|
+| coxa + trochanter + femur | **94.0%** |
+| tarsus + pretarsus | **2.4%** |
+
+and left/right area asymmetry of **<0.3%**. At the fitter's `n_sample=8000` the pretarsus
+expects **~0.3 area samples** and the tarsus ~12.6, against the code's own `n_t < 10` skip
+threshold. So the distal problem is **intra-leg weighting, not left/right**: a mirror-coupling
+term has almost nothing to correct, and coupling two equally under-constrained tips
+constrains neither. The item as written could not have worked.
+
+### 11.3 The replacement fixes were implemented — and did not work either (M8)
+
+`--split_distal` (7 groups → 13, so the distal half gets its own equally-weighted data term)
+and `--part_robust` (per-part kernel scaled by each part's own thickness; measured body 0.117
+vs distal leg 0.008–0.012, a **14.2×** ratio). Both verified working end-to-end.
+
+M8 vs stock baseline: chamfer −54.7%, fscore@0.02 +3.4%, edge −30.4%, deform_mag −51.2%,
+midline −49.6% — i.e. **it reproduces M7 and does not beat it**, and critically:
+
+> **`part_leg_distal` = +16.0%, against M7's +15.5%. Unchanged.**
+
+The diagnosis was right as a *measurement* and wrong as a *theory of the fix*. Giving distal
+segments 50% of a leg's vote does not make the parametric model able to reach them. The most
+likely reading, consistent with §3: the baseline attains 0.0080 on distal legs *by melting the
+mesh onto them*, and 0.0093 with half the free-form deformation is close to the honest limit
+of what pose+shape can do there. If so this is not a regression to fix but a cost to accept —
+and the way to test that is the M4b ceiling restricted to distal parts, not more weighting.
+
+### 11.4 Geodesic branch decomposition (research lead) — fails its own pre-registered gate
+
+The strongest idea from the paradigm search: decompose the raw scan by geodesic level sets, so
+"which leg is which" becomes two signs and an ordering rather than a search. On the template's
+clean rest-pose mesh it separates all six legs **100% purely in 0.2 s**. The proposer
+pre-registered the gate ">= 6 limb branches on >= 80% of specimens" and could not test it (the
+data drive was unmounted at the time). Probe 14 ran it on all 50 real scans:
+
+| | result | required |
+|---|---|---|
+| specimens reaching ≥6 branches | **58%** | 80% |
+| identical count across two sampling seeds | **20%** | — |
+| mean \|seed0 − seed1\| | **2.12 branches** | — |
+| collapse to ≤2 branches at every threshold | 4/50 | — |
+
+The reproducibility figure is the disqualifying one: the same specimen yields 1 branch under
+one surface sampling and 9 under another. The failures are the compact, spiny genera
+(*Cephalotes* ×2, *Dilobocondyla*, *Dorylus*) where legs rest against the body — connectivity
+cannot separate two touching legs, and no threshold choice repairs that. **Good idea,
+defeated by this specific data.**
+
+### 11.5 A correction to §4 of this report
+
+The paradigm synthesis checked my own numbers and found §4's framing overstated:
+
+* `M4b_ceiling_free` — 13 shape directions, no deform — fscore@0.02 = **0.7313**
+* `M6_augmented` — 37 shape directions, no deform — fscore@0.02 = **0.7356**
+
+**A 2.8× enlargement of the shape space bought +0.004 F-score.** If shape capacity were the
+binding constraint that should have moved substantially. §4's measurement (the 13 directions
+reach only ~1% of body length at prior scale, against offsets of 2.4%) stands, but the
+*conclusion* drawn from it does not: shape capacity ranks third, behind pose/correspondence
+error and behind the **completely empty pose-corrective space** — `posedirs` in
+`SMIL_OmniAnt.pkl` is literally shape `(0,)`, and `smal_torch.py` silently substitutes zeros.
+Folding concentrates at joint boundaries (6.33% across vs 1.48% within), which is exactly what
+a missing `posedirs` predicts.
+
+And M6's failure is self-explaining in a way I missed: **shape directions estimated from a
+correspondence you do not trust encode correspondence error, not shape.** That is why its
+spectrum was flat (first PC 10.9%). Fixing correspondence must precede enlarging the shape
+space — which reverses the priority order §8 gave.
+
+### 11.6 Where this leaves the recommended next step
+
+Not "more shape directions" and not "a better optimizer". The plan the search converged on is
+a **learned per-point part field on the target**: predict, for each of ~30k sampled target
+points, one of 14 labels (body, 6 legs × {proximal, distal}, debris), then hand that to the
+existing hierarchical optimizer as a *frozen, target-derived* partition — replacing
+`TargetPartition.assign`, which is currently derived from the current fit and can therefore
+only confirm what the fit already believes. That removes the leg-permutation multimodality by
+construction rather than by regularisation, needs no landmark annotation (labels come free
+from `weights.argmax` on the template), and is the one thing that a classifier can do and a
+level-set sweep provably cannot: separate two *touching* legs from context.

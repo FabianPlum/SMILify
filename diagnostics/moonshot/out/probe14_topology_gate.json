@@ -1,0 +1,806 @@
+{
+ "gate_pass": false,
+ "frac_ge6": 0.58,
+ "rows": [
+  {
+   "name": "Acanthostichus_aff.brevicornis_CASENT0744328",
+   "best_seed0": 6,
+   "best_seed1": 6,
+   "agree": true,
+   "counts": {
+    "0.15": 4,
+    "0.2": 4,
+    "0.25": 1,
+    "0.3": 2,
+    "0.35": 4,
+    "0.4": 6,
+    "0.45": 5,
+    "0.5": 5
+   }
+  },
+  {
+   "name": "Acromyrmex_coronatus_CASENT0744365",
+   "best_seed0": 7,
+   "best_seed1": 1,
+   "agree": false,
+   "counts": {
+    "0.15": 2,
+    "0.2": 2,
+    "0.25": 1,
+    "0.3": 2,
+    "0.35": 7,
+    "0.4": 7,
+    "0.45": 7,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Acromyrmex_lobicornis_CASENT0878007",
+   "best_seed0": 5,
+   "best_seed1": 5,
+   "agree": true,
+   "counts": {
+    "0.15": 3,
+    "0.2": 4,
+    "0.25": 4,
+    "0.3": 4,
+    "0.35": 5,
+    "0.4": 5,
+    "0.45": 5,
+    "0.5": 5
+   }
+  },
+  {
+   "name": "Anochetus_risii_CASENT0877608",
+   "best_seed0": 3,
+   "best_seed1": 8,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 2,
+    "0.4": 3,
+    "0.45": 3,
+    "0.5": 2
+   }
+  },
+  {
+   "name": "Anochetus_risii_CASENT0877609",
+   "best_seed0": 4,
+   "best_seed1": 3,
+   "agree": false,
+   "counts": {
+    "0.15": 4,
+    "0.2": 4,
+    "0.25": 4,
+    "0.3": 3,
+    "0.35": 3,
+    "0.4": 3,
+    "0.45": 3,
+    "0.5": 3
+   }
+  },
+  {
+   "name": "Aphaenogaster_pallida_CASENT0745235",
+   "best_seed0": 9,
+   "best_seed1": 7,
+   "agree": false,
+   "counts": {
+    "0.15": 3,
+    "0.2": 6,
+    "0.25": 6,
+    "0.3": 9,
+    "0.35": 8,
+    "0.4": 7,
+    "0.45": 7,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Atopomyrmex_mocquerysi_CASENT0744784",
+   "best_seed0": 6,
+   "best_seed1": 5,
+   "agree": false,
+   "counts": {
+    "0.15": 2,
+    "0.2": 2,
+    "0.25": 3,
+    "0.3": 3,
+    "0.35": 5,
+    "0.4": 6,
+    "0.45": 6,
+    "0.5": 6
+   }
+  },
+  {
+   "name": "Carebara_trechideros_CASENT0877591",
+   "best_seed0": 6,
+   "best_seed1": 6,
+   "agree": true,
+   "counts": {
+    "0.15": 2,
+    "0.2": 2,
+    "0.25": 1,
+    "0.3": 5,
+    "0.35": 6,
+    "0.4": 6,
+    "0.45": 6,
+    "0.5": 6
+   }
+  },
+  {
+   "name": "Centromyrmex_brachycola_CASENT0744052",
+   "best_seed0": 3,
+   "best_seed1": 2,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 1,
+    "0.5": 3
+   }
+  },
+  {
+   "name": "Cephalotes_minutus_CASENT0709253",
+   "best_seed0": 1,
+   "best_seed1": 6,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 1,
+    "0.5": 1
+   }
+  },
+  {
+   "name": "Cephalotes_simillimus_CASENT0744408",
+   "best_seed0": 1,
+   "best_seed1": 4,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 1,
+    "0.5": 1
+   }
+  },
+  {
+   "name": "Cephalotes_spinosus_CASENT0744158",
+   "best_seed0": 5,
+   "best_seed1": 12,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 2,
+    "0.3": 2,
+    "0.35": 3,
+    "0.4": 3,
+    "0.45": 5,
+    "0.5": 5
+   }
+  },
+  {
+   "name": "Crematogaster_nawai_OKENT0105046",
+   "best_seed0": 4,
+   "best_seed1": 4,
+   "agree": true,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 2,
+    "0.3": 2,
+    "0.35": 1,
+    "0.4": 2,
+    "0.45": 4,
+    "0.5": 4
+   }
+  },
+  {
+   "name": "Cryptopone_sauteri_CASENT0743771",
+   "best_seed0": 3,
+   "best_seed1": 8,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 2,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 3,
+    "0.5": 3
+   }
+  },
+  {
+   "name": "Cyphoidris_afrc-tz01_CASENT0744810",
+   "best_seed0": 4,
+   "best_seed1": 6,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 2,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 2,
+    "0.45": 2,
+    "0.5": 4
+   }
+  },
+  {
+   "name": "Cyphomyrmex_cf.minutus_CASENT0744280",
+   "best_seed0": 7,
+   "best_seed1": 5,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 2,
+    "0.25": 3,
+    "0.3": 3,
+    "0.35": 4,
+    "0.4": 7,
+    "0.45": 7,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Dilobocondyla_fouqueti_CASENT0745576",
+   "best_seed0": 1,
+   "best_seed1": 9,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 1,
+    "0.5": 1
+   }
+  },
+  {
+   "name": "Dorylus_fulvus_CASENT0745678",
+   "best_seed0": 2,
+   "best_seed1": 4,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 2,
+    "0.5": 2
+   }
+  },
+  {
+   "name": "Eciton_hamatum_CASENT0744580",
+   "best_seed0": 8,
+   "best_seed1": 6,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 6,
+    "0.5": 8
+   }
+  },
+  {
+   "name": "Ectatomma_brunneum_CASENT0744575",
+   "best_seed0": 3,
+   "best_seed1": 2,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 3,
+    "0.3": 1,
+    "0.35": 3,
+    "0.4": 3,
+    "0.45": 2,
+    "0.5": 2
+   }
+  },
+  {
+   "name": "Eurhopalothrix_procera_CASENT0745605",
+   "best_seed0": 9,
+   "best_seed1": 6,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 2,
+    "0.25": 5,
+    "0.3": 7,
+    "0.35": 8,
+    "0.4": 8,
+    "0.45": 9,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Heteroponera_panamensis_CASENT0744055",
+   "best_seed0": 4,
+   "best_seed1": 5,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 4,
+    "0.45": 4,
+    "0.5": 4
+   }
+  },
+  {
+   "name": "Labidus_praedator_CASENT0744236",
+   "best_seed0": 8,
+   "best_seed1": 8,
+   "agree": true,
+   "counts": {
+    "0.15": 2,
+    "0.2": 2,
+    "0.25": 2,
+    "0.3": 3,
+    "0.35": 5,
+    "0.4": 5,
+    "0.45": 8,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Labidus_praedator_CASENT0744237",
+   "best_seed0": 6,
+   "best_seed1": 7,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 6,
+    "0.5": 6
+   }
+  },
+  {
+   "name": "Lasius_nr._fuliginosus_CASENT0878037",
+   "best_seed0": 7,
+   "best_seed1": 4,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 4,
+    "0.3": 4,
+    "0.35": 6,
+    "0.4": 6,
+    "0.45": 6,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Lioponera_daikoku_OKENT0105067",
+   "best_seed0": 7,
+   "best_seed1": 6,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 2,
+    "0.3": 4,
+    "0.35": 6,
+    "0.4": 7,
+    "0.45": 7,
+    "0.5": 4
+   }
+  },
+  {
+   "name": "Mayriella_sp._CASENT0745610",
+   "best_seed0": 7,
+   "best_seed1": 9,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 3,
+    "0.45": 5,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Mesoponera_ambigua_CASENT0745584",
+   "best_seed0": 7,
+   "best_seed1": 7,
+   "agree": true,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 4,
+    "0.4": 5,
+    "0.45": 5,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Myrmecina_ryukyuensis_OKENT0105085",
+   "best_seed0": 7,
+   "best_seed1": 9,
+   "agree": false,
+   "counts": {
+    "0.15": 2,
+    "0.2": 1,
+    "0.25": 4,
+    "0.3": 7,
+    "0.35": 7,
+    "0.4": 7,
+    "0.45": 7,
+    "0.5": 6
+   }
+  },
+  {
+   "name": "Myrmecina_sp._CASENT0745613",
+   "best_seed0": 6,
+   "best_seed1": 9,
+   "agree": false,
+   "counts": {
+    "0.15": 3,
+    "0.2": 3,
+    "0.25": 3,
+    "0.3": 3,
+    "0.35": 3,
+    "0.4": 4,
+    "0.45": 5,
+    "0.5": 6
+   }
+  },
+  {
+   "name": "Nesomyrmex_angulatus_CASENT0744820",
+   "best_seed0": 6,
+   "best_seed1": 5,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 1,
+    "0.5": 6
+   }
+  },
+  {
+   "name": "Odontomachus_troglodytes_CASENT0744970",
+   "best_seed0": 5,
+   "best_seed1": 5,
+   "agree": true,
+   "counts": {
+    "0.15": 2,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 2,
+    "0.45": 5,
+    "0.5": 4
+   }
+  },
+  {
+   "name": "Oxyopomyrmex_saulcyi_CASENT0745218",
+   "best_seed0": 5,
+   "best_seed1": 6,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 2,
+    "0.3": 1,
+    "0.35": 2,
+    "0.4": 3,
+    "0.45": 5,
+    "0.5": 5
+   }
+  },
+  {
+   "name": "Polyrhachis_decemdentata_CASENT0744779",
+   "best_seed0": 7,
+   "best_seed1": 4,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 2,
+    "0.3": 4,
+    "0.35": 4,
+    "0.4": 5,
+    "0.45": 6,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Polyrhachis_dives_CASENT0878093",
+   "best_seed0": 7,
+   "best_seed1": 2,
+   "agree": false,
+   "counts": {
+    "0.15": 2,
+    "0.2": 2,
+    "0.25": 2,
+    "0.3": 3,
+    "0.35": 2,
+    "0.4": 3,
+    "0.45": 5,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Ponera_kohmoku_OKENT0105440",
+   "best_seed0": 5,
+   "best_seed1": 7,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 2,
+    "0.25": 2,
+    "0.3": 3,
+    "0.35": 5,
+    "0.4": 5,
+    "0.45": 5,
+    "0.5": 5
+   }
+  },
+  {
+   "name": "Ponera_tamon_OKENT0105154",
+   "best_seed0": 8,
+   "best_seed1": 7,
+   "agree": false,
+   "counts": {
+    "0.15": 5,
+    "0.2": 6,
+    "0.25": 8,
+    "0.3": 8,
+    "0.35": 8,
+    "0.4": 8,
+    "0.45": 8,
+    "0.5": 8
+   }
+  },
+  {
+   "name": "Pseudolasius_sp._CASENT0878065",
+   "best_seed0": 3,
+   "best_seed1": 4,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 2,
+    "0.25": 2,
+    "0.3": 2,
+    "0.35": 2,
+    "0.4": 3,
+    "0.45": 3,
+    "0.5": 3
+   }
+  },
+  {
+   "name": "Pseudomyrmex_cf.solis_CASENT0744065",
+   "best_seed0": 3,
+   "best_seed1": 5,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 1,
+    "0.5": 3
+   }
+  },
+  {
+   "name": "Solenopsis_invicta_CASENT0744384",
+   "best_seed0": 7,
+   "best_seed1": 6,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 2,
+    "0.25": 3,
+    "0.3": 3,
+    "0.35": 3,
+    "0.4": 5,
+    "0.45": 7,
+    "0.5": 6
+   }
+  },
+  {
+   "name": "Stigmatomma_FHG02_CASENT0745561",
+   "best_seed0": 8,
+   "best_seed1": 8,
+   "agree": true,
+   "counts": {
+    "0.15": 1,
+    "0.2": 5,
+    "0.25": 8,
+    "0.3": 8,
+    "0.35": 7,
+    "0.4": 7,
+    "0.45": 7,
+    "0.5": 8
+   }
+  },
+  {
+   "name": "Strumigenys_alberti_CASENT0878103",
+   "best_seed0": 3,
+   "best_seed1": 3,
+   "agree": true,
+   "counts": {
+    "0.15": 3,
+    "0.2": 3,
+    "0.25": 3,
+    "0.3": 3,
+    "0.35": 2,
+    "0.4": 2,
+    "0.45": 1,
+    "0.5": 1
+   }
+  },
+  {
+   "name": "Strumigenys_canina_OKENT0105288",
+   "best_seed0": 4,
+   "best_seed1": 2,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 2,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 4,
+    "0.5": 4
+   }
+  },
+  {
+   "name": "Strumigenys_crassicornis_CASENT0744273",
+   "best_seed0": 8,
+   "best_seed1": 2,
+   "agree": false,
+   "counts": {
+    "0.15": 3,
+    "0.2": 6,
+    "0.25": 7,
+    "0.3": 8,
+    "0.35": 8,
+    "0.4": 8,
+    "0.45": 8,
+    "0.5": 8
+   }
+  },
+  {
+   "name": "Strumigenys_sp._appretiata_group_CASENT0744156",
+   "best_seed0": 7,
+   "best_seed1": 7,
+   "agree": true,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 4,
+    "0.35": 7,
+    "0.4": 7,
+    "0.45": 7,
+    "0.5": 6
+   }
+  },
+  {
+   "name": "Strumigenys_stenorhina_OKENT0105268",
+   "best_seed0": 7,
+   "best_seed1": 8,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 3,
+    "0.35": 5,
+    "0.4": 5,
+    "0.45": 6,
+    "0.5": 7
+   }
+  },
+  {
+   "name": "Syllophopsis_sechellensis_OKENT0105212",
+   "best_seed0": 8,
+   "best_seed1": 2,
+   "agree": false,
+   "counts": {
+    "0.15": 4,
+    "0.2": 5,
+    "0.25": 5,
+    "0.3": 7,
+    "0.35": 8,
+    "0.4": 7,
+    "0.45": 5,
+    "0.5": 5
+   }
+  },
+  {
+   "name": "Temnothorax_congruus_OKENT0105443",
+   "best_seed0": 7,
+   "best_seed1": 5,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 3,
+    "0.25": 5,
+    "0.3": 5,
+    "0.35": 7,
+    "0.4": 5,
+    "0.45": 6,
+    "0.5": 4
+   }
+  },
+  {
+   "name": "Temnothorax_sp._OKENT0105336",
+   "best_seed0": 6,
+   "best_seed1": 7,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 2,
+    "0.4": 4,
+    "0.45": 6,
+    "0.5": 2
+   }
+  },
+  {
+   "name": "Tetramorium_kraepelini_CASENT0744084",
+   "best_seed0": 6,
+   "best_seed1": 8,
+   "agree": false,
+   "counts": {
+    "0.15": 1,
+    "0.2": 1,
+    "0.25": 1,
+    "0.3": 1,
+    "0.35": 1,
+    "0.4": 1,
+    "0.45": 4,
+    "0.5": 6
+   }
+  }
+ ]
+}
