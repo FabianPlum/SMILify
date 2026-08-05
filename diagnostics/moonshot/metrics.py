@@ -77,9 +77,7 @@ def surface_metrics(pred_mesh, tgt_mesh, n_points=30000, taus=(0.005, 0.01, 0.02
         out["chamfer_l1"] = float((dist_pt.mean() + dist_tp.mean()).item())
         out["acc_mean"] = float(dist_pt.mean().item())  # pred->tgt: accuracy
         out["comp_mean"] = float(dist_tp.mean().item())  # tgt->pred: completeness
-        out["hausdorff_95"] = float(
-            max(torch.quantile(dist_pt, 0.95).item(), torch.quantile(dist_tp, 0.95).item())
-        )
+        out["hausdorff_95"] = float(max(torch.quantile(dist_pt, 0.95).item(), torch.quantile(dist_tp, 0.95).item()))
         out["hausdorff_max"] = float(max(dist_pt.max().item(), dist_tp.max().item()))
 
         for tau in taus:
@@ -288,8 +286,18 @@ def template_part_segmentation(weights, joint_names):
 # ---------------------------------------------------------------- top level
 
 
-def evaluate(pred_verts, faces, tgt_mesh, template_verts, sym_verts, part_ids, part_names,
-             deform_verts=None, device="cuda:0", n_points=30000):
+def evaluate(
+    pred_verts,
+    faces,
+    tgt_mesh,
+    template_verts,
+    sym_verts,
+    part_ids,
+    part_names,
+    deform_verts=None,
+    device="cuda:0",
+    n_points=30000,
+):
     """Run the full suite for ONE specimen. Returns a flat dict."""
     pred_mesh = _as_meshes(pred_verts, faces, device)
     r = {}

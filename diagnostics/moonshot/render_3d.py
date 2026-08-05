@@ -26,7 +26,6 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib import cm
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, REPO)
@@ -102,7 +101,9 @@ def main():
 
     cols = []
     for rd in args.runs:
-        npzs = sorted([p for p in glob.glob(os.path.join(rd, "*.npz")) if "_batch_" not in p and "start_selection" not in p])
+        npzs = sorted(
+            [p for p in glob.glob(os.path.join(rd, "*.npz")) if "_batch_" not in p and "start_selection" not in p]
+        )
         if not npzs:
             print(f"  skip {rd}")
             continue
@@ -118,8 +119,16 @@ def main():
     for r, i in enumerate(sel):
         axes[r, 0].imshow(tgt_imgs[i])
         axes[r, 0].set_title("TARGET scan" if r == 0 else "", fontsize=9)
-        axes[r, 0].text(-0.06, 0.5, os.path.basename(files[i])[:20], rotation=90,
-                        va="center", ha="center", transform=axes[r, 0].transAxes, fontsize=6)
+        axes[r, 0].text(
+            -0.06,
+            0.5,
+            os.path.basename(files[i])[:20],
+            rotation=90,
+            va="center",
+            ha="center",
+            transform=axes[r, 0].transAxes,
+            fontsize=6,
+        )
         for c, (nm, d) in enumerate(cols):
             V = torch.tensor(d["verts"][i], dtype=torch.float32, device=DEV)
             F = torch.tensor(d["faces"][0].astype(np.int64), dtype=torch.int64, device=DEV)
@@ -140,10 +149,11 @@ def main():
     titles = {
         "surface": "Shaded surface — speckle/creasing = broken mesh integrity",
         "deform": "Coloured by |deform_verts|  (black = pose/shape explained it, "
-                  "bright = free-form offset did, i.e. correspondence traded away).  scale 0–0.06",
+        "bright = free-form offset did, i.e. correspondence traded away).  scale 0–0.06",
         "error": "Coloured by distance to target surface.  scale 0–0.05",
     }
     import textwrap
+
     fig.suptitle("\n".join(textwrap.wrap(titles[args.mode], 95)), fontsize=9)
     plt.tight_layout(rect=[0, 0, 1, 0.955])
     p = os.path.join(outdir, f"render3d_{args.mode}.png")

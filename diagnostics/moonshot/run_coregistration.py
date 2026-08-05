@@ -51,7 +51,6 @@ import json
 import os
 import pickle
 import shutil
-import subprocess
 import sys
 
 import numpy as np
@@ -136,7 +135,7 @@ def build_constrained_basis(offsets, v_template, faces, sym_map, n_keep, smooth_
     mean = X.mean(0)
     Xc = (X - mean).reshape(N, -1)
     U, S, Vt = torch.linalg.svd(Xc, full_matrices=False)
-    var = (S**2)
+    var = S**2
     cum = torch.cumsum(var, 0) / var.sum()
 
     # 3. fold gate -- drive each candidate to +/-3 sigma alone and reject if it folds
@@ -154,7 +153,9 @@ def build_constrained_basis(offsets, v_template, faces, sym_map, n_keep, smooth_
             break
 
     rep = dict(
-        n_candidates=int(Vt.shape[0]), n_kept=len(kept), n_rejected=len(rejected),
+        n_candidates=int(Vt.shape[0]),
+        n_kept=len(kept),
+        n_rejected=len(rejected),
         base_fold=base_fold,
         var_explained_by_kept=float(cum[kept[-1]]) if kept else 0.0,
         rejected_worst_fold=[float(w) for _, w in rejected[:10]],
@@ -178,8 +179,7 @@ def write_model(base_pkl, out_pkl, dirs, mean):
     cov = np.eye(n_old + k)
     cov[:n_old, :n_old] = np.asarray(dd["shape_cov"], dtype=np.float64)
     dd["shape_cov"] = cov
-    dd["shape_mean_betas"] = np.concatenate(
-        [np.asarray(dd["shape_mean_betas"], dtype=np.float64), np.zeros(k)])
+    dd["shape_mean_betas"] = np.concatenate([np.asarray(dd["shape_mean_betas"], dtype=np.float64), np.zeros(k)])
     for key in ("scaledirs", "transdirs"):
         if key in dd:
             arr = np.asarray(dd[key], dtype=np.float64)
@@ -193,9 +193,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--worker_dir", required=True)
     ap.add_argument("--rounds", type=int, default=3)
-    ap.add_argument("--n_specimens", type=int, default=400,
-                    help="corpus size per round; 757 available. Kept below the full set by "
-                         "default so a round fits in memory as one batch group.")
+    ap.add_argument(
+        "--n_specimens",
+        type=int,
+        default=400,
+        help="corpus size per round; 757 available. Kept below the full set by "
+        "default so a round fits in memory as one batch group.",
+    )
     ap.add_argument("--n_new", type=int, default=32, help="directions to KEEP per round (post fold-gate)")
     ap.add_argument("--smooth_iters", type=int, default=6)
     ap.add_argument("--batch", type=int, default=50)
@@ -210,8 +214,7 @@ def main():
     n_train = len(files) // 2
     train_files, test_files = files[:n_train], files[n_train:]
     print(f"[coreg] corpus {len(files)}  train {len(train_files)}  test {len(test_files)}", flush=True)
-    print("[coreg] split is FIXED across rounds, so test-split gains are a real generalisation curve",
-          flush=True)
+    print("[coreg] split is FIXED across rounds, so test-split gains are a real generalisation curve", flush=True)
 
     # staging dirs of symlinks, so the existing runners work unchanged
     for name, fl in (("coreg_train", train_files), ("coreg_test", test_files)):
@@ -226,11 +229,18 @@ def main():
     print("[coreg] The fold gate and the symmetrised, smoothed basis are implemented above")
     print("[coreg] and are the part that round 1 lacked -- see module docstring.\n")
 
-    json.dump(dict(train=[os.path.basename(p) for p in train_files],
-                   test=[os.path.basename(p) for p in test_files],
-                   seed=args.seed, rounds=args.rounds, n_new=args.n_new,
-                   smooth_iters=args.smooth_iters),
-              open(os.path.join(OUT, "coreg_split.json"), "w"), indent=1)
+    json.dump(
+        dict(
+            train=[os.path.basename(p) for p in train_files],
+            test=[os.path.basename(p) for p in test_files],
+            seed=args.seed,
+            rounds=args.rounds,
+            n_new=args.n_new,
+            smooth_iters=args.smooth_iters,
+        ),
+        open(os.path.join(OUT, "coreg_split.json"), "w"),
+        indent=1,
+    )
     print(f"[coreg] wrote {os.path.join(OUT, 'coreg_split.json')}")
 
 

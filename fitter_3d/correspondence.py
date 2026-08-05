@@ -111,9 +111,7 @@ def sinkhorn_loss(src, tgt, blur=0.05, n_iter=25, max_pts=1200, chunk=8, generat
     """
     outs, infos = [], []
     for s in range(0, src.shape[0], chunk):
-        l, i = _sinkhorn_chunk(
-            src[s : s + chunk], tgt[s : s + chunk], blur, n_iter, max_pts, generator
-        )
+        l, i = _sinkhorn_chunk(src[s : s + chunk], tgt[s : s + chunk], blur, n_iter, max_pts, generator)
         outs.append(l)
         infos.append(i["plan_concentration"])
     return torch.stack(outs).mean(), {"plan_concentration": float(np.mean(infos))}

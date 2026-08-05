@@ -16,8 +16,6 @@ import shutil
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from probe_01_orientation import load_obj_verts_faces, area_weighted_stats, pca_axes  # noqa: E402
-from probe_02_roll import roll_angle_about_x  # noqa: E402
 
 MESH_DIR = "/media/fabi/Data/SMILify_DATASETS_BACKUP/custom_processing/antscan_proofread_castes/half_workers"
 OUT_DIR = os.path.join(os.path.dirname(__file__), "out")

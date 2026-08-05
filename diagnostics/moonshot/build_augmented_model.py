@@ -33,7 +33,6 @@ import glob
 import json
 import os
 import pickle
-import sys
 
 import numpy as np
 
@@ -50,8 +49,13 @@ def main():
     args = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
 
-    npzs = sorted([p for p in glob.glob(os.path.join(args.source_run, "*.npz"))
-                   if "_batch_" not in p and "start_selection" not in p])
+    npzs = sorted(
+        [
+            p
+            for p in glob.glob(os.path.join(args.source_run, "*.npz"))
+            if "_batch_" not in p and "start_selection" not in p
+        ]
+    )
     d = np.load(npzs[-1], allow_pickle=True)
     dv = d["deform_verts"].astype(np.float64)  # (B, V, 3) -- in template correspondence
     B, V, _ = dv.shape
@@ -65,11 +69,15 @@ def main():
     else:
         train, test = idx, idx
     print(f"train specimens: {len(train)}   test specimens: {len(test)}  (components learned on TRAIN only)")
-    np.savez(os.path.join(OUT, "m6_split.npz"), train=train, test=test,
-             train_labels=np.array([labels[i] for i in train]),
-             test_labels=np.array([labels[i] for i in test]))
+    np.savez(
+        os.path.join(OUT, "m6_split.npz"),
+        train=train,
+        test=test,
+        train_labels=np.array([labels[i] for i in train]),
+        test_labels=np.array([labels[i] for i in test]),
+    )
 
-    X = dv[train].reshape(len(train), -1)          # (Ntrain, V*3)
+    X = dv[train].reshape(len(train), -1)  # (Ntrain, V*3)
     mean = X.mean(0)
     Xc = X - mean
     # economy SVD: Ntrain << V*3, so at most Ntrain-1 meaningful directions
@@ -78,12 +86,12 @@ def main():
     cum = np.cumsum(var) / var.sum()
     k = min(args.n_new, Vt.shape[0])
     print(f"\noffset-field PCA: {k} of {Vt.shape[0]} available directions retained")
-    print(f"  variance explained by {k} components: {100*cum[k-1]:.1f}%")
+    print(f"  variance explained by {k} components: {100 * cum[k - 1]:.1f}%")
     for i in [0, 1, 2, 4, 9, min(19, len(cum) - 1)]:
         if i < len(cum):
-            print(f"    first {i+1:2d} components: {100*cum[i]:5.1f}%")
+            print(f"    first {i + 1:2d} components: {100 * cum[i]:5.1f}%")
 
-    new_dirs = Vt[:k].reshape(k, V, 3).transpose(1, 2, 0)   # (V,3,k)
+    new_dirs = Vt[:k].reshape(k, V, 3).transpose(1, 2, 0)  # (V,3,k)
 
     # scale each new direction so that beta ~ N(0,1) produces a realistic offset, matching
     # the convention of the existing shapedirs (whose betas carry the model's shape_cov)
@@ -95,7 +103,7 @@ def main():
         u.encoding = "latin1"
         dd = u.load()
 
-    old_sd = np.asarray(dd["shapedirs"], dtype=np.float64)      # (V,3,13)
+    old_sd = np.asarray(dd["shapedirs"], dtype=np.float64)  # (V,3,13)
     n_old = old_sd.shape[2]
     dd["shapedirs"] = np.concatenate([old_sd, new_dirs], axis=2)
 
@@ -109,13 +117,12 @@ def main():
     cov = np.eye(n_tot)
     cov[:n_old, :n_old] = old_cov
     dd["shape_cov"] = cov
-    dd["shape_mean_betas"] = np.concatenate([np.asarray(dd["shape_mean_betas"], dtype=np.float64),
-                                             np.zeros(k)])
+    dd["shape_mean_betas"] = np.concatenate([np.asarray(dd["shape_mean_betas"], dtype=np.float64), np.zeros(k)])
     # scaledirs / transdirs are indexed by beta and must grow to match, or the SMAL forward
     # pass will broadcast-error. New directions get zero joint scale/translation effect.
     for key in ("scaledirs", "transdirs"):
         if key in dd:
-            a = np.asarray(dd[key], dtype=np.float64)          # (13, 55, 3)
+            a = np.asarray(dd[key], dtype=np.float64)  # (13, 55, 3)
             dd[key] = np.concatenate([a, np.zeros((k,) + a.shape[1:])], axis=0)
 
     with open(args.out_pkl, "wb") as f:
@@ -127,11 +134,19 @@ def main():
         if key in dd:
             print(f"  {key} -> {np.asarray(dd[key]).shape}")
 
-    json.dump(dict(source=npzs[-1], n_new=int(k), n_old=int(n_old),
-                   var_explained=float(cum[k - 1]),
-                   spectrum=[float(x) for x in (var / var.sum())[:40]],
-                   train=[int(x) for x in train], test=[int(x) for x in test]),
-              open(os.path.join(OUT, "m6_augmented_model.json"), "w"), indent=1)
+    json.dump(
+        dict(
+            source=npzs[-1],
+            n_new=int(k),
+            n_old=int(n_old),
+            var_explained=float(cum[k - 1]),
+            spectrum=[float(x) for x in (var / var.sum())[:40]],
+            train=[int(x) for x in train],
+            test=[int(x) for x in test],
+        ),
+        open(os.path.join(OUT, "m6_augmented_model.json"), "w"),
+        indent=1,
+    )
 
 
 if __name__ == "__main__":

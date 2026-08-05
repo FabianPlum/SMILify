@@ -114,8 +114,13 @@ def main():
     best_state = None
 
     common = dict(
-        target_meshes=targets, out_dir=args.results_dir, device=device,
-        mesh_names=names, n_sample=6000, edge_mode="rest", lr_decay=True,
+        target_meshes=targets,
+        out_dir=args.results_dir,
+        device=device,
+        mesh_names=names,
+        n_sample=6000,
+        edge_mode="rest",
+        lr_decay=True,
     )
 
     for si, (roll, elev) in enumerate(starts):
@@ -129,11 +134,22 @@ def main():
                 # template's leg chains are mirrored in position but share axis convention.
                 smal.joint_rot.data[:, coxa_rows, 1] = elev
         st = MoonshotStage(
-            nits=args.probe_its, scheme="default", smal_3d_fitter=smal,
-            name=f"probe_{si}", lr=0.02, custom_lrs={"joint_rot": 0.006},
-            loss_weights={"w_chamfer": 1.0, "w_edge": 0.05, "w_normal": 0.01,
-                          "w_laplacian": 0.005, "w_beta_prior": 0.002, "w_sym": 0.5},
-            log_every=0, **common,
+            nits=args.probe_its,
+            scheme="default",
+            smal_3d_fitter=smal,
+            name=f"probe_{si}",
+            lr=0.02,
+            custom_lrs={"joint_rot": 0.006},
+            loss_weights={
+                "w_chamfer": 1.0,
+                "w_edge": 0.05,
+                "w_normal": 0.01,
+                "w_laplacian": 0.005,
+                "w_beta_prior": 0.002,
+                "w_sym": 0.5,
+            },
+            log_every=0,
+            **common,
         )
         st.run()
         s = score_fit(smal, targets)
@@ -146,8 +162,11 @@ def main():
             for k, v in smal.state_dict().items():
                 best_state[k][improved] = v.detach()[improved]
             best_score = torch.where(improved, s, best_score)
-        print(f"  start {si:2d} roll={roll:+6.1f} elev={elev:+5.2f}  "
-              f"mean score {float(s.mean()):.6f}  best-for {n_imp:2d}/{B} specimens", flush=True)
+        print(
+            f"  start {si:2d} roll={roll:+6.1f} elev={elev:+5.2f}  "
+            f"mean score {float(s.mean()):.6f}  best-for {n_imp:2d}/{B} specimens",
+            flush=True,
+        )
         del smal, st
         torch.cuda.empty_cache()
 
@@ -156,8 +175,7 @@ def main():
     smal = SMAL3DFitter(batch_size=B, device=device, shape_family=-1)
     smal.load_state_dict(best_state)
 
-    lw = {"w_chamfer": 1.0, "w_edge": 0.05, "w_normal": 0.01, "w_laplacian": 0.005,
-          "w_beta_prior": 0.002, "w_sym": 0.5}
+    lw = {"w_chamfer": 1.0, "w_edge": 0.05, "w_normal": 0.01, "w_laplacian": 0.005, "w_beta_prior": 0.002, "w_sym": 0.5}
     for nm, its, sch, lr, jlr, extra in [
         ("MS1_refine", args.refine_its, "default", 0.01, 0.004, {}),
         ("MS2_deform", args.deform_its, "all", 0.002, 0.001, {"w_offset": 3.0}),
@@ -165,16 +183,26 @@ def main():
         w = dict(lw)
         w.update(extra)
         st = MoonshotStage(
-            nits=its, scheme=sch, smal_3d_fitter=smal, name=nm, lr=lr,
-            custom_lrs={"joint_rot": jlr}, loss_weights=w, log_every=200, **common,
+            nits=its,
+            scheme=sch,
+            smal_3d_fitter=smal,
+            name=nm,
+            lr=lr,
+            custom_lrs={"joint_rot": jlr},
+            loss_weights=w,
+            log_every=200,
+            **common,
         )
         st.run()
         st.save_npz(labels=names)
 
     # record which start each specimen chose -- useful for the report
-    np.savez(os.path.join(args.results_dir, "start_selection.npz"),
-             best_score=best_score.cpu().numpy(),
-             starts=np.array(starts), labels=np.array(names))
+    np.savez(
+        os.path.join(args.results_dir, "start_selection.npz"),
+        best_score=best_score.cpu().numpy(),
+        starts=np.array(starts),
+        labels=np.array(names),
+    )
     del smal
     torch.cuda.empty_cache()
     gc.collect()

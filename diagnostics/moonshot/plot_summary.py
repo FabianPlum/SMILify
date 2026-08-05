@@ -48,10 +48,12 @@ def fig_stage_trajectories(data, out):
     """Metric evolution across stages, for the baseline and the control."""
     keys = ["baseline", "C0_control", "A4_nofreeze", "M1_hier"]
     keys = [k for k in keys if k in data]
-    metrics = [("fscore@0.01", "F-score@0.01  (higher better)", False),
-               ("edge_logratio_absmean", "edge distortion  (lower better)", True),
-               ("deform_mag_mean", "|deform_verts| mean  (lower better)", True),
-               ("midline_dev_mean", "midline deviation  (lower better)", True)]
+    metrics = [
+        ("fscore@0.01", "F-score@0.01  (higher better)", False),
+        ("edge_logratio_absmean", "edge distortion  (lower better)", True),
+        ("deform_mag_mean", "|deform_verts| mean  (lower better)", True),
+        ("midline_dev_mean", "midline deviation  (lower better)", True),
+    ]
     fig, axes = plt.subplots(1, len(metrics), figsize=(4.3 * len(metrics), 3.9))
     for ax, (m, title, lower) in zip(axes, metrics):
         for k in keys:
@@ -64,8 +66,9 @@ def fig_stage_trajectories(data, out):
         ax.set_xlabel("stage index")
         ax.grid(alpha=0.25)
         ax.legend(fontsize=6)
-    fig.suptitle("Metric evolution across pipeline stages — the baseline buys surface accuracy "
-                 "with distortion", fontsize=11)
+    fig.suptitle(
+        "Metric evolution across pipeline stages — the baseline buys surface accuracy with distortion", fontsize=11
+    )
     plt.tight_layout(rect=[0, 0, 1, 0.94])
     p = os.path.join(out, "summary_stage_trajectories.png")
     fig.savefig(p, dpi=115)
@@ -85,19 +88,24 @@ def fig_tradeoff(data, out):
         y = f["fscore@0.01"].mean()
         x2 = f["deform_mag_mean"].mean()
         hi = name in ("baseline", "C0_control")
-        for ax, xv, xl in [(axes[0], x, "edge distortion (log-ratio)"),
-                           (axes[1], x2, "mean |deform_verts|")]:
-            ax.scatter(xv, y, s=110 if hi else 65, alpha=0.85,
-                       c="#c53030" if hi else "#2b6cb0", zorder=3,
-                       edgecolors="k" if hi else "none", linewidths=1.2)
+        for ax, xv, xl in [(axes[0], x, "edge distortion (log-ratio)"), (axes[1], x2, "mean |deform_verts|")]:
+            ax.scatter(
+                xv,
+                y,
+                s=110 if hi else 65,
+                alpha=0.85,
+                c="#c53030" if hi else "#2b6cb0",
+                zorder=3,
+                edgecolors="k" if hi else "none",
+                linewidths=1.2,
+            )
             ax.annotate(name, (xv, y), fontsize=6.5, xytext=(4, 4), textcoords="offset points")
             ax.set_xlabel(xl + "   →  worse mesh")
             ax.set_ylabel("F-score@0.01   →  better surface")
             ax.grid(alpha=0.25)
     axes[0].set_title("Surface accuracy vs edge distortion")
     axes[1].set_title("Surface accuracy vs free-form deformation")
-    fig.suptitle("Up-and-left is strictly better. Red = stock pipeline / its harness control.",
-                 fontsize=11)
+    fig.suptitle("Up-and-left is strictly better. Red = stock pipeline / its harness control.", fontsize=11)
     plt.tight_layout(rect=[0, 0, 1, 0.93])
     p = os.path.join(out, "summary_tradeoff.png")
     fig.savefig(p, dpi=115)
@@ -123,8 +131,9 @@ def fig_per_part(data, out):
     ax.set_xticks(x + 0.4)
     ax.set_xticklabels(names, rotation=35, ha="right", fontsize=7)
     ax.set_ylabel("mean distance to target surface (lower better)")
-    ax.set_title("Per-anatomical-part accuracy, final stage — aggregates hide that legs "
-                 "behave differently from the body")
+    ax.set_title(
+        "Per-anatomical-part accuracy, final stage — aggregates hide that legs behave differently from the body"
+    )
     ax.legend(fontsize=7, ncol=6)
     ax.grid(alpha=0.25, axis="y")
     plt.tight_layout()
@@ -153,8 +162,9 @@ def fig_per_specimen(data, out, control="C0_control"):
             common = c.index.intersection(aa.index)
             if m not in c.columns or m not in aa.columns:
                 continue
-            delta = 100 * (aa.loc[common, m].values - c.loc[common, m].values) / (
-                np.abs(c.loc[common, m].values) + 1e-12)
+            delta = (
+                100 * (aa.loc[common, m].values - c.loc[common, m].values) / (np.abs(c.loc[common, m].values) + 1e-12)
+            )
             ax.plot(np.sort(delta), np.linspace(0, 100, len(delta)), lw=1.6, label=a)
         ax.axvline(0, c="k", lw=1, ls="--")
         ax.set_xlabel(f"per-specimen change in {m}  [%]")
@@ -162,8 +172,11 @@ def fig_per_specimen(data, out, control="C0_control"):
         ax.set_title(m, fontsize=9)
         ax.grid(alpha=0.25)
         ax.legend(fontsize=6.5)
-    fig.suptitle(f"Per-specimen paired change vs {control} — a curve entirely on one side of 0 "
-                 "means the effect is broad, not driven by a few specimens", fontsize=10)
+    fig.suptitle(
+        f"Per-specimen paired change vs {control} — a curve entirely on one side of 0 "
+        "means the effect is broad, not driven by a few specimens",
+        fontsize=10,
+    )
     plt.tight_layout(rect=[0, 0, 1, 0.93])
     p = os.path.join(out, "summary_per_specimen.png")
     fig.savefig(p, dpi=115)

@@ -29,10 +29,16 @@ OUT = os.path.join(HERE, "out")
 RUNS = os.path.join(HERE, "runs")
 
 GROUPS = [
-    ("SURFACE", [("fscore@0.01", False), ("fscore@0.02", False),
-                 ("chamfer_l2", True), ("hausdorff_95", True)]),
-    ("MESH VALIDITY", [("edge_logratio_absmean", True), ("tri_quality_mean", False),
-                       ("deform_mag_mean", True), ("dihedral_p99", True)]),
+    ("SURFACE", [("fscore@0.01", False), ("fscore@0.02", False), ("chamfer_l2", True), ("hausdorff_95", True)]),
+    (
+        "MESH VALIDITY",
+        [
+            ("edge_logratio_absmean", True),
+            ("tri_quality_mean", False),
+            ("deform_mag_mean", True),
+            ("dihedral_p99", True),
+        ],
+    ),
     ("CORRESPONDENCE", [("nbr_keep", False), ("bilateral", True), ("midline_dev_mean", True)]),
 ]
 
@@ -47,8 +53,10 @@ def load_metrics():
         last = list(dict.fromkeys(d["stage"]))[-1]
         out[n] = d[d["stage"] == last].mean(numeric_only=True).to_dict()
     # correspondence + tearing probes live in their own JSON files
-    for fn, keys in [("probe10_correspondence.json", ("nbr_keep", "bilateral")),
-                     ("probe12_tearing.json", ("dihedral_p99", "folded_face_frac"))]:
+    for fn, keys in [
+        ("probe10_correspondence.json", ("nbr_keep", "bilateral")),
+        ("probe12_tearing.json", ("dihedral_p99", "folded_face_frac")),
+    ]:
         p = os.path.join(OUT, fn)
         if not os.path.exists(p):
             continue
@@ -82,12 +90,13 @@ def main():
                     continue
                 b, v = base[k], m[a][k]
                 rel = 100 * (v - b) / (abs(b) + 1e-12)
-                vals.append(-rel if lo else rel)   # sign flipped so up = better
+                vals.append(-rel if lo else rel)  # sign flipped so up = better
             ax.bar(x + i * w, vals, w, label=a)
         ax.axhline(0, c="k", lw=1)
         ax.set_xticks(x + 0.4 - w / 2)
-        ax.set_xticklabels([k.replace("_absmean", "").replace("_mean", "") for k, _ in metrics],
-                           rotation=25, ha="right", fontsize=8)
+        ax.set_xticklabels(
+            [k.replace("_absmean", "").replace("_mean", "") for k, _ in metrics], rotation=25, ha="right", fontsize=8
+        )
         ax.set_title(gname, fontsize=11)
         ax.grid(alpha=0.25, axis="y")
     axes[0].set_ylabel("% better than the stock pipeline  (up = better, all metrics)")
@@ -95,7 +104,9 @@ def main():
     fig.suptitle(
         "What each approach buys, relative to the stock pipeline.  The stock fitter scores "
         "well on SURFACE and badly on the other two —\nand only the other two are what "
-        "registration exists to produce.", fontsize=11)
+        "registration exists to produce.",
+        fontsize=11,
+    )
     plt.tight_layout(rect=[0, 0, 1, 0.92])
     p = os.path.join(OUT, "headline.png")
     fig.savefig(p, dpi=120)

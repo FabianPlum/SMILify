@@ -246,3 +246,9 @@ benchmark_singleview_*/
 
 # Claude Code: project CLAUDE.md is tracked; machine-local settings are not.
 .claude/settings.local.json
+
+# part-field training corpus: regenerable from make_partfield_data.py in ~4 min, and
+# synth_train.npz alone is 192 MB. The split (split.json) IS tracked, so the corpus can be
+# rebuilt with the same held-out specimens.
+diagnostics/moonshot/partfield/*.npz
+diagnostics/moonshot/partfield/smoke*

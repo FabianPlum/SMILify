@@ -12,7 +12,6 @@ Reports, for each metric:
   * the pooled estimate with between-seed std
 """
 
-import glob
 import os
 
 import numpy as np
@@ -23,9 +22,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.path.join(HERE, "runs")
 
 METRICS = [
-    ("fscore@0.01", False), ("fscore@0.02", False), ("chamfer_l2", True),
-    ("edge_logratio_absmean", True), ("deform_mag_mean", True),
-    ("tri_quality_mean", False), ("part_leg_distal_dist_mean", True),
+    ("fscore@0.01", False),
+    ("fscore@0.02", False),
+    ("chamfer_l2", True),
+    ("edge_logratio_absmean", True),
+    ("deform_mag_mean", True),
+    ("tri_quality_mean", False),
+    ("part_leg_distal_dist_mean", True),
 ]
 
 
@@ -40,9 +43,11 @@ def load(run):
 
 def main():
     seeds = []
-    for s, (c, a) in {0: ("C0_control", "A4_nofreeze"),
-                      1: ("C0_control_s1", "A4_nofreeze_s1"),
-                      2: ("C0_control_s2", "A4_nofreeze_s2")}.items():
+    for s, (c, a) in {
+        0: ("C0_control", "A4_nofreeze"),
+        1: ("C0_control_s1", "A4_nofreeze_s1"),
+        2: ("C0_control_s2", "A4_nofreeze_s2"),
+    }.items():
         dc, da = load(c), load(a)
         if dc is None or da is None:
             print(f"  seed {s}: missing ({c} / {a})")
@@ -56,7 +61,7 @@ def main():
     print(f"SEED REPEATS — A4_nofreeze vs C0_control, {len(seeds)} seeds, 50 paired specimens each")
     print("=" * 90)
     print("\n  Relative change per seed (sign flipped so + is always better):\n")
-    hdr = f"  {'metric':<28}" + "".join(f"{'seed '+str(s):>11}" for s, _, _ in seeds)
+    hdr = f"  {'metric':<28}" + "".join(f"{'seed ' + str(s):>11}" for s, _, _ in seeds)
     print(hdr + f"{'mean':>10}{'sd':>8}  {'consistent?':>12}")
     print("  " + "-" * (len(hdr) + 30))
 

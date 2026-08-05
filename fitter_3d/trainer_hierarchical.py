@@ -49,12 +49,10 @@ import os
 import numpy as np
 import torch
 from pytorch3d.ops import knn_points, sample_points_from_meshes
-from pytorch3d.structures import Meshes
 
 import config
-from fitter_3d.trainer import SMAL3DFitter, get_meshes
+from fitter_3d.trainer import get_meshes
 from fitter_3d.trainer_moonshot import (
-    MoonshotStage,
     rest_edge_loss,
     robust_chamfer,
     build_lr_joint_pairs,
@@ -263,6 +261,8 @@ class HierarchicalStage:
         optimise_deform=False,
         part_scale=None,
         robust_mult=3.0,
+        partition=None,
+        chamfer_groups=None,
     ):
         self.name = name
         self.n_it = nits
@@ -280,23 +280,34 @@ class HierarchicalStage:
         # per-part robust scale (item 2). None = disabled, keeping the previous behaviour.
         self.part_scale = part_scale
         self.robust_mult = robust_mult
+        self.chamfer_groups = set(chamfer_groups) if chamfer_groups is not None else None
 
         self.lw = dict(
-            w_chamfer=1.0, w_edge=0.05, w_normal=0.01, w_laplacian=0.005,
-            w_beta_prior=0.002, w_sym=0.5, w_offset=0.0, w_midline=0.0,
+            w_chamfer=1.0,
+            w_edge=0.05,
+            w_normal=0.01,
+            w_laplacian=0.005,
+            w_beta_prior=0.002,
+            w_sym=0.5,
+            w_offset=0.0,
+            w_midline=0.0,
         )
         if loss_weights:
             self.lw.update(loss_weights)
 
         self.vg = torch.as_tensor(vertex_group, device=device)
-        self.part = TargetPartition(vertex_group, len(group_names), device)
+        # An injected partition (see fitter_3d.partfield.PartFieldPartition) is TARGET-derived
+        # and frozen; the default one is FIT-derived and recomputed from the current mesh.
+        # Both satisfy the same three-method interface, so nothing below this line changes.
+        self.part = partition if partition is not None else TargetPartition(vertex_group, len(group_names), device)
 
         # which joint_rot rows may move
         if active_groups is None:
             self.joint_mask = torch.ones(smal.joint_rot.shape[1], dtype=torch.bool, device=device)
         else:
-            self.joint_mask = joint_mask_for_groups(
-                joint_names, set(active_groups), split_distal=split_distal).to(device)
+            self.joint_mask = joint_mask_for_groups(joint_names, set(active_groups), split_distal=split_distal).to(
+                device
+            )
 
         params = [
             {"params": [smal.global_rot], "lr": lr},
@@ -328,9 +339,7 @@ class HierarchicalStage:
             with open(config.SMAL_FILE, "rb") as _f:
                 _u = _p._Unpickler(_f)
                 _u.encoding = "latin1"
-                self.sym_verts = torch.tensor(
-                    np.asarray(_u.load()["sym_verts"]).astype(np.int64), device=device
-                )
+                self.sym_verts = torch.tensor(np.asarray(_u.load()["sym_verts"]).astype(np.int64), device=device)
         self.history = []
         self.churn_history = []
 
@@ -347,6 +356,13 @@ class HierarchicalStage:
         total = 0.0
         n_terms = 0
         for g, gname in enumerate(self.group_names):
+            # chamfer_groups=None (the default, and what every pre-existing arm uses) sums
+            # over ALL groups, so a frozen part is still anchored while an active one moves.
+            # Restricting it is only meaningful for the H0 body stage under a target-derived
+            # partition, where summing over the leg groups would drag the body toward legs
+            # that have not been fitted yet.
+            if self.chamfer_groups is not None and gname not in self.chamfer_groups:
+                continue
             vmask = self.vg == g
             if vmask.sum() < 10:
                 continue
@@ -382,9 +398,7 @@ class HierarchicalStage:
                 l_ch = self._partitioned_chamfer(fitted, tgt_pts)
             else:
                 src_pts = sample_points_from_meshes(mesh, self.n_sample)
-                l_ch, _, _ = robust_chamfer(
-                    src_pts, tgt_pts, kernel=self.robust_kernel, scale=self.robust_scale
-                )
+                l_ch, _, _ = robust_chamfer(src_pts, tgt_pts, kernel=self.robust_kernel, scale=self.robust_scale)
             comp["chamfer"] = l_ch
             loss = loss + self.lw["w_chamfer"] * l_ch
 

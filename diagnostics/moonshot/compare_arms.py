@@ -17,7 +17,6 @@ Metric orientation is declared explicitly (lower_is_better) rather than guessed.
 """
 
 import argparse
-import glob
 import os
 
 import numpy as np
@@ -130,8 +129,7 @@ def main():
     ctrl_pose = pose_checkpoint(ctrl)
 
     arms = sorted(
-        d for d in os.listdir(args.runs_dir)
-        if os.path.isdir(os.path.join(args.runs_dir, d)) and d != args.control
+        d for d in os.listdir(args.runs_dir) if os.path.isdir(os.path.join(args.runs_dir, d)) and d != args.control
     )
     all_rows = []
     for name in arms:

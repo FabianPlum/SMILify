@@ -45,11 +45,15 @@ def build_parser():
     p.add_argument("--max_meshes", type=int, default=-1)
     p.add_argument("--eval", action="store_true", help="run the metric suite after fitting")
     p.add_argument("--quiet", action="store_true", default=True)
-    p.add_argument("--init_from", type=str, default=None,
-                   help="path to a stage .npz whose pose/shape state initialises this run. "
-                        "Used to hand a better pose (e.g. from the hierarchical fitter) to a "
-                        "standard surface-convergence schedule, so the two contributions are "
-                        "separable.")
+    p.add_argument(
+        "--init_from",
+        type=str,
+        default=None,
+        help="path to a stage .npz whose pose/shape state initialises this run. "
+        "Used to hand a better pose (e.g. from the hierarchical fitter) to a "
+        "standard surface-convergence schedule, so the two contributions are "
+        "separable.",
+    )
     return p
 
 
@@ -83,11 +87,9 @@ def main(args):
     if args.init_from:
         d = np.load(args.init_from, allow_pickle=True)
         with torch.no_grad():
-            for k in ["global_rot", "joint_rot", "betas", "log_beta_scales", "trans",
-                      "betas_trans", "deform_verts"]:
+            for k in ["global_rot", "joint_rot", "betas", "log_beta_scales", "trans", "betas_trans", "deform_verts"]:
                 if k in d:
-                    getattr(smal, k).data = torch.tensor(
-                        d[k], dtype=torch.float32, device=device)
+                    getattr(smal, k).data = torch.tensor(d[k], dtype=torch.float32, device=device)
         print(f"[moonshot] initialised pose/shape from {args.init_from}", flush=True)
 
     manager = MoonshotManager(out_dir=args.results_dir, labels=mesh_names)
@@ -156,7 +158,7 @@ def run_eval(args, smal, target_meshes, mesh_names, device):
         r["mesh"] = name
         rows.append(r)
         if (i + 1) % 10 == 0:
-            print(f"  eval {i+1}/{len(mesh_names)}", flush=True)
+            print(f"  eval {i + 1}/{len(mesh_names)}", flush=True)
 
     keys = ["mesh"] + [k for k in rows[0] if k != "mesh"]
     out_csv = os.path.join(args.results_dir, "metrics.csv")

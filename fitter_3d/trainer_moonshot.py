@@ -57,11 +57,10 @@ import matplotlib.pyplot as plt
 
 from pytorch3d.ops import sample_points_from_meshes, knn_points
 from pytorch3d.loss import mesh_laplacian_smoothing, mesh_normal_consistency
-from pytorch3d.structures import Meshes
 
 import config
-from fitter_3d.trainer import SMAL3DFitter, SMALParamGroup, get_meshes  # reuse model, unmodified
-from fitter_3d.utils import plot_meshes, try_mkdir
+from fitter_3d.trainer import SMALParamGroup, get_meshes  # reuse model, unmodified
+from fitter_3d.utils import plot_meshes
 
 nn = torch.nn
 
@@ -355,9 +354,7 @@ class MoonshotStage:
         self.param_group = SMALParamGroup(smal_3d_fitter, scheme, custom_lrs)
         self.optimizer = torch.optim.Adam(self.param_group, lr=lr)
         self.scheduler = (
-            torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=max(nits, 1))
-            if lr_decay
-            else None
+            torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=max(nits, 1)) if lr_decay else None
         )
 
         with torch.no_grad():
@@ -381,9 +378,7 @@ class MoonshotStage:
             with open(config.SMAL_FILE, "rb") as _f:
                 _u = _p._Unpickler(_f)
                 _u.encoding = "latin1"
-                self.sym_verts = torch.tensor(
-                    np.asarray(_u.load()["sym_verts"]).astype(np.int64), device=device
-                )
+                self.sym_verts = torch.tensor(np.asarray(_u.load()["sym_verts"]).astype(np.int64), device=device)
 
         self.lr_pairs = None
         if self.loss_weights.get("w_sym", 0.0) > 0:

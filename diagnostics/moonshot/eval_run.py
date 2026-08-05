@@ -92,7 +92,7 @@ def main():
             r["stage"] = sname
             rows.append(r)
             if (i + 1) % 10 == 0:
-                print(f"  {i+1}/{len(names)}", flush=True)
+                print(f"  {i + 1}/{len(names)}", flush=True)
         all_rows += rows
 
         def m(k):
