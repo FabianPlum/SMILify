@@ -1,0 +1,28 @@
+[probe] model OmniAnt_25PCs_joint_limited.pkl: J=55, N_POSE=54
+[probe] constrained axes 96/162, median half-width 20.0 deg
+
+==============================================================================
+Stage_1_default  --  81 registrations already accepted as good
+==============================================================================
+  axes in violation           0.1 / 162 per specimen (min 0, max 2)
+  specimens with >=1 violation 10 / 81
+  violation magnitude          median 3.2 deg, p90 6.9 deg, max 7.4 deg
+  loss_limit (mean over all)   median 0.00000, max 0.00086
+  w_limit * loss_limit @ 100   median 0.000, max 0.086
+  chamfer term for comparison  0.005 - 0.045
+  -> limit term is 0x the LARGEST chamfer contribution
+  worst joints (violating specimen-axes): [('ma_r', 8), ('ma_l', 4)]
+  loss_limit percentiles       p10 0.00000  p50 0.00000  p90 0.00011
+
+==============================================================================
+Stage_3_deform_fine  --  81 registrations already accepted as good
+==============================================================================
+  axes in violation           0.1 / 162 per specimen (min 0, max 2)
+  specimens with >=1 violation 10 / 81
+  violation magnitude          median 3.2 deg, p90 6.9 deg, max 7.4 deg
+  loss_limit (mean over all)   median 0.00000, max 0.00086
+  w_limit * loss_limit @ 100   median 0.000, max 0.086
+  chamfer term for comparison  0.005 - 0.045
+  -> limit term is 0x the LARGEST chamfer contribution
+  worst joints (violating specimen-axes): [('ma_r', 8), ('ma_l', 4)]
+  loss_limit percentiles       p10 0.00000  p50 0.00000  p90 0.00011

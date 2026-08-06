@@ -25,7 +25,6 @@ N_BENCH = 12
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    files = sorted([f for f in os.listdir(MESH_DIR) if f.endswith(".obj")])
 
     # Reuse probe 03's measurements if present, else recompute on a wide sample.
     cache = os.path.join(OUT_DIR, "probe03_roll_validity.json")

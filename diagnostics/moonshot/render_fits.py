@@ -84,9 +84,7 @@ def main():
                 mag = np.linalg.norm(dv[i], axis=-1)
                 ax = axes[r, c + 1]
                 ax.scatter(tgt[i][:, a], tgt[i][:, b], s=0.4, alpha=0.15, c="#bbb", linewidths=0)
-                sc = ax.scatter(
-                    V[:, a], V[:, b], s=0.5, alpha=0.7, c=mag, cmap="inferno", vmin=0, vmax=0.06, linewidths=0
-                )
+                ax.scatter(V[:, a], V[:, b], s=0.5, alpha=0.7, c=mag, cmap="inferno", vmin=0, vmax=0.06, linewidths=0)
                 ax.set_aspect("equal")
                 ax.tick_params(labelsize=5)
                 if r == 0:

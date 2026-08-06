@@ -51,6 +51,7 @@ import torch
 from pytorch3d.ops import knn_points, sample_points_from_meshes
 
 import config
+from fitter_3d.joint_limits import joint_limit_tensors, limit_hinge
 from fitter_3d.trainer import get_meshes
 from fitter_3d.trainer_moonshot import (
     rest_edge_loss,
@@ -324,9 +325,14 @@ class HierarchicalStage:
             w_sym=0.5,
             w_offset=0.0,
             w_midline=0.0,
+            w_limit=0.0,
         )
         if loss_weights:
             self.lw.update(loss_weights)
+
+        # Authored rotation limits, or (None, None) when the model has none. Built once here
+        # rather than per-iteration; config.dd is the same dict SMAL loaded from config.SMAL_FILE.
+        self.min_limits, self.max_limits = joint_limit_tensors(config.dd, device)
 
         self.vg = torch.as_tensor(vertex_group, device=device)
         # An injected partition (see fitter_3d.partfield.PartFieldPartition) is TARGET-derived
@@ -483,6 +489,21 @@ class HierarchicalStage:
             l_j = self.smal.log_beta_scales.pow(2).mean() + self.smal.betas_trans.pow(2).mean()
             comp["jres"] = l_j
             loss = loss + self.lw["w_jresid"] * l_j
+
+        if self.lw.get("w_limit", 0.0) > 0:
+            # Authored per-joint rotation limits (REPORT §6.9). The arms that unfreeze pose
+            # drive 37 of 96 constrained axes out of anatomical range on every specimen,
+            # concentrated on the distal hind leg -- exactly the joints §4 shows the area-
+            # sampled data term cannot constrain. This is the only term here that acts on
+            # those joints at all.
+            if self.min_limits is None:
+                raise ValueError(
+                    "w_limit > 0 but the model file authors no 'joint_limits'. "
+                    "Point config.SMAL_FILE at a model that does (e.g. OmniAnt_25PCs_joint_limited.pkl)."
+                )
+            l_lim = limit_hinge(self.smal.joint_rot, self.min_limits, self.max_limits)
+            comp["limit"] = l_lim
+            loss = loss + self.lw["w_limit"] * l_lim
 
         if self.lw.get("w_midline", 0.0) > 0 and self.sym_verts is not None:
             l_m = midline_penalty(mesh.verts_padded(), self.sym_verts)

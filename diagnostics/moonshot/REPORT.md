@@ -79,6 +79,8 @@ per-stage change in `joint_rot`:
 | Stage_2_deform_coarse | 1000 | **0.00000** | **0.00000** | 4.87 |
 | Stage_3_deform_fine | 1000 | **0.00000** | **0.00000** | 2.11 |
 
+![per-stage parameter movement](out/probe07_stages.png)
+
 2000 of 2400 iterations cannot change a joint angle. Whatever pose error exists after
 iteration 400 is permanent, and the remaining 83% of compute is spent hiding it with
 per-vertex offsets.
@@ -86,6 +88,8 @@ per-vertex offsets.
 **What that costs**, measured directly (probe 10, `fitter_3d/correspondence.py`): mean edge
 distortion vs template **74%**, local vertex neighbourhoods destroyed **36%**, free-form
 offset magnitude **2×** that of the best arm.
+
+![correspondence damage vs the template](out/probe10_correspondence.png)
 
 **Pose is trapped, not under-optimised.** Arm E1 raised the pose learning rate and budget; the
 result was *worse than its own initialisation*. Increasing step size in a multimodal objective
@@ -134,6 +138,8 @@ moves midsagittal vertices off y=0 while leaving every scale pair identical. A f
 planarity penalty on the 223 `sym_verts` (penalising the *variance* of their y, so a
 legitimate global translation costs nothing) swung it from +43.8% worse to −46.5% better.
 
+![headline arm comparison](out/headline.png)
+
 **The caveat, which matters (§3):** M7 is *worse* than baseline on every per-part
 `within_tau` — legs 0.9541 vs 0.9843, body 0.9549 vs 0.9876, head 0.9554 vs 0.9897. That is
 not evidence M7 is worse. Those metrics measure how close fitted vertices sit to the target
@@ -167,6 +173,8 @@ The baseline reaches a higher surface score only by deforming.
 | **surface proximity** | chamfer, fscore@τ, hausdorff, *all* `part_*_dist_mean`, *all* `part_*_within_tau` | getting vertices near the target surface — **by any means, including destroying the mesh** |
 | **correspondence integrity** | edge_logratio, deform_mag, neighbourhood preservation, tri_quality, dihedral/folding | keeping the template's own structure while it moves |
 
+![surface-proximity vs correspondence-integrity trade-off](out/summary_tradeoff.png)
+
 Two demonstrations that the first kind is gameable:
 
 * Artificially snapping every distal vertex onto its nearest target point improves
@@ -195,6 +203,8 @@ localise, and closing it is the highest-value instrument work remaining.
   surface area; tibia+tarsus+pretarsus hold **2.4%**. At `n_sample=8000` the pretarsus expects
   **~0.3 samples** against the code's own `n_t < 10` skip threshold. Distal segments are
   effectively unconstrained by an area-sampled data term.
+![leg-chain area budget](out/probe13_distal.png)
+
 * **Bilateral symmetry** (probe 13): the template is left/right symmetric to **<0.3%** by area,
   and its mirror involution is exact (max match distance 0.00e+00). A mirror-coupling term has
   almost nothing to correct.
@@ -204,6 +214,8 @@ localise, and closing it is the highest-value instrument work remaining.
   moves fscore@0.02 only **0.7313 → 0.7356**. `posedirs` is literally shape `(0,)` — the
   pose-corrective blendshape slot is empty — and folding concentrates across joint boundaries
   (6.33%) versus within parts (1.48%).
+![thin-structure outlier bias](out/probe09_thin_bias.png)
+
 * **Alignment**: worker scans are canonically aligned — PCA-1 yaw median **1.0°**, 90th pct
   9.4° — with exactly one 62° outlier (*Atopomyrmex mocquerysi*).
 
@@ -219,12 +231,16 @@ the kernel's zero-gradient region). Mutual-NN + Lowe ratio and Sinkhorn OT were 
 scaling** (`--part_robust`, scale ∝ each part's own template thickness, measured 14.2× ratio
 body-to-distal) was the principled fix and produced no distal gain.
 
+![shape capacity 13 vs 37 directions](out/probe08_shape_capacity.png)
+
 ### 5.2 Geodesic branch decomposition
 A target-derived partition from the scan's own branching topology. On the template it separates
 all six legs perfectly in 0.2 s. On the 50 real scans it reaches ≥6 branches on **58%** against
 its own pre-registered 80% gate, and agrees with itself across two surface samplings only
 **20%** of the time. Legs touching the body merge into one component and no threshold separates
 them. **Rejected on its own gate.**
+
+![geodesic branch-count gate](out/probe14_topology.png)
 
 ### 5.3 The learned part field
 A PointNet++ segmentation network labelling raw scan points into 13 anatomical parts + debris,
@@ -235,6 +251,8 @@ used as a **frozen, target-derived** replacement for the fit-derived partition.
 anatomy-free baseline. On the four specimens where the geodesic sweep collapsed to ≤2 branches
 (three to a *single* branch — limbs touching, no bottleneck to cut) it recovers **6/6 legs on
 every one**. That capability difference from a level set is real.
+
+![part field: predictions vs the fit-derived partition](out/partfield_vs_fit.png)
 
 *What it costs:* substituted into the fitter it loses decisively. Against the byte-identical
 control `M8a_split_only` (differing only in `--part_field`), at `H3_deform`, n=50:
@@ -522,17 +540,47 @@ dimensional, same sample size:
 |---|---|---|---|
 | exact correspondence | **0.42** | **0.00** | 91.9% |
 | + per-vertex noise 0.004 | 0.51 | 0.27 | 90.0% |
-| **real registrations** | **0.99** | 0.98 | 39.7% |
+| **real registrations (worker)** | **0.99** | 0.98 | 39.7% |
+
+![probe 19 — leave-one-out generalisation](out/probe19_correspondence.png)
 
 The metric detects learnable structure when it is present, and reduces error to zero at 20
-modes on 13-dimensional data. On the real registrations it finds none.
+modes on 13-dimensional data. On the real *worker* registrations it finds none.
+
+### 6.4.1 The same pipeline DOES register clean scans — corrected
+
+The paragraph above originally continued "this pipeline produces surface fits, not
+registrations". That claim was measured only on workers, and it is **wrong as a statement
+about the pipeline**. Running the identical metric on the 81 ALL_ANTS_CLEAN registrations —
+same code, same losses, same template family, the corpus OmniAnt's own shape space was built
+from:
+
+| corpus | gen@1 | gen@5 | gen@10 | gen@20 | gen@40 |
+|---|---|---|---|---|---|
+| worker registrations | — | — | **0.99–1.00** | 0.98 | — |
+| BPX_noprior, best worker arm (§6.8.2) | — | — | **0.9353** | 0.9208 | — |
+| **ALL_ANTS_CLEAN** | 0.7336 | 0.5816 | **0.5383** | 0.4999 | **0.4586** |
+| *synthetic, exact correspondence* | | | *0.42* | *0.00* | |
+
+The clean corpus lands essentially **at the exact-correspondence reference**, and keeps
+improving out to 40 modes rather than plateauing. So correspondence is establishable by this
+machinery. What defeats it is specific to worker scans, and §6.1 already identified the
+irreducible difference as **pose** — ethanol-preserved workers are contracted and folded,
+the reference corpus is posed and extended.
+
+**Corrected bottom line.** The pipeline produces registrations on clean scans and surface fits
+on workers. Everything downstream that needs cross-specimen correspondence *can* be built —
+on the clean corpus, which is exactly what `OmniAnt_25PCs_joint_limited.pkl` now is. The
+worker problem is a pose problem, not a method problem, and that is a far more tractable
+statement than the one it replaces.
 
 **The gate does not fix this.** Gated registrations appear to generalise better in absolute
 terms (0.01256 vs 0.02110), but that is entirely lower diversity: normalised by each
 population's own spread, all three sets sit at **0.99–1.00**. The gate improves the *fit*
 (§6.2, decisively) without improving *correspondence consistency* at all.
 
-**What this explains.** It is the common cause behind several separate observations:
+**What this explains** (for the worker corpus; §6.4.1 shows the clean corpus does not share
+it). It is the common cause behind several separate observations:
 * why the offset PCA spectrum is flat (§5.4) — the residual is noise, not shape;
 * why enlarging the shape space 13 → 37 changed almost nothing (§4) — the added directions
   were noise directions;
@@ -546,11 +594,12 @@ do not fix inconsistent correspondence; they average it further toward the mean.
 stating plainly because it was the single most expensive item on the queue, and it was never
 run. The measurement above cost ten minutes and removes it.
 
-**The honest bottom line.** This pipeline currently produces *surface fits*, not
-*registrations*. The distinction is exactly the one §1 opened with, and it is now measured at
-the population level rather than inferred from edge distortion on single specimens. Nothing
-downstream that depends on cross-specimen correspondence — shape spaces, beta regressors,
-morphometrics — can be built on the current output at any corpus size.
+**The honest bottom line, as corrected by §6.4.1.** On *worker* scans this pipeline produces
+*surface fits*, not *registrations*. The distinction is exactly the one §1 opened with, and it
+is measured at the population level rather than inferred from edge distortion on single
+specimens. Nothing downstream that depends on cross-specimen correspondence can be built on
+the current *worker* output at any corpus size — but the same pipeline reaches 0.4586 on clean
+scans, so the machinery is sound and the defect is in what worker scans do to pose.
 
 ---
 
@@ -877,6 +926,250 @@ because it was measured on `M4b`/`M6`, which are moonshot arms and *did* have th
 
 ---
 
+## 6.9 Pose freedom is being spent outside anatomical range
+
+§8 concluded that the two interventions which worked — M7 and A4 — both work by letting pose
+keep moving, and that pose is therefore the remaining lever. With
+`3D_model_prep/OmniAnt_25PCs_joint_limited.pkl` there is now a model carrying authored
+per-joint rotation limits (99 of 165 axes constrained across 33 of 55 joints, median
+half-width 20°), so for the first time "is this pose anatomically possible?" is a measurable
+question rather than a visual impression.
+
+**Scoring every stored arm's `joint_rot` against those limits.** Angles are canonicalised to
+‖θ‖ ≤ π first, because axis-angle is non-unique past π and a raw hinge would report a
+coordinate choice as an anatomical violation. Measured: canonicalising moves the violating-axis
+count by 0.0–0.1% and the median overshoot by 0.2°, but cuts the reported *maximum* from 216°
+to 141° — so it matters only for the extreme tail.
+
+| arm | violating axes/specimen | % specimens | median over | p95 over | worst joints |
+|---|---|---|---|---|---|
+| stock baseline | 3.8 / 96 | 92% | 4.0° | 16.9° | mandibles only |
+| C0_control | 3.2 / 96 | 92% | 4.3° | 18.2° | mandibles only |
+| **M7_handoff_midline** | **37.2 / 96** | **100%** | **19.5°** | **80.3°** | `l_3_ta_r`, `l_3_ti_r`, `l_3_ta_l` |
+| **BPX_noprior** | **37.3 / 96** | **100%** | **19.4°** | **77.5°** | hind-leg tarsi and tibiae |
+
+**The baseline looks clean only because it cannot move.** §1 measured that it freezes pose for
+83% of its iterations; its maximum rotation magnitude anywhere is 56°, and it never drives a
+single axis-angle component past π. The arms that unfreeze pose immediately spend that freedom
+outside the plausible range, ten times over.
+
+**And the violations concentrate exactly where §4 predicts they must.**
+
+![violations by anatomical group](out/limit_violations_bygroup.png)
+
+| group | constrained axes | % violating | mean overshoot |
+|---|---|---|---|
+| body | 0 | — | — |
+| mandible | 6 | 31.7% | 11.3° |
+| leg proximal (coxa/trochanter/femur) | 54 | 29.8% | 19.1° |
+| **leg distal (tibia/tarsus/pretarsus)** | 36 | **53.4%** | **35.7°** |
+
+§4's structural fact: coxa+trochanter+femur hold **94.0%** of a leg chain's surface area and
+tibia+tarsus+pretarsus hold **2.4%**, so at `n_sample=8000` the pretarsus expects ~0.3 target
+samples against the code's own `n_t < 10` skip threshold. Those joints are effectively
+**unconstrained by the data term** — and they are precisely the ones that end up furthest
+outside anatomical range, at nearly twice the rate and twice the overshoot of the proximal leg.
+The authored limits are the only term anywhere in this pipeline that acts on them at all.
+
+**What it looks like.** Statistics cannot adjudicate whether a hand-authored ±20° bound is
+anatomically right; a rendered ant can. Legal geometry is grey, overshoot is coloured:
+
+![limit violations rendered on the fitted meshes](out/limit_violations.png)
+
+The two "best" rows matter as much as the worst: `Aphaenogaster_pallida` and
+`Strumigenys_stenorhina` produce fits that look like ants and match their targets closely, and
+they *still* carry 12–13 out-of-range joints. `Anochetus_risii` shows the other extreme — a
+visibly shattered fit whose whole leg set is out of range.
+
+### 6.9.1 The weight had to be measured, not inherited
+
+PR #98 ships `w_limit: 100.0` for `fitter_3d/trainer.py`, where it is well scaled: the only
+violations there are mandibular, the hinge sits at ~9e-4, and 100× that is comparable to a
+chamfer of 5e-3…4.5e-2. Carrying that number into this pipeline would have been the §7.2 error
+again — a weight tuned in one regime applied untested in another.
+
+![loss-component calibration](out/limit_calibration.png)
+
+Measured (`probe_20_limit_calibration.py`): at the fitted pose the hinge is **0.122**, the
+hierarchical chamfer is **0.0334**, and the moonshot handoff chamfer is **0.00071**. So
+`w_limit=100` would be **366×** the data term, parity in the hierarchical stages is **0.273**,
+and parity in the handoff is **0.006** — a 47× difference between the two pipelines that one
+shared number would have silently got wrong in one of them.
+
+### 6.9.2 E1 — the limits work perfectly and correspondence does not care
+
+`run_e1_limits.sh`: LIM_0 (control, 0/0), LIM_1x (0.273/0.006), all on the 25-PC template,
+bench50, otherwise identical to `BPX_noprior`.
+
+| arm | gen@10/spread | gen@20/spread | violating axes | median over | betas sd |
+|---|---|---|---|---|---|
+| LIM_0 (w=0, control) | **0.9221** | 0.9095 | 37.4 | 20.5° | 0.273 |
+| LIM_1x (w=0.273) | 0.9336 | 0.9209 | **0.8** | **0.0°** | 0.278 |
+| LIM_3x (w=0.819) | 0.9372 | 0.9235 | **0.3** | **0.0°** | 0.277 |
+| *BPX_noprior, 13-PC template* | 0.9353 | 0.9208 | 37.3 | 19.4° | 0.318 |
+| *ALL_ANTS_CLEAN* | *0.5383* | *0.4999* | | | |
+
+**The mechanism succeeded completely and the primary outcome did not move — at any weight.**
+Violating axes fell 37.4 → 0.8 → 0.3 and median overshoot to exactly 0.0°, while gen/spread
+went 0.9221 → 0.9336 → 0.9372, monotonically *worse*. The pre-registration named this exact
+outcome as the kill condition: **anatomically implausible distal rotation is not what destroys
+correspondence, and the hypothesis is dropped rather than re-weighted.**
+
+*(Incidentally, the 25-PC template alone moved the control from BPX_noprior's 0.9353 to 0.9221
+— small, and the only variable is the shape space.)*
+
+**The null is genuine, not an artefact of the metric.** probe-19 measures rest-space geometry
+with pose *removed*, so a pose intervention can only reach it indirectly — if the limits had
+changed pose without changing anything probe-19 sees, the causal path would never have been
+open and the null would mean nothing. Checked: relative change LIM_0 → LIM_1x is `joint_rot`
+86.8%, `deform_verts` 106.3%, `log_beta_scales` 91.8%, `betas_trans` 79.5%. The intervention
+propagated into every channel the metric reads.
+
+### 6.9.3 Where the compensation went — and what it implies
+
+Forbidding the rotation did not make the fit correct. It made it compensate elsewhere:
+
+| channel | LIM_0 (free) | LIM_1x (limited) | change |
+|---|---|---|---|
+| `joint_rot` | 0.4258 | 0.3207 | −24.7% |
+| **`log_beta_scales`** — segment length | 0.1631 | **0.1996** | **+22.4%** |
+| **`betas_trans`** — joint offset | 0.0288 | **0.0318** | **+10.3%** |
+| `deform_verts` | 0.00955 | 0.00986 | +3.2% |
+
+The two parameters that gained are exactly the two that determine **where a joint sits**:
+`log_beta_scales` sets segment length (a longer bone pushes its child joint further out) and
+`betas_trans` translates the joint directly. Constrain the angle and the fit stretches the limb
+and slides the joint instead.
+
+This matches the domain reading of the renders: the violations are a *symptom* of the skeleton
+being placed wrong — the registration over- or undershoots where a joint actually is, so the
+limb bends in the wrong place or is stretched, and an out-of-range angle is one way of
+expressing that. It also explains E1's null directly: clamping an angle does not move a joint
+to the right location, so vertex *v* still does not land on the same anatomical point across
+specimens, and correspondence is untouched.
+
+**Standing decision (2026-08-06):** keep the limits restrictive for now. They are cheap, they
+remove a whole class of impossible output, and the authored ranges will be widened once
+literature- or scan-derived pose data is available to fill the space properly.
+
+### 6.9.4 E2 — pose really is trapped, and the instability is distal
+
+§1's "pose is trapped, not under-optimised" rested on a single arm (`E1_posebudget`) being
+worse than its own initialisation, which is also consistent with a badly chosen learning rate.
+`probe_21_pose_basins.py` tests it directly: run the same specimens under 5 seeds — changing
+only which target points are sampled — and measure the across-seed spread of the final joint
+angles.
+
+![across-seed pose spread](out/pose_basins.png)
+
+| group | free sd | limited sd | reduction | free p95 |
+|---|---|---|---|---|
+| body | 3.67° | 3.62° | **1.6%** | 16.1° |
+| mandible | 1.99° | 1.65° | 17.3% | 6.6° |
+| leg proximal | 5.70° | 4.99° | 12.5% | 17.1° |
+| **leg distal** | **13.93°** | **9.16°** | **34.3%** | **46.9°** |
+
+**§1's claim is confirmed, and localised.** The same specimen fitted twice with a different
+sampling seed puts its distal leg **14° apart on average and up to 47°**, while the body stays
+within 3.7°. The objective is genuinely multimodal, and the multimodality lives in the segments
+§4 showed the area-sampled data term cannot see.
+
+The joint limits cut distal instability by **34.3%** against **1.6%** on the body — the
+selective reduction the pre-registration named as the signature of the §6.9 mechanism rather
+than of generic pose damping. So the limits do real work on pose stability. They simply do not
+convert that into correspondence (§6.9.2), which is the finding that matters.
+
+---
+
+## 6.10 The anterior blind spot — head under-carried, appendages reaching
+
+**Domain observation (Fabian, from renders):** *"the head is simply not moved forward enough so
+the mandibles and antennae explode to form the head, while the head shrinks into the thorax."*
+
+Verified in `probe_22_anterior_blindspot_PROBE.py`. An earlier pass of this measurement used
+the wrong joint grouping — antennae are named `an_*`, not `a_*`, so they were silently pooled
+into "body", and the thorax reference wrongly included the whole gaster and waist. The numbers
+below supersede that pass; where they differ from it, these are the correct ones.
+
+**1. The authored limits do not cover the anterior — and the gap is wider than first stated.**
+
+| group | joints | constrained axes |
+|---|---|---|
+| thorax (`b_t`) | 1 | 3/3 |
+| **gaster** (`b_a_1…5`) | 5 | **0/15** |
+| **waist** (`w_*`) | 4 | **0/12** |
+| **head** (`b_h`) | 1 | **0/3** |
+| mandible (`ma_*`) | 2 | 6/6 |
+| **antenna** (`an_*`) | 6 | **0/18** |
+| leg (`l_*`) | 36 | 90/108 |
+
+Everything on the body axis except the thorax root and the mandibles is unconstrained: **45 of
+48 non-leg, non-mandible axes are free.** E1 therefore could not touch this failure mode by
+construction, which is worth holding next to E1's null — the limits were never applied where
+this particular failure lives.
+
+**2. The head is deformed least and the antennae most, only in the pose-mobile arms.**
+Free-form `deform_verts` magnitude per group, relative to the thorax:
+
+| arm | thorax (abs) | gaster | head | mandible | antenna | leg |
+|---|---|---|---|---|---|---|
+| baseline (pose frozen) | 0.04254 | 1.17× | 0.99× | 1.08× | 0.86× | 0.99× |
+| M7_handoff_midline | 0.02558 | 0.82× | **0.60×** | 0.81× | **1.44×** | 0.78× |
+| BPX_noprior | 0.01963 | 1.06× | **0.76×** | 1.09× | **1.79×** | 1.01× |
+| LIM_0 (no limits) | 0.01874 | 1.08× | **0.73×** | 1.29× | **1.82×** | 1.07× |
+| LIM_1x (limits on) | 0.01975 | 1.05× | **0.72×** | 1.24× | **1.72×** | 1.05× |
+
+The baseline is flat at ~1.0× everywhere — it shrink-wraps uniformly (§3). Every pose-mobile
+arm shows the same signature: the head deforms 24–40% *less* than the thorax while the antennae
+deform 44–82% *more*. That is the observation quantified — the head is not being carried
+forward, and the appendages reach to cover the gap.
+
+**A correction to an earlier reading.** It was previously inferred from LIM_1x's antenna figure
+(1.72×) that the joint limits were pushing work out of constrained parts into unconstrained
+ones. **That is refuted by its own control:** LIM_0, with no limits at all, is *higher* at
+1.82×. The antennae were already the most-deformed group before any limit was applied, so the
+limits are not the cause.
+
+**3. Nothing bounds per-joint scale, and the baseline exploits that spectacularly.**
+`exp(log_beta_scales)` across the 50 specimens:
+
+| arm | head | mandible | antenna |
+|---|---|---|---|
+| **baseline** | 0.033–4.612 (**138×**) | 0.030–11.801 (**389×**) | 0.024–21.227 (**889×**) |
+| M7_handoff_midline | 0.376–1.689 (4.5×) | 0.584–2.028 (3.5×) | 0.686–1.701 (2.5×) |
+| BPX_noprior | 0.341–1.733 (5.1×) | 0.611–1.836 (3.0×) | 0.610–1.685 (2.8×) |
+| LIM_0 | 0.310–1.577 (5.1×) | 0.530–1.641 (3.1×) | 0.342–2.201 (6.4×) |
+| LIM_1x | 0.353–1.724 (4.9×) | 0.547–1.569 (2.9×) | 0.357–2.333 (6.5×) |
+
+The stock baseline lets an antenna joint scale by **21×** and shrink to **0.024×** — an
+889-fold range on one anatomical part. That is literally a head shrinking into the thorax.
+`fitter_3d/joint_limits.py` hinges on `joint_rot` only; the only terms touching
+`log_beta_scales` anywhere are the L/R symmetry tie and the opt-in `w_jresid` L2, neither of
+which is an absolute bound. The hierarchical arms compress the range to 2.5–6.5×, but
+**incidentally** — no loss term enforces it.
+
+**4. The partition does not cover the head.** `vertex_groups` returns exactly
+`['body', 'l1_l', 'l1_r', 'l2_l', 'l2_r', 'l3_l', 'l3_r']` — head, mandibles and antennae are
+one undifferentiated `body` pool. The entire anti-multimodality mechanism (a leg cannot be
+rewarded for matching another leg's surface because that surface is not in its data term) is
+**not applied anteriorly**. Covering the head with mandible vertices costs the chamfer nothing.
+This is §3's gameability argument in the head region, and it is precisely the "part awareness"
+the domain observation asks for.
+
+**5. An instrument for this already exists outside the repo.** Khaoula's penetration/
+self-intersection detector (reviewed 2026-08-05, `diagnostics/khaoula_review/`) measures
+exactly this class of failure; specimen `23-37` appears in `penetration_regression_flags.csv`
+as a flagged regression (+8.5% burden at seed 0). The full deliverable is not on disk here, so
+the per-part head figure quoted in discussion could not be re-verified and is not asserted.
+The detector is in neither the repo nor this report's metric suite, and it should be.
+
+**Why this matters for what comes next.** Three independent mechanisms — the partition, the
+authored limits, and per-joint scale — all stop at the neck. The anterior is the one region
+where a *part-aware* intervention has never been tried, and unlike the distal leg (E1, null) it
+has not yet been tested and found wanting.
+
+---
+
 ## 7. Claims of mine that were wrong
 
 Kept because the pattern matters more than the individual errors: **every one produced
@@ -935,20 +1228,40 @@ geodesic decomposition, the learned part field, shape-space enlargement — all 
 both work by letting **pose keep moving**. That is a consistent signal, and it points at pose,
 not at the data term.
 
+**And §6.9 supplies the missing half of that sentence.** Pose freedom is not free: the arms
+that unfreeze pose put 37 of 96 constrained axes outside anatomically plausible range on 100%
+of specimens, median 19.4°, concentrated in the distal leg — the segments §4 shows the
+area-sampled data term cannot constrain at all. The baseline avoids this only by not moving.
+So the finding is not "pose should move more" but **"pose should move within a plausible set"**,
+and until now nothing in the pipeline defined that set.
+
+**Every item on the previous version of this list has since been executed.** The preprocessing
+A/B was run and was negative (§6.1); the soft partition was run and was null (§6.6 step 1); the
+correspondence-correctness metric was built (probe 19, §6.4); quality-gated evaluation was
+built and validated held-out (§6.2). What that sequence produced was mostly nulls, and the two
+things that *did* move — removing `w_beta_prior` (§6.8) and now the joint limits (§6.9) — were
+both found by measuring the pipeline rather than by proposing a better correspondence method.
+
 **Next, in order:**
-1. **The preprocessing A/B** (§6) — cheapest remaining decisive experiment.
-2. **A soft partition** — per-point class probabilities as chamfer *weights* rather than a hard
-   argmax, so uncertainty reduces influence instead of causing deletion or wrong commitment.
-   This is §5.3's conclusion, and it matches the EM formulation used for robust statistical
-   shape model fitting (E-step: posterior that each point is explained by the model; M-step:
-   weighted fit), which is self-correcting where the frozen partition was not.
-3. **A correspondence-correctness metric** (§3), without which arms cannot be separated on the
-   thing that matters.
-4. **Quality-gated evaluation**: rank the 757 workers by intrinsic scan features and report on
-   the fittable subset explicitly, rather than averaging over specimens no parametric fit could
-   recover.
+1. **E1, running** (§6.9.2) — do authored joint limits move probe-19 gen/spread off 0.9353?
+   First intervention that constrains pose rather than freeing it.
+2. **E2, direct test of the trapped-pose claim.** §1 asserts pose is "trapped, not
+   under-optimised" and that has never been measured directly. Run the same specimens under N
+   seeds and measure the across-seed spread of final joint angles, with and without limits. The
+   mandible pilot (PR #98 review) gave σ 0.0157 rad free → 0.0000 constrained on an
+   underdetermined DOF, which is the effect in miniature.
+3. **Re-test the shape ceiling with a shape space that generalises** (§4). "Shape capacity is
+   not binding" was established with 37 directions from *worker-offset* PCA — noise directions
+   by §6.4. The 25-PC clean-corpus space reaches gen@10 = 0.5383 (§6.4.1), so it carries real
+   structure and the claim deserves a genuine test.
+4. **Rebuild the worker shape space — but only if E1 moves.** §6.5 deliberately did not run
+   `run_top50.sh` because more specimens cannot fix inconsistent correspondence. If limits make
+   worker correspondence consistent, that decision reverses and this becomes the payoff run.
 5. **`posedirs` is empty.** Pose-corrective blendshapes are the standard fix for exactly the
-   joint-boundary folding measured in §4, and the slot has never been populated.
+   joint-boundary folding measured in §4 (6.33% across boundaries vs 1.48% within), and the
+   slot has never been populated. More attractive now: joint-boundary folding and distal
+   implausibility are the same region of the model.
+   NOTE: That is not quite correct. Pose correctives are normally used to correct exact vertex placements based on joint rotations. This would not help much in making registrations more realistic here as the largely "hinge joint" style degreees of freedom here lead to only small rotation-based deformation issues.
 
 ---
 

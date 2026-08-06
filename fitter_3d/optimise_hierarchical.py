@@ -150,6 +150,16 @@ def main():
         "instead of the unregularised per-specimen parameters (REPORT.md §6.6).",
     )
     ap.add_argument(
+        "--limit",
+        type=float,
+        default=0.0,
+        help="weight on the authored per-joint rotation-limit hinge. Requires a model that "
+        "carries 'joint_limits' (e.g. 3D_model_prep/OmniAnt_25PCs_joint_limited.pkl via "
+        "SMILIFY_SMAL_FILE). Constrains the distal leg joints that §4 shows the area-sampled "
+        "data term cannot reach: M7/BPX put 37 of 96 constrained axes out of range on 100% of "
+        "specimens, median 19.4 deg. Judge it with probe_19, not with surface metrics.",
+    )
+    ap.add_argument(
         "--soft_partition",
         type=float,
         default=0.0,
@@ -309,6 +319,7 @@ def main():
                 "w_sym": 0.5,
                 "w_midline": args.midline,
                 "w_jresid": args.jresid,
+                "w_limit": args.limit,
             },
             **common,
         ),
@@ -327,6 +338,7 @@ def main():
                 "w_sym": 0.5,
                 "w_midline": args.midline,
                 "w_jresid": args.jresid,
+                "w_limit": args.limit,
             },
             **common,
         ),
@@ -345,6 +357,7 @@ def main():
                 "w_sym": 0.5,
                 "w_midline": args.midline,
                 "w_jresid": args.jresid,
+                "w_limit": args.limit,
             },
             **common,
         ),
