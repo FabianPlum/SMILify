@@ -1,0 +1,27 @@
+====================================================================================================
+PROBE 25c -- residual worker/clean gap after removing betas_trans
+====================================================================================================
+
+A -- fraction of the worker-minus-clean D_pose(LEG) gap explained by betas_trans alone
+run                      body-norm  allbone-norm       no-norm
+LIM_0                       102.6%         68.2%         52.7%
+LIM_1x                      100.8%         76.0%         55.5%
+BPX_noprior                  90.6%         81.1%         72.0%
+M7_handoff_midline          102.8%         85.1%         63.1%
+
+B -- residual per-group D with betas_trans:=0, ALL-BONE normaliser (worker minus clean)
+    joint-placement hypothesis predicts a DISTAL-concentrated residual.
+run                        body   mandible    antenna   leg_prox   leg_dist       wing
+LIM_0                    0.1420     0.0931     0.1019     0.1235     0.2093     0.1034
+LIM_1x                   0.1487     0.1093     0.1297     0.1235     0.1934     0.0933
+BPX_noprior              0.1582     0.1078     0.1004     0.1269     0.1995     0.1027
+M7_handoff_midline       0.1469     0.1070     0.1053     0.1332     0.1799     0.1841
+baseline                 0.4770     0.3496     0.5915     0.3843     0.7064     0.0387
+ALL_ANTS_CLEAN           0.2329     0.0916     0.1533     0.0973     0.1447     0.0414
+
+    delta vs clean:
+LIM_0                   -0.0908    +0.0015    -0.0514    +0.0261    +0.0646    +0.0620
+LIM_1x                  -0.0842    +0.0177    -0.0236    +0.0261    +0.0488    +0.0519
+BPX_noprior             -0.0747    +0.0162    -0.0529    +0.0295    +0.0548    +0.0613
+M7_handoff_midline      -0.0860    +0.0154    -0.0480    +0.0359    +0.0352    +0.1427
+baseline                +0.2441    +0.2580    +0.4382    +0.2870    +0.5618    -0.0027

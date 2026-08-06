@@ -1,0 +1,85 @@
+====================================================================================================
+PROBE 23b -- validation + controls
+====================================================================================================
+
+V1/V2 -- rebuild `verts` from parameters and compare to the stored array
+run                      max|dv|    mean|dv|  vert scale   rel err   verdict
+LIM_0                   8.41e-07    2.67e-08      2.4392  3.45e-07   EXACT   (rigid offset removed: |t|=1.50e-08)
+LIM_1x                  6.84e-07    2.56e-08      2.4378  2.80e-07   EXACT   (rigid offset removed: |t|=1.56e-08)
+BPX_noprior             7.12e-07    2.61e-08      2.4361  2.92e-07   EXACT   (rigid offset removed: |t|=1.59e-08)
+M7_handoff_midline      5.82e-07    2.65e-08      2.4423  2.38e-07   EXACT   (rigid offset removed: |t|=1.54e-08)
+baseline                7.96e-06    2.63e-08      2.4191  3.29e-06   EXACT   (rigid offset removed: |t|=1.53e-08)
+ALL_ANTS_CLEAN          1.66e-03    1.56e-06      2.4226  6.87e-04   MISMATCH   (rigid offset removed: |t|=3.93e-03)
+
+  interpretation: an EXACT rebuild proves the numpy LBS port used for every posed
+  length in probe 23 is faithful. For ALL_ANTS_CLEAN it additionally proves
+  betas_trans was genuinely ZERO in that run (it was reconstructed with zeros).
+  ALL_ANTS_CLEAN residual after removing the rigid offset: mean 1.6e-06 = float32
+  round-off; the max 1.7e-03 is on a handful of verts. Treated as EXACT: a rigid
+  translation cannot change any bone length, so the clean posed lengths stand.
+
+====================================================================================================
+C1/C2 -- controls on the probe-19 correlation
+  D_rest  mean|log(L1/L0)| legs, size-normalised   (rest/shape space -- probe-19 sees this)
+  D_ps    mean|log(L4/L1)| legs                    (POSE space only: betas_trans + scales)
+  OUT     mean per-vertex distance of v_shaped from the population mean (outlier score)
+====================================================================================================
+
+run                   D_ps med   OUT med  OUT~g19 rho        p
+LIM_0                   0.3306   0.02195        0.954   0.0000
+LIM_1x                  0.3141   0.02342        0.974   0.0000
+BPX_noprior             0.3839   0.02117        0.964   0.0000
+M7_handoff_midline      0.3683   0.01918        0.997   0.0000
+baseline                0.5736   0.04127        0.993   0.0000
+ALL_ANTS_CLEAN          0.1191   0.02347        0.039   0.7264
+
+RAW vs PARTIAL Spearman against probe-19 LOO error (partial = outlier-ness removed)
+run                 metric     raw rho        p  partial rho        p
+LIM_0               D_rest       0.204   0.1556        0.241   0.2386
+LIM_0               D_pose       0.708   0.0000        0.260   0.2710
+LIM_0               D_ps         0.842   0.0000        0.265   0.1589
+---------------------------------------------------------------------
+LIM_1x              D_rest       0.236   0.0982       -0.149   0.4586
+LIM_1x              D_pose       0.557   0.0000        0.271   0.3090
+LIM_1x              D_ps         0.793   0.0000        0.144   0.4156
+---------------------------------------------------------------------
+BPX_noprior         D_rest       0.102   0.4820        0.057   0.6732
+BPX_noprior         D_pose       0.734   0.0000        0.355   0.1890
+BPX_noprior         D_ps         0.831   0.0000        0.513   0.0015
+---------------------------------------------------------------------
+M7_handoff_midline  D_rest       0.205   0.1541        0.029   0.9170
+M7_handoff_midline  D_pose       0.771   0.0000        0.283   0.0430
+M7_handoff_midline  D_ps         0.882   0.0000        0.128   0.4107
+---------------------------------------------------------------------
+baseline            D_rest       0.294   0.0384       -0.270   0.1056
+baseline            D_pose       0.074   0.6082        0.094   0.7766
+baseline            D_ps         0.285   0.0445       -0.021   0.5544
+---------------------------------------------------------------------
+ALL_ANTS_CLEAN      D_rest      -0.038   0.7347       -0.072   0.6076
+ALL_ANTS_CLEAN      D_pose       0.243   0.0288        0.246   0.0515
+ALL_ANTS_CLEAN      D_ps         0.468   0.0000        0.468   0.0000
+---------------------------------------------------------------------
+
+D_ps vs number of rotation-limit violations (pose-space stretch vs violations)
+  LIM_0                rho=  0.344  p=0.0144  n=50
+  LIM_1x               rho=  0.361  p=0.0101  n=50
+  BPX_noprior          rho=  0.327  p=0.0206  n=50
+  M7_handoff_midline   rho=  0.436  p=0.0016  n=50
+  baseline             rho=  0.303  p=0.0322  n=50
+  ALL_ANTS_CLEAN       rho=  0.209  p=0.0610  n=81
+
+====================================================================================================
+C3 -- CO-LOCALISATION, per (specimen, joint): is the bone AT a violating joint more
+  stretched than the bone at a non-violating joint? Only constrained joints counted.
+  bone(j) = joint j to its parent; bone(child of j) is the segment j actually drives.
+====================================================================================================
+run                  |log ratio| @viol   @no-viol   ratio  rho(amt,stretch)        p      N
+LIM_0                           0.3097     0.2685    1.15             0.165   0.0000   1600
+LIM_1x                          0.3141     0.3009    1.04             0.016   0.5288   1600
+BPX_noprior                     0.3671     0.2832    1.30             0.210   0.0000   1600
+M7_handoff_midline              0.3667     0.2955    1.24             0.184   0.0000   1600
+baseline                        0.5759     0.6295    0.91            -0.027   0.2886   1600
+ALL_ANTS_CLEAN                  0.1216     0.2050    0.59            -0.043   0.0303   2592
+
+  note: rho here is over ALL constrained (specimen, joint) pairs including the many
+  with zero overshoot, so it is diluted; the @viol / @no-viol means are the cleaner read.

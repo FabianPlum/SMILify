@@ -1,0 +1,190 @@
+====================================================================================================
+SETUP
+====================================================================================================
+  joints                        : 55
+  joints with >=1 limited axis  : 32   (hinge can act)
+  joints with ALL axes +/-pi    : 23   (hinge is EXACTLY 0, zero gradient) -> internal control group
+  free-joint names              : ['b_t', 'b_a_1', 'b_a_2', 'b_a_3', 'b_a_4', 'b_a_5', 'l_1_pt_r', 'l_2_pt_r', 'l_3_pt_r', 'w_1_r', 'w_2_r', 'l_1_pt_l', 'l_2_pt_l', 'l_3_pt_l', 'w_1_l', 'w_2_l', 'b_h', 'an_1_r', 'an_2_r', 'an_3_r', 'an_1_l', 'an_2_l', 'an_3_l']
+
+====================================================================================================
+R1 -- DOSE-RESPONSE: does the 'compensation' scale with the hinge weight?
+====================================================================================================
+  LIM_0 w_limit 0.0 | LIM_1x 0.006 (hier 0.273) | LIM_3x 0.018 (hier 0.819), 3x LIM_1x
+  same 50 specimens, same order, same template. probe-23 never loaded LIM_3x.
+
+  quantity                        LIM_0     LIM_1x     LIM_3x     1x/0     3x/0    3x/1x   monotone in w?
+  -------------------------------------------------------------------------------------------------------
+  |log_beta_scales|             0.32988    0.40377    0.40114    1.224    1.216    0.993   NO  <-- BREAKS
+  |betas_trans|                 0.05853    0.06463    0.06500    1.104    1.111    1.006              YES
+  |deform_verts|                0.01918    0.01981    0.01989    1.033    1.037    1.004              YES
+  |betas|                       0.26956    0.26550    0.26294    0.985    0.975    0.990              YES
+  cum joint disp %body          7.30895    6.87259    6.87110    0.940    0.940    1.000              YES
+  violating axes/spec             37.42       0.76       0.34    0.020    0.009        -
+    paired wilcoxon LIM_1x vs LIM_3x on |log_beta_scales|   : p=0.204  (3x-1x delta -0.00264)
+    paired wilcoxon LIM_1x vs LIM_3x on |betas_trans|       : p=0.432  (3x-1x delta +0.00038)
+
+  Where does the difference ORIGINATE? The two arms diverge at the HIERARCHICAL
+  stage (run_e1_limits.sh: hier w_limit 0 vs 0.273), and the deform stages are
+  --init_from <arm>_hier/H2_joint.npz. So Stage_3 is NOT a same-init A/B.
+    LIM_0_hier/H2_joint    |lbs| 0.26107   |bt| 0.01429
+    LIM_1x_hier/H2_joint   |lbs| 0.33168   |bt| 0.01613
+    LIM_3x_hier/H2_joint   |lbs| 0.32922   |bt| 0.01588
+    (Stage_3 values for the same arms: LIM_0 |lbs| 0.32988, LIM_1x |lbs| 0.40377, LIM_3x |lbs| 0.40114)
+
+====================================================================================================
+R2 -- SEED-NOISE FLOOR: same recipe, different seed, same 50 specimens
+====================================================================================================
+  M7_handoff_midline{,_s1,_s2}: identical yaml, seeds 0/1/2, hier re-run per seed
+  C0_control{,_s1,_s2} and A4_nofreeze{,_s1,_s2}: same protocol (run_seeds.sh).
+  These are the run-to-run NULL for the quantities probe-23 called compensation.
+
+  ### M7_handoff_midline  (3 seeds)
+    |log_beta_scales|    seed means [0.31839 0.32137 0.31988]  max/min spread +0.9%   pairwise ratios ['1.009', '1.005', '0.995']  paired wilcoxon p ['0.57', '0.73', '0.43']
+    |betas_trans|        seed means [0.05326 0.05635 0.05468]  max/min spread +5.8%   pairwise ratios ['1.058', '1.027', '0.970']  paired wilcoxon p ['0.01', '0.18', '0.15']
+    |deform_verts|       seed means [0.02051 0.02057 0.02065]  max/min spread +0.7%   pairwise ratios ['1.003', '1.007', '1.004']  paired wilcoxon p ['0.76', '0.26', '0.67']
+    |betas|              seed means [0.00042 0.00044 0.00042]  max/min spread +6.3%   pairwise ratios ['1.057', '0.994', '0.941']  paired wilcoxon p ['0.16', '0.97', '0.51']
+    cum disp %body       seed means [6.94167 7.05527 6.95868]  max/min spread +1.6%   pairwise ratios ['1.016', '1.002', '0.986']  paired wilcoxon p ['0.47', '0.78', '0.64']
+
+  ### C0_control  (3 seeds)
+    |log_beta_scales|    seed means [1.60435 1.61151 1.59987]  max/min spread +0.7%   pairwise ratios ['1.004', '0.997', '0.993']  paired wilcoxon p ['0.93', '0.36', '0.062']
+/home/fabi/dev/SMILify/diagnostics/moonshot/probe_24_refute_placement_stats_PROBE.py:327: RuntimeWarning: invalid value encountered in scalar divide
+  rat = [ps[j][key].mean() / ps[i][key].mean()
+/home/fabi/dev/SMILify/diagnostics/moonshot/probe_24_refute_placement_stats_PROBE.py:329: RuntimeWarning: invalid value encountered in scalar divide
+  spread = 100 * (means.max() / means.min() - 1)
+    |betas_trans|        seed means [0. 0. 0.]  max/min spread +nan%   pairwise ratios ['nan', 'nan', 'nan']  paired wilcoxon p ['nan', 'nan', 'nan']
+    |deform_verts|       seed means [0.05211 0.0522  0.05185]  max/min spread +0.7%   pairwise ratios ['1.002', '0.995', '0.993']  paired wilcoxon p ['0.54', '0.8', '0.44']
+    |betas|              seed means [0.22754 0.23147 0.22401]  max/min spread +3.3%   pairwise ratios ['1.017', '0.984', '0.968']  paired wilcoxon p ['0.17', '0.34', '0.33']
+    cum disp %body       seed means [9.681   9.61458 9.71771]  max/min spread +1.1%   pairwise ratios ['0.993', '1.004', '1.011']  paired wilcoxon p ['0.28', '0.64', '0.43']
+
+  ### A4_nofreeze  (3 seeds)
+    |log_beta_scales|    seed means [1.56403 1.57808 1.57415]  max/min spread +0.9%   pairwise ratios ['1.009', '1.006', '0.998']  paired wilcoxon p ['0.45', '0.45', '0.99']
+    |betas_trans|        seed means [0.06623 0.0665  0.06371]  max/min spread +4.4%   pairwise ratios ['1.004', '0.962', '0.958']  paired wilcoxon p ['0.8', '0.039', '0.021']
+    |deform_verts|       seed means [0.03986 0.03995 0.03962]  max/min spread +0.8%   pairwise ratios ['1.002', '0.994', '0.992']  paired wilcoxon p ['0.23', '0.23', '0.095']
+    |betas|              seed means [0.28408 0.28139 0.27212]  max/min spread +4.4%   pairwise ratios ['0.991', '0.958', '0.967']  paired wilcoxon p ['0.87', '0.012', '0.15']
+    cum disp %body       seed means [9.66583 9.77148 9.68682]  max/min spread +1.1%   pairwise ratios ['1.011', '1.002', '0.991']  paired wilcoxon p ['0.47', '0.92', '0.5']
+
+  SEED-NOISE SUMMARY (max/min spread across seeds of the SAME recipe):
+    |log_beta_scales|    seed spreads [0.9 0.7 0.9]%   max 0.9%   |  probe-23 LIM_1x-vs-LIM_0 effect +22.4%   -> effect/noise = 23.99x
+    |betas_trans|        seed spreads [5.8 nan 4.4]%   max nan%   |  probe-23 LIM_1x-vs-LIM_0 effect +10.4%   -> effect/noise = nanx
+    |deform_verts|       seed spreads [0.7 0.7 0.8]%   max 0.8%   |  probe-23 LIM_1x-vs-LIM_0 effect +3.3%   -> effect/noise = 3.95x
+    cum disp %body       seed spreads [1.6 1.1 1.1]%   max 1.6%   |  probe-23 LIM_1x-vs-LIM_0 effect -6.0%   -> effect/noise = 3.67x
+
+====================================================================================================
+R3 -- HINGE-INACTIVE CONTROL: joints the limit term cannot touch
+====================================================================================================
+  limit_hinge = mean(max(jr-hi,0)+max(lo-jr,0)). On a joint authored +/-pi on every
+  axis the term is identically 0 and dJ/dtheta is identically 0 -- the optimiser
+  gets NO signal there. If |lbs| rises on those joints as much as on hinged joints,
+  the rise is a global trajectory shift, not compensation.
+
+  group                          n  |lbs| L0       L1x       L3x    1x/0    3x/0 |   |bt| L0       L1x    1x/0
+  ------------------------------------------------------------------------------------------------------------
+  hinged (>=1 limited axis)     32    0.3737    0.4926    0.4900   1.318   1.311 |    0.0510    0.0591   1.160
+  NOT hinged (all axes free)    23    0.2690    0.2802    0.2775   1.042   1.032 |    0.0690    0.0723   1.047
+    ...of which non-leg         17    0.2806    0.2871    0.2856   1.023   1.018 |    0.0736    0.0726   0.986
+
+  per-joint ratio |lbs|_LIM_1x / |lbs|_LIM_0:
+    hinged   : median 1.263  IQR [1.119, 1.381]  frac >1 1.00
+    unhinged : median 1.033  IQR [1.000, 1.105]  frac >1 0.74
+    mannwhitney(hinged ratios vs unhinged ratios) p = 5.5e-07
+
+  the SAME split under pure seed noise (M7 seed0 -> seed1, no limit anywhere):
+    _s0->_s1: hinged-set median ratio 1.018, unhinged-set median ratio 0.988, overall mean |lbs| 0.3184 -> 0.3214 (+0.9%)
+    _s0->_s2: hinged-set median ratio 1.002, unhinged-set median ratio 0.984, overall mean |lbs| 0.3184 -> 0.3199 (+0.5%)
+    _s1->_s2: hinged-set median ratio 0.992, unhinged-set median ratio 0.970, overall mean |lbs| 0.3214 -> 0.3199 (-0.5%)
+
+====================================================================================================
+R4 -- IS rho(violation-rate DROP, d|log_beta_scales|) = +0.848 AN ADEQUATE STATISTIC?
+====================================================================================================
+  reproduce probe-23 (n=32 constrained joints):
+    rho(drop, d|lbs|) = +0.848   rho(drop, d|bt|) = +0.734
+    NOTE: LIM_1x violation rate is ~0, so 'drop' IS essentially the LIM_0 violation
+          rate: rho(drop, LIM_0 viol rate) = +0.990
+          and probe-23 measured rho(LIM_0 viol rate, depth) = +0.922. So this is the
+          SAME across-joint quantity it partialled depth out of in its first arm.
+
+  (a) depth partialled out, the standard probe-23 itself applied:
+    rho(drop, depth)        = +0.916
+    rho(d|lbs|, depth)      = +0.873
+    PARTIAL rho(drop, d|lbs| | depth) = +0.247
+    PARTIAL rho(drop, d|bt|  | depth) = +0.164
+
+  (b) baseline magnitude partialled out (does the extra scale just land where scale
+      already was? then it is a rescale, not targeting):
+    rho(d|lbs|, baseline |lbs|_LIM_0) = +0.623
+    rho(drop,   baseline |lbs|_LIM_0) = +0.830
+    PARTIAL rho(drop, d|lbs| | baseline |lbs|) = +0.758
+
+  (c) EFFECTIVE n: the 32 'independent' joints are bilateral twins tied by w_sym=0.5.
+    |d|lbs|_r - d|lbs|_l| / |d|lbs|_r| over constrained twins: median 0.0005, max 0.0361  -> twins are near-duplicates
+    after collapsing twins: n = 16 independent joints
+    rho(drop, d|lbs|)  = +0.854   permutation p = 0.0000
+    rho(drop, d|bt|)   = +0.737
+    PARTIAL rho(drop, d|lbs| | depth), collapsed = +0.271
+
+  (d) the same statistic computed on a SEED PAIR (no limit change at all):
+    rho(LIM_0 violation rate, d|lbs| from seed0->_s1) = +0.154   (collapsed n=16: +0.163)
+    rho(LIM_0 violation rate, d|lbs| from seed0->_s2) = -0.027   (collapsed n=16: -0.010)
+
+  (e) LIM_3x, where violations are also ~0: is d|lbs| the same joints?
+    rho(d|lbs|_1x, d|lbs|_3x) over constrained joints = +0.985
+    rho(drop, d|lbs|_3x) = +0.861  (mean d|lbs|_3x +0.1163 vs d|lbs|_1x +0.1189)
+
+====================================================================================================
+R5 -- 'AT NO COST IN SURFACE FIT': what does p = 0.089 actually license?
+====================================================================================================
+  probe-23 accepted a null from a non-significant paired test (n=50, ratio 1.045).
+  Here: the trainer's OWN metrics.csv (chamfer_l2 at Stage_3), bootstrap CI on the
+  ratio, and the seed-noise floor for the same metric.
+
+  chamfer_l2                 LIM_0 0.000316336  |  LIM_1x 0.000319655 (ratio 1.0105, wins 23/50, p 0.924)  |  LIM_3x 0.000320771 (ratio 1.0140, wins 25/50, p 0.553)
+  fscore@0.02                LIM_0 0.925369  |  LIM_1x 0.923766 (ratio 0.9983, wins 29/50, p 0.121)  |  LIM_3x 0.923447 (ratio 0.9979, wins 29/50, p 0.0789)
+  part_leg_distal_dist_mean  LIM_0 0.00921689  |  LIM_1x 0.00921938 (ratio 1.0003, wins 25/50, p 1)  |  LIM_3x 0.0094107 (ratio 1.0210, wins 27/50, p 0.811)
+  normal_consistency         LIM_0 0.82076  |  LIM_1x 0.819608 (ratio 0.9986, wins 21/50, p 0.781)  |  LIM_3x 0.819941 (ratio 0.9990, wins 29/50, p 0.309)
+
+  SEED NOISE on chamfer_l2 (M7, identical recipe): means [0.000318 0.00032  0.000325]  max/min = 1.0207
+    seed0 vs seed1: ratio 1.0066  wins 23/50  paired wilcoxon p 0.695
+    seed0 vs seed2: ratio 1.0207  wins 25/50  paired wilcoxon p 0.716
+    seed1 vs seed2: ratio 1.0141  wins 25/50  paired wilcoxon p 0.833
+
+  bootstrap 95% CI on mean chamfer_l2 ratio LIM_1x/LIM_0: [0.9849, 1.0374]  point 1.0105
+    -> the data do NOT exclude a degradation of up to 3.7%. 'no cost' is not established;
+       what is established is 'not proven to cost more than that'.
+
+====================================================================================================
+R6 -- HEADLINE '7.31% vs 2.40%': outliers, gauge, and template
+====================================================================================================
+  (a) distribution / outlier structure of the worker 7.31%:
+      per-(spec,joint) cells n=2750: mean 7.309  median 4.860  trimmed10 6.418
+      per-specimen means: min 2.934 max 14.498 sd 3.188  top-5 specimens contribute 19.1% of the total (5/50 = 10%)
+      per-joint means: top-12 joints hold 43.8% of the total (12/55 = 21.8%): ['l_1_pt_l', 'l_1_pt_r', 'l_2_pt_r', 'l_2_pt_l', 'l_1_ta_l', 'l_1_ta_r']...
+      CLEAN same cells: mean 2.402 median 1.914
+      LIKE-FOR-LIKE (scale only, since CLEAN has no betas_trans):
+        LIM_0 scale-only 4.506%  vs CLEAN 2.402%  ratio 1.88x   (headline quotes 3.0x from the both-params number against a scale-only one)
+        ...yet |lbs| is LARGER in CLEAN: 0.5123 vs 0.3299. Displacement per unit |lbs| differs by 2.91x, so the metric is not measuring 'how hard the optimiser pushed'.
+
+  (b) GAUGE: with Rs=I and propagate_scaling=False the chain telescopes to
+      M_i = S_i / S_0, so t_i = J_0 + sum_path (S_par/S_0)(bone + T).
+      A COMMON factor on every joint is therefore invisible to skinning but NOT
+      to |log_beta_scales|; conversely a large ROOT scale suppresses displacement.
+      LIM_0   root lbs (mean over spec, per axis) [-0.1381 -0.131  -0.1813]   mean over NON-root joints [0.0104 0.0052 0.0304]
+              |lbs| raw 0.3299 -> after removing each specimen's mean log-scale (gauge-free) 0.3261
+      CLEAN   root lbs (mean over spec, per axis) [-0.0053  0.0175  0.0056]   mean over NON-root joints [-0.1146 -0.0592 -0.025 ]
+              |lbs| raw 0.5123 -> after removing each specimen's mean log-scale (gauge-free) 0.5074
+
+  (c) TEMPLATE SWAP: apply each arm's fitted log_beta_scales to the OTHER arm's
+      rest skeleton. Same parameters, different bone geometry.
+      LIM_0 params   worker skel: 4.509%   |   clean skel: 4.460%
+      CLEAN params   worker skel: 2.434%   |   clean skel: 2.381%
+      (if the two columns for one parameter set differ a lot, the headline gap is
+       skeleton geometry, not optimiser aggressiveness)
+
+  (d) specimen-size confound check (meshes are renormalised by load_meshes, so this
+      should be small -- verifying rather than assuming):
+      LIM_0 body bbox diag: mean 2.3564 sd 0.0080 range [2.3395, 2.3807]
+      rho(body diag, per-specimen cum disp %) = +0.444
+      CLEAN body bbox diag: mean 2.3441 sd 0.0401
+
+====================================================================================================
+DONE
+====================================================================================================

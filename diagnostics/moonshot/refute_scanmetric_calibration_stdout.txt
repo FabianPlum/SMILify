@@ -1,0 +1,77 @@
+  bench50 10/50
+  bench50 20/50
+  bench50 30/50
+  bench50 40/50
+  bench50 50/50
+  clean81 10/81
+  clean81 20/81
+  clean81 30/81
+  clean81 40/81
+  clean81 50/81
+  clean81 60/81
+  clean81 70/81
+  clean81 80/81
+REFUTE-3 -- is "% of joints outside the scan" CALIBRATED across the two corpora?
+
+The headline compares a raw fraction (worker 61.5% vs clean 30.1%) between two corpora and
+reads the difference as "worker joints are placed worse".  That inference is only valid if a
+given placement error produces the same %-outside in both corpora.  It does not, if the two
+sets of scans differ in how much room a joint has to be inside: the tolerance of the
+inside/outside test is the LOCAL HALF-THICKNESS of the animal at that joint.  A 0.4%-of-diagonal
+placement error is invisible in a limb of radius 0.8% and fatal in a limb of radius 0.2%.
+
+So this probe CALIBRATES the metric per corpus:
+
+  thickness   Euclidean distance transform of a robust (orientation-free, hole-closed) solid
+              occupancy; medial-axis points are interior voxels that are local maxima of the
+              EDT.  Their EDT value is the local half-thickness -- fit-free, and it is exactly
+              the tolerance budget the inside/outside test gives a joint.
+
+  sensitivity displace each medial-axis point by r * diag in a random isotropic direction and
+              measure the fraction that leaves the solid.  This is the corpus' own transfer
+              function from PLACEMENT ERROR -> %OUTSIDE.  Inverting it at the observed
+              %-outside gives r*, the placement error implied by the headline number IN THAT
+              CORPUS' OWN UNITS.  If r*_worker ~ r*_clean, the headline gap is a thickness
+              artefact and not evidence of worse placement.
+
+Reported separately for THICK medial points (body) and THIN ones (legs/antennae), because the
+headline's group table puts the biggest worker/clean gap in the legs.
+
+grid N=288  closing r=3vox (=2.08% diag)  medial pts/scan<=400
+
+--- LOCAL HALF-THICKNESS (medial-axis EDT), % of scan bbox diagonal
+   corpus        n    median      mean        sd   thin-half median
+   bench50      50    0.8505    0.8254    0.2190             0.6944
+   clean81      81    0.7764    0.8469    0.1373             0.6944
+   worker/clean thickness ratio = 1.095   Mann-Whitney p=9.43e-01
+   thin-half ratio              = 1.000   Mann-Whitney p=4.86e-02
+
+--- SENSITIVITY: %% of medial-axis points pushed OUTSIDE by a displacement r
+   (r in % of scan diagonal; this is the corpus' transfer function)
+   corpus         0.0     0.1     0.2     0.3     0.4     0.6     0.8     1.0     1.5     2.0     3.0
+   bench50 all     0.0     0.0     0.0     1.9     4.6    13.9    24.8    36.4    56.1    68.9    79.7
+   bench50 thin     0.0     0.0     0.0     3.2     8.2    24.0    41.7    57.8    76.5    83.6    87.9
+   clean81 all     0.0     0.0     0.0     1.1     3.0    12.6    26.8    42.6    67.1    78.9    86.9
+   clean81 thin     0.0     0.0     0.0     1.8     5.1    21.0    43.6    63.6    84.2    90.8    94.9
+
+--- HEADLINE RE-EXPRESSED AS AN IMPLIED PLACEMENT ERROR r* (% of diag)
+   run          n  %out GWN  %out ROBUST  r* (all medial)  r* (thin medial)
+   LIM_0       50     61.82        41.82            1.091             0.771
+   baseline    50     51.82        29.09            0.896             0.678
+   CLEAN       81     32.73        10.91            0.574             0.469
+
+   worker vs clean on the CALIBRATED quantity r*:
+      r* (all medial)    worker=1.091  clean=0.574  ratio=1.90  p=7.02e-20
+      r* (thin medial)   worker=0.771  clean=0.469  ratio=1.64  p=1.24e-16
+   for comparison, the RAW ratios:
+      %out GWN           worker=61.82  clean=32.73  ratio=1.89  p=8.45e-17
+      %out ROBUST        worker=41.82  clean=10.91  ratio=3.83  p=1.20e-19
+
+--- INTERNAL CONSISTENCY: LIM_0 vs stock baseline on the SAME 50 scans
+   n=50  GWN %outside  LIM_0=61.82  baseline=51.82  median paired diff=+9.09  Wilcoxon p=1.43e-05
+   n=50  ROBUST %outside  LIM_0=41.82  baseline=29.09  median paired diff=+12.73  Wilcoxon p=8.49e-06
+   NOTE: the prior agent's own proxy-1 rest-space L/R mirror gap ranks these the
+   OTHER way round: baseline 5.893% of body diagonal vs LIM_0 0.116%, a 50x gross
+   misplacement. Two 'objective joint placement' metrics disagree in SIGN on the
+   same specimens and the same scans.
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/refute_scanmetric_calibration_out.txt

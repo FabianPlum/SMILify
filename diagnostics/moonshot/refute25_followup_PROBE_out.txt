@@ -1,0 +1,32 @@
+================================================================================================
+1 — IN-DISTRIBUTION: fraction of each corpus's TOTAL rest-space variance that lies
+    inside the span of the shapedirs of the template it was fitted with
+================================================================================================
+corpus                template                               K  S var in span  F var in span
+LIM_0                 OmniAnt_25PCs_joint_limited.pkl       25          24.7%           0.9%
+BPX_noprior           SMIL_OmniAnt.pkl                      13          18.0%           0.6%
+M7_handoff_midline    SMIL_OmniAnt.pkl                      13           2.7%           2.7%
+baseline              SMIL_OmniAnt.pkl                      13           9.2%           3.5%
+CLEAN81_M7            SMIL_OmniAnt.pkl                      13          24.6%          24.4%
+ALL_ANTS_CLEAN        SMPL_fit.pkl                          20          65.9%           7.3%
+
+================================================================================================
+2 — MATCHED cross-ARM reproducibility of the free-form field
+================================================================================================
+pair                                    same-specimen r   cross-specimen r
+WORKER  LIM_0 vs LIM_1x                          0.4645            -0.0069
+WORKER  LIM_0 vs BPX_noprior            [vertex-count mismatch 10235 vs 10229]
+CLEAN   CLEAN_M7 vs CLEAN_hier H3                0.2979            -0.0041
+
+================================================================================================
+3 — SEED-MEAN of the worker field (M7, M7_s1, M7_s2): does removing the run-random
+    component rescue generalisation?
+================================================================================================
+field                         effdim   alpha   gen10/sp   gen20/sp   gen40/sp
+single run (M7)                32.35    0.44     0.9870     0.9794     0.9655
+mean of 3 seeds                32.45    0.44     0.9771     0.9684     0.9527
+seed DIFFERENCE (noise)        26.18    0.46     1.0145     1.0082     1.0018
+
+  |seed difference| / |field| = 1.0069   (so the run-random part is a real fraction of the field, and removing it changes nothing above)
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/refute25_followup.json

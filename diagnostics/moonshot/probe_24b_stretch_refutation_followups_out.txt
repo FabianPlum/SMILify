@@ -1,0 +1,74 @@
+========================================================================================================
+PROBE 24b -- follow-ups closing the remaining escape routes
+========================================================================================================
+
+========================================================================================================
+F1 -- CO-LOCALISATION: pooled (probe 23's C3) vs WITHIN-JOINT
+  pooled     : mean |log ratio| of bone(j) over all (specimen, constrained joint) pairs,
+               split by whether that joint violates -- probe 23's number
+  within     : the same split computed SEPARATELY at each joint, then averaged over joints
+               (only joints that have both violating and non-violating specimens)
+========================================================================================================
+run                  pooled @v    @no-v  ratio  | within @v    @no-v  ratio  #joints
+LIM_0                   0.2702   0.2586   1.04       0.2687   0.2702   0.99       32
+LIM_1x                  0.2990   0.2780   1.08       0.3022   0.2736   1.10       23
+BPX_noprior             0.3033   0.2699   1.12       0.3036   0.2638   1.15       32
+M7_handoff_midline      0.3009   0.2812   1.07       0.3010   0.2962   1.02       31
+baseline                0.4937   0.5651   0.87       0.4640   0.5858   0.79       24
+ALL_ANTS_CLEAN          0.1216   0.1896   0.64       0.1212   0.1358   0.89        2
+
+========================================================================================================
+F2 -- IS THE STRETCH<->VIOLATION LINK SPECIFIC?  partial on a generic deviation score
+  OUT = mean per-vertex distance of the shaped mesh from the corpus mean (no bones, no angles)
+========================================================================================================
+run                   raw rho        p  | partial on OUT        p | partial on |betas|        p  | rho(OUT,n_viol)  rho(OUT,D_pose)
+LIM_0                   0.341   0.0153             0.284   0.1107                0.357   0.0114              0.234            0.353
+LIM_1x                  0.157   0.2767             0.120   0.3431                0.154   0.2862              0.251            0.170
+BPX_noprior             0.468   0.0006             0.423   0.0028                0.435   0.0032              0.343            0.237
+M7_handoff_midline      0.443   0.0013             0.403   0.0195                0.445   0.0013              0.270            0.251
+baseline                0.132   0.3603             0.155   0.2881                0.141   0.3469              0.156           -0.129
+ALL_ANTS_CLEAN          0.145   0.1960             0.158   0.2101                0.164   0.2421             -0.020            0.287
+
+========================================================================================================
+F3 -- DISTAL CONCENTRATION WITH AND WITHOUT betas_trans
+  headline numbers recomputed: mean|log ratio| and p95 of the ratio, leg groups
+========================================================================================================
+run                  prox m|log| dist m|log|   d/p  dist p95 | bt=0 prox    dist   d/p  dist p95
+LIM_0                     0.2532      0.3943  1.56      3.11      0.1469  0.2913  1.98      2.12
+LIM_1x                    0.2720      0.3709  1.36      2.82      0.1492  0.2722  1.82      2.07
+BPX_noprior               0.2821      0.4860  1.72      4.37      0.1602  0.2800  1.75      2.02
+M7_handoff_midline        0.2790      0.4885  1.75      4.28      0.1659  0.2568  1.55      1.97
+baseline                  0.4798      0.7935  1.65      3.43      0.4798  0.7935  1.65      3.43
+ALL_ANTS_CLEAN            0.1608      0.2636  1.64      1.61      0.1608  0.2636  1.64      1.61
+
+========================================================================================================
+F4 -- TEMPLATE SCALE vs betas_trans MAGNITUDE (is the arm ranking a units artifact?)
+========================================================================================================
+run                 template                            median L0  mean |bt| (legs)   |bt|/L0   D_pose
+LIM_0               OmniAnt_25PCs_joint_limited.pkl        0.1964            0.0514     0.262   0.3030
+LIM_1x              OmniAnt_25PCs_joint_limited.pkl        0.1964            0.0613     0.312   0.3131
+BPX_noprior         SMIL_OmniAnt.pkl                       0.1929            0.0540     0.280   0.3686
+M7_handoff_midline  SMIL_OmniAnt.pkl                       0.1929            0.0538     0.279   0.3382
+baseline            SMIL_OmniAnt.pkl                       0.1929            0.0000     0.000   0.6203
+ALL_ANTS_CLEAN      SMPL_fit.pkl                           0.2002            0.0000     0.000   0.1850
+
+  across the 4 worker arms: |bt|/L0 = ['0.262', '0.312', '0.280', '0.279']  D_pose = ['0.303', '0.313', '0.369', '0.338']
+  Pearson r(|bt|/L0, D_pose) over the 4 arms = -0.042  (n=4, descriptive only)
+
+========================================================================================================
+F5 -- THE PRETARSUS HEADLINE, with and without betas_trans
+========================================================================================================
+run                   pt median ratio  pt mean|log|  | bt=0 median  mean|log|  | ta median    bt=0
+LIM_0                           1.530        0.5822          1.363     0.3753        1.145   1.211
+LIM_1x                          1.368        0.5118          1.354     0.3610        0.989   1.110
+BPX_noprior                     1.969        0.8193          1.309     0.3364        1.174   1.202
+M7_handoff_midline              2.010        0.8180          1.271     0.3208        1.148   1.157
+baseline                        0.879        0.9759          0.879     0.9759        0.925   0.925
+ALL_ANTS_CLEAN                  1.180        0.3084          1.180     0.3084        0.961   0.961
+
+========================================================================================================
+F6 -- power check: what rho is detectable at n=50 and n=81?
+========================================================================================================
+  n=50: minimum detectable |rho| at 80% power, alpha=0.05 two-sided = 0.387
+  n=81: minimum detectable |rho| at 80% power, alpha=0.05 two-sided = 0.307
+  probe 23's reported worker rhos vs n_viol are 0.157-0.468, i.e. straddling that line.

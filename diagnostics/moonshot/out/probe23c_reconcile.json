@@ -1,0 +1,50 @@
+{
+ "reconcile": {
+  "LIM_0|Stage_2_deform_coarse.npz|OmniAnt_25PCs_joint_limited.pkl": 0.9109298095229998,
+  "LIM_0|Stage_3_deform_fine.npz|OmniAnt_25PCs_joint_limited.pkl": 0.8998435512926108,
+  "LIM_0_hier|H0_body.npz|OmniAnt_25PCs_joint_limited.pkl": 0.21939507587807403,
+  "LIM_0_hier|H1_legs.npz|OmniAnt_25PCs_joint_limited.pkl": 0.2805851072308899,
+  "LIM_0_hier|H2_joint.npz|OmniAnt_25PCs_joint_limited.pkl": 0.2618958438501392,
+  "LIM_0_hier|H3_deform.npz|OmniAnt_25PCs_joint_limited.pkl": 0.8593394120373634,
+  "BPX_noprior|Stage_2_deform_coarse.npz|SMIL_OmniAnt.pkl": 0.926908502268984,
+  "BPX_noprior|Stage_3_deform_fine.npz|SMIL_OmniAnt.pkl": 0.9165695397944011,
+  "BPX_noprior_hier|H0_body.npz|SMIL_OmniAnt.pkl": 0.09444834904144071,
+  "BPX_noprior_hier|H1_legs.npz|SMIL_OmniAnt.pkl": 0.12407463008927302,
+  "BPX_noprior_hier|H2_joint.npz|SMIL_OmniAnt.pkl": 0.12554221383256775,
+  "BPX_noprior_hier|H3_deform.npz|SMIL_OmniAnt.pkl": 0.8488344213181094,
+  "ALL_ANTS_CLEAN|Stage_3_deform_fine.npz|SMPL_fit.pkl": 0.5238724539124419
+ },
+ "LIM_0": {
+  "joints_gen10": 0.9154205282351084,
+  "random_gen10": 0.8069839735039239,
+  "random_sd": 0.029964264168671668,
+  "paired_diff": 0.10843655473118449,
+  "ci": [
+   0.07663413140740148,
+   0.1430605179294501
+  ],
+  "frac_specimens_joints_worse": 0.86
+ },
+ "BPX_noprior": {
+  "joints_gen10": 0.8579874451929932,
+  "random_gen10": 0.7871692842879764,
+  "random_sd": 0.03731861950958076,
+  "paired_diff": 0.07081816090501665,
+  "ci": [
+   0.03342273174273064,
+   0.10796717805026156
+  ],
+  "frac_specimens_joints_worse": 0.7
+ },
+ "ALL_ANTS_CLEAN": {
+  "joints_gen10": 0.4607558852991224,
+  "random_gen10": 0.4650333845543868,
+  "random_sd": 0.023630478705181104,
+  "paired_diff": -0.004277499255264395,
+  "ci": [
+   -0.018275346011048323,
+   0.010003098026100866
+  ],
+  "frac_specimens_joints_worse": 0.49382716049382713
+ }
+}

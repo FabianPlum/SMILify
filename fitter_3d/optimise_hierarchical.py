@@ -150,6 +150,16 @@ def main():
         "instead of the unregularised per-specimen parameters (REPORT.md §6.6).",
     )
     ap.add_argument(
+        "--split_anterior",
+        action="store_true",
+        help="give the head, mandibles and antennae their own partition groups instead of "
+        "folding them into 'body'. REPORT §6.10: the fold means covering the head with "
+        "mandible vertices costs the chamfer nothing, and every pose-mobile arm shows the "
+        "head deforming 24-40%% LESS than the thorax while antennae deform 44-82%% MORE. The "
+        "'too small to carry a data term' argument is false -- the head is 19.5%% of surface "
+        "area, 3x any leg group.",
+    )
+    ap.add_argument(
         "--limit",
         type=float,
         default=0.0,
@@ -195,7 +205,9 @@ def main():
         u.encoding = "latin1"
         dd = u.load()
     jnames = list(dd["J_names"])
-    vg, gnames = vertex_groups(np.asarray(dd["weights"]), jnames, split_distal=args.split_distal)
+    vg, gnames = vertex_groups(
+        np.asarray(dd["weights"]), jnames, split_distal=args.split_distal, split_anterior=args.split_anterior
+    )
     counts = {g: int((vg == i).sum()) for i, g in enumerate(gnames)}
     print(f"[hier] anatomical groups (template vertices): {counts}", flush=True)
 
@@ -285,13 +297,19 @@ def main():
         out_dir=args.results_dir,
         n_sample=args.n_sample,
         split_distal=args.split_distal,
+        split_anterior=args.split_anterior,
         part_scale=part_scale,
         soft_partition=args.soft_partition,
         robust_mult=args.part_robust if args.part_robust > 0 else 3.0,
     )
     partitioned = not args.no_partition
-    leg_groups = [g for g in gnames if g != "body"]
-    print(f"[hier] {len(gnames)} groups, {len(leg_groups)} leg groups", flush=True)
+    ANTERIOR = {"head", "mandible", "antenna"}
+    leg_groups = [g for g in gnames if g != "body" and g not in ANTERIOR]
+    # H0 places the body; with --split_anterior the head is no longer part of 'body', so its
+    # joints must be named explicitly or they would be frozen for the whole body stage.
+    body_groups = ["body"] + [g for g in gnames if g in ANTERIOR]
+    print(f"[hier] {len(gnames)} groups: {gnames}", flush=True)
+    print(f"[hier] body stage moves {body_groups}, leg stage moves {len(leg_groups)} leg groups", flush=True)
 
     stages = [
         # 1) body only -- places the coxae.
@@ -306,7 +324,7 @@ def main():
         HierarchicalStage(
             "H0_body",
             args.body_its,
-            active_groups=["body"],
+            active_groups=body_groups,
             partitioned=bool(args.pf_body and partition is not None),
             chamfer_groups=["body"] if (args.pf_body and partition is not None) else None,
             lr=0.02,

@@ -1,0 +1,50 @@
+PROBE 27 -- direct ablation of the two channels the claim indicts.
+
+The claim attributes "61.5% of worker joints outside the scan" to JOINT PLACEMENT, i.e. to
+log_beta_scales (per-joint segment scaling) and betas_trans (per-joint translation offsets),
+the free, essentially unregularised per-specimen parameters. That is a causal statement about
+two named tensors, and it is directly testable: switch them off and re-measure.
+
+  full        as fitted
+  bt=0        betas_trans zeroed        (the channel that moves joints outright)
+  lbs=0       log_beta_scales zeroed    (the channel that changes segment length)
+  both=0      both zeroed -> joints come from J_regressor . v_shaped and pose alone
+
+Everything else (betas, pose, global translation, the scan) is held fixed. If the free
+placement channels are what puts the joints outside the animal, switching them off must move
+%-outside DOWN, towards the shape-space-only placement. If %-outside goes UP, the channels are
+correcting placement, not corrupting it, and the metric is reporting something else.
+
+The same ablation is run on the clean corpus for log_beta_scales (its npz has no betas_trans).
+
+
+====================================================================================================
+### LIM_0 (worker)  n=50
+   ... 20
+   ... 40
+   full     %outside= 61.5   median gap=0.495%diag
+   lbs=0    %outside= 61.2   median gap=0.901%diag   median joint move=2.358%diag   wilcoxon vs full p=0.955
+   both=0   %outside= 61.6   median gap=1.035%diag   median joint move=4.331%diag   wilcoxon vs full p=0.87
+   bt=0     %outside= 68.2   median gap=0.911%diag   median joint move=3.272%diag   wilcoxon vs full p=2.25e-05
+   group               full     lbs=0    both=0      bt=0
+   body                55.6      50.1      45.8      52.6
+   leg_distal          65.0      79.7      81.0      86.8
+   leg_middle          72.2      76.0      79.8      88.0
+   leg_proximal        52.8      47.0      49.8      52.8
+   mandible            77.0      41.0      40.0      62.0
+
+====================================================================================================
+### ALL_ANTS_CLEAN (81)  n=81
+   ... 20
+   ... 40
+   ... 60
+   ... 80
+   full     %outside= 30.1   median gap=0.280%diag
+   lbs=0    %outside= 73.0   median gap=0.842%diag   median joint move=1.812%diag   wilcoxon vs full p=5.24e-15
+   both=0   %outside= 73.0   median gap=0.842%diag   median joint move=1.812%diag   wilcoxon vs full p=5.24e-15
+   group               full     lbs=0    both=0
+   body                49.9      61.1      61.1
+   leg_distal          22.1      97.7      97.7
+   leg_middle          12.4      92.9      92.9
+   leg_proximal        27.1      45.8      45.8
+   mandible            32.7      69.8      69.8

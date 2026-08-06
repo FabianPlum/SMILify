@@ -1,0 +1,140 @@
+
+==============================================================================
+LIM_0   n=50  V=10235  K=25  template=OmniAnt_25PCs_joint_limited.pkl  bbox_diag=2.34631
+  betas sd (across specimens, pooled) = 0.275852   |beta| mean = 0.269563
+  deform_verts mean magnitude         = 0.019184  (0.818% of bbox diag)
+  --- across-specimen variance decomposition (sum over V*3 entries, ddof=1)
+    Var(parametric  shapedirs.betas) = 2.13473   share  20.623%
+    Var(free-form   deform_verts)    = 7.86482   share  75.981%
+    2*Cov(param, free-form)          = 0.351456   share   3.395%
+    Var(sum S)                       = 10.351   [check 10.351]
+    corr(param, free-form)           = +0.0429
+  --- probe-19 LOO generalisation; ratio = gen / POPULATION spread (the historical normaliser, calibrated on M7)
+    (a) parametric only    spread=0.011409 [LOO 0.011642]  cmp@5= 68.7% cmp@10= 86.3%  gen(gen/spread) @1=0.00957(0.8389)  @5=0.00786(0.6889)  @10=0.00636(0.5576)  @20=0.00261(0.2292)  @40=0.00000(0.0000)
+    (b) free-form only     spread=0.018814 [LOO 0.019197]  cmp@5= 25.5% cmp@10= 42.7%  gen(gen/spread) @1=0.01912(1.0164)  @5=0.01893(1.0062)  @10=0.01881(0.9998)  @20=0.01869(0.9935)  @40=0.01849(0.9828)
+    (c) sum (rest shape)   spread=0.023589 [LOO 0.024070]  cmp@5= 31.9% cmp@10= 48.6%  gen(gen/spread) @1=0.02266(0.9604)  @5=0.02208(0.9362)  @10=0.02166(0.9182)  @20=0.02130(0.9028)  @40=0.02073(0.8787)
+
+==============================================================================
+LIM_1x   n=50  V=10235  K=25  template=OmniAnt_25PCs_joint_limited.pkl  bbox_diag=2.34631
+  betas sd (across specimens, pooled) = 0.280953   |beta| mean = 0.265502
+  deform_verts mean magnitude         = 0.019808  (0.844% of bbox diag)
+  --- across-specimen variance decomposition (sum over V*3 entries, ddof=1)
+    Var(parametric  shapedirs.betas) = 2.17683   share  19.889%
+    Var(free-form   deform_verts)    = 8.40493   share  76.792%
+    2*Cov(param, free-form)          = 0.36331   share   3.319%
+    Var(sum S)                       = 10.9451   [check 10.9451]
+    corr(param, free-form)           = +0.0425
+  --- probe-19 LOO generalisation; ratio = gen / POPULATION spread (the historical normaliser, calibrated on M7)
+    (a) parametric only    spread=0.011502 [LOO 0.011737]  cmp@5= 65.9% cmp@10= 85.1%  gen(gen/spread) @1=0.00996(0.8659)  @5=0.00828(0.7202)  @10=0.00643(0.5592)  @20=0.00338(0.2938)  @40=0.00000(0.0000)
+    (b) free-form only     spread=0.019476 [LOO 0.019874]  cmp@5= 24.9% cmp@10= 42.5%  gen(gen/spread) @1=0.01980(1.0168)  @5=0.01960(1.0065)  @10=0.01950(1.0014)  @20=0.01935(0.9937)  @40=0.01913(0.9823)
+    (c) sum (rest shape)   spread=0.024235 [LOO 0.024730]  cmp@5= 30.4% cmp@10= 46.9%  gen(gen/spread) @1=0.02356(0.9722)  @5=0.02299(0.9485)  @10=0.02264(0.9342)  @20=0.02223(0.9172)  @40=0.02160(0.8913)
+
+==============================================================================
+BPX_noprior   n=50  V=10229  K=13  template=SMIL_OmniAnt.pkl  bbox_diag=2.34465
+  betas sd (across specimens, pooled) = 0.321299   |beta| mean = 0.325837
+  deform_verts mean magnitude         = 0.019507  (0.832% of bbox diag)
+  --- across-specimen variance decomposition (sum over V*3 entries, ddof=1)
+    Var(parametric  shapedirs.betas) = 1.44149   share  14.777%
+    Var(free-form   deform_verts)    = 8.04624   share  82.486%
+    2*Cov(param, free-form)          = 0.2669   share   2.736%
+    Var(sum S)                       = 9.75462   [check 9.75462]
+    corr(param, free-form)           = +0.0392
+  --- probe-19 LOO generalisation; ratio = gen / POPULATION spread (the historical normaliser, calibrated on M7)
+    (a) parametric only    spread=0.009008 [LOO 0.009192]  cmp@5= 80.8% cmp@10= 96.9%  gen(gen/spread) @1=0.00720(0.7988)  @5=0.00467(0.5189)  @10=0.00217(0.2412)  @20=0.00000(0.0000)  @40=0.00000(0.0000)
+    (b) free-form only     spread=0.019156 [LOO 0.019547]  cmp@5= 25.8% cmp@10= 43.3%  gen(gen/spread) @1=0.01943(1.0144)  @5=0.01923(1.0039)  @10=0.01913(0.9988)  @20=0.01899(0.9911)  @40=0.01879(0.9810)
+    (c) sum (rest shape)   spread=0.022450 [LOO 0.022909]  cmp@5= 31.0% cmp@10= 47.5%  gen(gen/spread) @1=0.02169(0.9663)  @5=0.02126(0.9468)  @10=0.02100(0.9353)  @20=0.02067(0.9208)  @40=0.02020(0.8998)
+
+==============================================================================
+M7_handoff_midline   n=50  V=10229  K=13  template=SMIL_OmniAnt.pkl  bbox_diag=2.34465
+  betas sd (across specimens, pooled) = 0.000421   |beta| mean = 0.000418
+  deform_verts mean magnitude         = 0.020509  (0.875% of bbox diag)
+  --- across-specimen variance decomposition (sum over V*3 entries, ddof=1)
+    Var(parametric  shapedirs.betas) = 4.89286e-06   share   0.000%
+    Var(free-form   deform_verts)    = 8.5084   share  99.986%
+    2*Cov(param, free-form)          = 0.00122204   share   0.014%
+    Var(sum S)                       = 8.50963   [check 8.50963]
+    corr(param, free-form)           = +0.0947
+  --- probe-19 LOO generalisation; ratio = gen / POPULATION spread (the historical normaliser, calibrated on M7)
+    (a) parametric only    spread=0.000015 [LOO 0.000015]  cmp@5= 95.6% cmp@10= 99.4%  gen(gen/spread) @1=0.00001(0.5224)  @5=0.00000(0.2867)  @10=0.00000(0.1374)  @20=0.00000(0.0000)  @40=0.00000(0.0000)
+    (b) free-form only     spread=0.019960 [LOO 0.020367]  cmp@5= 26.8% cmp@10= 44.3%  gen(gen/spread) @1=0.02009(1.0063)  @5=0.01984(0.9939)  @10=0.01970(0.9870)  @20=0.01955(0.9794)  @40=0.01927(0.9655)
+    (c) sum (rest shape)   spread=0.019962 [LOO 0.020370]  cmp@5= 26.8% cmp@10= 44.3%  gen(gen/spread) @1=0.02009(1.0062)  @5=0.01984(0.9938)  @10=0.01970(0.9870)  @20=0.01955(0.9794)  @40=0.01927(0.9654)
+
+==============================================================================
+baseline   n=50  V=10229  K=13  template=SMIL_OmniAnt.pkl  bbox_diag=2.34465
+  betas sd (across specimens, pooled) = 0.258961   |beta| mean = 0.218880
+  deform_verts mean magnitude         = 0.043060  (1.837% of bbox diag)
+  --- across-specimen variance decomposition (sum over V*3 entries, ddof=1)
+    Var(parametric  shapedirs.betas) = 1.30444   share   4.502%
+    Var(free-form   deform_verts)    = 27.2718   share  94.112%
+    2*Cov(param, free-form)          = 0.401668   share   1.386%
+    Var(sum S)                       = 28.9779   [check 28.9779]
+    corr(param, free-form)           = +0.0337
+  --- probe-19 LOO generalisation; ratio = gen / POPULATION spread (the historical normaliser, calibrated on M7)
+    (a) parametric only    spread=0.007520 [LOO 0.007674]  cmp@5= 92.9% cmp@10= 99.3%  gen(gen/spread) @1=0.00603(0.8024)  @5=0.00262(0.3478)  @10=0.00098(0.1302)  @20=0.00000(0.0000)  @40=0.00000(0.0000)
+    (b) free-form only     spread=0.041720 [LOO 0.042571]  cmp@5= 26.4% cmp@10= 43.4%  gen(gen/spread) @1=0.04230(1.0139)  @5=0.04137(0.9915)  @10=0.04101(0.9829)  @20=0.04043(0.9690)  @40=0.03947(0.9460)
+    (c) sum (rest shape)   spread=0.043262 [LOO 0.044145]  cmp@5= 28.0% cmp@10= 45.1%  gen(gen/spread) @1=0.04377(1.0118)  @5=0.04251(0.9825)  @10=0.04199(0.9706)  @20=0.04127(0.9539)  @40=0.04027(0.9309)
+
+==============================================================================
+ALL_ANTS_CLEAN   n=81  V=10236  K=20  template=SMPL_fit.pkl  bbox_diag=2.30181
+  betas sd (across specimens, pooled) = 0.435122   |beta| mean = 0.401454
+  deform_verts mean magnitude         = 0.017305  (0.752% of bbox diag)
+  --- across-specimen variance decomposition (sum over V*3 entries, ddof=1)
+    Var(parametric  shapedirs.betas) = 5.25131   share  53.720%
+    Var(free-form   deform_verts)    = 3.59555   share  36.782%
+    2*Cov(param, free-form)          = 0.928521   share   9.499%
+    Var(sum S)                       = 9.77538   [check 9.77538]
+    corr(param, free-form)           = +0.1068
+  --- probe-19 LOO generalisation; ratio = gen / POPULATION spread (the historical normaliser, calibrated on M7)
+    (a) parametric only    spread=0.017288 [LOO 0.017504]  cmp@5= 92.0% cmp@10= 98.2%  gen(gen/spread) @1=0.01053(0.6093)  @5=0.00611(0.3537)  @10=0.00322(0.1861)  @20=0.00000(0.0000)  @40=0.00000(0.0000)
+    (b) free-form only     spread=0.015375 [LOO 0.015567]  cmp@5= 44.3% cmp@10= 57.1%  gen(gen/spread) @1=0.01427(0.9284)  @5=0.01263(0.8217)  @10=0.01219(0.7932)  @20=0.01163(0.7561)  @40=0.01087(0.7070)
+    (c) sum (rest shape)   spread=0.026035 [LOO 0.026361]  cmp@5= 72.1% cmp@10= 80.5%  gen(gen/spread) @1=0.01933(0.7426)  @5=0.01500(0.5763)  @10=0.01381(0.5304)  @20=0.01275(0.4899)  @40=0.01171(0.4496)
+
+==============================================================================
+CLEAN81_M7_currentpipe   n=81  V=10229  K=13  template=SMIL_OmniAnt.pkl  bbox_diag=2.34465
+  betas sd (across specimens, pooled) = 0.000457   |beta| mean = 0.000353
+  deform_verts mean magnitude         = 0.008880  (0.379% of bbox diag)
+  --- across-specimen variance decomposition (sum over V*3 entries, ddof=1)
+    Var(parametric  shapedirs.betas) = 9.23786e-06   share   0.001%
+    Var(free-form   deform_verts)    = 1.33121   share  99.812%
+    2*Cov(param, free-form)          = 0.00249837   share   0.187%
+    Var(sum S)                       = 1.33371   [check 1.33371]
+    corr(param, free-form)           = +0.3562
+  --- probe-19 LOO generalisation; ratio = gen / POPULATION spread (the historical normaliser, calibrated on M7)
+    (a) parametric only    spread=0.000019 [LOO 0.000019]  cmp@5= 98.9% cmp@10= 99.8%  gen(gen/spread) @1=0.00001(0.3610)  @5=0.00000(0.1418)  @10=0.00000(0.0660)  @20=0.00000(0.0000)  @40=0.00000(0.0000)
+    (b) free-form only     spread=0.008289 [LOO 0.008393]  cmp@5= 52.9% cmp@10= 62.5%  gen(gen/spread) @1=0.00741(0.8944)  @5=0.00662(0.7991)  @10=0.00646(0.7792)  @20=0.00622(0.7509)  @40=0.00604(0.7292)
+    (c) sum (rest shape)   spread=0.008295 [LOO 0.008399]  cmp@5= 53.0% cmp@10= 62.6%  gen(gen/spread) @1=0.00741(0.8938)  @5=0.00662(0.7986)  @10=0.00646(0.7787)  @20=0.00622(0.7504)  @40=0.00604(0.7287)
+
+==============================================================================
+CLEAN81_hier_H3   n=81  V=10229  K=13  template=SMIL_OmniAnt.pkl  bbox_diag=2.34465
+  betas sd (across specimens, pooled) = 0.001822   |beta| mean = 0.001496
+  deform_verts mean magnitude         = 0.002554  (0.109% of bbox diag)
+  --- across-specimen variance decomposition (sum over V*3 entries, ddof=1)
+    Var(parametric  shapedirs.betas) = 0.000192759   share   0.174%
+    Var(free-form   deform_verts)    = 0.109205   share  98.532%
+    2*Cov(param, free-form)          = 0.00143465   share   1.294%
+    Var(sum S)                       = 0.110832   [check 0.110832]
+    corr(param, free-form)           = +0.1563
+  --- probe-19 LOO generalisation; ratio = gen / POPULATION spread (the historical normaliser, calibrated on M7)
+    (a) parametric only    spread=0.000089 [LOO 0.000090]  cmp@5= 99.9% cmp@10=100.0%  gen(gen/spread) @1=0.00003(0.3519)  @5=0.00000(0.0455)  @10=0.00000(0.0144)  @20=0.00000(0.0000)  @40=0.00000(0.0000)
+    (b) free-form only     spread=0.002455 [LOO 0.002486]  cmp@5= 37.2% cmp@10= 49.6%  gen(gen/spread) @1=0.00230(0.9386)  @5=0.00214(0.8710)  @10=0.00207(0.8441)  @20=0.00202(0.8229)  @40=0.00197(0.8044)
+    (c) sum (rest shape)   spread=0.002476 [LOO 0.002507]  cmp@5= 38.0% cmp@10= 50.3%  gen(gen/spread) @1=0.00231(0.9333)  @5=0.00214(0.8641)  @10=0.00207(0.8377)  @20=0.00202(0.8168)  @40=0.00198(0.7981)
+
+==============================================================================
+CONTROL: ALL_ANTS_CLEAN subsampled to n=50 (5 draws) — is the clean advantage just corpus size?
+    parametric only        gen/spread @10 = 0.1941 +/- 0.0079   @40 = 0.0000 +/- 0.0000
+    free-form only         gen/spread @10 = 0.8264 +/- 0.0097   @40 = 0.7438 +/- 0.0110
+    sum                    gen/spread @10 = 0.5643 +/- 0.0146   @40 = 0.4859 +/- 0.0153
+
+==============================================================================
+CONTROL: CLEAN81_M7_currentpipe subsampled to n=50 (5 draws) — is the clean advantage just corpus size?
+    parametric only        gen/spread @10 = 0.0664 +/- 0.0071   @40 = 0.0000 +/- 0.0000
+    free-form only         gen/spread @10 = 0.8000 +/- 0.0112   @40 = 0.7584 +/- 0.0084
+    sum                    gen/spread @10 = 0.7994 +/- 0.0112   @40 = 0.7579 +/- 0.0084
+
+==============================================================================
+CONTROL: CLEAN81_hier_H3 subsampled to n=50 (5 draws) — is the clean advantage just corpus size?
+    parametric only        gen/spread @10 = 0.0171 +/- 0.0024   @40 = 0.0000 +/- 0.0000
+    free-form only         gen/spread @10 = 0.8688 +/- 0.0041   @40 = 0.8256 +/- 0.0020
+    sum                    gen/spread @10 = 0.8623 +/- 0.0043   @40 = 0.8193 +/- 0.0020
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/shape_variance_decomp.json

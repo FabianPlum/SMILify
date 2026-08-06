@@ -1,0 +1,47 @@
+REFUTE-B -- are the two scan corpora the same KIND of object?
+
+The inside/outside test (generalized winding number) is only defined on a closed,
+consistently oriented surface. The prior probe validated GWN by offsetting RANDOM face
+centroids, which is dominated by the huge body surface; the legs (where the claim lives)
+are a small fraction of the surface area.
+
+Measures per scan: verts, faces, dropped polygon corners (the OBJ parser keeps only the
+first 3 of each face line), boundary edges, non-manifold edges, connected components,
+duplicate-vertex fraction, mean NN spacing, and the bbox diagonal.
+
+
+### worker (bench50)   n=50
+   stat                            median         min         max
+   n_verts                      48904.500   13048.000   49997.000
+   n_tris_parsed                94450.000   27551.000  106831.000
+   n_poly>3                         0.000       0.000       0.000
+   corners_dropped                  0.000       0.000       0.000
+   boundary_edges                8075.000    1784.000   20766.000
+   nonmanifold_edges             4095.000     538.000   24653.000
+   connected_components            44.500       5.000     301.000
+   NN spacing %diag                 0.280       0.181       0.701
+   scans with boundary or non-manifold edges: 50/50
+   scans with >1 connected component:        50/50
+     Dorylus_fulvus_CASENT0745678_processed.obj         bnd= 20766 nonman=24440 comp=209 quads=    0
+     Ectatomma_brunneum_CASENT0744575_processed.obj     bnd= 19377 nonman=24653 comp= 74 quads=    0
+     Odontomachus_troglodytes_CASENT0744970_processed   bnd= 11657 nonman=18925 comp=  9 quads=    0
+     Syllophopsis_sechellensis_OKENT0105212_processed   bnd= 17516 nonman=12663 comp=192 quads=    0
+     Acromyrmex_coronatus_CASENT0744365_processed.obj   bnd= 18711 nonman=11003 comp=126 quads=    0
+
+### clean  (clean81)   n=81
+   stat                            median         min         max
+   n_verts                      18823.000    4866.000   46512.000
+   n_tris_parsed                41375.000   10132.000   97669.000
+   n_poly>3                         0.000       0.000     100.000
+   corners_dropped                  0.000       0.000     100.000
+   boundary_edges                1999.000       0.000    5121.000
+   nonmanifold_edges             5239.000       0.000   10590.000
+   connected_components             2.000       1.000      17.000
+   NN spacing %diag                 0.325       0.219       0.487
+   scans with boundary or non-manifold edges: 74/81
+   scans with >1 connected component:        47/81
+     streblognathus.obj                                 bnd=  5121 nonman=10590 comp=  4 quads=    0
+     stigmatomma-liebe.obj                              bnd=  3591 nonman= 9309 comp=  2 quads=    0
+     basiceros.obj                                      bnd=  4907 nonman= 7875 comp= 17 quads=    0
+     brachyponera-chinensis.obj                         bnd=  3453 nonman= 9087 comp= 11 quads=    0
+     daceton.obj                                        bnd=  3646 nonman= 8152 comp= 13 quads=    0

@@ -1,0 +1,76 @@
+====================================================================================================
+T1/T2  SEED REPRODUCIBILITY of deform_verts on the SAME 50 worker meshes
+       'per-specimen noise' predicts cross-seed distance ~ across-specimen spread.
+====================================================================================================
+
+  M7_handoff_midline   n=50  across-specimen spread of F = 0.019960
+    seed M7_handoff_midline vs M7_handoff_midline_s1: cross-seed dist 0.016910 =  84.7% of spread;  corr(centred F) +0.4629;  median per-specimen corr(F) +0.5942
+    seed M7_handoff_midline vs M7_handoff_midline_s2: cross-seed dist 0.016945 =  84.9% of spread;  corr(centred F) +0.4544;  median per-specimen corr(F) +0.5776
+    seed M7_handoff_midline_s1 vs M7_handoff_midline_s2: cross-seed dist 0.017265 =  86.5% of spread;  corr(centred F) +0.4411;  median per-specimen corr(F) +0.5946
+    -> mean cross-seed distance (NOISE FLOOR) 0.017040  (85.4% of spread)
+    -> LOO gen@10 0.019701 (0.9870 of spread), gen@40 0.019271 (0.9655)
+    -> unexplained residual @10 is 1.16x the seed-to-seed disagreement
+
+  C0_control   n=50  across-specimen spread of F = 0.049355
+    seed C0_control vs C0_control_s1: cross-seed dist 0.031803 =  64.4% of spread;  corr(centred F) +0.6988;  median per-specimen corr(F) +0.7742
+    seed C0_control vs C0_control_s2: cross-seed dist 0.030582 =  62.0% of spread;  corr(centred F) +0.7117;  median per-specimen corr(F) +0.8030
+    seed C0_control_s1 vs C0_control_s2: cross-seed dist 0.031022 =  62.9% of spread;  corr(centred F) +0.7082;  median per-specimen corr(F) +0.7837
+    -> mean cross-seed distance (NOISE FLOOR) 0.031136  (63.1% of spread)
+    -> LOO gen@10 0.048396 (0.9806 of spread), gen@40 0.046610 (0.9444)
+    -> unexplained residual @10 is 1.55x the seed-to-seed disagreement
+
+  A4_nofreeze   n=50  across-specimen spread of F = 0.038291
+    seed A4_nofreeze vs A4_nofreeze_s1: cross-seed dist 0.027348 =  71.4% of spread;  corr(centred F) +0.6529;  median per-specimen corr(F) +0.7198
+    seed A4_nofreeze vs A4_nofreeze_s2: cross-seed dist 0.027239 =  71.1% of spread;  corr(centred F) +0.6487;  median per-specimen corr(F) +0.7339
+    seed A4_nofreeze_s1 vs A4_nofreeze_s2: cross-seed dist 0.028269 =  73.8% of spread;  corr(centred F) +0.6319;  median per-specimen corr(F) +0.6828
+    -> mean cross-seed distance (NOISE FLOOR) 0.027618  (72.1% of spread)
+    -> LOO gen@10 0.037736 (0.9855 of spread), gen@40 0.036363 (0.9497)
+    -> unexplained residual @10 is 1.37x the seed-to-seed disagreement
+
+  M1_sym(H3)   n=50  across-specimen spread of F = 0.005992
+    seed M1_sym vs M1_sym_s1: cross-seed dist 0.004572 =  76.3% of spread;  corr(centred F) +0.5912;  median per-specimen corr(F) +0.7031
+    seed M1_sym vs M1_sym_s2: cross-seed dist 0.004420 =  73.8% of spread;  corr(centred F) +0.6239;  median per-specimen corr(F) +0.7375
+    seed M1_sym_s1 vs M1_sym_s2: cross-seed dist 0.004584 =  76.5% of spread;  corr(centred F) +0.5918;  median per-specimen corr(F) +0.6829
+    -> mean cross-seed distance (NOISE FLOOR) 0.004525  (75.5% of spread)
+    -> LOO gen@10 0.005899 (0.9845 of spread), gen@40 0.005673 (0.9467)
+    -> unexplained residual @10 is 1.30x the seed-to-seed disagreement
+
+====================================================================================================
+T3  SPATIAL FREQUENCY — does the unlearnable part live at high frequency?
+    F = F_low (umbrella-smoothed, 40 passes lam=0.7) + F_high
+====================================================================================================
+
+  M7_handoff_midline (worker)  n=50 V=10229
+    |F| 0.020509   |F_low| 0.008608   |F_high| 0.015543   (high frac of energy 69.0%)
+    F (raw)    spread 0.019960   gen/spread @1=1.0063  @5=0.9939  @10=0.9870  @20=0.9794  @40=0.9655
+    F_low      spread 0.008095   gen/spread @1=0.9607  @5=0.9326  @10=0.9155  @20=0.8899  @40=0.8518
+    F_high     spread 0.015366   gen/spread @1=1.0194  @5=1.0101  @10=1.0065  @20=1.0012  @40=0.9914
+
+  CLEAN81_M7 (clean, matched)  n=81 V=10229
+    |F| 0.008880   |F_low| 0.003939   |F_high| 0.006576   (high frac of energy 52.9%)
+    F (raw)    spread 0.008289   gen/spread @1=0.8944  @5=0.7991  @10=0.7792  @20=0.7509  @40=0.7292
+    F_low      spread 0.003537   gen/spread @1=0.7929  @5=0.6690  @10=0.6157  @20=0.5728  @40=0.5233
+    F_high     spread 0.006186   gen/spread @1=0.9186  @5=0.8621  @10=0.8450  @20=0.8253  @40=0.8057
+
+  LIM_0 (worker)  n=50 V=10235
+    |F| 0.019184   |F_low| 0.007384   |F_high| 0.015177   (high frac of energy 74.0%)
+    F (raw)    spread 0.018814   gen/spread @1=1.0164  @5=1.0062  @10=0.9998  @20=0.9935  @40=0.9828
+    F_low      spread 0.007157   gen/spread @1=0.9966  @5=0.9763  @10=0.9604  @20=0.9368  @40=0.8994
+    F_high     spread 0.014957   gen/spread @1=1.0189  @5=1.0128  @10=1.0093  @20=1.0025  @40=0.9950
+
+  ALL_ANTS_CLEAN (legacy)  n=81 V=10236
+    |F| 0.017305   |F_low| 0.012390   |F_high| 0.008216   (high frac of energy 28.2%)
+    F (raw)    spread 0.015375   gen/spread @1=0.9284  @5=0.8217  @10=0.7932  @20=0.7561  @40=0.7070
+    F_low      spread 0.010709   gen/spread @1=0.8990  @5=0.7717  @10=0.7203  @20=0.6533  @40=0.5814
+    F_high     spread 0.007504   gen/spread @1=0.9552  @5=0.8967  @10=0.8783  @20=0.8558  @40=0.8257
+
+====================================================================================================
+T4  TEMPLATE CENTREDNESS — where does v_template sit relative to each corpus?
+    (betas are frozen in M7/CLEAN81_M7, so mean_i F_i IS the template-to-corpus offset)
+====================================================================================================
+  M7_handoff_midline (worker)    |mean_i F_i| = 0.006815   |F| = 0.020509   spread(F) = 0.019960
+  CLEAN81_M7 (clean, matched)    |mean_i F_i| = 0.002960   |F| = 0.008880   spread(F) = 0.008289
+  LIM_0 (worker)                 |mean_i F_i| = 0.005679   |F| = 0.019184   spread(F) = 0.018814
+  ALL_ANTS_CLEAN (legacy)        |mean_i F_i| = 0.007907   |F| = 0.017305   spread(F) = 0.015375
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/shape_decomp_REFUTE2.json

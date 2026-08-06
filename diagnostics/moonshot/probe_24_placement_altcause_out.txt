@@ -1,0 +1,152 @@
+
+====================================================================================================
+PART A -- LIKE-FOR-LIKE control. probe-23 compared workers to a LEGACY fit on a
+          different template with no betas_trans. CLEAN_M7 is the same 81 clean
+          meshes through the IDENTICAL template + recipe as the worker arms.
+====================================================================================================
+arm              corpus    n  nb     |bt|    |lbs|  cumdisp%    bone%  betaMag%   dvMag%
+----------------------------------------------------------------------------------------
+CLEAN_M7         clean    81  13  0.01203  0.07075     2.405    25.72     0.001    0.365
+M7_worker        worker   50  13  0.02647  0.15537     6.466    79.06     0.001    0.831
+GATE_easy_M7     worker   50  13  0.01799  0.09682     4.562    38.22     0.001    0.669
+GATE_rand_M7     worker   50  13  0.02802  0.15918     6.520    79.90     0.001    0.866
+S0_oldmodel_M7   worker   50  13  0.02091  0.10905     4.674    47.23     0.001    0.706
+BPX_noprior      worker   50  13  0.02657  0.15496     6.440    78.45     0.458    0.791
+LIM_0            worker   50  25  0.02881  0.16311     6.845 116393926.43     0.571    0.777
+LIM_1x           worker   50  25  0.03177  0.19957     6.473 117800916.11     0.560    0.803
+LIM_3x           worker   50  25  0.03190  0.19732     6.476 117658336.75     0.559    0.806
+LEGACY_CLEAN     clean    81  20  0.00000  0.25636     2.334    17.61     0.871    0.714
+
+  per-specimen cumdisp%, like-for-like block (SMIL_OmniAnt.pkl + M7 recipe):
+    CLEAN_M7         mean   2.405  median   2.246  p10   1.606  p90   3.686
+    M7_worker        mean   6.466  median   6.312  p10   4.243  p90   9.291
+    GATE_easy_M7     mean   4.562  median   4.363  p10   3.303  p90   5.872
+    GATE_rand_M7     mean   6.520  median   6.406  p10   4.341  p90   9.182
+    S0_oldmodel_M7   mean   4.674  median   4.608  p10   3.190  p90   5.867
+    BPX_noprior      mean   6.440  median   6.159  p10   4.139  p90   9.396
+
+    CLEAN_M7 vs M7_worker cumdisp: 2.405 vs 6.466 ratio 2.689  mannwhitney p=7.32e-21
+    probe-23's claim was ratio 7.309/2.402 = 3.043
+
+====================================================================================================
+PART B -- why LEGACY_CLEAN shows LOW displacement despite the HIGHEST |lbs|.
+          propagate_scaling=False makes the accumulated linear map S_root^-1 . S_j,
+          so a scale field COMMON to all joints is gauge -- it cancels exactly.
+====================================================================================================
+  CLEAN_M7         |lbs| 0.07075  |root lbs| 0.09480  |lbs - root| 0.10512   gauge fraction -48.6%
+  M7_worker        |lbs| 0.15537  |root lbs| 0.16588  |lbs - root| 0.22802   gauge fraction -46.8%
+  GATE_easy_M7     |lbs| 0.09682  |root lbs| 0.11419  |lbs - root| 0.14213   gauge fraction -46.8%
+  GATE_rand_M7     |lbs| 0.15918  |root lbs| 0.16808  |lbs - root| 0.23364   gauge fraction -46.8%
+  S0_oldmodel_M7   |lbs| 0.10905  |root lbs| 0.09140  |lbs - root| 0.13674   gauge fraction -25.4%
+  BPX_noprior      |lbs| 0.15496  |root lbs| 0.15656  |lbs - root| 0.22186   gauge fraction -43.2%
+  LIM_0            |lbs| 0.16311  |root lbs| 0.16546  |lbs - root| 0.22592   gauge fraction -38.5%
+  LIM_1x           |lbs| 0.19957  |root lbs| 0.16326  |lbs - root| 0.25226   gauge fraction -26.4%
+  LIM_3x           |lbs| 0.19732  |root lbs| 0.15714  |lbs - root| 0.25030   gauge fraction -26.8%
+  LEGACY_CLEAN     |lbs| 0.25636  |root lbs| 0.08184  |lbs - root| 0.26615   gauge fraction  -3.8%
+
+====================================================================================================
+PART C -- POSE. Is the clean corpus extended and the workers folded, and does pose
+          predict placement usage?
+====================================================================================================
+  arm              |jointrot|deg  |legrot|deg  legrot max  straight(pose)  straight(rest)
+  CLEAN_M7                 14.20        14.61       49.97          0.7378          0.7392
+  M7_worker                46.79        56.64      162.15          0.5170          0.7392
+  GATE_easy_M7             44.01        53.34      163.84          0.4781          0.7392
+  GATE_rand_M7             47.66        57.04      157.00          0.4803          0.7392
+  S0_oldmodel_M7           43.44        53.08      156.55          0.4944          0.7392
+  BPX_noprior              46.77        56.81      157.39          0.5117          0.7386
+  LIM_0                    49.16        57.71      164.33          0.4952          0.7412
+  LIM_1x                   37.46        40.22      109.57          0.5517          0.7411
+  LIM_3x                   37.10        39.71      107.00          0.5518          0.7410
+  LEGACY_CLEAN              5.14         5.14       20.30          0.7462          0.7484
+
+    mean leg-joint rotation (deg): CLEAN_M7 14.6066  M7_worker 56.6403  mannwhitney p=1.31e-21
+
+    leg straightness (1 = fully extended): CLEAN_M7 0.7378  M7_worker 0.5170  mannwhitney p=9.12e-20
+
+  WITHIN-ARM rank correlation, per specimen: does pose magnitude predict placement?
+  arm                rho(legrot,cumdisp)   rho(legrot,|lbs|)   rho(straight,cumdisp)
+  CLEAN_M7                         0.418               0.235                  -0.203
+  M7_worker                        0.552               0.656                   0.183
+  GATE_easy_M7                     0.642               0.479                  -0.188
+  GATE_rand_M7                     0.488               0.460                   0.196
+  S0_oldmodel_M7                   0.279               0.474                  -0.411
+  BPX_noprior                      0.454               0.602                   0.112
+  LIM_0                            0.383               0.502                   0.167
+  LIM_1x                           0.593               0.652                   0.076
+  LIM_3x                           0.546               0.635                   0.135
+  LEGACY_CLEAN                     0.275               0.386                  -0.366
+
+  pose overlap window (mean leg rotation): [35.37, 47.69] deg -> 3/81 clean, 7/50 workers
+
+====================================================================================================
+PART D -- IN-DISTRIBUTION. run_clean81.sh: 'ALL_ANTS_CLEAN is the 81-mesh corpus that
+          SMIL_OmniAnt.pkl's own shape space was built from'. How much of the needed
+          deformation does each corpus get out of betas vs the free parameters?
+====================================================================================================
+  arm               betaMag%   dvMag%  lbsMesh%  btMesh%  free/beta
+  CLEAN_M7             0.001    0.365     1.406    1.497   4210.797
+  M7_worker            0.001    0.831     2.892    2.660   7979.051
+  GATE_easy_M7         0.001    0.669     2.259    2.499   9328.602
+  GATE_rand_M7         0.001    0.866     3.045    2.679  10071.170
+  S0_oldmodel_M7       0.001    0.706     1.900    2.523   9982.067
+  BPX_noprior          0.458    0.791     2.841    2.725     13.882
+  LIM_0                0.571    0.777     2.814    2.655     10.936
+  LIM_1x               0.560    0.803     2.848    2.719     11.365
+  LIM_3x               0.559    0.806     2.855    2.748     11.457
+  LEGACY_CLEAN         0.871    0.714     1.941    0.000      3.048
+
+====================================================================================================
+PART E -- L2 re-examined. Did the compensation go SPECIFICALLY into placement, or did
+          every free group grow (balloon squeeze)? Common currency = mesh displacement.
+====================================================================================================
+  arm          |bt|    |lbs|  dvMesh%  betaMesh%  lbsMesh%  btMesh%  cumdisp%   bone%
+  LIM_0     0.02881  0.16311    0.777      0.571     2.814    2.655     6.845 116393926.43
+  LIM_1x    0.03177  0.19957    0.803      0.560     2.848    2.719     6.473 117800916.11
+  LIM_3x    0.03190  0.19732    0.806      0.559     2.855    2.748     6.476 117658336.75
+
+  paired deltas LIM_0 -> LIM_1x (same 50 specimens, same order), in %-change:
+  quantity                          LIM_0     LIM_1x   %change  wilcoxon p
+  |log_beta_scales| (param)       0.16311    0.19957    +22.4%    5.71e-12
+  |betas_trans|     (param)       0.02881    0.03177    +10.3%    3.26e-07
+  |deform_verts|    (param)       0.00955    0.00986     +3.3%    5.64e-05
+  |betas|           (param)       0.26956    0.26550     -1.5%       0.521
+  lbs  MESH effect  %body         2.81445    2.84785     +1.2%       0.455
+  bt   MESH effect  %body         2.65502    2.71879     +2.4%       0.438
+  dv   MESH effect  %body         0.77669    0.80271     +3.4%    5.12e-05
+  beta MESH effect  %body         0.57115    0.56045     -1.9%       0.295
+  JOINT cum displacement %        6.84512    6.47322     -5.4%      0.0305
+  BONE local distortion  %     116393926.42628 117800916.11087     +1.2%       0.759
+
+  NOTE: the gauge share of the |lbs| growth (common scale field, no relative
+        effect because propagate_scaling=False cancels S_root):
+    LIM_0    |lbs| 0.16311  |lbs-root| 0.22592
+    LIM_1x   |lbs| 0.19957  |lbs-root| 0.25226
+
+====================================================================================================
+PART F -- is the CORRESPONDENCE metric (probe-19) itself pose-contaminated?
+          fitter_3d/trainer.py:240 adds deform_verts AFTER skinning, so it is a POSED-
+          space offset; probe-19 adds it to REST-space geometry. Recomputed three ways.
+====================================================================================================
+
+  CLEAN_M7  (n=81)
+    probe-19 as-is (vt+dv+sd.beta)     gen@10 0.7242   gen@40 0.6728
+    no deform_verts (vt+sd.beta)       gen@10 0.0497   gen@40 0.0000
+    dv un-rotated to rest frame        gen@10 0.7177   gen@40 0.6695
+
+  M7_worker  (n=50)
+    probe-19 as-is (vt+dv+sd.beta)     gen@10 0.9508   gen@40 0.9305
+    no deform_verts (vt+sd.beta)       gen@10 0.1105   gen@40 0.0000
+    dv un-rotated to rest frame        gen@10 0.7097   gen@40 0.6952
+
+  GATE_easy_M7  (n=50)
+    probe-19 as-is (vt+dv+sd.beta)     gen@10 0.9697   gen@40 0.9475
+    no deform_verts (vt+sd.beta)       gen@10 0.0981   gen@40 0.0000
+    dv un-rotated to rest frame        gen@10 0.9520   gen@40 0.9289
+
+  BPX_noprior  (n=50)
+    probe-19 as-is (vt+dv+sd.beta)     gen@10 0.9199   gen@40 0.8928
+    no deform_verts (vt+sd.beta)       gen@10 0.2269   gen@40 0.0000
+    dv un-rotated to rest frame        gen@10 0.8989   gen@40 0.8673
+
+DONE

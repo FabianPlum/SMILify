@@ -1,0 +1,79 @@
+PROBE 22 -- de-confound proxy 2 by decomposing leg-proportion spread by TAXONOMIC LEVEL.
+
+Proxy 2b (cross-specimen spread of within-leg segment proportions) is confounded: both
+corpora span many ant genera, and coxa:femur:tibia:tarsus really does vary between genera.
+This probe removes the confound by splitting the pairwise spread into
+
+    REPEAT      byte-identical scan fitted twice   -> pure fitter noise, zero biology
+    CONSPECIFIC same Genus species, two specimens  -> noise + individual variation
+    CONGENERIC  same genus, different species      -> + species variation
+    CROSS-GENUS everything else                    -> + genus variation (the number 2b reports)
+
+If CROSS-GENUS is not much bigger than CONSPECIFIC, the fitted leg proportions carry almost
+no taxonomic signal and the spread in 2b is measurement error, i.e. joint misplacement.
+If CROSS-GENUS >> CONSPECIFIC, the spread is largely real biology and 2b is not evidence of
+misplacement.
+
+Taxon parsing:
+  worker labels  'Genus_species_CASENT0744328_processed.obj' -> genus, species
+  clean labels   'dolichoderus-attelaboides' -> genus 'dolichoderus'; bare numeric labels
+                 ('01'..'20') have no taxon and are used only in the CROSS-GENUS pool.
+  MEASURED: 'ectatomma-tuberculatum.obj' and 'ectatomma-tuberculatum (1).obj' are BYTE
+  IDENTICAL (md5 d758d652435b080d0ad5a8bd1cd3cc4b), so that clean pair is a REPEAT.
+
+
+### LIM_0 (worker)   n=50
+   level           n_pairs    median      mean       p90
+   REPEAT                0        -- none in this corpus
+   CONSPECIFIC           2     19.17     19.17     24.75
+   CONGENERIC           18     22.50     24.19     34.00
+   CROSS-GENUS        1205     21.45     22.59     33.21
+   conspecific pairs:
+      Anochetus_risii_CASENT0877608_proc | Anochetus_risii_CASENT0877609_proc -> 12.19%
+      Labidus_praedator_CASENT0744236_pr | Labidus_praedator_CASENT0744237_pr -> 26.15%
+   >>> CONSPECIFIC / CROSS-GENUS = 0.89   (1.0 = fitted leg proportions carry NO taxonomic signal)
+   per-specimen dispersion (median diff to all others): median=21.15%  IQR=[19.34,23.43]%
+
+### M7_midline (worker)   n=50
+   level           n_pairs    median      mean       p90
+   REPEAT                0        -- none in this corpus
+   CONSPECIFIC           2     25.40     25.40     31.36
+   CONGENERIC           18     24.46     23.09     33.55
+   CROSS-GENUS        1205     22.74     23.94     35.25
+   conspecific pairs:
+      Anochetus_risii_CASENT0877608_proc | Anochetus_risii_CASENT0877609_proc -> 17.95%
+      Labidus_praedator_CASENT0744236_pr | Labidus_praedator_CASENT0744237_pr -> 32.85%
+   >>> CONSPECIFIC / CROSS-GENUS = 1.12   (1.0 = fitted leg proportions carry NO taxonomic signal)
+   per-specimen dispersion (median diff to all others): median=22.06%  IQR=[20.59,24.81]%
+
+### baseline (worker, stock)   n=50
+   level           n_pairs    median      mean       p90
+   REPEAT                0        -- none in this corpus
+   CONSPECIFIC           2     52.47     52.47     61.00
+   CONGENERIC           18     38.40     39.97     55.28
+   CROSS-GENUS        1205     46.06     48.31     72.69
+   conspecific pairs:
+      Anochetus_risii_CASENT0877608_proc | Anochetus_risii_CASENT0877609_proc -> 63.13%
+      Labidus_praedator_CASENT0744236_pr | Labidus_praedator_CASENT0744237_pr -> 41.82%
+   >>> CONSPECIFIC / CROSS-GENUS = 1.14   (1.0 = fitted leg proportions carry NO taxonomic signal)
+   per-specimen dispersion (median diff to all others): median=45.58%  IQR=[40.42,50.17]%
+
+### ALL_ANTS_CLEAN (81)   n=81
+   level           n_pairs    median      mean       p90
+   REPEAT                1      0.63      0.63      0.63
+   CONSPECIFIC           0        -- none in this corpus
+   CONGENERIC           11     11.36     12.97     21.46
+   CROSS-GENUS        3228     11.35     12.77     21.26
+   >>> CONSPECIFIC / CROSS-GENUS = nan   (1.0 = fitted leg proportions carry NO taxonomic signal)
+   per-specimen dispersion (median diff to all others): median=10.94%  IQR=[9.80,12.42]%
+
+====================================================================================================
+SUMMARY -- median relative difference in within-leg segment proportions [%]
+run                            REPEAT  CONSPEC   CONGEN   XGENUS  CONSPEC/XGENUS
+LIM_0 (worker)                     --    19.17    22.50    21.45            0.89
+M7_midline (worker)                --    25.40    24.46    22.74            1.12
+baseline (worker, stock)           --    52.47    38.40    46.06            1.14
+ALL_ANTS_CLEAN (81)              0.63       --    11.36    11.35             nan
+====================================================================================================
+per-specimen dispersion, LIM_0 vs CLEAN: median 21.15% vs 10.94%  ratio=1.93  U=3939  p=1.24e-19  (n=50 vs 81)
+====================================================================================================

@@ -439,6 +439,29 @@ Monotone in every metric. **Top 50% versus the whole corpus: fscore@0.01 +14.7%,
 sets, not a single controlled experiment; the controlled statement is the easy-vs-rand test
 above.
 
+**The effect size is much smaller across recipes than within one.** The rho = +0.80 above was
+measured within a single arm on bench50. Pooled over 2500 (specimen, run) outcomes from 50
+scored runs (`probe_23_fittability_gate_PROBE.py`), run-grouped cross-validation gives
+**rho = +0.254** against a permutation noise floor of 0.037. The gate is real and far above
+noise, but it predicts *far* less well when applied across differing recipes than §6.2's
+headline number implies, and the headline should be read as a within-arm figure.
+
+**A multi-feature score does not beat it.** Adding `radial_p90`, aspect ratio, radial spread,
+log-radial and yaw gives cross-validated rho = +0.261 against `radial_med` alone at +0.254 —
+inside noise. `aspect` contributes rho = +0.010. **Keep the single number**; the extra
+features add complexity and nothing else. Operating table over all 757 workers
+(`out/fittability_gate.csv`, with `keep_top50` / `keep_top25` flags):
+
+| keep | cutoff | n kept | deform_mag median | vs all |
+|---|---|---|---|---|
+| 25% | 0.1955 | 190 | 0.01451 | −26.6% |
+| **50%** | **0.2367** | **379** | **0.01555** | **−21.3%** |
+| 75% | 0.2847 | 568 | 0.01741 | −11.9% |
+| 90% | 0.3422 | 681 | 0.01904 | −3.6% |
+
+Returns flatten past 50%: 50→75% recovers 189 specimens for nearly half the quality gain, and
+75→90% is almost free coverage worth almost nothing. **Top 50% is the operating point.**
+
 **Why the score means something.** ALL_ANTS_CLEAN — the corpus OmniAnt's shape space was
 built from — has median `radial_med` **0.1521**, which is the **6.6th percentile** of the
 worker distribution (worker median 0.2367). The workers are systematically more compact than
@@ -1163,10 +1186,49 @@ as a flagged regression (+8.5% burden at seed 0). The full deliverable is not on
 the per-part head figure quoted in discussion could not be re-verified and is not asserted.
 The detector is in neither the repo nor this report's metric suite, and it should be.
 
-**Why this matters for what comes next.** Three independent mechanisms — the partition, the
-authored limits, and per-joint scale — all stop at the neck. The anterior is the one region
-where a *part-aware* intervention has never been tried, and unlike the distal leg (E1, null) it
-has not yet been tested and found wanting.
+### 6.10.1 E3 — the anterior split, and it is not the partition
+
+`--split_anterior` gives head, mandible and antenna their own partition groups
+(`run_e3_anterior.sh`, single variable against LIM_1x). The code's objection to this — that
+the parts would be "too small to carry a stable data term" — was measured and is false:
+
+| group | verts | area % | expected samples @8000 |
+|---|---|---|---|
+| **head** | 2174 | **19.53%** | 1563 |
+| mandible | 379 | 3.11% | 248 |
+| antenna | 362 | 1.70% | 136 |
+| *each leg, which already gets its own term* | ~750 | *5.5–6.6%* | *439–531* |
+
+The head is **three times larger than any leg group**, and even the antenna clears the code's
+own `n_t < 10` skip threshold by 13×. Nothing was ever too small.
+
+| arm | head | mandible | antenna | gaster | leg | gen@10 |
+|---|---|---|---|---|---|---|
+| LIM_1x (anterior folded) | 0.72× | 1.24× | 1.72× | 1.05× | 1.05× | 0.9336 |
+| **ANT_split** | **0.73×** | 1.44× | 1.62× | 1.08× | 1.01× | 0.9253 |
+
+**Null on the pre-registered outcome.** The head ratio had to rise from 0.72× toward 1.0× and
+did not move (0.73×). The antenna improved slightly (1.72 → 1.62×) and the mandible got
+*worse* (1.24 → 1.44×). Per the pre-registration: **the partition is not what drives the
+anterior failure.** Giving the head its own equally-weighted data term does not cause it to be
+carried forward.
+
+gen/spread moved 0.9336 → 0.9253, roughly back to LIM_0's 0.9221, but that is not the claim
+under test and is within the range these arms wander over.
+
+**What this leaves.** Of the three mechanisms that stop at the neck, the partition is now
+tested and null, and the authored limits cannot reach the anterior by construction (§6.10,
+claim 1). The remaining one is **per-joint scale**, which nothing bounds: the stock baseline
+lets an antenna joint span 889× and a head joint 138×, and the only terms touching
+`log_beta_scales` anywhere are the L/R symmetry tie and the opt-in `w_jresid` L2. That is the
+next thing to test, and it is the one mechanism that can directly produce "the head shrinks
+into the thorax".
+
+**Three pre-registered nulls in a row** — E1 (rotation limits), E3 (anterior partition), and
+earlier the soft partition — all of them interventions on *how the data term is shaped*. The
+one intervention that has ever moved correspondence (§6.8, removing `w_beta_prior`) acted on
+**what the model is allowed to represent**, not on the data term. That contrast is now the
+strongest pattern in this work.
 
 ---
 

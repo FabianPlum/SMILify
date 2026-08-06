@@ -1,0 +1,74 @@
+8 target meshes loaded.
+/home/fabi/mambaforge/envs/pytorch3d/lib/python3.10/site-packages/pytorch3d/ops/laplacian_matrices.py:51: UserWarning: torch.sparse.SparseTensor(indices, values, shape, *, device=) is deprecated.  Please use torch.sparse_coo_tensor(indices, values, shape, dtype=, device=). (Triggered internally at /opt/conda/conda-bld/pytorch_1699449181202/work/torch/csrc/utils/tensor_new.cpp:605.)
+  A = torch.sparse.FloatTensor(idx, ones, (V, V))
+    [H0_body]    0/400 loss=0.021201  chamfer=0.02119  edge=0.00000  lap=0.00142  sym=0.00000  mid=0.00000
+    [H0_body]  399/400 loss=0.008603  chamfer=0.00648  edge=0.03512  lap=0.00158  sym=0.00015  mid=0.00014
+    [H1_legs]    0/400 loss=0.024486  chamfer=0.02412  edge=0.00000  lap=0.00158  sym=0.00015  mid=0.00014
+    [H1_legs]  399/400 loss=0.005757  chamfer=0.00447  edge=0.02129  lap=0.00172  sym=0.00011  mid=0.00008  churn=0.007
+    [H2_joint]    0/400 loss=0.004685  chamfer=0.00447  edge=0.00000  lap=0.00172  sym=0.00011  mid=0.00008
+    [H2_joint]  399/400 loss=0.003463  chamfer=0.00298  edge=0.00807  lap=0.00184  sym=0.00011  mid=0.00001  churn=0.008
+    [H0_body]    0/400 loss=0.021259  chamfer=0.02125  edge=0.00000  lap=0.00142  sym=0.00000  mid=0.00000
+    [H0_body]  399/400 loss=0.008465  chamfer=0.00623  edge=0.03972  lap=0.00159  sym=0.00013  mid=0.00009
+    [H1_legs]    0/400 loss=0.022793  chamfer=0.02254  edge=0.00000  lap=0.00159  sym=0.00013  mid=0.00009
+    [H1_legs]  399/400 loss=0.005030  chamfer=0.00397  edge=0.01811  lap=0.00171  sym=0.00008  mid=0.00005  churn=0.008
+    [H2_joint]    0/400 loss=0.004120  chamfer=0.00397  edge=0.00000  lap=0.00171  sym=0.00008  mid=0.00005
+    [H2_joint]  399/400 loss=0.003156  chamfer=0.00271  edge=0.00761  lap=0.00183  sym=0.00010  mid=0.00001  churn=0.008
+    [H0_body]    0/400 loss=0.021140  chamfer=0.02113  edge=0.00000  lap=0.00142  sym=0.00000  mid=0.00000
+    [H0_body]  399/400 loss=0.008529  chamfer=0.00627  edge=0.03815  lap=0.00158  sym=0.00016  mid=0.00013
+    [H1_legs]    0/400 loss=0.023259  chamfer=0.02291  edge=0.00000  lap=0.00158  sym=0.00016  mid=0.00013
+    [H1_legs]  399/400 loss=0.005472  chamfer=0.00437  edge=0.01800  lap=0.00170  sym=0.00011  mid=0.00007  churn=0.007
+    [H2_joint]    0/400 loss=0.004669  chamfer=0.00447  edge=0.00000  lap=0.00170  sym=0.00011  mid=0.00007
+    [H2_joint]  399/400 loss=0.003544  chamfer=0.00307  edge=0.00779  lap=0.00183  sym=0.00012  mid=0.00001  churn=0.005
+    [H0_body]    0/400 loss=0.021221  chamfer=0.02121  edge=0.00000  lap=0.00142  sym=0.00000  mid=0.00000
+    [H0_body]  399/400 loss=0.008544  chamfer=0.00628  edge=0.03824  lap=0.00158  sym=0.00015  mid=0.00013
+    [H1_legs]    0/400 loss=0.024978  chamfer=0.02463  edge=0.00000  lap=0.00158  sym=0.00015  mid=0.00013
+    [H1_legs]  399/400 loss=0.005504  chamfer=0.00440  edge=0.01797  lap=0.00171  sym=0.00010  mid=0.00007  churn=0.009
+    [H2_joint]    0/400 loss=0.004715  chamfer=0.00451  edge=0.00000  lap=0.00171  sym=0.00010  mid=0.00007
+    [H2_joint]  399/400 loss=0.003496  chamfer=0.00302  edge=0.00771  lap=0.00184  sym=0.00013  mid=0.00001  churn=0.006
+    [H0_body]    0/400 loss=0.021098  chamfer=0.02109  edge=0.00000  lap=0.00142  sym=0.00000  mid=0.00000
+    [H0_body]  399/400 loss=0.008596  chamfer=0.00638  edge=0.03768  lap=0.00158  sym=0.00014  mid=0.00013
+    [H1_legs]    0/400 loss=0.025705  chamfer=0.02537  edge=0.00000  lap=0.00158  sym=0.00014  mid=0.00013
+    [H1_legs]  399/400 loss=0.005602  chamfer=0.00452  edge=0.01745  lap=0.00171  sym=0.00009  mid=0.00008  churn=0.008
+    [H2_joint]    0/400 loss=0.004764  chamfer=0.00455  edge=0.00000  lap=0.00171  sym=0.00009  mid=0.00008
+    [H2_joint]  399/400 loss=0.003515  chamfer=0.00301  edge=0.00838  lap=0.00183  sym=0.00012  mid=0.00001  churn=0.008
+[e2] free: (5, 8, 54, 3)
+    [H0_body]    0/400 loss=0.021201  chamfer=0.02119  edge=0.00000  lap=0.00142  sym=0.00000  limit=0.00000  mid=0.00000
+    [H0_body]  399/400 loss=0.008604  chamfer=0.00648  edge=0.03509  lap=0.00158  sym=0.00015  limit=0.00000  mid=0.00014
+    [H1_legs]    0/400 loss=0.024484  chamfer=0.02412  edge=0.00000  lap=0.00158  sym=0.00015  limit=0.00000  mid=0.00014
+    [H1_legs]  399/400 loss=0.006401  chamfer=0.00514  edge=0.02060  lap=0.00172  sym=0.00012  limit=0.00000  mid=0.00008  churn=0.007
+    [H2_joint]    0/400 loss=0.005277  chamfer=0.00504  edge=0.00000  lap=0.00172  sym=0.00012  limit=0.00000  mid=0.00008
+    [H2_joint]  399/400 loss=0.003851  chamfer=0.00337  edge=0.00772  lap=0.00185  sym=0.00013  limit=0.00000  mid=0.00001  churn=0.007
+    [H0_body]    0/400 loss=0.021259  chamfer=0.02125  edge=0.00000  lap=0.00142  sym=0.00000  limit=0.00000  mid=0.00000
+    [H0_body]  399/400 loss=0.008465  chamfer=0.00623  edge=0.03969  lap=0.00159  sym=0.00013  limit=0.00000  mid=0.00009
+    [H1_legs]    0/400 loss=0.022593  chamfer=0.02234  edge=0.00000  lap=0.00159  sym=0.00013  limit=0.00000  mid=0.00009
+    [H1_legs]  399/400 loss=0.005723  chamfer=0.00464  edge=0.01833  lap=0.00171  sym=0.00011  limit=0.00000  mid=0.00005  churn=0.008
+    [H2_joint]    0/400 loss=0.004719  chamfer=0.00455  edge=0.00000  lap=0.00171  sym=0.00011  limit=0.00000  mid=0.00005
+    [H2_joint]  399/400 loss=0.003807  chamfer=0.00335  edge=0.00747  lap=0.00184  sym=0.00013  limit=0.00000  mid=0.00001  churn=0.006
+    [H0_body]    0/400 loss=0.021140  chamfer=0.02113  edge=0.00000  lap=0.00142  sym=0.00000  limit=0.00000  mid=0.00000
+    [H0_body]  399/400 loss=0.008527  chamfer=0.00627  edge=0.03819  lap=0.00158  sym=0.00015  limit=0.00000  mid=0.00013
+    [H1_legs]    0/400 loss=0.021106  chamfer=0.02075  edge=0.00000  lap=0.00158  sym=0.00015  limit=0.00000  mid=0.00013
+    [H1_legs]  399/400 loss=0.005347  chamfer=0.00439  edge=0.01473  lap=0.00170  sym=0.00012  limit=0.00000  mid=0.00007  churn=0.008
+    [H2_joint]    0/400 loss=0.004761  chamfer=0.00454  edge=0.00000  lap=0.00170  sym=0.00012  limit=0.00000  mid=0.00007
+    [H2_joint]  399/400 loss=0.003747  chamfer=0.00331  edge=0.00673  lap=0.00181  sym=0.00015  limit=0.00000  mid=0.00001  churn=0.006
+    [H0_body]    0/400 loss=0.021221  chamfer=0.02121  edge=0.00000  lap=0.00142  sym=0.00000  limit=0.00000  mid=0.00000
+    [H0_body]  399/400 loss=0.008524  chamfer=0.00627  edge=0.03809  lap=0.00158  sym=0.00015  limit=0.00000  mid=0.00013
+    [H1_legs]    0/400 loss=0.024991  chamfer=0.02464  edge=0.00000  lap=0.00158  sym=0.00015  limit=0.00000  mid=0.00013
+    [H1_legs]  399/400 loss=0.006118  chamfer=0.00503  edge=0.01733  lap=0.00171  sym=0.00013  limit=0.00000  mid=0.00007  churn=0.010
+    [H2_joint]    0/400 loss=0.005345  chamfer=0.00513  edge=0.00000  lap=0.00171  sym=0.00013  limit=0.00000  mid=0.00007
+    [H2_joint]  399/400 loss=0.004124  chamfer=0.00355  edge=0.00894  lap=0.00185  sym=0.00019  limit=0.00000  mid=0.00001  churn=0.006
+    [H0_body]    0/400 loss=0.021098  chamfer=0.02109  edge=0.00000  lap=0.00142  sym=0.00000  limit=0.00000  mid=0.00000
+    [H0_body]  399/400 loss=0.008595  chamfer=0.00638  edge=0.03765  lap=0.00158  sym=0.00014  limit=0.00000  mid=0.00013
+    [H1_legs]    0/400 loss=0.025696  chamfer=0.02536  edge=0.00000  lap=0.00158  sym=0.00014  limit=0.00000  mid=0.00013
+    [H1_legs]  399/400 loss=0.006241  chamfer=0.00516  edge=0.01704  lap=0.00171  sym=0.00013  limit=0.00000  mid=0.00008  churn=0.008
+    [H2_joint]    0/400 loss=0.005387  chamfer=0.00516  edge=0.00000  lap=0.00171  sym=0.00013  limit=0.00000  mid=0.00008
+    [H2_joint]  399/400 loss=0.004113  chamfer=0.00352  edge=0.00925  lap=0.00184  sym=0.00020  limit=0.00000  mid=0.00001  churn=0.006
+[e2] limited: (5, 8, 54, 3)
+
+Across-seed spread of the FINAL joint angle (5 seeds, 8 specimens, 400 its/stage)
+group                free sd   limited sd   reduction   free p95
+body                   3.67°        3.62°        1.6%     16.14°
+mandible               1.99°        1.65°       17.3%      6.62°
+leg proximal           5.70°        4.99°       12.5%     17.08°
+leg distal            13.93°        9.16°       34.3%     46.85°
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/pose_basins.png

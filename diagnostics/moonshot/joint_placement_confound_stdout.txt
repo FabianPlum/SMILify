@@ -1,0 +1,49 @@
+PROBE 23 -- is the scan-based joint metric just a shadow of a worse SURFACE fit?
+
+Probe 21 measured that worker joints sit outside their own scan 61.5% of the time vs 30.1%
+for the clean corpus. But the worker SURFACE fit is also worse (fitted->scan mean NN
+0.317% vs 0.222% of the scan diagonal). If joint-outside-ness is simply proportional to
+surface-fit error, the joint metric carries no independent information.
+
+This probe computes, per specimen:
+    chamfer   fitted-mesh -> scan mean nearest-neighbour distance / scan diagonal
+    outfrac   fraction of the 55 joints outside the scan (|winding number| < 0.5)
+    gap       median joint->scan distance / scan diagonal
+    centr     median surface centrality of the joints wrt the scan
+and reports (a) the within-corpus Spearman correlation between chamfer and each joint
+metric, and (b) a Mann-Whitney U across specimens (worker vs clean), which is the correct
+unit of independence -- unlike the pairwise pooling used elsewhere.
+
+Also dumps per-specimen arrays to joint_placement_confound.npz for later reuse.
+
+
+### LIM_0 (worker)   n=50
+   metric          median      mean        sd   spearman r vs chamfer         p
+   chamfer         0.0032    0.0032    0.0007                      --        --
+   outfrac         0.6182    0.6145    0.0926                   0.023  8.71e-01
+   gap             0.0050    0.0051    0.0013                   0.573  1.38e-05
+   centrality      0.4269    0.4394    0.0547                  -0.131  3.63e-01
+
+### ALL_ANTS_CLEAN   n=81
+   metric          median      mean        sd   spearman r vs chamfer         p
+   chamfer         0.0022    0.0024    0.0006                      --        --
+   outfrac         0.2909    0.3006    0.0840                  -0.083  4.60e-01
+   gap             0.0027    0.0028    0.0004                   0.779  1.16e-17
+   centrality      0.3389    0.3448    0.0545                   0.176  1.16e-01
+
+============================================================================================
+PER-SPECIMEN worker vs clean (Mann-Whitney U, two-sided)
+metric        worker med   clean med    ratio         U           p
+chamfer           0.0032      0.0022     1.42      3309    1.19e-09
+outfrac           0.6182      0.2909     2.12      4032    1.88e-21
+gap               0.0050      0.0027     1.81      3922    2.58e-19
+centrality        0.4269      0.3389     1.26      3593    1.12e-13
+
+Controlling for surface fit: regress each joint metric on chamfer WITHIN each
+corpus, then compare the residuals across corpora.
+   outfrac      pooled slope= 109.454  resid median worker=+0.1551  clean=-0.0846  U=3738  p=4.92e-16
+   gap          pooled slope=   1.432  resid median worker=+0.0006  clean=-0.0003  U=3421  p=3.80e-11
+   centrality   pooled slope=  48.026  resid median worker=+0.0481  clean=-0.0291  U=3056  p=1.05e-06
+============================================================================================
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/joint_placement_confound_out.txt

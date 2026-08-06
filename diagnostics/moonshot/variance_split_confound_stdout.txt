@@ -1,0 +1,46 @@
+============================================================================================
+1. UNITS -- are the shapedirs unit-norm and orthogonal? (if so, parametric share == beta amplitude)
+============================================================================================
+    SMPL_fit.pkl                       K=20  ||dir_k||: min=0.8833 max=1.1092   max |<dir_i,dir_j>| (i!=j) = 0.309
+    SMIL_OmniAnt.pkl                   K=13  ||dir_k||: min=0.9884 max=1.0349   max |<dir_i,dir_j>| (i!=j) = 0.295
+    OmniAnt_25PCs_joint_limited.pkl    K=25  ||dir_k||: min=0.9601 max=1.0835   max |<dir_i,dir_j>| (i!=j) = 0.280
+    -> unit-norm but NOT orthogonal (off-diagonals up to ~0.3). Var(parametric) is
+       therefore sum_k Var(beta_k) plus cross terms -- still driven almost entirely by
+       how large the optimiser let the betas grow, but the projections below use a QR
+       orthonormalisation of the span rather than the raw directions.
+
+============================================================================================
+2. ACHIEVABLE vs USED parametric share (least-squares refit of betas to the corpus's
+   own rest-space geometry, same basis, same corpus)
+============================================================================================
+    corpus             n   K    USED %  ACHIEV %  used/achiev   betas sd used  betas sd LS
+    LIM_0             50  25    20.623    24.702        0.835          0.2759       0.3077
+    BPX_noprior       50  13    14.777    18.011        0.820          0.3213       0.3561
+    M7_worker         50  13     0.000     2.671        0.000          0.0004       0.1227
+    baseline          50  13     4.502     9.200        0.489          0.2590       0.4274
+    CLEAN81_M7        81  13     0.001    24.584        0.000          0.0005       0.1397
+    ALL_ANTS_CLEAN    81  20    53.720    65.892        0.815          0.4351       0.4958
+
+    USED %   = what the published decomposition reports (Var(shapedirs.betas)/Var(S))
+    ACHIEV % = the same quantity if betas were fitted by least squares to the corpus's
+               own geometry in the SAME basis. It is the corpus's ceiling.
+
+============================================================================================
+3. PROVENANCE / IN-DISTRIBUTION
+============================================================================================
+    LIM_0            mean dist to v_template = 0.025656 (1.093% bbox, sd 0.007140)   UNEXPLAINABLE-by-shapespace residual = 0.019837 (0.845% bbox)
+    BPX_noprior      mean dist to v_template = 0.024168 (1.031% bbox, sd 0.006704)   UNEXPLAINABLE-by-shapespace residual = 0.019621 (0.837% bbox)
+    M7_worker        mean dist to v_template = 0.020512 (0.875% bbox, sd 0.005936)   UNEXPLAINABLE-by-shapespace residual = 0.020131 (0.859% bbox)
+    baseline         mean dist to v_template = 0.044881 (1.914% bbox, sd 0.011764)   UNEXPLAINABLE-by-shapespace residual = 0.042208 (1.800% bbox)
+    CLEAN81_M7       mean dist to v_template = 0.008886 (0.379% bbox, sd 0.002465)   UNEXPLAINABLE-by-shapespace residual = 0.008244 (0.352% bbox)
+    ALL_ANTS_CLEAN   mean dist to v_template = 0.030684 (1.333% bbox, sd 0.007495)   UNEXPLAINABLE-by-shapespace residual = 0.019335 (0.840% bbox)
+
+  principal angles: model shapedirs vs the corpus's OWN top-K PCA of rest shapes
+    LIM_0            K=25  mean cos = 0.3678  #cos>0.9 =  0/25  top5 = 0.891, 0.817, 0.676, 0.640, 0.636
+    BPX_noprior      K=13  mean cos = 0.3322  #cos>0.9 =  0/13  top5 = 0.862, 0.660, 0.582, 0.493, 0.431
+    M7_worker        K=13  mean cos = 0.0985  #cos>0.9 =  0/13  top5 = 0.523, 0.169, 0.132, 0.122, 0.079
+    baseline         K=13  mean cos = 0.2733  #cos>0.9 =  0/13  top5 = 0.687, 0.612, 0.418, 0.389, 0.341
+    CLEAN81_M7       K=13  mean cos = 0.3027  #cos>0.9 =  0/13  top5 = 0.795, 0.571, 0.439, 0.425, 0.375
+    ALL_ANTS_CLEAN   K=20  mean cos = 0.5487  #cos>0.9 =  3/20  top5 = 0.969, 0.934, 0.917, 0.890, 0.850
+
+wrote variance_split_confound_out.txt

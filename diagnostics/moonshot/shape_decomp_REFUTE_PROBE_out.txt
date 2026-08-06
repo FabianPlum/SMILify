@@ -1,0 +1,324 @@
+====================================================================================================
+R0  AUDIT — shapes, template pairing, einsum convention
+====================================================================================================
+  LIM_0                n= 50 V= 10235 K= 25 tpl=OmniAnt_25PCs_joint_limited.pkl  keys=['betas', 'betas_trans', 'deform_verts', 'faces', 'global_rot', 'joint_rot', 'labels', 'log_beta_scales', 'trans', 'verts']
+      explicit-loop check of shapedirs.betas on specimen 0: max abs diff 3.469e-18
+  BPX_noprior          n= 50 V= 10229 K= 13 tpl=SMIL_OmniAnt.pkl                 keys=['betas', 'betas_trans', 'deform_verts', 'faces', 'global_rot', 'joint_rot', 'labels', 'log_beta_scales', 'trans', 'verts']
+      explicit-loop check of shapedirs.betas on specimen 0: max abs diff 8.674e-19
+  M7_handoff_midline   n= 50 V= 10229 K= 13 tpl=SMIL_OmniAnt.pkl                 keys=['betas', 'betas_trans', 'deform_verts', 'faces', 'global_rot', 'joint_rot', 'labels', 'log_beta_scales', 'trans', 'verts']
+      explicit-loop check of shapedirs.betas on specimen 0: max abs diff 8.470e-22
+  baseline             n= 50 V= 10229 K= 13 tpl=SMIL_OmniAnt.pkl                 keys=['betas', 'betas_trans', 'deform_verts', 'faces', 'global_rot', 'joint_rot', 'labels', 'log_beta_scales', 'trans', 'verts']
+      explicit-loop check of shapedirs.betas on specimen 0: max abs diff 4.337e-19
+  ALL_ANTS_CLEAN       n= 81 V= 10236 K= 20 tpl=SMPL_fit.pkl                     keys=['betas', 'deform_verts', 'faces', 'global_rot', 'joint_rot', 'labels', 'log_beta_scales', 'trans', 'verts']
+      explicit-loop check of shapedirs.betas on specimen 0: max abs diff 8.674e-19
+  CLEAN81_M7           n= 81 V= 10229 K= 13 tpl=SMIL_OmniAnt.pkl                 keys=['betas', 'betas_trans', 'deform_verts', 'faces', 'global_rot', 'joint_rot', 'labels', 'log_beta_scales', 'trans', 'verts']
+      explicit-loop check of shapedirs.betas on specimen 0: max abs diff 8.470e-22
+
+====================================================================================================
+R1 + R2  variance split and LOO generalisation, re-derived (numpy float64)
+====================================================================================================
+
+  LIM_0  [worker]  n=50 K=25 bbox=2.3463
+    betas sd (pooled)  0.275852
+    |deform_verts|     0.019184  (0.818% bbox)
+    Var parametric      2.13473   20.623%
+    Var free-form       7.86482   75.981%
+    2*Cov              0.351456    3.395%   [sum check 10.351 vs 10.351]
+    (a) parametric P                   popspread=0.011409 loospread=0.011642 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.8389  @5=0.6889  @10=0.5576  @20=0.2292  @40=0.0000
+      gen/LOOspread (self-consistent) @1=0.8221  @5=0.6751  @10=0.5464  @20=0.2246  @40=0.0000
+    (b) free-form F                    popspread=0.018814 loospread=0.019197 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0164  @5=1.0062  @10=0.9998  @20=0.9935  @40=0.9828
+      gen/LOOspread (self-consistent) @1=0.9960  @5=0.9861  @10=0.9798  @20=0.9736  @40=0.9632
+    (c) sum S                          popspread=0.023589 loospread=0.024070 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.9604  @5=0.9362  @10=0.9182  @20=0.9028  @40=0.8787
+      gen/LOOspread (self-consistent) @1=0.9412  @5=0.9175  @10=0.8998  @20=0.8847  @40=0.8611
+
+  BPX_noprior  [worker]  n=50 K=13 bbox=2.3446
+    betas sd (pooled)  0.321299
+    |deform_verts|     0.019507  (0.832% bbox)
+    Var parametric      1.44149   14.777%
+    Var free-form       8.04624   82.486%
+    2*Cov                0.2669    2.736%   [sum check 9.75462 vs 9.75462]
+    (a) parametric P                   popspread=0.009008 loospread=0.009192 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.7988  @5=0.5189  @10=0.2412  @20=0.0000  @40=0.0000
+      gen/LOOspread (self-consistent) @1=0.7829  @5=0.5085  @10=0.2364  @20=0.0000  @40=0.0000
+    (b) free-form F                    popspread=0.019156 loospread=0.019547 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0144  @5=1.0039  @10=0.9988  @20=0.9911  @40=0.9810
+      gen/LOOspread (self-consistent) @1=0.9941  @5=0.9839  @10=0.9788  @20=0.9713  @40=0.9614
+    (c) sum S                          popspread=0.022450 loospread=0.022909 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.9663  @5=0.9468  @10=0.9353  @20=0.9208  @40=0.8998
+      gen/LOOspread (self-consistent) @1=0.9470  @5=0.9279  @10=0.9166  @20=0.9024  @40=0.8818
+
+  M7_handoff_midline  [worker]  n=50 K=13 bbox=2.3446
+    betas sd (pooled)  0.000421
+    |deform_verts|     0.020509  (0.875% bbox)
+    Var parametric  4.89286e-06    0.000%
+    Var free-form        8.5084   99.986%
+    2*Cov            0.00122204    0.014%   [sum check 8.50963 vs 8.50963]
+    (a) parametric P                   popspread=0.000015 loospread=0.000015 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.5224  @5=0.2867  @10=0.1374  @20=0.0000  @40=0.0000
+      gen/LOOspread (self-consistent) @1=0.5119  @5=0.2810  @10=0.1346  @20=0.0000  @40=0.0000
+    (b) free-form F                    popspread=0.019960 loospread=0.020367 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0063  @5=0.9939  @10=0.9870  @20=0.9794  @40=0.9655
+      gen/LOOspread (self-consistent) @1=0.9862  @5=0.9740  @10=0.9673  @20=0.9598  @40=0.9462
+    (c) sum S                          popspread=0.019962 loospread=0.020370 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0062  @5=0.9938  @10=0.9870  @20=0.9794  @40=0.9654
+      gen/LOOspread (self-consistent) @1=0.9861  @5=0.9740  @10=0.9672  @20=0.9598  @40=0.9461
+
+  baseline  [worker]  n=50 K=13 bbox=2.3446
+    betas sd (pooled)  0.258961
+    |deform_verts|     0.043060  (1.837% bbox)
+    Var parametric      1.30444    4.502%
+    Var free-form       27.2718   94.112%
+    2*Cov              0.401668    1.386%   [sum check 28.9779 vs 28.9779]
+    (a) parametric P                   popspread=0.007520 loospread=0.007674 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.8024  @5=0.3478  @10=0.1302  @20=0.0000  @40=0.0000
+      gen/LOOspread (self-consistent) @1=0.7864  @5=0.3408  @10=0.1276  @20=0.0000  @40=0.0000
+    (b) free-form F                    popspread=0.041720 loospread=0.042571 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0139  @5=0.9915  @10=0.9829  @20=0.9690  @40=0.9460
+      gen/LOOspread (self-consistent) @1=0.9936  @5=0.9717  @10=0.9632  @20=0.9497  @40=0.9271
+    (c) sum S                          popspread=0.043262 loospread=0.044145 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0118  @5=0.9825  @10=0.9706  @20=0.9539  @40=0.9309
+      gen/LOOspread (self-consistent) @1=0.9915  @5=0.9629  @10=0.9511  @20=0.9348  @40=0.9122
+
+  ALL_ANTS_CLEAN  [clean]  n=81 K=20 bbox=2.3018
+    betas sd (pooled)  0.435122
+    |deform_verts|     0.017305  (0.752% bbox)
+    Var parametric      5.25131   53.720%
+    Var free-form       3.59555   36.782%
+    2*Cov              0.928521    9.499%   [sum check 9.77538 vs 9.77538]
+    (a) parametric P                   popspread=0.017288 loospread=0.017504 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.6093  @5=0.3537  @10=0.1861  @20=0.0000  @40=0.0000
+      gen/LOOspread (self-consistent) @1=0.6018  @5=0.3493  @10=0.1838  @20=0.0000  @40=0.0000
+    (b) free-form F                    popspread=0.015375 loospread=0.015567 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.9284  @5=0.8217  @10=0.7932  @20=0.7561  @40=0.7070
+      gen/LOOspread (self-consistent) @1=0.9169  @5=0.8116  @10=0.7834  @20=0.7468  @40=0.6983
+    (c) sum S                          popspread=0.026035 loospread=0.026361 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.7426  @5=0.5763  @10=0.5304  @20=0.4899  @40=0.4496
+      gen/LOOspread (self-consistent) @1=0.7334  @5=0.5691  @10=0.5239  @20=0.4839  @40=0.4440
+
+  CLEAN81_M7  [clean]  n=81 K=13 bbox=2.3446
+    betas sd (pooled)  0.000457
+    |deform_verts|     0.008880  (0.379% bbox)
+    Var parametric  9.23786e-06    0.001%
+    Var free-form       1.33121   99.812%
+    2*Cov            0.00249837    0.187%   [sum check 1.33371 vs 1.33371]
+    (a) parametric P                   popspread=0.000019 loospread=0.000019 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.3610  @5=0.1418  @10=0.0660  @20=0.0000  @40=0.0000
+      gen/LOOspread (self-consistent) @1=0.3566  @5=0.1400  @10=0.0652  @20=0.0000  @40=0.0000
+    (b) free-form F                    popspread=0.008289 loospread=0.008393 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.8944  @5=0.7991  @10=0.7792  @20=0.7509  @40=0.7292
+      gen/LOOspread (self-consistent) @1=0.8833  @5=0.7893  @10=0.7696  @20=0.7416  @40=0.7202
+    (c) sum S                          popspread=0.008295 loospread=0.008399 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.8938  @5=0.7986  @10=0.7787  @20=0.7504  @40=0.7287
+      gen/LOOspread (self-consistent) @1=0.8828  @5=0.7887  @10=0.7690  @20=0.7411  @40=0.7197
+
+====================================================================================================
+R3  TRIVIAL MODES — is the clean corpus's 'structure' a similarity transform?
+    S_raw      : as published
+    S_transl   : per-specimen centroid removed
+    S_scale    : centroid + isotropic scale removed
+    S_proc     : centroid + scale + rigid rotation removed (GPA, 3 iters)
+====================================================================================================
+
+  LIM_0  [n=50]
+    centroid scatter 0.001951  =   8.27% of pop spread
+    mean radius per specimen: mean 0.41757 CV 0.0063
+    S_raw                              popspread=0.023589 loospread=0.024070 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.9604  @5=0.9362  @10=0.9182  @20=0.9028  @40=0.8787
+      gen/LOOspread (self-consistent) @1=0.9412  @5=0.9175  @10=0.8998  @20=0.8847  @40=0.8611
+    S_transl                           popspread=0.023500 loospread=0.023980 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.9605  @5=0.9375  @10=0.9195  @20=0.9043  @40=0.8803
+      gen/LOOspread (self-consistent) @1=0.9413  @5=0.9187  @10=0.9011  @20=0.8862  @40=0.8627
+    S_scale                            popspread=0.023172 loospread=0.023645 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.9600  @5=0.9365  @10=0.9191  @20=0.9039  @40=0.8803
+      gen/LOOspread (self-consistent) @1=0.9408  @5=0.9178  @10=0.9007  @20=0.8858  @40=0.8627
+    S_proc                             popspread=0.023145 loospread=0.023617 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.9600  @5=0.9366  @10=0.9193  @20=0.9042  @40=0.8807
+      gen/LOOspread (self-consistent) @1=0.9408  @5=0.9179  @10=0.9010  @20=0.8861  @40=0.8630
+    F_raw                              popspread=0.018814 loospread=0.019197 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0164  @5=1.0062  @10=0.9998  @20=0.9935  @40=0.9828
+      gen/LOOspread (self-consistent) @1=0.9960  @5=0.9861  @10=0.9798  @20=0.9736  @40=0.9632
+    F_transl                           popspread=0.018813 loospread=0.019197 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0164  @5=1.0062  @10=0.9998  @20=0.9935  @40=0.9828
+      gen/LOOspread (self-consistent) @1=0.9960  @5=0.9861  @10=0.9798  @20=0.9736  @40=0.9632
+
+  BPX_noprior  [n=50]
+    centroid scatter 0.001835  =   8.18% of pop spread
+    mean radius per specimen: mean 0.41858 CV 0.0061
+    S_raw                              popspread=0.022450 loospread=0.022909 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.9663  @5=0.9468  @10=0.9353  @20=0.9208  @40=0.8998
+      gen/LOOspread (self-consistent) @1=0.9470  @5=0.9279  @10=0.9166  @20=0.9024  @40=0.8818
+    S_transl                           popspread=0.022370 loospread=0.022827 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.9674  @5=0.9482  @10=0.9366  @20=0.9225  @40=0.9016
+      gen/LOOspread (self-consistent) @1=0.9480  @5=0.9292  @10=0.9179  @20=0.9041  @40=0.8836
+    S_scale                            popspread=0.022089 loospread=0.022540 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.9673  @5=0.9477  @10=0.9361  @20=0.9219  @40=0.9016
+      gen/LOOspread (self-consistent) @1=0.9480  @5=0.9287  @10=0.9173  @20=0.9035  @40=0.8836
+    S_proc                             popspread=0.022050 loospread=0.022500 (ratio 1.0204)
+      gen/POPspread (published defn) @1=0.9674  @5=0.9479  @10=0.9363  @20=0.9217  @40=0.9022
+      gen/LOOspread (self-consistent) @1=0.9481  @5=0.9290  @10=0.9175  @20=0.9033  @40=0.8842
+    F_raw                              popspread=0.019156 loospread=0.019547 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0144  @5=1.0039  @10=0.9988  @20=0.9911  @40=0.9810
+      gen/LOOspread (self-consistent) @1=0.9941  @5=0.9839  @10=0.9788  @20=0.9713  @40=0.9614
+    F_transl                           popspread=0.019156 loospread=0.019547 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0144  @5=1.0039  @10=0.9988  @20=0.9911  @40=0.9810
+      gen/LOOspread (self-consistent) @1=0.9941  @5=0.9839  @10=0.9788  @20=0.9713  @40=0.9614
+
+  M7_handoff_midline  [n=50]
+    centroid scatter 0.000133  =   0.67% of pop spread
+    mean radius per specimen: mean 0.41710 CV 0.0030
+    S_raw                              popspread=0.019962 loospread=0.020370 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0062  @5=0.9938  @10=0.9870  @20=0.9794  @40=0.9654
+      gen/LOOspread (self-consistent) @1=0.9861  @5=0.9740  @10=0.9672  @20=0.9598  @40=0.9461
+    S_transl                           popspread=0.019962 loospread=0.020369 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0062  @5=0.9938  @10=0.9869  @20=0.9794  @40=0.9654
+      gen/LOOspread (self-consistent) @1=0.9861  @5=0.9739  @10=0.9672  @20=0.9598  @40=0.9461
+    S_scale                            popspread=0.019758 loospread=0.020162 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0059  @5=0.9932  @10=0.9863  @20=0.9788  @40=0.9650
+      gen/LOOspread (self-consistent) @1=0.9858  @5=0.9733  @10=0.9666  @20=0.9592  @40=0.9457
+    S_proc                             popspread=0.019758 loospread=0.020161 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0059  @5=0.9932  @10=0.9863  @20=0.9788  @40=0.9650
+      gen/LOOspread (self-consistent) @1=0.9858  @5=0.9733  @10=0.9666  @20=0.9592  @40=0.9457
+    F_raw                              popspread=0.019960 loospread=0.020367 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0063  @5=0.9939  @10=0.9870  @20=0.9794  @40=0.9655
+      gen/LOOspread (self-consistent) @1=0.9862  @5=0.9740  @10=0.9673  @20=0.9598  @40=0.9462
+    F_transl                           popspread=0.019960 loospread=0.020367 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0063  @5=0.9939  @10=0.9870  @20=0.9794  @40=0.9655
+      gen/LOOspread (self-consistent) @1=0.9862  @5=0.9740  @10=0.9673  @20=0.9598  @40=0.9462
+
+  baseline  [n=50]
+    centroid scatter 0.004507  =  10.42% of pop spread
+    mean radius per specimen: mean 0.41934 CV 0.0110
+    S_raw                              popspread=0.043262 loospread=0.044145 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0118  @5=0.9825  @10=0.9706  @20=0.9539  @40=0.9309
+      gen/LOOspread (self-consistent) @1=0.9915  @5=0.9629  @10=0.9511  @20=0.9348  @40=0.9122
+    S_transl                           popspread=0.043077 loospread=0.043956 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0115  @5=0.9815  @10=0.9704  @20=0.9538  @40=0.9303
+      gen/LOOspread (self-consistent) @1=0.9912  @5=0.9618  @10=0.9510  @20=0.9347  @40=0.9117
+    S_scale                            popspread=0.041479 loospread=0.042326 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0106  @5=0.9810  @10=0.9697  @20=0.9529  @40=0.9298
+      gen/LOOspread (self-consistent) @1=0.9904  @5=0.9614  @10=0.9504  @20=0.9338  @40=0.9112
+    S_proc                             popspread=0.041426 loospread=0.042272 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0107  @5=0.9810  @10=0.9699  @20=0.9527  @40=0.9291
+      gen/LOOspread (self-consistent) @1=0.9905  @5=0.9614  @10=0.9505  @20=0.9337  @40=0.9105
+    F_raw                              popspread=0.041720 loospread=0.042571 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0139  @5=0.9915  @10=0.9829  @20=0.9690  @40=0.9460
+      gen/LOOspread (self-consistent) @1=0.9936  @5=0.9717  @10=0.9632  @20=0.9497  @40=0.9271
+    F_transl                           popspread=0.041553 loospread=0.042402 (ratio 1.0204)
+      gen/POPspread (published defn) @1=1.0138  @5=0.9914  @10=0.9835  @20=0.9694  @40=0.9464
+      gen/LOOspread (self-consistent) @1=0.9935  @5=0.9715  @10=0.9638  @20=0.9500  @40=0.9275
+
+  ALL_ANTS_CLEAN  [n=81]
+    centroid scatter 0.003751  =  14.41% of pop spread
+    mean radius per specimen: mean 0.41088 CV 0.0320
+    S_raw                              popspread=0.026035 loospread=0.026361 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.7426  @5=0.5763  @10=0.5304  @20=0.4899  @40=0.4496
+      gen/LOOspread (self-consistent) @1=0.7334  @5=0.5691  @10=0.5239  @20=0.4839  @40=0.4440
+    S_transl                           popspread=0.025716 loospread=0.026037 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.7356  @5=0.5674  @10=0.5282  @20=0.4869  @40=0.4485
+      gen/LOOspread (self-consistent) @1=0.7265  @5=0.5604  @10=0.5216  @20=0.4809  @40=0.4430
+    S_scale                            popspread=0.023748 loospread=0.024045 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.7659  @5=0.5977  @10=0.5592  @20=0.5179  @40=0.4759
+      gen/LOOspread (self-consistent) @1=0.7565  @5=0.5903  @10=0.5523  @20=0.5115  @40=0.4701
+    S_proc                             popspread=0.023466 loospread=0.023759 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.7669  @5=0.5969  @10=0.5611  @20=0.5179  @40=0.4783
+      gen/LOOspread (self-consistent) @1=0.7575  @5=0.5895  @10=0.5542  @20=0.5115  @40=0.4724
+    F_raw                              popspread=0.015375 loospread=0.015567 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.9284  @5=0.8217  @10=0.7932  @20=0.7561  @40=0.7070
+      gen/LOOspread (self-consistent) @1=0.9169  @5=0.8116  @10=0.7834  @20=0.7468  @40=0.6983
+    F_transl                           popspread=0.015279 loospread=0.015470 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.9278  @5=0.8191  @10=0.7907  @20=0.7509  @40=0.7053
+      gen/LOOspread (self-consistent) @1=0.9164  @5=0.8090  @10=0.7810  @20=0.7417  @40=0.6966
+
+  CLEAN81_M7  [n=81]
+    centroid scatter 0.000060  =   0.72% of pop spread
+    mean radius per specimen: mean 0.41576 CV 0.0039
+    S_raw                              popspread=0.008295 loospread=0.008399 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.8938  @5=0.7986  @10=0.7787  @20=0.7504  @40=0.7287
+      gen/LOOspread (self-consistent) @1=0.8828  @5=0.7887  @10=0.7690  @20=0.7411  @40=0.7197
+    S_transl                           popspread=0.008295 loospread=0.008399 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.8938  @5=0.7985  @10=0.7786  @20=0.7503  @40=0.7287
+      gen/LOOspread (self-consistent) @1=0.8828  @5=0.7887  @10=0.7690  @20=0.7411  @40=0.7197
+    S_scale                            popspread=0.008293 loospread=0.008397 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.8924  @5=0.7972  @10=0.7773  @20=0.7491  @40=0.7274
+      gen/LOOspread (self-consistent) @1=0.8814  @5=0.7874  @10=0.7677  @20=0.7398  @40=0.7184
+    S_proc                             popspread=0.008293 loospread=0.008396 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.8924  @5=0.7972  @10=0.7772  @20=0.7491  @40=0.7274
+      gen/LOOspread (self-consistent) @1=0.8814  @5=0.7873  @10=0.7677  @20=0.7398  @40=0.7184
+    F_raw                              popspread=0.008289 loospread=0.008393 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.8944  @5=0.7991  @10=0.7792  @20=0.7509  @40=0.7292
+      gen/LOOspread (self-consistent) @1=0.8833  @5=0.7893  @10=0.7696  @20=0.7416  @40=0.7202
+    F_transl                           popspread=0.008289 loospread=0.008393 (ratio 1.0125)
+      gen/POPspread (published defn) @1=0.8943  @5=0.7991  @10=0.7792  @20=0.7509  @40=0.7292
+      gen/LOOspread (self-consistent) @1=0.8833  @5=0.7892  @10=0.7696  @20=0.7416  @40=0.7202
+
+====================================================================================================
+R4  NEAR-DUPLICATES — nearest-neighbour distance / population spread
+====================================================================================================
+
+  LIM_0: pop spread 0.023589; NN dist mean 0.026506 (1.1237 x spread), median 0.025878, min 0.016504
+      closest pair: Aphaenogaster_pallida_CASENT0745235_processed.obj <-> Temnothorax_congruus_OKENT0105443_processed.obj d=0.016504 (0.700x)
+      closest pair: Temnothorax_congruus_OKENT0105443_processed.obj <-> Aphaenogaster_pallida_CASENT0745235_processed.obj d=0.016504 (0.700x)
+      closest pair: Syllophopsis_sechellensis_OKENT0105212_processed.obj <-> Temnothorax_congruus_OKENT0105443_processed.obj d=0.018592 (0.788x)
+      closest pair: Ponera_tamon_OKENT0105154_processed.obj       <-> Temnothorax_congruus_OKENT0105443_processed.obj d=0.018601 (0.789x)
+      closest pair: Myrmecina_ryukyuensis_OKENT0105085_processed.obj <-> Temnothorax_congruus_OKENT0105443_processed.obj d=0.018624 (0.790x)
+      closest pair: Cephalotes_spinosus_CASENT0744158_processed.obj <-> Cephalotes_minutus_CASENT0709253_processed.obj d=0.019418 (0.823x)
+
+  BPX_noprior: pop spread 0.022450; NN dist mean 0.025455 (1.1338 x spread), median 0.024761, min 0.016885
+      closest pair: Aphaenogaster_pallida_CASENT0745235_processed.obj <-> Syllophopsis_sechellensis_OKENT0105212_processed.obj d=0.016885 (0.752x)
+      closest pair: Syllophopsis_sechellensis_OKENT0105212_processed.obj <-> Aphaenogaster_pallida_CASENT0745235_processed.obj d=0.016885 (0.752x)
+      closest pair: Temnothorax_congruus_OKENT0105443_processed.obj <-> Aphaenogaster_pallida_CASENT0745235_processed.obj d=0.016901 (0.753x)
+      closest pair: Ponera_tamon_OKENT0105154_processed.obj       <-> Temnothorax_congruus_OKENT0105443_processed.obj d=0.017508 (0.780x)
+      closest pair: Myrmecina_ryukyuensis_OKENT0105085_processed.obj <-> Temnothorax_congruus_OKENT0105443_processed.obj d=0.018207 (0.811x)
+      closest pair: Atopomyrmex_mocquerysi_CASENT0744784_processed.obj <-> Syllophopsis_sechellensis_OKENT0105212_processed.obj d=0.019227 (0.856x)
+
+  M7_handoff_midline: pop spread 0.019962; NN dist mean 0.023031 (1.1537 x spread), median 0.022606, min 0.015133
+      closest pair: Aphaenogaster_pallida_CASENT0745235_processed.obj <-> Temnothorax_congruus_OKENT0105443_processed.obj d=0.015133 (0.758x)
+      closest pair: Temnothorax_congruus_OKENT0105443_processed.obj <-> Aphaenogaster_pallida_CASENT0745235_processed.obj d=0.015133 (0.758x)
+      closest pair: Syllophopsis_sechellensis_OKENT0105212_processed.obj <-> Aphaenogaster_pallida_CASENT0745235_processed.obj d=0.015408 (0.772x)
+      closest pair: Lasius_nr._fuliginosus_CASENT0878037_processed.obj <-> Aphaenogaster_pallida_CASENT0745235_processed.obj d=0.016632 (0.833x)
+      closest pair: Ponera_tamon_OKENT0105154_processed.obj       <-> Temnothorax_congruus_OKENT0105443_processed.obj d=0.016685 (0.836x)
+      closest pair: Anochetus_risii_CASENT0877608_processed.obj   <-> Aphaenogaster_pallida_CASENT0745235_processed.obj d=0.016701 (0.837x)
+
+  baseline: pop spread 0.043262; NN dist mean 0.050832 (1.1750 x spread), median 0.049384, min 0.035435
+      closest pair: Temnothorax_congruus_OKENT0105443_processed.obj <-> Pseudomyrmex_cf.solis_CASENT0744065_processed.obj d=0.035435 (0.819x)
+      closest pair: Pseudomyrmex_cf.solis_CASENT0744065_processed.obj <-> Temnothorax_congruus_OKENT0105443_processed.obj d=0.035435 (0.819x)
+      closest pair: Syllophopsis_sechellensis_OKENT0105212_processed.obj <-> Pseudomyrmex_cf.solis_CASENT0744065_processed.obj d=0.036863 (0.852x)
+      closest pair: Ponera_tamon_OKENT0105154_processed.obj       <-> Pseudomyrmex_cf.solis_CASENT0744065_processed.obj d=0.036908 (0.853x)
+      closest pair: Acanthostichus_aff.brevicornis_CASENT0744328_processed.obj <-> Pseudomyrmex_cf.solis_CASENT0744065_processed.obj d=0.037364 (0.864x)
+      closest pair: Aphaenogaster_pallida_CASENT0745235_processed.obj <-> Syllophopsis_sechellensis_OKENT0105212_processed.obj d=0.037988 (0.878x)
+
+  ALL_ANTS_CLEAN: pop spread 0.026035; NN dist mean 0.018834 (0.7234 x spread), median 0.018478, min 0.006291
+      closest pair: ectatomma-tuberculatum (1)                    <-> ectatomma-tuberculatum                        d=0.006291 (0.242x)
+      closest pair: ectatomma-tuberculatum                        <-> ectatomma-tuberculatum (1)                    d=0.006291 (0.242x)
+      closest pair: 18                                            <-> 17                                            d=0.010832 (0.416x)
+      closest pair: 17                                            <-> 18                                            d=0.010832 (0.416x)
+      closest pair: 14                                            <-> 18                                            d=0.012683 (0.487x)
+      closest pair: 08                                            <-> 06                                            d=0.012828 (0.493x)
+
+  CLEAN81_M7: pop spread 0.008295; NN dist mean 0.008103 (0.9769 x spread), median 0.007737, min 0.003348
+      closest pair: ectatomma-tuberculatum.obj                    <-> ectatomma-tuberculatum (1).obj                d=0.003348 (0.404x)
+      closest pair: ectatomma-tuberculatum (1).obj                <-> ectatomma-tuberculatum.obj                    d=0.003348 (0.404x)
+      closest pair: acromyrmex.obj                                <-> atta-vollenweideri.obj                        d=0.005157 (0.622x)
+      closest pair: atta-vollenweideri.obj                        <-> acromyrmex.obj                                d=0.005157 (0.622x)
+      closest pair: 18.obj                                        <-> 16.obj                                        d=0.005548 (0.669x)
+      closest pair: 16.obj                                        <-> 18.obj                                        d=0.005548 (0.669x)
+
+====================================================================================================
+R6  IN-DISTRIBUTION — free-form field size and how much of it lies in shapedirs span
+====================================================================================================
+  LIM_0                |F| 0.019184   frac of centred free-form variance inside span(shapedirs[:25]) =  0.899%
+      metrics.csv stage=Stage_3_deform_fine  chamfer_l1 mean 0.019584   deform_mag_mean 0.019184
+  BPX_noprior          |F| 0.019507   frac of centred free-form variance inside span(shapedirs[:13]) =  0.603%
+      metrics.csv stage=Stage_3_deform_fine  chamfer_l1 mean 0.019602   deform_mag_mean 0.019507
+  M7_handoff_midline   |F| 0.020509   frac of centred free-form variance inside span(shapedirs[:13]) =  2.657%
+      metrics.csv stage=Stage_3_deform_fine  chamfer_l1 mean 0.019705   deform_mag_mean 0.020509
+  baseline             |F| 0.043060   frac of centred free-form variance inside span(shapedirs[:13]) =  3.519%
+      metrics.csv stage=Stage_3_deform_fine  chamfer_l1 mean 0.024842   deform_mag_mean 0.043060
+  ALL_ANTS_CLEAN       |F| 0.017305   frac of centred free-form variance inside span(shapedirs[:20]) =  7.268%
+  CLEAN81_M7           |F| 0.008880   frac of centred free-form variance inside span(shapedirs[:13]) = 24.442%
+      metrics.csv stage=Stage_3_deform_fine  chamfer_l1 mean 0.010779   deform_mag_mean 0.008880
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/shape_decomp_REFUTE.json

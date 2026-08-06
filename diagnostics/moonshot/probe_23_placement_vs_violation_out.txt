@@ -1,0 +1,195 @@
+====================================================================================================
+PART A -- per-arm placement magnitudes and rotation violations
+====================================================================================================
+
+### LIM_0   n=50   template=OmniAnt_25PCs_joint_limited.pkl   betas=25
+    betas_trans present in npz : True
+    body bbox diag (model units): mean 2.3564
+    |betas|            per-spec mean L2 over dims : 0.26956   (sd across spec of beta: 0.27308)
+    |betas_trans|      mean per joint (model u)   : 0.05853   as % body 2.484%
+    |log_beta_scales|  mean per joint (log units) : 0.32988   -> mean scale factor 1.2033
+    |deform_verts|     mean per vertex            : 0.01918   as % body 0.814%
+    JOINT DISPLACEMENT caused by these params (rest space, identity pose):
+      cumulative, both params : mean 7.309%  median 4.860%  p95 22.584%  max 56.375% of body
+      cumulative, trans only  : mean 3.888%   p95 9.501%
+      cumulative, scale only  : mean 4.506%   p95 15.825%
+      local bone-vector change: mean 58.72% of that bone's rest length   p95 197.83%
+    VIOLATIONS (canonicalised): 37.42 axes/specimen of 96   median overshoot 20.5 deg   p95 84.6 deg
+    VIOLATIONS (raw, no canonicalisation, as fitter_3d/joint_limits.py counts them): 37.42 axes/specimen
+
+### LIM_1x   n=50   template=OmniAnt_25PCs_joint_limited.pkl   betas=25
+    betas_trans present in npz : True
+    body bbox diag (model units): mean 2.3563
+    |betas|            per-spec mean L2 over dims : 0.26550   (sd across spec of beta: 0.27813)
+    |betas_trans|      mean per joint (model u)   : 0.06463   as % body 2.743%
+    |log_beta_scales|  mean per joint (log units) : 0.40377   -> mean scale factor 1.2781
+    |deform_verts|     mean per vertex            : 0.01981   as % body 0.841%
+    JOINT DISPLACEMENT caused by these params (rest space, identity pose):
+      cumulative, both params : mean 6.873%  median 4.893%  p95 20.365%  max 59.284% of body
+      cumulative, trans only  : mean 4.059%   p95 10.273%
+      cumulative, scale only  : mean 4.417%   p95 15.563%
+      local bone-vector change: mean 58.32% of that bone's rest length   p95 182.82%
+    VIOLATIONS (canonicalised): 0.76 axes/specimen of 96   median overshoot 0.0 deg   p95 0.6 deg
+    VIOLATIONS (raw, no canonicalisation, as fitter_3d/joint_limits.py counts them): 0.76 axes/specimen
+
+### BPX_noprior   n=50   template=SMIL_OmniAnt.pkl   betas=13
+    betas_trans present in npz : True
+    body bbox diag (model units): mean 2.3510
+    |betas|            per-spec mean L2 over dims : 0.32584   (sd across spec of beta: 0.31807)
+    |betas_trans|      mean per joint (model u)   : 0.05360   as % body 2.280%
+    |log_beta_scales|  mean per joint (log units) : 0.31694   -> mean scale factor 1.1916
+    |deform_verts|     mean per vertex            : 0.01951   as % body 0.830%
+    JOINT DISPLACEMENT caused by these params (rest space, identity pose):
+      cumulative, both params : mean 6.868%  median 4.723%  p95 20.951%  max 47.194% of body
+      cumulative, trans only  : mean 3.667%   p95 8.937%
+      cumulative, scale only  : mean 4.390%   p95 15.969%
+      local bone-vector change: mean 78.45% of that bone's rest length   p95 319.82%
+    VIOLATIONS (canonicalised): 37.26 axes/specimen of 96   median overshoot 19.2 deg   p95 76.8 deg
+    VIOLATIONS (raw, no canonicalisation, as fitter_3d/joint_limits.py counts them): 37.22 axes/specimen
+
+### ALL_ANTS_CLEAN   n=81   template=SMPL_fit.pkl   betas=20
+    betas_trans present in npz : False
+    body bbox diag (model units): mean 2.3441
+    |betas|            per-spec mean L2 over dims : 0.40145   (sd across spec of beta: 0.43243)
+    |betas_trans|      mean per joint (model u)   : 0.00000   as % body 0.000%
+    |log_beta_scales|  mean per joint (log units) : 0.51228   -> mean scale factor 1.4053
+    |deform_verts|     mean per vertex            : 0.01730   as % body 0.738%
+    JOINT DISPLACEMENT caused by these params (rest space, identity pose):
+      cumulative, both params : mean 2.402%  median 1.914%  p95 6.931%  max 17.068% of body
+      cumulative, trans only  : mean 0.000%   p95 0.000%
+      cumulative, scale only  : mean 2.402%   p95 6.931%
+      local bone-vector change: mean 17.94% of that bone's rest length   p95 49.88%
+    VIOLATIONS (canonicalised): 0.15 axes/specimen of 96   median overshoot 3.2 deg   p95 7.2 deg
+    VIOLATIONS (raw, no canonicalisation, as fitter_3d/joint_limits.py counts them): 0.15 axes/specimen
+
+====================================================================================================
+PART B -- does placement magnitude predict rotation violation?
+====================================================================================================
+  POOLED = over all (specimen, constrained joint) pairs; inflated by the distal gradient
+           (distal joints are both most displaced -- cumulative down the chain -- and most violated)
+  WITHIN-JOINT = correlation computed separately per joint across specimens, then averaged.
+           This removes the joint-identity confound and is the honest test.
+
+
+### LIM_0
+    violating (joint,specimen) cells: 1157 / 1600  (72.3%)
+    metric                    POOLED r(viol)  POOLED rho(over)  WITHIN-J rho(over)  WITHIN-J r(viol)
+    ------------------------------------------------------------------------------------------------
+    |betas_trans|                      0.074             0.107               0.093             0.051   (n_joints 32/32)
+    |log_beta_scales|                  0.196             0.272               0.113             0.084   (n_joints 32/32)
+    cum disp %body (both)              0.229             0.411               0.062             0.054   (n_joints 32/32)
+    cum disp %body (trans)             0.196             0.291               0.084             0.049   (n_joints 32/32)
+    cum disp %body (scale)             0.255             0.454               0.057             0.051   (n_joints 26/26)
+    local bone distortion              0.146             0.219               0.072             0.077   (n_joints 32/32)
+
+    top-10 joints by VIOLATION RATE : ['l_3_ta_l', 'l_3_ta_r', 'l_1_ta_l', 'l_1_ta_r', 'l_2_ti_l', 'l_3_ti_l', 'l_2_ti_r', 'l_2_ta_l', 'l_1_ti_l', 'l_3_ti_r']
+    top-10 joints by DISPLACEMENT   : ['l_1_ta_l', 'l_1_ta_r', 'l_2_ta_l', 'l_2_ta_r', 'l_3_ta_r', 'l_3_ta_l', 'l_1_ti_l', 'l_1_ti_r', 'l_2_ti_l', 'l_2_ti_r']
+    overlap: 8/10   (['l_1_ta_l', 'l_1_ta_r', 'l_1_ti_l', 'l_2_ta_l', 'l_2_ti_l', 'l_2_ti_r', 'l_3_ta_l', 'l_3_ta_r'])
+    ACROSS-JOINT rho(violation rate, mean cum displacement) = 0.898
+    ACROSS-JOINT rho(violation rate, mean |betas_trans|)    = 0.270
+    ACROSS-JOINT rho(violation rate, mean |log_beta_scales|)= 0.806
+    proximal (co/tr/fe)    n_joints 18  viol_rate 0.627  cum_disp 3.770%  |bt| 0.04743  |lbs| 0.27756
+    distal (ti/ta/pt)      n_joints 12  viol_rate 0.887  cum_disp 10.993%  |bt| 0.05498  |lbs| 0.52297
+
+### LIM_1x
+    violating (joint,specimen) cells: 35 / 1600  (2.2%)
+    metric                    POOLED r(viol)  POOLED rho(over)  WITHIN-J rho(over)  WITHIN-J r(viol)
+    ------------------------------------------------------------------------------------------------
+    |betas_trans|                      0.022             0.026               0.052             0.056   (n_joints 23/23)
+    |log_beta_scales|                  0.021             0.060               0.076             0.055   (n_joints 23/23)
+    cum disp %body (both)              0.033             0.044               0.046             0.079   (n_joints 23/23)
+    cum disp %body (trans)             0.023             0.040               0.043             0.057   (n_joints 23/23)
+    cum disp %body (scale)             0.032             0.042               0.048             0.046   (n_joints 21/21)
+    local bone distortion              0.040             0.037               0.052             0.068   (n_joints 23/23)
+
+    top-10 joints by VIOLATION RATE : ['l_1_fe_r', 'l_3_fe_r', 'l_2_tr_r', 'l_2_fe_r', 'l_2_ti_r', 'l_3_ti_r', 'l_1_ta_r', 'l_2_fe_l', 'l_2_tr_l', 'l_2_co_r']
+    top-10 joints by DISPLACEMENT   : ['l_1_ta_l', 'l_1_ta_r', 'l_3_ta_l', 'l_3_ta_r', 'l_2_ta_r', 'l_2_ta_l', 'l_1_ti_r', 'l_1_ti_l', 'l_3_ti_l', 'l_3_ti_r']
+    overlap: 2/10   (['l_1_ta_r', 'l_3_ti_r'])
+    ACROSS-JOINT rho(violation rate, mean cum displacement) = 0.068
+    ACROSS-JOINT rho(violation rate, mean |betas_trans|)    = -0.146
+    ACROSS-JOINT rho(violation rate, mean |log_beta_scales|)= 0.068
+    proximal (co/tr/fe)    n_joints 18  viol_rate 0.026  cum_disp 3.964%  |bt| 0.04896  |lbs| 0.34048
+    distal (ti/ta/pt)      n_joints 12  viol_rate 0.017  cum_disp 9.978%  |bt| 0.07471  |lbs| 0.74220
+
+### BPX_noprior
+    violating (joint,specimen) cells: 1177 / 1600  (73.6%)
+    metric                    POOLED r(viol)  POOLED rho(over)  WITHIN-J rho(over)  WITHIN-J r(viol)
+    ------------------------------------------------------------------------------------------------
+    |betas_trans|                      0.143             0.167               0.108             0.104   (n_joints 32/32)
+    |log_beta_scales|                  0.204             0.269               0.109             0.106   (n_joints 32/32)
+    cum disp %body (both)              0.213             0.364               0.041             0.045   (n_joints 32/32)
+    cum disp %body (trans)             0.213             0.302               0.079             0.071   (n_joints 32/32)
+    cum disp %body (scale)             0.229             0.400               0.051             0.035   (n_joints 26/26)
+    local bone distortion              0.124             0.217               0.072             0.060   (n_joints 32/32)
+
+    top-10 joints by VIOLATION RATE : ['l_3_ta_r', 'l_2_ta_l', 'l_3_ti_r', 'l_2_ta_r', 'l_3_ta_l', 'l_1_ta_l', 'l_1_ti_l', 'l_2_ti_l', 'l_3_ti_l', 'l_1_ti_r']
+    top-10 joints by DISPLACEMENT   : ['l_1_ta_r', 'l_1_ta_l', 'l_2_ta_r', 'l_2_ta_l', 'l_3_ta_r', 'l_3_ta_l', 'l_1_ti_r', 'l_1_ti_l', 'l_2_ti_r', 'l_2_ti_l']
+    overlap: 8/10   (['l_1_ta_l', 'l_1_ti_l', 'l_1_ti_r', 'l_2_ta_l', 'l_2_ta_r', 'l_2_ti_l', 'l_3_ta_l', 'l_3_ta_r'])
+    ACROSS-JOINT rho(violation rate, mean cum displacement) = 0.872
+    ACROSS-JOINT rho(violation rate, mean |betas_trans|)    = 0.603
+    ACROSS-JOINT rho(violation rate, mean |log_beta_scales|)= 0.780
+    proximal (co/tr/fe)    n_joints 18  viol_rate 0.632  cum_disp 3.661%  |bt| 0.04382  |lbs| 0.27465
+    distal (ti/ta/pt)      n_joints 12  viol_rate 0.885  cum_disp 10.640%  |bt| 0.06005  |lbs| 0.53311
+
+### ALL_ANTS_CLEAN
+    violating (joint,specimen) cells: 12 / 2592  (0.5%)
+    metric                    POOLED r(viol)  POOLED rho(over)  WITHIN-J rho(over)  WITHIN-J r(viol)
+    ------------------------------------------------------------------------------------------------
+/home/fabi/mambaforge/envs/pytorch3d/lib/python3.10/site-packages/scipy/stats/_stats_py.py:5655: ConstantInputWarning: An input array is constant; the correlation coefficient is not defined.
+  rpb, prob = pearsonr(x, y)
+/home/fabi/dev/SMILify/diagnostics/moonshot/probe_23_placement_vs_violation_PROBE.py:286: ConstantInputWarning: An input array is constant; the correlation coefficient is not defined.
+  rho_pool = spearmanr(x[ok], over[ok])[0]
+    |betas_trans|                        nan               nan                 nan               nan   (n_joints 0/0)
+    |log_beta_scales|                  0.069             0.057               0.205             0.184   (n_joints 2/2)
+    cum disp %body (both)             -0.013            -0.001               0.115             0.033   (n_joints 2/2)
+    cum disp %body (trans)               nan               nan                 nan               nan   (n_joints 0/0)
+    cum disp %body (scale)            -0.013            -0.001               0.115             0.033   (n_joints 2/2)
+    local bone distortion              0.010             0.022               0.112             0.037   (n_joints 2/2)
+
+    top-10 joints by VIOLATION RATE : ['ma_r', 'ma_l', 'l_1_co_r', 'l_1_tr_r', 'l_1_ta_r', 'l_2_co_r', 'l_1_fe_r', 'l_1_ti_r', 'l_2_ti_r', 'l_2_ta_r']
+    top-10 joints by DISPLACEMENT   : ['l_3_ta_r', 'l_3_ta_l', 'l_2_ta_l', 'l_2_ta_r', 'l_3_ti_r', 'l_3_ti_l', 'l_1_ta_l', 'l_1_ta_r', 'l_3_fe_l', 'l_3_fe_r']
+    overlap: 2/10   (['l_1_ta_r', 'l_2_ta_r'])
+/home/fabi/dev/SMILify/diagnostics/moonshot/probe_23_placement_vs_violation_PROBE.py:323: ConstantInputWarning: An input array is constant; the correlation coefficient is not defined.
+  rho_jt = spearmanr(vr[cj], mt[cj])[0]
+    ACROSS-JOINT rho(violation rate, mean cum displacement) = -0.084
+    ACROSS-JOINT rho(violation rate, mean |betas_trans|)    = nan
+    ACROSS-JOINT rho(violation rate, mean |log_beta_scales|)= 0.157
+    proximal (co/tr/fe)    n_joints 18  viol_rate 0.000  cum_disp 1.291%  |bt| 0.00000  |lbs| 0.30482
+    distal (ti/ta/pt)      n_joints 12  viol_rate 0.000  cum_disp 3.843%  |bt| 0.00000  |lbs| 0.44791
+
+====================================================================================================
+PART C -- LIM_1x (limits ON) vs LIM_0 (limits OFF): where did the compensation go?
+====================================================================================================
+  paired on 50 specimens, identical order, identical template
+
+  quantity                              LIM_0       LIM_1x        delta    ratio   wilcoxon p
+  -------------------------------------------------------------------------------------------
+  |betas_trans|  (mean/joint)         0.05853      0.06463     +0.00610    1.104     5.95e-07
+  |log_beta_scales| (mean/jt)         0.32988      0.40377     +0.07389    1.224     7.66e-12
+  |deform_verts| (mean/vert)          0.01918      0.01981     +0.00062    1.033     5.37e-05
+  |betas| (mean/dim)                  0.26956      0.26550     -0.00406    0.985        0.521
+  cum joint disp %body                7.30895      6.87259     -0.43636    0.940       0.0191
+  local bone distortion               0.58718      0.58315     -0.00403    0.993        0.947
+  violating axes/specimen            37.42000      0.76000    -36.66000    0.020     1.78e-15
+  total overshoot deg/spec         1077.91526      0.31496  -1077.60030    0.000     1.78e-15
+
+  per-joint: did the joints that STOPPED violating pick up more placement?
+    rho(violation-rate DROP, d|betas_trans|)      = +0.734
+    rho(violation-rate DROP, d|log_beta_scales|)  = +0.848
+    rho(violation-rate DROP, d cum displacement)  = -0.489
+
+    joints violating in >50% of LIM_0 specimens (n=29): ['l_1_co_r', 'l_1_tr_r', 'l_1_fe_r', 'l_1_ti_r', 'l_1_ta_r', 'l_2_tr_r', 'l_2_fe_r', 'l_2_ti_r', 'l_2_ta_r', 'l_3_tr_r', 'l_3_fe_r', 'l_3_ti_r', 'l_3_ta_r', 'l_1_co_l', 'l_1_tr_l', 'l_1_fe_l', 'l_1_ti_l', 'l_1_ta_l', 'l_2_tr_l', 'l_2_fe_l', 'l_2_ti_l', 'l_2_ta_l', 'l_3_co_l', 'l_3_tr_l', 'l_3_fe_l', 'l_3_ti_l', 'l_3_ta_l', 'ma_r', 'ma_l']
+    was-violating    |bt| 0.05132 -> 0.06010   (+17.1%) | |lbs| 0.38782 -> 0.51746   (+33.4%) | cumdisp 6.980% -> 6.676%
+
+====================================================================================================
+PART D -- worker vs CLEAN: how much of joint placement is free-parameter driven?
+====================================================================================================
+  arm                    |bt|      |lbs|   |dv|%body   cumdisp%  bonedist%   viol_ax   sd(lbs)/sd(beta)
+  -----------------------------------------------------------------------------------------------------
+  LIM_0               0.05853    0.32988       0.814      7.309      58.72     37.42               0.68
+  LIM_1x              0.06463    0.40377       0.841      6.873      58.32      0.76               0.88
+  BPX_noprior         0.05360    0.31694       0.830      6.868      78.45     37.26               0.54
+  ALL_ANTS_CLEAN      0.00000    0.51228       0.738      2.402      17.94      0.15               0.64
+
+  NOTE: the CLEAN npz has NO betas_trans key (9 keys vs 10) -- that arm predates the
+        parameter, so its |bt| = 0 by absence, not by the optimiser choosing zero.

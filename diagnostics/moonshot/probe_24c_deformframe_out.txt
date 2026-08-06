@@ -1,0 +1,35 @@
+========================================================================================================
+PROBE 24c -- which frame is deform_verts in?  (decides probe 19 / probe 23 validity)
+========================================================================================================
+
+--------------------------------------------------------------------------------------------------------
+1. REBUILD the stored `verts` under the two competing frame assumptions
+--------------------------------------------------------------------------------------------------------
+corpus                (A) dv in v_shaped    (B) dv after LBS   mesh extent
+LIM_0                          2.420e-02           5.554e-08        2.0248
+BPX_noprior                    2.123e-02           5.469e-08        2.0197
+ALL_ANTS_CLEAN                 1.041e-02           3.928e-03        1.9905
+
+   (A) is probe 19 / probe 23's assumption; (B) is fitter_3d/trainer.py L230-241.
+
+--------------------------------------------------------------------------------------------------------
+2. HOW MUCH POSE IS BAKED INTO probe-23's 'rest-space' ARRAY
+--------------------------------------------------------------------------------------------------------
+corpus               mean|dv|  mean|dv_rest|  |dv - dv_rest|   global rot spread (deg)
+LIM_0                  0.0192         0.0177          0.0126                     10.19
+BPX_noprior            0.0195         0.0180          0.0128                      7.43
+ALL_ANTS_CLEAN         0.0173         0.0180          0.0040                      2.57
+   dv_rest = T^-1 . dv, i.e. the free-form offset pulled back into the REST frame
+   through each vertex's own skinning transform. |dv - dv_rest| is the frame error
+   probe 19 / probe 23 carry per vertex.
+
+--------------------------------------------------------------------------------------------------------
+3. THE HEADLINE METRIC, recomputed on a CORRECTLY UNPOSED rest geometry
+--------------------------------------------------------------------------------------------------------
+corpus              JOINTS probe23  JOINTS correct   VERTS probe19   VERTS correct
+LIM_0                       0.9154          0.8772          0.8998          0.8874
+BPX_noprior                 0.8580          0.8436          0.9166          0.8987
+ALL_ANTS_CLEAN              0.4608          0.4780          0.5239          0.5447
+   (VERTS columns raw/unnormalised, as probe 19 reports them)
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24c_deformframe.json

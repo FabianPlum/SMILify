@@ -1,0 +1,47 @@
+REFUTE-5 -- does "% joints outside the scan" measure JOINT PLACEMENT, or POSE?
+
+The posed joint the metric scores is
+    J_posed = f(betas, log_beta_scales, betas_trans, joint_rot, global_rot, trans)
+so a joint can land outside the animal because the REST skeleton is misplaced (the hypothesis)
+or because the POSE is wrong (a different failure).  The headline does not separate them.
+
+A discriminating pair already exists on disk, measured in probe 23:
+    LIM_0   rotation-limit violations 37.42 axes/specimen, median overshoot 20.5 deg
+    LIM_1x  rotation-limit violations  0.76 axes/specimen, median overshoot  0.0 deg
+    but their REST-SPACE joint displacement is nearly identical:
+            cumulative joint displacement 7.309% (LIM_0) vs 6.873% (LIM_1x) of body,
+            trans-only 3.888% vs 4.059%, scale-only 4.506% vs 4.417%.
+So LIM_0 -> LIM_1x is an almost pure POSE intervention at fixed placement, on the same 50
+specimens and the same 50 scans.  Whatever the metric does across that pair is what it is
+measuring.
+
+Also scored: the ANATOMICAL-PLACEMENT NULL.  Replace the fitted rest joints J by the AUTHORED
+template joints dd['J'] (and by J_regressor . v_template), keeping the fitted pose, scale,
+translation.  That is a skeleton with the template's placement and the specimen's pose.
+
+
+run                           fitted        no_betas_trans     no_scale_no_trans  template_J_regressor            authored_J
+(median %% of the 55 joints outside the raw scan, n=50 worker specimens)
+LIM_0                          61.82                 68.18                 62.73                 61.82                 61.82
+LIM_1x                         61.82                 69.09                 65.45                 61.82                 60.00
+LIM_3x                         61.82                 69.09                 65.45                 62.73                 63.64
+M7_worker                      58.18                 65.45                 60.00                 58.18                 70.91
+BPX_noprior                    58.18                 65.45                 61.82                 60.00                 70.00
+
+================================================================================================
+A) NEARLY-PURE POSE INTERVENTION at fixed placement: LIM_0 -> LIM_1x
+   (probe 23: violations 37.42 -> 0.76 axes/specimen; rest-space joint
+    displacement 7.309% -> 6.873% of body, i.e. essentially unchanged)
+   %outside  LIM_0 61.82  ->  LIM_1x 61.82   median paired change +0.00 pts   n=50  p=7.10e-01
+   %outside  LIM_0 61.82  ->  LIM_3x 61.82   median paired change +0.00 pts   n=50  p=9.58e-01
+
+B) ABLATING THE PLACEMENT CHANNELS (same pose, same scan)
+   LIM_0        no_betas_trans            68.18   (fitted  61.82, change  +6.36 pts, p=2.02e-05)
+   LIM_0        no_scale_no_trans         62.73   (fitted  61.82, change  -1.82 pts, p=8.66e-01)
+   LIM_0        template_J_regressor      61.82   (fitted  61.82, change  +0.00 pts, p=5.80e-01)
+   LIM_0        authored_J                61.82   (fitted  61.82, change  +0.00 pts, p=7.50e-01)
+   M7_worker    no_betas_trans            65.45   (fitted  58.18, change  +5.45 pts, p=4.95e-07)
+   M7_worker    no_scale_no_trans         60.00   (fitted  58.18, change  +1.82 pts, p=6.39e-02)
+   M7_worker    template_J_regressor      58.18   (fitted  58.18, change  +0.00 pts, p=1.57e-01)
+   M7_worker    authored_J                70.91   (fitted  58.18, change +12.73 pts, p=1.59e-08)
+================================================================================================

@@ -1,0 +1,73 @@
+
+====================================================================================================
+PART J -- foldedness measured on the TARGET .obj files, no fitted parameter involved
+====================================================================================================
+  CLEAN_M7     matched 81/81 target meshes
+      aniso              mean   3.9527  median   3.7499  p10   3.2515  p90   4.7727
+      flat               mean   0.5799  median   0.5841  p10   0.4148  p90   0.7111
+      rmean_over_rmax    mean   0.3828  median   0.3807  p10   0.3415  p90   0.4241
+      rstd_over_rmax     mean   0.2008  median   0.2016  p10   0.1800  p90   0.2232
+  M7_worker    matched 50/50 target meshes
+      aniso              mean   2.5996  median   2.4728  p10   1.6526  p90   3.5299
+      flat               mean   0.5280  median   0.5219  p10   0.3264  p90   0.7568
+      rmean_over_rmax    mean   0.4555  median   0.4673  p10   0.3503  p90   0.5324
+      rstd_over_rmax     mean   0.1993  median   0.1953  p10   0.1638  p90   0.2389
+
+    aniso: clean 3.9527 vs worker 2.5996  mannwhitney p=4.07e-15
+
+    rmean_over_rmax: clean 0.3828 vs worker 0.4555  mannwhitney p=4.68e-09
+
+    rstd_over_rmax: clean 0.2008 vs worker 0.1993  mannwhitney p=0.382
+    CLEAN_M7     rho(target aniso           , fitted legrot) = -0.180   rho(target aniso           , cumdisp) = -0.021
+    CLEAN_M7     rho(target rmean_over_rmax , fitted legrot) = +0.029   rho(target rmean_over_rmax , cumdisp) = +0.267
+    M7_worker    rho(target aniso           , fitted legrot) = -0.224   rho(target aniso           , cumdisp) = -0.532
+    M7_worker    rho(target rmean_over_rmax , fitted legrot) = +0.375   rho(target rmean_over_rmax , cumdisp) = +0.638
+
+====================================================================================================
+PART K -- probe-24b PART I revisited. In the M7 arms |betas| ~ 3e-4, so probe-19's
+          rest geometry is essentially v_template + deform_verts. Any specimen with
+          large deform_verts is automatically a population outlier. Partial out |dv|.
+====================================================================================================
+
+  CLEAN_M7 (n=81)   gen@10 = 0.7242
+    rho(LOO, |dv|)                       = +0.706
+    rho(LOO, cumdisp   ) = +0.582   | |dv| = +0.271 (p=0.0143)   | |dv|,legrot = +0.307 (p=0.00533)
+    rho(LOO, |lbs|     ) = +0.641   | |dv| = +0.407 (p=0.00016)   | |dv|,legrot = +0.416 (p=0.000112)
+    rho(LOO, |bt|      ) = +0.487   | |dv| = +0.198 (p=0.0765)   | |dv|,legrot = +0.207 (p=0.0639)
+    rho(LOO, bone dist ) = +0.548   | |dv| = +0.231 (p=0.0381)   | |dv|,legrot = +0.246 (p=0.0268)
+
+  M7_worker (n=50)   gen@10 = 0.9508
+    rho(LOO, |dv|)                       = +0.865
+    rho(LOO, cumdisp   ) = +0.852   | |dv| = +0.719 (p=4.19e-09)   | |dv|,legrot = +0.658 (p=2.13e-07)
+    rho(LOO, |lbs|     ) = +0.861   | |dv| = +0.813 (p=7.19e-13)   | |dv|,legrot = +0.758 (p=1.92e-10)
+    rho(LOO, |bt|      ) = +0.873   | |dv| = +0.713 (p=6.1e-09)   | |dv|,legrot = +0.639 (p=6.04e-07)
+    rho(LOO, bone dist ) = +0.892   | |dv| = +0.835 (p=4.68e-14)   | |dv|,legrot = +0.787 (p=1.24e-11)
+
+  BPX_noprior (n=50)   gen@10 = 0.9199
+    rho(LOO, |dv|)                       = +0.900
+    rho(LOO, cumdisp   ) = +0.825   | |dv| = +0.588 (p=6.98e-06)   | |dv|,legrot = +0.569 (p=1.62e-05)
+    rho(LOO, |lbs|     ) = +0.840   | |dv| = +0.723 (p=2.95e-09)   | |dv|,legrot = +0.694 (p=2.31e-08)
+    rho(LOO, |bt|      ) = +0.876   | |dv| = +0.663 (p=1.51e-07)   | |dv|,legrot = +0.641 (p=5.24e-07)
+    rho(LOO, bone dist ) = +0.893   | |dv| = +0.811 (p=8.97e-13)   | |dv|,legrot = +0.793 (p=6.9e-12)
+
+  LIM_0 (n=50)   gen@10 = 0.9115
+    rho(LOO, |dv|)                       = +0.919
+    rho(LOO, cumdisp   ) = +0.820   | |dv| = +0.617 (p=1.84e-06)   | |dv|,legrot = +0.608 (p=2.8e-06)
+    rho(LOO, |lbs|     ) = +0.823   | |dv| = +0.692 (p=2.6e-08)   | |dv|,legrot = +0.693 (p=2.41e-08)
+    rho(LOO, |bt|      ) = +0.860   | |dv| = +0.708 (p=8.61e-09)   | |dv|,legrot = +0.702 (p=1.38e-08)
+    rho(LOO, bone dist ) = +0.894   | |dv| = +0.804 (p=2.01e-12)   | |dv|,legrot = +0.807 (p=1.48e-12)
+
+====================================================================================================
+PART L -- LIM_0 -> LIM_1x compensation measured at the FITTED pose, not identity.
+          Mesh displacement caused by switching each parameter group off, per specimen.
+====================================================================================================
+  quantity                                   LIM_0    LIM_1x   %change  wilcoxon p
+  lbs mesh effect @ fitted pose %body       2.6985    2.8145     +4.3%      0.0115
+  bt  mesh effect @ fitted pose %body       2.7676    2.8386     +2.6%       0.175
+  deform_verts magnitude       %body        0.7767    0.8027     +3.4%    5.12e-05
+  joint cum displacement       %body        6.8451    6.4732     -5.4%      0.0305
+  local bone distortion            %       58.7179   58.3151     -0.7%       0.947
+  |log_beta_scales| (parameter)             0.1631    0.1996    +22.4%    5.71e-12
+  |betas_trans|     (parameter)             0.0288    0.0318    +10.3%    3.26e-07
+
+DONE

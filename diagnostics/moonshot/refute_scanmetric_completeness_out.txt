@@ -1,0 +1,50 @@
+REFUTE-6 -- are the worker SCANS missing the body parts whose joints are scored "outside"?
+
+The metric asks "is the fitted joint inside the target scan".  If the scan does not CONTAIN the
+body part (broken tarsus, snapped antenna, unresolved thin structure in the CT isosurface), the
+joint there is outside no matter how well it was placed.  That is a property of the specimen and
+its scan, not of the registration.
+
+The prior work gated on the MEAN fitted->scan nearest-neighbour distance (0.317% worker vs
+0.222% clean) and called the frames matched.  A mean cannot see a missing limb: 3% of the
+vertices sitting 3% of the diagonal away from anything moves the mean by 0.09%.  This probe
+measures the TAIL instead, and localises it to the joints.
+
+Per specimen:
+  orphan_v    fraction of fitted-mesh vertices further than T from any scan point
+              (model geometry standing in empty space => the scan lacks that part)
+  orphan_j    fraction of the 55 joints whose skinning-dominant body region is orphaned:
+              measured as the fraction of joints whose 200 nearest FITTED-MESH vertices are
+              on average further than T from the scan
+  extra_s     fraction of scan points further than T from the fitted mesh (debris / medium)
+  outfrac     the headline metric, for the joint-level association
+and then, WITHIN each corpus, the per-joint association between "this joint's neighbourhood is
+missing from the scan" and "this joint is scored outside".
+
+threshold T = 1.0% of the scan bbox diagonal;  knn=200
+
+run              n  orphan model verts %   extra scan pts %  joints in orphan region %    %out
+LIM_0           50                 1.192             19.651                      0.000   61.82
+M7_worker       50                 1.168             19.436                      0.000   58.18
+CLEAN_M7        81                 0.000              0.787                      0.000   29.09
+CLEAN_legacy    81                 0.000              0.365                      0.000   29.09
+
+================================================================================================
+A) IS THE SCAN MISSING GEOMETRY THE MODEL CLAIMS EXISTS?  (worker vs clean,
+   template and pipeline held fixed: M7_worker vs CLEAN_M7)
+   orphan model verts               worker    1.168   clean    0.000   ratio    inf   p=4.82e-22
+   extra scan points                worker   19.436   clean    0.787   ratio  24.70   p=2.07e-21
+   joints in an orphan region       worker    0.000   clean    0.000   ratio    inf   p=3.93e-03
+   median joint-local scan gap      worker    0.314   clean    0.232   ratio   1.35   p=6.02e-10
+
+B) DOES ORPHAN-NESS EXPLAIN 'OUTSIDE' AT THE JOINT LEVEL, WITHIN A CORPUS?
+   M7_worker      rho(joint-local scan gap, outside) = +0.052 (p=6.0e-03)   P(outside | orphan)=100.0%  P(outside | not orphan)= 58.2%  n_orphan=5/2750
+   CLEAN_M7       rho(joint-local scan gap, outside) = -0.068 (p=5.7e-06)   P(outside | orphan)=  nan%  P(outside | not orphan)= 30.7%  n_orphan=0/4455
+   LIM_0          rho(joint-local scan gap, outside) = +0.016 (p=4.0e-01)   P(outside | orphan)=100.0%  P(outside | not orphan)= 61.4%  n_orphan=2/2750
+   CLEAN_legacy   rho(joint-local scan gap, outside) = -0.079 (p=1.1e-07)   P(outside | orphan)=  nan%  P(outside | not orphan)= 30.1%  n_orphan=0/4455
+
+C) RESTRICTED TO JOINTS WHOSE NEIGHBOURHOOD IS PRESENT IN BOTH CORPORA
+   (drop every joint sitting in an orphan region; recompute the headline)
+   M7_worker    vs CLEAN_M7       raw 58.18/29.09 ratio 2.00  ->  present-only 58.18/29.09 ratio 2.00  p=3.62e-20
+   LIM_0        vs CLEAN_legacy   raw 61.82/29.09 ratio 2.12  ->  present-only 61.82/29.09 ratio 2.12  p=1.92e-21
+================================================================================================

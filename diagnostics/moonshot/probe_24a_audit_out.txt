@@ -1,0 +1,89 @@
+====================================================================================================
+LIM_0   template=OmniAnt_25PCs_joint_limited.pkl
+====================================================================================================
+  npz keys/shapes:
+    global_rot       (50, 3)              float32
+    joint_rot        (50, 54, 3)          float32
+    betas            (50, 25)             float32
+    log_beta_scales  (50, 55, 3)          float32
+    trans            (50, 3)              float32
+    deform_verts     (50, 10235, 3)       float32
+    betas_trans      (50, 55, 3)          float32
+    verts            (50, 10235, 3)       float32
+    faces            (50, 20466, 3)       int64
+    labels           (50,)                <U60
+  template keys: ['J', 'J_names', 'J_regressor', 'bs_style', 'bs_type', 'f', 'joint_limits', 'kintree_table', 'posedirs', 'scaledirs', 'shape_cov', 'shape_mean_betas', 'shapedirs', 'sym_verts', 'transdirs', 'v_template', 'weights']
+  v_template (10235, 3)   shapedirs (10235, 3, 25)
+  J_regressor type=<class 'numpy.ndarray'>
+  J_regressor dense shape (55, 10235)
+    row sums:  min 1.000000  max 1.000000  mean 1.000000
+    min weight 0.000000e+00   any negative: False
+    support per row: min 10 median 10 mean 10.00 max 10
+    n_joints 55
+  kintree_table (2, 55)  root=b_t
+  betas in npz: 25   shapedirs K: 25
+  n specimens: 50   deform_verts (50, 10235, 3)
+  template vertices nearest a LEG joint: 52.6%   (leg joints are 65.5% of joints)
+  v_template bbox extent [1.79116136 1.43564713 0.48561981]
+
+====================================================================================================
+BPX_noprior   template=SMIL_OmniAnt.pkl
+====================================================================================================
+  npz keys/shapes:
+    global_rot       (50, 3)              float32
+    joint_rot        (50, 54, 3)          float32
+    betas            (50, 13)             float32
+    log_beta_scales  (50, 55, 3)          float32
+    trans            (50, 3)              float32
+    deform_verts     (50, 10229, 3)       float32
+    betas_trans      (50, 55, 3)          float32
+    verts            (50, 10229, 3)       float32
+    faces            (50, 20454, 3)       int64
+    labels           (50,)                <U60
+  template keys: ['J', 'J_names', 'J_regressor', 'bs_style', 'bs_type', 'f', 'kintree_table', 'posedirs', 'scaledirs', 'shape_cov', 'shape_mean_betas', 'shapedirs', 'sym_verts', 'transdirs', 'v_template', 'weights']
+  v_template (10229, 3)   shapedirs (10229, 3, 13)
+  J_regressor type=<class 'numpy.ndarray'>
+  J_regressor dense shape (55, 10229)
+    row sums:  min 1.000000  max 1.000000  mean 1.000000
+    min weight 0.000000e+00   any negative: False
+    support per row: min 10 median 24 mean 36.89 max 200
+    n_joints 55
+  kintree_table (2, 55)  root=b_t
+  betas in npz: 13   shapedirs K: 13
+  n specimens: 50   deform_verts (50, 10229, 3)
+  template vertices nearest a LEG joint: 52.8%   (leg joints are 65.5% of joints)
+  v_template bbox extent [1.78880531 1.43524396 0.48746346]
+
+====================================================================================================
+ALL_ANTS_CLEAN   template=SMPL_fit.pkl
+====================================================================================================
+  npz keys/shapes:
+    global_rot       (81, 3)              float32
+    joint_rot        (81, 54, 3)          float32
+    betas            (81, 20)             float32
+    log_beta_scales  (81, 55, 3)          float32
+    trans            (81, 3)              float32
+    deform_verts     (81, 10236, 3)       float32
+    verts            (81, 10236, 3)       float32
+    faces            (81, 20468, 3)       int64
+    labels           (81,)                <U33
+  template keys: ['J', 'J_names', 'J_regressor', 'bs_style', 'bs_type', 'f', 'kintree_table', 'posedirs', 'shape_cov', 'shape_mean_betas', 'shapedirs', 'sym_verts', 'v_template', 'weights']
+  v_template (10236, 3)   shapedirs (10236, 3, 20)
+  J_regressor type=<class 'numpy.ndarray'>
+  J_regressor dense shape (55, 10236)
+    row sums:  min 1.000000  max 1.000000  mean 1.000000
+    min weight 0.000000e+00   any negative: False
+    support per row: min 20 median 20 mean 20.00 max 20
+    n_joints 55
+  kintree_table (2, 55)  root=b_t
+  betas in npz: 20   shapedirs K: 20
+  n specimens: 81   deform_verts (81, 10236, 3)
+  template vertices nearest a LEG joint: 54.6%   (leg joints are 65.5% of joints)
+  v_template bbox extent [1.77575964 1.38457382 0.4774377 ]
+
+====================================================================================================
+J_names identity across templates
+====================================================================================================
+  LIM_0 == BPX_noprior : True
+  LIM_0 == ALL_ANTS_CLEAN : True
+  set(LIM_0) == set(CLEAN) : True

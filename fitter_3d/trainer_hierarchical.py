@@ -71,10 +71,32 @@ nn = torch.nn
 DISTAL_SEGMENTS = ("ti", "ta", "pt")
 
 
-def anatomical_groups(joint_names, split_distal=False):
+def anatomical_groups(joint_names, split_distal=False, split_anterior=False):
     """Map each joint index to 'body', or to a leg group.
 
-    Head, mandibles and antennae are folded into 'body' for the purpose of the partition:
+    split_anterior: give the head, mandibles and antennae their own groups instead of folding
+    them into 'body'.
+
+    THE FOLD WAS A MEASURED MISTAKE (REPORT §6.10). The paragraph below used to argue that
+    splitting the anterior "would create parts too small to carry a stable data term". That
+    is false, and backwards for the head. Measured on the template:
+
+        head      19.53% of surface area, 1563 expected samples at n_sample=8000
+        mandible   3.11%,  248 samples
+        antenna    1.70%,  136 samples
+        each leg   5.5-6.6%, 439-531 samples   <- and each leg DOES get its own term
+
+    The head is three times larger than any leg group, and even the antenna clears the code's
+    own n_t<10 skip threshold by 13x. Nothing here was ever too small.
+
+    What the fold actually cost: with head, mandible and antenna target points in one
+    undifferentiated pool, covering the head with mandible vertices costs the chamfer nothing
+    -- the entire anti-multimodality mechanism is simply not applied anteriorly. Measured
+    consequence in every pose-mobile arm: the head deforms 24-40% LESS than the thorax while
+    the antennae deform 44-82% MORE, i.e. the head is not carried forward and the appendages
+    stretch to reach. That is the failure the domain expert reported from renders.
+
+    ORIGINAL NOTE, retained because the distal reasoning below still stands:
     they are anterior and unambiguous relative to the legs, and splitting them further
     would create parts too small to carry a stable data term (pretarsus is 7-15 verts).
 
@@ -105,25 +127,31 @@ def anatomical_groups(joint_names, split_distal=False):
                 groups[j] = f"l{k}{half}_{side}"
             else:
                 groups[j] = f"l{k}_{side}"
+        elif split_anterior and nm == "b_h":
+            groups[j] = "head"
+        elif split_anterior and nm.startswith("ma"):
+            groups[j] = "mandible"
+        elif split_anterior and nm.startswith("an_"):
+            groups[j] = "antenna"
         else:
             groups[j] = "body"
     return groups
 
 
-def vertex_groups(weights, joint_names, split_distal=False):
+def vertex_groups(weights, joint_names, split_distal=False, split_anterior=False):
     """Assign each template vertex to an anatomical group by dominant skinning weight."""
     dom = np.asarray(weights).argmax(axis=1)
-    jg = anatomical_groups(joint_names, split_distal=split_distal)
+    jg = anatomical_groups(joint_names, split_distal=split_distal, split_anterior=split_anterior)
     names = sorted(set(jg.values()))
     name2i = {n: i for i, n in enumerate(names)}
     vg = np.array([name2i[jg[d]] for d in dom], dtype=np.int64)
     return vg, names
 
 
-def joint_mask_for_groups(joint_names, allowed, split_distal=False):
+def joint_mask_for_groups(joint_names, allowed, split_distal=False, split_anterior=False):
     """Boolean mask over joint_rot rows (i.e. joints EXCLUDING the global root) selecting
     the joints belonging to `allowed` groups."""
-    jg = anatomical_groups(joint_names, split_distal=split_distal)
+    jg = anatomical_groups(joint_names, split_distal=split_distal, split_anterior=split_anterior)
     # joint_rot has N_POSE = len(joint_names) - 1 rows; row i corresponds to joint i+1
     m = torch.zeros(len(joint_names) - 1, dtype=torch.bool)
     for j in range(1, len(joint_names)):
@@ -277,6 +305,7 @@ class HierarchicalStage:
         active_groups=None,
         partitioned=True,
         split_distal=False,
+        split_anterior=False,
         lr=0.01,
         joint_lr=0.01,
         n_sample=8000,
@@ -344,9 +373,9 @@ class HierarchicalStage:
         if active_groups is None:
             self.joint_mask = torch.ones(smal.joint_rot.shape[1], dtype=torch.bool, device=device)
         else:
-            self.joint_mask = joint_mask_for_groups(joint_names, set(active_groups), split_distal=split_distal).to(
-                device
-            )
+            self.joint_mask = joint_mask_for_groups(
+                joint_names, set(active_groups), split_distal=split_distal, split_anterior=split_anterior
+            ).to(device)
 
         params = [
             {"params": [smal.global_rot], "lr": lr},

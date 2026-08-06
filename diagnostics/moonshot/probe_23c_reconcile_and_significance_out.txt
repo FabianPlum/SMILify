@@ -1,0 +1,44 @@
+====================================================================================================
+PROBE 23c -- reconciliation and significance
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+A. RECONCILE recomputed full-vertex gen@10 with the report's quoted values
+----------------------------------------------------------------------------------------------------
+sweeping (run dir x stage npz x template), raw unnormalised vertices, k=10
+run                   stage                     template                             n   gen@10
+LIM_0                 Stage_2_deform_coarse.npz OmniAnt_25PCs_joint_limited.pkl     50   0.9109
+LIM_0                 Stage_3_deform_fine.npz   OmniAnt_25PCs_joint_limited.pkl     50   0.8998
+LIM_0_hier            H0_body.npz               OmniAnt_25PCs_joint_limited.pkl     50   0.2194
+LIM_0_hier            H1_legs.npz               OmniAnt_25PCs_joint_limited.pkl     50   0.2806
+LIM_0_hier            H2_joint.npz              OmniAnt_25PCs_joint_limited.pkl     50   0.2619
+LIM_0_hier            H3_deform.npz             OmniAnt_25PCs_joint_limited.pkl     50   0.8593
+BPX_noprior           Stage_2_deform_coarse.npz SMIL_OmniAnt.pkl                    50   0.9269
+BPX_noprior           Stage_3_deform_fine.npz   SMIL_OmniAnt.pkl                    50   0.9166
+BPX_noprior_hier      H0_body.npz               SMIL_OmniAnt.pkl                    50   0.0944
+BPX_noprior_hier      H1_legs.npz               SMIL_OmniAnt.pkl                    50   0.1241
+BPX_noprior_hier      H2_joint.npz              SMIL_OmniAnt.pkl                    50   0.1255
+BPX_noprior_hier      H3_deform.npz             SMIL_OmniAnt.pkl                    50   0.8488
+ALL_ANTS_CLEAN        Stage_3_deform_fine.npz   SMPL_fit.pkl                        81   0.5239
+
+quoted in REPORT.md: worker control 0.9221 (E1), BPX_noprior 0.9353, CLEAN 0.5383
+
+----------------------------------------------------------------------------------------------------
+B. PAIRED significance: anatomical joints vs matched random landmarks, gen@10
+----------------------------------------------------------------------------------------------------
+LIM_0
+   anatomical joints  gen@10/spread = 0.9154
+   random landmarks   gen@10/spread = 0.8070  (sd over 24 draws 0.0300, range 0.7434-0.8622)
+   paired difference (joints - random) = +0.1084  95% CI [+0.0766, +0.1431]  specimens where joints are worse: 86%
+
+BPX_noprior
+   anatomical joints  gen@10/spread = 0.8580
+   random landmarks   gen@10/spread = 0.7872  (sd over 24 draws 0.0373, range 0.7113-0.8484)
+   paired difference (joints - random) = +0.0708  95% CI [+0.0334, +0.1080]  specimens where joints are worse: 70%
+
+ALL_ANTS_CLEAN
+   anatomical joints  gen@10/spread = 0.4608
+   random landmarks   gen@10/spread = 0.4650  (sd over 24 draws 0.0236, range 0.4332-0.5204)
+   paired difference (joints - random) = -0.0043  95% CI [-0.0183, +0.0100]  specimens where joints are worse: 49%
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe23c_reconcile.json

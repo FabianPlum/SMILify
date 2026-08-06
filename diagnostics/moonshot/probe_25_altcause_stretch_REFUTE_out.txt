@@ -1,0 +1,178 @@
+========================================================================================================
+PROBE 25 -- ALTERNATIVE-CAUSE REFUTATION of the 'worker segments stretched 2x' claim
+========================================================================================================
+bone_i = M[parent](o_i + t_i),  M[p] = R_0 . s_0^-1 . R_1...R_p . s_p   (batch_lbs.py, propagate_scaling=False)
+=> |bone_i| = | s_0^-1 . R_{1..p} . s_p . (o_i + t_i) |.  R_0 drops (orthogonal).
+=> POSE can only change a bone length by interacting with the ANISOTROPY of the global root scale s_0^-1.
+
+========================================================================================================
+CONTROL A/B -- D_pose (LEG bones, probe-23's exact metric) under each mechanism switched OFF
+  actual      = probe-23's published number
+  -bt         = betas_trans := 0            (matches the clean corpus's code version)
+  isoRoot     = s_0 made isotropic          (kills the pose x root-anisotropy term only)
+  identPose   = all rotations := I          (kills pose entirely)
+  -bt+isoRoot = both A and B1
+========================================================================================================
+run                 kind      actual      -bt  isoRoot   noRoot  identPose  -bt+iso  -bt+ident
+LIM_0               worker    0.3030   0.1819   0.2952   0.2712     0.3017   0.1839     0.1790
+LIM_1x              worker    0.3131   0.1839   0.3128   0.2831     0.3065   0.1743     0.1812
+BPX_noprior         worker    0.3686   0.2022   0.3599   0.3301     0.3643   0.1883     0.2063
+M7_handoff_midline  worker    0.3382   0.1807   0.3336   0.3186     0.3305   0.1718     0.1859
+baseline            worker    0.6203   0.6203   0.6073   0.6185     0.6136   0.6073     0.6136
+ALL_ANTS_CLEAN      clean     0.1850   0.1850   0.1805   0.1742     0.1873   0.1805     0.1873
+
+same, DISTAL leg bones only:
+run                 kind      actual      -bt  isoRoot   noRoot  identPose  -bt+iso  -bt+ident
+LIM_0               worker    0.3352   0.2570   0.3418   0.3276     0.3391   0.2414     0.2451
+LIM_1x              worker    0.3410   0.2072   0.3577   0.3478     0.3540   0.2204     0.2156
+BPX_noprior         worker    0.4486   0.2201   0.4417   0.4261     0.4591   0.2155     0.2492
+M7_handoff_midline  worker    0.4189   0.2029   0.4092   0.3902     0.4207   0.2042     0.2144
+baseline            worker    0.7564   0.7564   0.7967   0.7961     0.7829   0.7967     0.7829
+ALL_ANTS_CLEAN      clean     0.2196   0.2196   0.2138   0.2090     0.2174   0.2138     0.2174
+
+WORKER/CLEAN RATIO of median D_pose (leg) under each control  [claim rests on this being ~1.6-2.0]
+run                    actual      -bt  isoRoot  identPose  -bt+iso  -bt+ident
+LIM_0                    1.64     0.98     1.64       1.61     1.02     0.96
+LIM_1x                   1.69     0.99     1.73       1.64     0.97     0.97
+BPX_noprior              1.99     1.09     1.99       1.95     1.04     1.10
+M7_handoff_midline       1.83     0.98     1.85       1.76     0.95     0.99
+baseline                 3.35     3.35     3.36       3.28     3.36     3.28
+
+========================================================================================================
+CONTROL E -- is the excess LIMB-SPECIFIC?  D by group, actual vs -bt+isoRoot
+  wing joints carry log_beta_scales == 0 exactly in the worker runs -> no per-joint scale at all
+========================================================================================================
+run                    body a   body c    leg a    leg c   dist a   dist c   wing a   wing c
+LIM_0                  0.2359   0.1022   0.3030   0.1839   0.3352   0.2414   0.1650   0.1115
+LIM_1x                 0.2309   0.1120   0.3131   0.1743   0.3410   0.2204   0.1395   0.1094
+BPX_noprior            0.2294   0.1303   0.3686   0.1883   0.4486   0.2155   0.2001   0.1145
+M7_handoff_midline     0.2389   0.1160   0.3382   0.1718   0.4189   0.2042   0.1840   0.1603
+baseline               0.3363   0.3782   0.6203   0.6073   0.7564   0.7967   0.2132   0.1549
+ALL_ANTS_CLEAN         0.1737   0.1717   0.1850   0.1805   0.2196   0.2138   0.1319   0.1205
+
+wing log_beta_scales exact stats (max |lbs| over wing joints, all specimens):
+  LIM_0                max|log_beta_scales[wing]| = 0.0455   max|betas_trans[wing]| = 1.20761
+  LIM_1x               max|log_beta_scales[wing]| = 0.0381   max|betas_trans[wing]| = 0.97293
+  BPX_noprior          max|log_beta_scales[wing]| = 0.0000   max|betas_trans[wing]| = 0.00000
+  M7_handoff_midline   max|log_beta_scales[wing]| = 0.0000   max|betas_trans[wing]| = 0.00000
+  baseline             max|log_beta_scales[wing]| = 0.0000   max|betas_trans[wing]| = 0.00000
+  ALL_ANTS_CLEAN       max|log_beta_scales[wing]| = 0.2538   max|betas_trans[wing]| = 0.00000
+
+========================================================================================================
+CONTROL C1 -- POSE DISTRIBUTION: is clean really 'extended' and worker 'folded'?
+  |theta| = per-joint rotation magnitude (rad).  extension = mean over the 6 legs of
+  ||pretarsus_tip - coxa|| / (sum of that leg's rest bone lengths)  in the POSED skeleton.
+========================================================================================================
+run                 kind     mean|th|   p95|th|  frac>30deg  legExt p50  legExt p05  aniso s0 p50  aniso s0 p95
+LIM_0               worker     0.8580    2.1297       62.1%      0.6290      0.4209        1.1717        1.3696
+LIM_1x              worker     0.6537    1.5692       51.8%      0.6453      0.4748        1.1958        1.5124
+BPX_noprior         worker     0.8163    2.0518       59.8%      0.6625      0.4164        1.1143        1.4001
+M7_handoff_midline  worker     0.8166    2.0795       59.9%      0.6750      0.4426        1.1262        1.3715
+baseline            worker     0.2156    0.5049        4.3%      0.6607      0.4661        1.4662        2.4998
+ALL_ANTS_CLEAN      clean      0.0898    0.2927        0.1%      0.7850      0.6116        1.1433        1.3109
+
+========================================================================================================
+CONTROL C2 -- POSE SWAP.  Recompute D_pose(leg) with this corpus's shape/scale/trans
+  parameters but poses drawn from another corpus (20 random pairings, median reported).
+  If folded worker poses alone inflate the metric, CLEAN+workerPose must rise toward 0.30.
+========================================================================================================
+params from         poses from              D_pose(leg) med   D_dist med
+LIM_0               LIM_0 (own)                      0.3030       0.3352
+LIM_0               LIM_1x                           0.3028       0.3371
+LIM_0               BPX_noprior                      0.3025       0.3364
+LIM_0               M7_handoff_midline               0.3027       0.3366
+LIM_0               baseline                         0.3002       0.3394
+LIM_0               ALL_ANTS_CLEAN                   0.3025       0.3383
+------------------------------------------------------------------------
+LIM_1x              LIM_0                            0.3082       0.3453
+LIM_1x              LIM_1x (own)                     0.3131       0.3410
+LIM_1x              BPX_noprior                      0.3095       0.3474
+LIM_1x              M7_handoff_midline               0.3095       0.3484
+LIM_1x              baseline                         0.3107       0.3505
+LIM_1x              ALL_ANTS_CLEAN                   0.3061       0.3540
+------------------------------------------------------------------------
+BPX_noprior         LIM_0                            0.3678       0.4471
+BPX_noprior         LIM_1x                           0.3648       0.4436
+BPX_noprior         BPX_noprior (own)                0.3686       0.4486
+BPX_noprior         M7_handoff_midline               0.3670       0.4500
+BPX_noprior         baseline                         0.3637       0.4489
+BPX_noprior         ALL_ANTS_CLEAN                   0.3639       0.4565
+------------------------------------------------------------------------
+M7_handoff_midline  LIM_0                            0.3338       0.4088
+M7_handoff_midline  LIM_1x                           0.3335       0.4156
+M7_handoff_midline  BPX_noprior                      0.3327       0.4142
+M7_handoff_midline  M7_handoff_midline (own)           0.3382       0.4189
+M7_handoff_midline  baseline                         0.3309       0.4216
+M7_handoff_midline  ALL_ANTS_CLEAN                   0.3311       0.4218
+------------------------------------------------------------------------
+baseline            LIM_0                            0.6428       0.8043
+baseline            LIM_1x                           0.6318       0.7947
+baseline            BPX_noprior                      0.6372       0.7998
+baseline            M7_handoff_midline               0.6471       0.8046
+baseline            baseline (own)                   0.6203       0.7564
+baseline            ALL_ANTS_CLEAN                   0.6144       0.7852
+------------------------------------------------------------------------
+ALL_ANTS_CLEAN      LIM_0                            0.1838       0.2191
+ALL_ANTS_CLEAN      LIM_1x                           0.1848       0.2195
+ALL_ANTS_CLEAN      BPX_noprior                      0.1845       0.2195
+ALL_ANTS_CLEAN      M7_handoff_midline               0.1834       0.2202
+ALL_ANTS_CLEAN      baseline                         0.1867       0.2173
+ALL_ANTS_CLEAN      ALL_ANTS_CLEAN (own)             0.1850       0.2196
+------------------------------------------------------------------------
+
+========================================================================================================
+CONTROL D -- IN-DISTRIBUTION-BY-CONSTRUCTION
+  D1 Mahalanobis distance of betas under the model's OWN shape prior (shape_mean_betas, shape_cov),
+     normalised by sqrt(K) so corpora with different K are comparable (chi -> ~1 if in-distribution).
+  D2 |deform_verts| = the geometry the shape space could NOT express (per-vertex, /body size).
+========================================================================================================
+run                    K  has scaledirs   mahal/sqrtK p50      p95  frac>1.5   |dv| p50   |dv| p95
+LIM_0                 25           True            0.9223   1.3568     0.020    0.04374    0.06966
+LIM_1x                25           True            0.9112   1.3585     0.020    0.04578    0.07119
+BPX_noprior           13           True            0.7810   1.2174     0.000    0.04516    0.06925
+M7_handoff_midline    13           True            0.0007   0.0012     0.000    0.04875    0.07214
+baseline              13           True            0.4000   0.8733     0.000    0.09994    0.14784
+ALL_ANTS_CLEAN        20          False            0.2385   0.3845     0.000    0.04099    0.05662
+
+========================================================================================================
+CONTROL F -- does 'stretch tracks rotation violations' survive removing the pose term?
+  F1 pose-free stretch (identity pose, i.e. pure scale+trans) vs n_viol
+  F2 D_pose vs n_viol, PARTIAL on mean pose magnitude
+  also: n_viol vs pose magnitude (is n_viol just 'how extreme the pose is'?)
+========================================================================================================
+run                   D_actual~viol        p  D_identPose~viol        p  D_act~viol|posemag        p  viol~posemag        p
+LIM_0                         0.341   0.0153             0.273   0.0547              -0.189   0.2179         0.727   0.0000
+LIM_1x                        0.157   0.2767             0.131   0.3629              -0.042   0.6670         0.391   0.0050
+BPX_noprior                   0.468   0.0006             0.440   0.0014               0.055   0.9007         0.656   0.0000
+M7_handoff_midline            0.443   0.0013             0.432   0.0018               0.063   0.6825         0.635   0.0000
+baseline                      0.132   0.3603             0.190   0.1853               0.039   0.7343         0.727   0.0000
+ALL_ANTS_CLEAN                0.145   0.1960             0.155   0.1678               0.134   0.3128         0.153   0.1731
+
+  and against probe-19 LOO error:
+run                    D_actual~g19        p   D_identPose~g19        p   D_-bt+iso~g19        p
+LIM_0                         0.708   0.0000             0.693   0.0000           0.756   0.0000
+LIM_1x                        0.557   0.0000             0.518   0.0001           0.676   0.0000
+BPX_noprior                   0.734   0.0000             0.762   0.0000           0.633   0.0000
+M7_handoff_midline            0.771   0.0000             0.766   0.0000           0.624   0.0000
+baseline                      0.074   0.6082             0.113   0.4335           0.051   0.7253
+ALL_ANTS_CLEAN                0.243   0.0288             0.244   0.0280           0.220   0.0481
+
+========================================================================================================
+GAP ACCOUNTING -- how much of the worker-minus-clean D_pose(leg) gap each alternative cause removes
+========================================================================================================
+LIM_0                raw gap = +0.1181
+                       remove betas_trans (code version)   -> gap -0.0031   (102.6% of the gap removed)
+                       remove root anisotropy x pose       -> gap +0.1146   (  2.9% of the gap removed)
+                       remove BOTH                         -> gap +0.0034   ( 97.1% of the gap removed)
+LIM_1x               raw gap = +0.1281
+                       remove betas_trans (code version)   -> gap -0.0011   (100.8% of the gap removed)
+                       remove root anisotropy x pose       -> gap +0.1322   ( -3.2% of the gap removed)
+                       remove BOTH                         -> gap -0.0062   (104.9% of the gap removed)
+BPX_noprior          raw gap = +0.1836
+                       remove betas_trans (code version)   -> gap +0.0172   ( 90.6% of the gap removed)
+                       remove root anisotropy x pose       -> gap +0.1794   (  2.3% of the gap removed)
+                       remove BOTH                         -> gap +0.0077   ( 95.8% of the gap removed)
+M7_handoff_midline   raw gap = +0.1533
+                       remove betas_trans (code version)   -> gap -0.0043   (102.8% of the gap removed)
+                       remove root anisotropy x pose       -> gap +0.1531   (  0.1% of the gap removed)
+                       remove BOTH                         -> gap -0.0087   (105.7% of the gap removed)

@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/tmp/claude-1000/-home-fabi-dev-SMILify/6c5a615e-788c-4441-a87e-20e1d0723794/scratchpad/quick_lim.py", line 22, in <module>
+    res[tag]=o; print(tag,"median %outside = %.2f"%(100*np.median(list(o.values()))),flush=True)
+TypeError: %o format: an integer is required, not numpy.float64

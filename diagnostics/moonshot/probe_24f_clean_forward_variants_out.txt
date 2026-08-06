@@ -1,0 +1,12 @@
+ALL_ANTS_CLEAN forward-convention sweep (mean |rebuilt - stored verts|, extent 1.99)
+template              dv in v_shaped   propagate_scaling  use log_scale          err
+SMPL_fit.pkl                    True               False           True    1.041e-02
+SMPL_fit.pkl                    True               False          False    4.803e-02
+SMPL_fit.pkl                    True                True           True    6.526e-02
+SMPL_fit.pkl                    True                True          False    4.803e-02
+SMPL_fit.pkl                   False               False           True    3.928e-03
+SMPL_fit.pkl                   False               False          False    4.789e-02
+SMPL_fit.pkl                   False                True           True    6.564e-02
+SMPL_fit.pkl                   False                True          False    4.789e-02
+OmniAnt_25PCs_joint_limited.pkl                        -- vertex count mismatch, cannot pair --
+SMIL_OmniAnt.pkl                            -- vertex count mismatch, cannot pair --

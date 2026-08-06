@@ -1,0 +1,81 @@
+REFUTE-2 -- measure the FALSE-OUTSIDE FLOOR of the "joint is outside the scan" oracle,
+separately for each corpus, using control points that are inside the animal BY CONSTRUCTION
+and have nothing to do with any fit.
+
+WHY.  The headline (worker 61.5% of joints outside vs clean 30.1%) uses a generalized winding
+number on the raw scan.  REFUTE-1 measured that 0/50 worker scans are winding-consistent
+(20/81 clean are), worker boundary-edge fraction is 5.5% vs 3.2%, and an exterior flood fill
+leaks through the worker surface everywhere: the largest enclosed interior blob holds 23-27%
+of interior voxels for workers vs 96-97% for clean.  A GWN oracle on such a mesh reports
+"outside" for genuinely interior points.  If that false-outside rate differs by corpus, the
+headline comparison is measuring mesh provenance, not joint placement.
+
+METHOD (per scan, orientation-free, fit-free)
+  1. normalise exactly as the fit did (fitter_3d/utils.py:340-344)
+  2. voxelise the surface at pitch = diag/N  (subdivision rasteriser -- ignores orientation)
+  3. morphological CLOSING with a ball of radius R voxels -> seals holes up to ~2R voxels
+  4. flood fill the exterior with 6-connectivity; INTERIOR = not-closed-surface and not-reached
+  5. keep the LARGEST interior component only, then ERODE it by R voxels
+     -> DEEP INTERIOR: voxels at least R voxels inside a sealed surface.  These points are
+        inside the animal under a criterion that uses no face orientation and tolerates holes.
+  6. evaluate the HEADLINE ORACLE (|GWN| < 0.5) at random deep-interior points
+     -> the fraction it wrongly calls OUTSIDE is the corpus's false-outside FLOOR.
+  7. re-score the actual fitted JOINTS with the ROBUST oracle (step 4/5 occupancy) and with
+     the headline GWN oracle, so the two can be compared on identical points.
+
+Also reported: the maximum inscribed radius (Euclidean distance transform of the interior)
+at each joint -- how much room a joint has to be "inside" at all.
+
+grid N=288  closing radius=3 voxels (= 2.08% of the scan diagonal)  control pts/scan=60
+
+### LIM_0 (worker)   n=3
+   GWN %joints outside (HEADLINE)                                    60.000  (mean 61.212, sd 3.090)
+   ROBUST %joints outside                                            40.000  (mean 38.182, sd 9.735)
+   FALSE-OUTSIDE FLOOR (deep interior pts called outside by GWN)      0.000  (mean 0.000, sd 0.000)
+   median inscribed radius at joints (%diag)                          0.347  (mean 0.432, sd 0.120)
+   frac of interior in largest blob                                   0.689  (mean 0.782, sd 0.154)
+   n deep-interior voxels                                         71977.000  (mean 61124.333, sd 21338.733)
+   n control pts                                                     60.000  (mean 60.000, sd 0.000)
+   n interior voxels                                             140267.000  (mean 139924.333, sd 37833.145)
+   n surface voxels                                               57586.000  (mean 63212.667, sd 10739.324)
+
+### baseline (worker)   n=3
+   GWN %joints outside (HEADLINE)                                    47.273  (mean 43.030, sd 8.699)
+   ROBUST %joints outside                                            27.273  (mean 26.061, sd 7.472)
+   FALSE-OUTSIDE FLOOR (deep interior pts called outside by GWN)      0.000  (mean 0.000, sd 0.000)
+   median inscribed radius at joints (%diag)                          0.491  (mean 0.559, sd 0.096)
+   frac of interior in largest blob                                   0.689  (mean 0.782, sd 0.154)
+   n deep-interior voxels                                         71977.000  (mean 61124.333, sd 21338.733)
+   n control pts                                                     60.000  (mean 60.000, sd 0.000)
+   n interior voxels                                             140267.000  (mean 139924.333, sd 37833.145)
+   n surface voxels                                               57586.000  (mean 63212.667, sd 10739.324)
+
+### ALL_ANTS_CLEAN   n=3
+   GWN %joints outside (HEADLINE)                                    32.727  (mean 30.303, sd 6.181)
+   ROBUST %joints outside                                             9.091  (mean 10.303, sd 3.090)
+   FALSE-OUTSIDE FLOOR (deep interior pts called outside by GWN)      0.000  (mean 0.000, sd 0.000)
+   median inscribed radius at joints (%diag)                          0.491  (mean 0.491, sd 0.000)
+   frac of interior in largest blob                                   0.554  (mean 0.513, sd 0.110)
+   n deep-interior voxels                                         19683.000  (mean 29077.000, sd 21212.298)
+   n control pts                                                     60.000  (mean 60.000, sd 0.000)
+   n interior voxels                                              58877.000  (mean 80102.000, sd 37576.572)
+   n surface voxels                                               41963.000  (mean 47212.667, sd 8492.189)
+
+================================================================================================
+WORKER vs CLEAN, per specimen (Mann-Whitney two-sided)
+metric                                          worker     clean    ratio           p
+GWN %outside (HEADLINE)                         60.000    32.727     1.83    1.00e-01
+ROBUST %outside                                 40.000     9.091     4.40    1.00e-01
+FALSE-OUTSIDE FLOOR                              0.000     0.000      nan    1.00e+00
+inscribed radius %diag                           0.347     0.491     0.71    6.37e-01
+
+HEADLINE EXCESS ABOVE EACH CORPUS' OWN FALSE-OUTSIDE FLOOR
+   worker LIM_0       GWN %outside= 60.00  floor=  0.00  excess median=+60.00  (mean +61.21)
+   worker baseline    GWN %outside= 47.27  floor=  0.00  excess median=+47.27  (mean +43.03)
+   clean              GWN %outside= 32.73  floor=  0.00  excess median=+32.73  (mean +30.30)
+   worker-vs-clean on the EXCESS: p=1.00e-01
+
+PAIRED, SAME 50 SCANS: LIM_0 vs stock baseline
+   GWN %outside (HEADLINE)      LIM_0= 60.00  baseline= 47.27  median diff=+10.91  paired p=2.50e-01
+   ROBUST %outside              LIM_0= 40.00  baseline= 27.27  median diff=+14.55  paired p=5.00e-01
+================================================================================================

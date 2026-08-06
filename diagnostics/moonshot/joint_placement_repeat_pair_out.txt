@@ -1,0 +1,17 @@
+PROBE 25 -- confirm the clean corpus REPEAT pair was fitted independently.
+
+'ectatomma-tuberculatum.obj' and 'ectatomma-tuberculatum (1).obj' in
+diagnostics/moonshot/clean81 are BYTE IDENTICAL (md5 d758d652435b080d0ad5a8bd1cd3cc4b),
+so the ALL_ANTS_CLEAN fit contains the same scan fitted twice. Probe 22 uses that pair as
+the repeatability floor for fitted leg proportions (0.63%). That floor only means anything
+if the two rows actually took different optimisation paths rather than being a copy.
+
+rows 27 77
+  betas            identical=False  max|diff|=0.097541  rel=0.0682
+  log_beta_scales  identical=False  max|diff|=0.206  rel=0.1177
+  global_rot       identical=False  max|diff|=0.0053033  rel=0.0368
+  joint_rot        identical=False  max|diff|=0.041913  rel=0.1289
+  trans            identical=False  max|diff|=0.001494  rel=0.0669
+  deform_verts     identical=False  max|diff|=0.037933  rel=0.1575
+  verts            identical=False  max|diff|=0.041658  rel=0.0422
+  verts RMS diff / bbox diag = 0.00227

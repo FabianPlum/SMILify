@@ -1,0 +1,23 @@
+REFUTE-F -- the worker pipeline has 165 joint-placement parameters the CLEAN one does not.
+
+The CLEAN npz has NO `betas_trans` key at all (verified: 'betas_trans' not in d.files); the
+worker runs do. betas_trans is a free, per-specimen (55,3) offset added to every bone's
+local offset in batch_lbs.py:158. So the worker fitter can move joints directly and the
+clean fitter cannot. Any metric that scores "how well are the joints placed" will therefore
+separate the two corpora even if the SCANS were identical.
+
+This probe measures how far betas_trans actually moves the worker joints, and how far
+log_beta_scales does, both as % of the body diagonal, so the size of that structural
+advantage/handicap can be compared with the claimed effect (median joint->scan gap
+0.495% (worker) vs 0.280% (clean) of the diagonal).
+
+run         has bt   |dJ| betas_trans   |dJ| logscale   sd(logscale)   sd(betas)  |J_st-J_reg|
+LIM_0         True              3.224           2.272         0.1854      0.2731         0.849
+LIM_1x        True              3.324           2.442         0.2459      0.2781         0.896
+baseline      True              0.000           7.382         0.9170      0.2564         0.085
+CLEAN        False              0.000           1.850         0.2762      0.4324         0.015
+
+units: |dJ| columns are the median over all joints/specimens of the joint
+displacement caused by switching that channel off, in % of the body diagonal.
+Compare with the claimed effect size: median joint->scan gap 0.495% (worker)
+vs 0.280% (clean) of the diagonal, i.e. a 0.215 %diag difference.

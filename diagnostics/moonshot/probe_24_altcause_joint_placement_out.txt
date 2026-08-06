@@ -1,0 +1,132 @@
+======================================================================================================
+PROBE 24 -- ALTERNATIVE-CAUSE attack on probe 23 (joint placement)
+======================================================================================================
+
+------------------------------------------------------------------------------------------------------
+A. POSE REGIME -- is the clean corpus simply UNPOSED and the workers folded?
+------------------------------------------------------------------------------------------------------
+corpus            kind        n  mean|aa| deg   p50    p90    p99    max   frac joints >30deg
+LIM_0             worker     50        49.16  41.85 100.84 169.01  274.7      0.621
+BPX_noprior       worker     50        46.77  40.36  97.05 163.25  295.1      0.598
+ALL_ANTS_CLEAN    clean      81         5.14   3.32  13.09  22.50   45.8      0.001
+
+  per-specimen mean|aa| (deg): distribution across specimens
+    LIM_0              min  33.68  q25  45.03  med  49.97  q75  54.20  max  65.02
+    BPX_noprior        min  29.39  q25  42.73  med  45.29  q75  51.22  max  62.51
+    ALL_ANTS_CLEAN     min   3.89  q25   4.69  med   5.07  q75   5.48  max   7.55
+
+------------------------------------------------------------------------------------------------------
+C. NUMERATOR vs DENOMINATOR -- the headline is a RATIO
+------------------------------------------------------------------------------------------------------
+LIM_0              spread(k=0) 0.02296   abs gen@10 0.02102   ratio gen@10/spread 0.9154
+BPX_noprior        spread(k=0) 0.01980   abs gen@10 0.01699   ratio gen@10/spread 0.8580
+ALL_ANTS_CLEAN     spread(k=0) 0.02969   abs gen@10 0.01368   ratio gen@10/spread 0.4608
+
+  LIM_0          log-gap vs CLEAN = +0.6865  =  numerator +0.4292 ( 62.5%)  +  denominator +0.2573 ( 37.5%)
+                 absolute joint LOO error is only 1.536x clean's, but the ratio says 1.987x
+  BPX_noprior    log-gap vs CLEAN = +0.6217  =  numerator +0.2165 ( 34.8%)  +  denominator +0.4052 ( 65.2%)
+                 absolute joint LOO error is only 1.242x clean's, but the ratio says 1.862x
+
+------------------------------------------------------------------------------------------------------
+B. PARAMETRIC-vs-FREE-FORM MIXING -- gen/spread ~ sqrt(free-form variance share)
+------------------------------------------------------------------------------------------------------
+corpus             param share  sqrt(1-share)  observed gen@10  ratio obs/pred
+LIM_0                   0.0804         0.9589           0.9154           0.955
+BPX_noprior             0.1397         0.9275           0.8580           0.925
+ALL_ANTS_CLEAN          0.6726         0.5722           0.4608           0.805
+
+  RE-MIX EXPERIMENT: rescale the parametric channel of each corpus so its parametric
+  variance share matches a target, then recompute gen@10/spread on the joints.
+  X(alpha) = v_template + deform_verts + alpha * shapedirs.betas
+
+corpus                t=0.05     t=0.1     t=0.2    t=0.35     t=0.5  t=0.6726     t=0.8
+LIM_0                 0.9232    0.9097    0.8767    0.8294    0.7777    0.7030    0.6237
+BPX_noprior           0.8890    0.8716    0.8380    0.7794    0.7143    0.6227    0.5255
+ALL_ANTS_CLEAN        0.7000    0.6796    0.6430    0.5915    0.5354    0.4607    0.3883
+
+  read: at the CLEAN corpus's own parametric share (t=0.6726, column 6) the worker
+  joints are compared against clean's observed 0.4608 on an equal-mixing footing.
+
+------------------------------------------------------------------------------------------------------
+D. REGION-MATCHED LANDMARK CONTROLS -- is it 'joints', or is it the LIMB REGION?
+------------------------------------------------------------------------------------------------------
+corpus              verts on limbs   joints on limbs   J_reg supp radius    rand supp radius
+LIM_0                        0.460             0.655             0.00944             0.02025
+BPX_noprior                  0.460             0.655             0.02286             0.03839
+ALL_ANTS_CLEAN               0.460             0.655             0.01957             0.02743
+
+corpus            read-out                            gen@10/spread  sd over draws
+LIM_0             anatomical joints (55)                     0.9154
+LIM_0             mid-bone landmarks (54)                    0.8489
+LIM_0             3/4-bone landmarks (54)                    0.8504
+LIM_0             uniform random landmarks (55)              0.8170         0.0249
+LIM_0             LIMB-only random landmarks (55)            0.8707         0.0285
+LIM_0             BODY-only random landmarks (55)            0.7244         0.0193
+
+BPX_noprior       anatomical joints (55)                     0.8580
+BPX_noprior       mid-bone landmarks (54)                    0.8150
+BPX_noprior       3/4-bone landmarks (54)                    0.7917
+BPX_noprior       uniform random landmarks (55)              0.7947         0.0357
+BPX_noprior       LIMB-only random landmarks (55)            0.8667         0.0210
+BPX_noprior       BODY-only random landmarks (55)            0.7102         0.0209
+
+ALL_ANTS_CLEAN    anatomical joints (55)                     0.4608
+ALL_ANTS_CLEAN    mid-bone landmarks (54)                    0.4585
+ALL_ANTS_CLEAN    3/4-bone landmarks (54)                    0.4557
+ALL_ANTS_CLEAN    uniform random landmarks (55)              0.4723         0.0267
+ALL_ANTS_CLEAN    LIMB-only random landmarks (55)            0.4470         0.0175
+ALL_ANTS_CLEAN    BODY-only random landmarks (55)            0.5205         0.0163
+
+  If MID-BONE / LIMB-only landmarks are as bad as the joints on workers, then probe
+  23b's 'joints are worse than random landmarks' is a REGION effect (limbs deform
+  freely everywhere), not evidence that joint LOCATIONS specifically are wrong.
+
+------------------------------------------------------------------------------------------------------
+A2. WITHIN-CORPUS: does per-specimen POSE magnitude predict per-specimen LOO error?
+------------------------------------------------------------------------------------------------------
+corpus               rho(pose, joint LOO@10)         p   rho(pose, |deform|)         p
+LIM_0                                  0.579    0.0000                 0.580    0.0000
+BPX_noprior                            0.613    0.0000                 0.661    0.0000
+ALL_ANTS_CLEAN                         0.444    0.0000                 0.411    0.0001
+
+  low-pose vs high-pose HALF of each corpus, recomputed independently (n = half)
+corpus            half           n  mean pose deg    spread  abs gen@10  gen@10/spread
+LIM_0             low-pose      25          43.78   0.01938     0.01834         0.9460
+LIM_0             high-pose     25          54.53   0.02686     0.02472         0.9204
+BPX_noprior       low-pose      25          41.59   0.01685     0.01501         0.8909
+BPX_noprior       high-pose     25          51.95   0.02306     0.02012         0.8723
+ALL_ANTS_CLEAN    low-pose      40           4.61   0.02886     0.01273         0.4409
+ALL_ANTS_CLEAN    high-pose     40           5.68   0.02898     0.01663         0.5737
+
+------------------------------------------------------------------------------------------------------
+E. CHANNEL MISMATCH -- the EFFECTIVE rest skeleton includes betas_trans / scales
+------------------------------------------------------------------------------------------------------
+   batch_global_rigid_transformation builds bone offsets as
+       j_here = (J[i] - J[parent]) + betas_trans[i] * (1,-1,1)
+   and scales them by exp(log_beta_scales).  The worker npz files carry
+   betas_trans; the ALL_ANTS_CLEAN npz does NOT (key absent).
+
+corpus            skeleton variant                            spread  abs gen@10  gen@10/spread
+LIM_0             J_regressor . v_shaped   (probe 23)        0.02296     0.02102         0.9154
+LIM_0             + betas_trans                              0.08814     0.06435         0.7301
+LIM_0             + log_beta_scales                          0.07512     0.03817         0.5081
+LIM_0             + betas_trans + log_beta_scales            0.11028     0.07279         0.6601
+
+BPX_noprior       J_regressor . v_shaped   (probe 23)        0.01980     0.01699         0.8580
+BPX_noprior       + betas_trans                              0.08877     0.06137         0.6914
+BPX_noprior       + log_beta_scales                          0.07565     0.03522         0.4656
+BPX_noprior       + betas_trans + log_beta_scales            0.10874     0.06935         0.6378
+
+ALL_ANTS_CLEAN    J_regressor . v_shaped   (probe 23)        0.02969     0.01368         0.4608
+ALL_ANTS_CLEAN    + log_beta_scales                          0.07129     0.03245         0.4552
+
+------------------------------------------------------------------------------------------------------
+F. REFERENCE -- gen@10/spread for STRUCTURELESS geometry at each (n, P)
+------------------------------------------------------------------------------------------------------
+LIM_0              n= 50  iid-noise 55 landmarks gen@10/spread = 0.9690   iid vertex noise read out at the joints = 0.9320
+BPX_noprior        n= 50  iid-noise 55 landmarks gen@10/spread = 0.9702   iid vertex noise read out at the joints = 0.9118
+ALL_ANTS_CLEAN     n= 81  iid-noise 55 landmarks gen@10/spread = 0.9703   iid vertex noise read out at the joints = 0.9373
+
+  This is the value a read-out takes when there is NO learnable structure at all.
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24_altcause.json

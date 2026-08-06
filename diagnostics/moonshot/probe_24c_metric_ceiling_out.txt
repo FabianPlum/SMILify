@@ -1,0 +1,17 @@
+======================================================================================================
+PROBE 24c -- the no-structure CEILING of gen@10/spread, per read-out and per corpus
+======================================================================================================
+
+[LIM_0] n=50 V=10235  real deform roughness 0.2839; matched by 4 smoothing passes (roughness 0.3019)
+   read-out               REAL   ceiling iid   ceiling smooth   real - smooth ceiling
+   joints (norm)        0.9154        0.9363    0.9303 +-0.0116                 -0.0149
+   vertices (norm)      0.7070        0.9958    0.9853 +-0.0040                 -0.2782
+   vertices (raw)       0.8998        0.9998    0.9987 +-0.0001                 -0.0989
+
+[BPX_noprior] n=50 V=10229  real deform roughness 0.2702; matched by 4 smoothing passes (roughness 0.3020)
+   read-out               REAL   ceiling iid   ceiling smooth   real - smooth ceiling
+   joints (norm)        0.8580        0.8983    0.9092 +-0.0133                 -0.0512
+   vertices (norm)      0.6866        0.9956    0.9845 +-0.0043                 -0.2979
+   vertices (raw)       0.9166        0.9998    0.9987 +-0.0001                 -0.0821
+
+[ALL_ANTS_CLEAN] n=81 V=10236  real deform roughness 0.0967; matched by 16 smoothing passes (roughness 0.0788)

@@ -1,0 +1,33 @@
+======================================================================================================
+PROBE 24f -- everything that differs between the clean corpus and the worker arms
+======================================================================================================
+
+corpus              n      V   faces   K  J_reg supp  betas_trans   npz written
+LIM_0              50  10235   20466  25        10.0      present    2026-08-06
+BPX_noprior        50  10229   20454  13        36.9      present    2026-08-05
+ALL_ANTS_CLEAN     81  10236   20468  20        20.0       ABSENT    2025-02-13
+
+  Templates are three DIFFERENT meshes (10235 / 10229 / 10236 vertices), so the
+  corpora are not even in the same correspondence space; K differs (25/13/20), and
+  the J_regressor support differs 3.7x.
+
+------------------------------------------------------------------------------------------------------
+FITTER VERSION
+------------------------------------------------------------------------------------------------------
+  per-joint translation (betas_trans) first appears in: 941d2ef 2025-08-26 Now supporting 3D translation and scaling for individual limbs
+  ALL_ANTS_CLEAN npz written:                          2025-02-13
+  => the clean corpus was produced by an EARLIER fitter that did not have the
+     per-joint translation parameter at all.  The two sides of the contrast are
+     different fitter versions, not just different scans.
+
+------------------------------------------------------------------------------------------------------
+TAXA
+------------------------------------------------------------------------------------------------------
+  LIM_0             n= 50  distinct genus-ish tokens: 37
+  BPX_noprior       n= 50  distinct genus-ish tokens: 37
+  ALL_ANTS_CLEAN    n= 81  distinct genus-ish tokens: 73
+  genus overlap worker vs clean: 11 of 37 (30%)  -> ['acanthostichus', 'acromyrmex', 'cephalotes', 'cyphomyrmex', 'dorylus', 'ectatomma', 'labidus', 'odontomachus', 'polyrhachis', 'stigmatomma', 'strumigenys']
+
+  Both corpora span ant diversity, so 'many species vs one species' is NOT the
+  confound; but they are largely DIFFERENT species, sampled and prepared differently.
+

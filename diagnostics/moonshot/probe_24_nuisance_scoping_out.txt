@@ -1,0 +1,24 @@
+================================================================================
+LIM_0 n 50 V 10235 K 25 supp 10
+  betas sd per dim: [0.4569 0.4023 0.2264 0.331  0.4342 0.2911 0.2913 0.2059]  |b| rms 0.3534162624449975
+  deform_verts rms: 0.016445578273288564  para rms 0.010398774620396987
+  joint parametric share 0.080
+  random-landmark parametric share mean 0.307  sd 0.038
+  vertex-density composition: {'body': 0.503, 'mand': 0.037, 'prox': 0.262, 'mid': 0.169, 'dist': 0.03}
+  joint composition: {'body': 0.309, 'prox': 0.218, 'mid': 0.218, 'dist': 0.218, 'mand': 0.036}
+================================================================================
+BPX_noprior n 50 V 10229 K 13 supp 37
+  betas sd per dim: [0.4956 0.4449 0.3096 0.3984 0.2541 0.288  0.2545 0.3428]  |b| rms 0.4170340878941258
+  deform_verts rms: 0.01654947768743485  para rms 0.00865838414634908
+  joint parametric share 0.140
+  random-landmark parametric share mean 0.315  sd 0.035
+  vertex-density composition: {'body': 0.503, 'mand': 0.037, 'prox': 0.261, 'mid': 0.169, 'dist': 0.03}
+  joint composition: {'body': 0.309, 'prox': 0.218, 'mid': 0.218, 'dist': 0.218, 'mand': 0.036}
+================================================================================
+ALL_ANTS_CLEAN n 81 V 10236 K 20 supp 20
+  betas sd per dim: [0.917  0.8941 0.8479 0.9487 0.6506 0.566  0.3136 0.5042]  |b| rms 0.5911835451060443
+  deform_verts rms: 0.012312200538918709  para rms 0.015213673862529385
+  joint parametric share 0.673
+  random-landmark parametric share mean 0.628  sd 0.047
+  vertex-density composition: {'body': 0.503, 'mand': 0.037, 'prox': 0.262, 'mid': 0.169, 'dist': 0.03}
+  joint composition: {'body': 0.309, 'prox': 0.218, 'mid': 0.218, 'dist': 0.218, 'mand': 0.036}

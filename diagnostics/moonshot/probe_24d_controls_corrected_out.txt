@@ -1,0 +1,54 @@
+============================================================================================================
+PROBE 24d -- joints vs SPATIALLY MATCHED landmarks, on FRAME-CORRECTED rest geometry
+============================================================================================================
+
+------------------------------------------------------------------------------------------------------------
+LIM_0   n=50  m=10  anatomical joints on legs 65%
+------------------------------------------------------------------------------------------------------------
+  anatomical joints (shipped J_regressor)      gen@10/spread = 0.8772
+  anatomical joints (uniform kNN, m=10 )           gen@10/spread = 0.8642
+  vs controls, referenced to the SHIPPED-J_regressor joints:
+    uniform random landmarks (23b/23c)          0.7951 (sd 0.0339) legs  46%  joints-minus-control +0.0821 CI [+0.0493,+0.1162] sig  fallback 0.0/55
+    leg-only random landmarks                   0.8543 (sd 0.0278) legs 100%  joints-minus-control +0.0229 CI [-0.0086,+0.0583] n.s.  fallback 0.0/55
+    BONE-MATCHED off-articulation               0.8520 (sd 0.0203) legs  65%  joints-minus-control +0.0252 CI [-0.0042,+0.0544] n.s.  fallback 17.0/55
+  vs controls, referenced to the uniform-kNN joints (weighting matched):
+    uniform random landmarks                    0.7951 (sd 0.0339) legs  46%  joints-minus-control +0.0691 CI [+0.0394,+0.1002] sig  fallback 0.0/55
+    BONE-MATCHED off-articulation               0.8520 (sd 0.0203) legs  65%  joints-minus-control +0.0122 CI [-0.0177,+0.0409] n.s.  fallback 17.0/55
+
+------------------------------------------------------------------------------------------------------------
+BPX_noprior   n=50  m=37  anatomical joints on legs 65%
+------------------------------------------------------------------------------------------------------------
+  anatomical joints (shipped J_regressor)      gen@10/spread = 0.8436
+  anatomical joints (uniform kNN, m=37 )           gen@10/spread = 0.8455
+  vs controls, referenced to the SHIPPED-J_regressor joints:
+    uniform random landmarks (23b/23c)          0.7574 (sd 0.0434) legs  46%  joints-minus-control +0.0863 CI [+0.0474,+0.1242] sig  fallback 0.0/55
+    leg-only random landmarks                   0.8363 (sd 0.0227) legs 100%  joints-minus-control +0.0073 CI [-0.0302,+0.0463] n.s.  fallback 0.0/55
+    BONE-MATCHED off-articulation               0.7792 (sd 0.0134) legs  63%  joints-minus-control +0.0644 CI [+0.0354,+0.0935] sig  fallback 33.0/55
+  vs controls, referenced to the uniform-kNN joints (weighting matched):
+    uniform random landmarks                    0.7574 (sd 0.0434) legs  46%  joints-minus-control +0.0882 CI [+0.0555,+0.1193] sig  fallback 0.0/55
+    BONE-MATCHED off-articulation               0.7792 (sd 0.0134) legs  63%  joints-minus-control +0.0663 CI [+0.0412,+0.0908] sig  fallback 33.0/55
+
+------------------------------------------------------------------------------------------------------------
+ALL_ANTS_CLEAN   n=81  m=20  anatomical joints on legs 65%
+------------------------------------------------------------------------------------------------------------
+  anatomical joints (shipped J_regressor)      gen@10/spread = 0.4780
+  anatomical joints (uniform kNN, m=20 )           gen@10/spread = 0.4767
+  vs controls, referenced to the SHIPPED-J_regressor joints:
+    uniform random landmarks (23b/23c)          0.4793 (sd 0.0312) legs  46%  joints-minus-control -0.0013 CI [-0.0134,+0.0119] n.s.  fallback 0.0/55
+    leg-only random landmarks                   0.4510 (sd 0.0303) legs 100%  joints-minus-control +0.0270 CI [+0.0098,+0.0440] sig  fallback 0.0/55
+    BONE-MATCHED off-articulation               0.4344 (sd 0.0148) legs  65%  joints-minus-control +0.0436 CI [+0.0345,+0.0539] sig  fallback 24.0/55
+  vs controls, referenced to the uniform-kNN joints (weighting matched):
+    uniform random landmarks                    0.4793 (sd 0.0312) legs  46%  joints-minus-control -0.0026 CI [-0.0148,+0.0106] n.s.  fallback 0.0/55
+    BONE-MATCHED off-articulation               0.4344 (sd 0.0148) legs  65%  joints-minus-control +0.0423 CI [+0.0331,+0.0523] sig  fallback 24.0/55
+
+============================================================================================================
+SUMMARY -- joints-minus-control gen@10/spread, by control type (frame-corrected)
+============================================================================================================
+corpus               uniform (23b/c)      leg-only    BONE-MATCHED    BONE-MATCHED (kNN ref)
+LIM_0                        +0.0821       +0.0229         +0.0252                   +0.0122
+BPX_noprior                  +0.0863       +0.0073         +0.0644                   +0.0663
+ALL_ANTS_CLEAN               -0.0013       +0.0270         +0.0436                   +0.0423
+
+probe 23c reported (uncorrected frame, uniform controls only):
+   LIM_0 +0.1084   BPX_noprior +0.0708   ALL_ANTS_CLEAN -0.0043 (null)
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24d_controls_corrected.json

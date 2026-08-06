@@ -1,0 +1,77 @@
+======================================================================================================
+PROBE 24e -- per-joint gen@10/spread: REAL vs a no-structure NULL of matched roughness
+======================================================================================================
+
+[LIM_0]  n=50  joints with gen@10/spread > 1.0:  REAL 12/55   NULL 8.2/55
+   corpus-mean per-joint ratio: REAL 0.9311   NULL 0.9374
+   group              n      REAL      NULL   REAL - NULL
+   body              17    0.8702    0.9258       -0.0556
+   leg-distal        12    0.9338    0.9017       +0.0321
+   leg-mid           12    0.9594    0.9322       +0.0272
+   leg-proximal      12    0.9914    0.9932       -0.0017
+   mandible           2    0.8996    0.9483       -0.0487
+   worst 12 joints (REAL) with the NULL value at the same joint:
+      joint                REAL     NULL  z vs null
+      l_1_fe_r           1.0777   0.9619       3.18
+      b_a_2              1.0697   0.9653       3.25
+      l_1_tr_l           1.0485   0.9860       1.67
+      l_1_tr_r           1.0471   1.0115       1.67
+      l_2_co_r           1.0399   0.9731       2.10
+      l_2_tr_r           1.0375   0.9994       1.19
+      b_a_1              1.0338   0.9710       3.32
+      l_2_fe_r           1.0230   0.9440       3.18
+      l_2_co_l           1.0143   0.9965       0.56
+      l_1_ti_r           1.0073   0.9336       2.94
+      l_1_fe_l           1.0059   0.9513       1.91
+      b_a_4              1.0001   0.9301       3.41
+   correlation of the REAL per-joint ranking with the NULL's = 0.182
+
+[BPX_noprior]  n=50  joints with gen@10/spread > 1.0:  REAL 12/55   NULL 9.2/55
+   corpus-mean per-joint ratio: REAL 0.8800   NULL 0.9222
+   group              n      REAL      NULL   REAL - NULL
+   body              17    0.7824    0.9131       -0.1307
+   leg-distal        12    0.9419    0.8617       +0.0802
+   leg-mid           12    0.9584    0.9153       +0.0431
+   leg-proximal      12    0.8882    1.0010       -0.1129
+   mandible           2    0.8196    0.9300       -0.1104
+   worst 12 joints (REAL) with the NULL value at the same joint:
+      joint                REAL     NULL  z vs null
+      l_2_fe_r           1.0596   0.9420       2.13
+      l_1_fe_l           1.0442   0.9338       4.46
+      l_1_tr_r           1.0393   1.0098       1.49
+      l_2_ti_l           1.0354   0.9237       3.01
+      l_1_tr_l           1.0280   1.0005       1.20
+      l_3_ti_l           1.0232   0.8627       3.61
+      l_2_tr_r           1.0200   1.0180       0.10
+      l_2_tr_l           1.0158   0.9972       0.54
+      l_1_ta_r           1.0150   0.8626       2.64
+      b_a_2              1.0127   0.9864       0.98
+      b_a_3              1.0061   0.9287       1.51
+      l_1_fe_r           1.0003   0.9513       1.72
+   correlation of the REAL per-joint ranking with the NULL's = -0.021
+
+[ALL_ANTS_CLEAN]  n=81  joints with gen@10/spread > 1.0:  REAL 0/55   NULL 9.4/55
+   corpus-mean per-joint ratio: REAL 0.4834   NULL 0.9276
+   group              n      REAL      NULL   REAL - NULL
+   body              17    0.4585    0.9337       -0.4751
+   leg-distal        12    0.3427    0.8566       -0.5139
+   leg-mid           12    0.4999    0.9161       -0.4162
+   leg-proximal      12    0.6120    0.9994       -0.3874
+   mandible           2    0.6674    0.9417       -0.2744
+   worst 12 joints (REAL) with the NULL value at the same joint:
+      joint                REAL     NULL  z vs null
+      l_1_tr_l           0.8170   1.0016     -17.69
+      l_1_tr_r           0.7709   1.0103     -17.77
+      ma_l               0.6922   0.9570      -6.92
+      l_2_fe_r           0.6450   0.9471      -9.54
+      ma_r               0.6425   0.9264      -8.22
+      l_3_tr_l           0.6417   0.9873     -24.11
+      l_2_tr_l           0.6297   0.9955     -17.13
+      l_3_fe_r           0.6263   0.9228      -7.96
+      l_3_tr_r           0.6245   0.9953     -13.97
+      l_2_fe_l           0.6227   0.9325      -8.84
+      l_3_fe_l           0.6082   0.9070      -9.16
+      l_2_tr_r           0.5929   0.9985     -14.81
+   correlation of the REAL per-joint ranking with the NULL's = 0.582
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24e_perjoint_null.json

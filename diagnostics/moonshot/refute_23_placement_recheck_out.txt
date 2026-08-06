@@ -1,0 +1,143 @@
+====================================================================================================
+R0 -- template audit (are the three corpora comparable at all?)
+====================================================================================================
+  OmniAnt_25PCs_joint_limited.pkl        V= 10235 K= 25 body=2.3463  J_names==ref True  kintree==ref True
+      rest-J max |diff| vs ref = 0.0000 (0.00% of body)   mean bone length 0.2340 vs ref 0.2340 (ratio 1.000)
+      rest bone-direction angle vs ref: mean 1.67 deg   max 90.00 deg
+      scaledirs present: True   transdirs: True   joint_limits: True
+  SMIL_OmniAnt.pkl                       V= 10229 K= 13 body=2.3446  J_names==ref True  kintree==ref True
+      rest-J max |diff| vs ref = 0.1073 (4.58% of body)   mean bone length 0.2232 vs ref 0.2340 (ratio 0.954)
+      rest bone-direction angle vs ref: mean 9.30 deg   max 90.00 deg
+      scaledirs present: True   transdirs: True   joint_limits: False
+  SMPL_fit.pkl                           V= 10236 K= 20 body=2.3018  J_names==ref True  kintree==ref True
+      rest-J max |diff| vs ref = 0.0527 (2.29% of body)   mean bone length 0.2258 vs ref 0.2340 (ratio 0.965)
+      rest bone-direction angle vs ref: mean 6.17 deg   max 90.00 deg
+      scaledirs present: False   transdirs: False   joint_limits: False
+
+====================================================================================================
+R1 -- FORWARD-MODEL VALIDATION: does the assumed kinematics reproduce the stored verts?
+====================================================================================================
+  reconstruct stored `verts` from stored params. If an arm does not reconstruct, every
+  derived number for that arm (displacement, mesh-level effect) is measured with the
+  wrong forward model.  err = mean per-vertex ||recon - stored|| / body bbox diagonal.
+
+  arm              template                             prop=False    prop=True
+  ------------------------------------------------------------------------------
+  LIM_0            OmniAnt_25PCs_joint_limited.pkl         0.0000%      2.7524%
+  LIM_1x           OmniAnt_25PCs_joint_limited.pkl         0.0000%      3.0018%
+  LIM_3x           OmniAnt_25PCs_joint_limited.pkl         0.0000%      2.7842%
+  BPX_noprior      SMIL_OmniAnt.pkl                        0.0000%      2.6860%
+  ALL_ANTS_CLEAN   SMPL_fit.pkl                            0.1676%      2.7977%
+
+====================================================================================================
+R2 -- re-derivation of the joint-displacement table (independent implementation)
+====================================================================================================
+  arm                 n     |lbs|      |bt|   cumdisp%  lbs-only%  bt-only%  bonedist%mean  bonedist%med
+  ----------------------------------------------------------------------------------------------------
+  LIM_0              50   0.32988   0.05853      7.309      4.506     3.888          58.72         35.24
+  LIM_1x             50   0.40377   0.06463      6.873      4.417     4.059          58.32         37.27
+  LIM_3x             50   0.40114   0.06500      6.871      4.426     4.101          58.28         38.32
+  BPX_noprior        50   0.31694   0.05360      6.868      4.390     3.667          78.45         36.52
+  ALL_ANTS_CLEAN     81   0.51228   0.00000      2.402      2.402     0.000          17.94         14.79
+
+====================================================================================================
+R3 -- ROOT-RELATIVE decomposition of log_beta_scales
+====================================================================================================
+  With propagate_scaling=False the accumulated map is M_i = S_root^-1 . S_i, so only
+  (lbs_i - lbs_root) has ANY geometric effect. A common-mode scale inflates |lbs| for free.
+
+  arm                |lbs| raw   |lbs - lbs_root|   |lbs_root|  |mean over joints|   sd across joints
+  ----------------------------------------------------------------------------------------------------
+  LIM_0                0.32988            0.45250      0.30921             0.04331            0.22631
+  LIM_1x               0.40377            0.50183      0.31071             0.05613            0.28693
+  LIM_3x               0.40114            0.49996      0.30216             0.05544            0.28848
+  BPX_noprior          0.31694            0.44389      0.29177             0.04116            0.21933
+  ALL_ANTS_CLEAN       0.51228            0.53045      0.16077             0.09041            0.37345
+
+====================================================================================================
+R4 -- TEMPLATE CROSSOVER: same parameters, other corpus' rest skeleton
+====================================================================================================
+  cumulative displacement is a function of (rest J, lbs, bt). Swapping only the rest J
+  isolates 'the parameters are bigger' from 'the template's bones are arranged differently'.
+
+  params from      rest skeleton                            cumdisp%
+  --------------------------------------------------------------------
+  LIM_0            OmniAnt_25PCs_joint_limited.pkl             7.357
+  LIM_0            SMIL_OmniAnt.pkl                            7.259
+  LIM_0            SMPL_fit.pkl                                7.282
+  LIM_1x           OmniAnt_25PCs_joint_limited.pkl             6.916
+  LIM_1x           SMIL_OmniAnt.pkl                            6.818
+  LIM_1x           SMPL_fit.pkl                                6.861
+  ALL_ANTS_CLEAN   OmniAnt_25PCs_joint_limited.pkl             2.450
+  ALL_ANTS_CLEAN   SMIL_OmniAnt.pkl                            2.392
+  ALL_ANTS_CLEAN   SMPL_fit.pkl                                2.347
+
+====================================================================================================
+R5 -- DEPTH CONTROL on rho(violation-rate DROP, d|log_beta_scales|) = +0.848
+====================================================================================================
+
+  ### LIM_0 -> LIM_1x
+    rho(drop, d|lbs|)                        = +0.848   <- probe-23's surviving evidence
+    rho(drop, depth)                         = +0.916
+    rho(d|lbs|, depth)                       = +0.873
+    PARTIAL rho(drop, d|lbs| | depth)        = +0.247
+    rho(drop, d|bt|)                         = +0.734
+    PARTIAL rho(drop, d|bt| | depth)         = +0.164
+    rho(d|lbs|, BASELINE |lbs| in LIM_0)     = +0.623   (is the growth just multiplicative?)
+    PARTIAL rho(drop, d|lbs| | baseline|lbs|)= +0.758
+    |lbs| growth on CONSTRAINED joints  n=32: 0.3737 -> 0.4926 (+31.8%)
+    |lbs| growth on UNCONSTRAINABLE     n=22: 0.2671 -> 0.2788 (+4.4%)   <- these joints have NO limit to escape
+
+  ### LIM_0 -> LIM_3x
+    rho(drop, d|lbs|)                        = +0.858   <- probe-23's surviving evidence
+    rho(drop, depth)                         = +0.910
+    rho(d|lbs|, depth)                       = +0.871
+    PARTIAL rho(drop, d|lbs| | depth)        = +0.319
+    rho(drop, d|bt|)                         = +0.759
+    PARTIAL rho(drop, d|bt| | depth)         = +0.147
+    rho(d|lbs|, BASELINE |lbs| in LIM_0)     = +0.621   (is the growth just multiplicative?)
+    PARTIAL rho(drop, d|lbs| | baseline|lbs|)= +0.775
+    |lbs| growth on CONSTRAINED joints  n=32: 0.3737 -> 0.4900 (+31.1%)
+    |lbs| growth on UNCONSTRAINABLE     n=22: 0.2671 -> 0.2764 (+3.5%)   <- these joints have NO limit to escape
+
+====================================================================================================
+R6 -- DOSE-RESPONSE across w_limit (hier 0 / 0.273 / 0.819)
+====================================================================================================
+  arm          viol ax     |lbs|      |bt|   |betas|      |dv|   cumdisp%   bonedist%  meshdisp lbs+bt%
+  ----------------------------------------------------------------------------------------------------
+  LIM_0          37.42   0.32988   0.05853   0.26956   0.01918      7.309       58.72              4.69
+  LIM_1x          0.76   0.40377   0.06463   0.26550   0.01981      6.873       58.32              4.65
+  LIM_3x          0.34   0.40114   0.06500   0.26294   0.01989      6.871       58.28              4.66
+
+  paired wilcoxon vs LIM_0 (same 50 specimens, same order):
+    LIM_1x  |lbs|         0.32988 ->    0.40377 ( +22.4%)  p=7.66e-12
+    LIM_1x  |bt|          0.05853 ->    0.06463 ( +10.4%)  p=5.95e-07
+    LIM_1x  cumdisp%      7.30895 ->    6.87259 (  -6.0%)  p=0.0191
+    LIM_1x  bonedist      0.58718 ->    0.58315 (  -0.7%)  p=0.947
+    LIM_3x  |lbs|         0.32988 ->    0.40114 ( +21.6%)  p=1.17e-11
+    LIM_3x  |bt|          0.05853 ->    0.06500 ( +11.1%)  p=2.47e-07
+    LIM_3x  cumdisp%      7.30895 ->    6.87110 (  -6.0%)  p=0.0186
+    LIM_3x  bonedist      0.58718 ->    0.58280 (  -0.7%)  p=0.767
+
+====================================================================================================
+R7 -- is 'local bone distortion' driven by short bones in the denominator?
+====================================================================================================
+  LIM_0            bone len (% body): mean 9.98 p5 2.93 min 0.000   n_bones_used 53/54
+                   distortion: %bone mean 58.72 median 35.24    %BODY mean 4.466
+  BPX_noprior      bone len (% body): mean 9.54 p5 1.73 min 0.414   n_bones_used 54/54
+                   distortion: %bone mean 78.45 median 36.52    %BODY mean 4.189
+  ALL_ANTS_CLEAN   bone len (% body): mean 9.88 p5 2.64 min 0.000   n_bones_used 53/54
+                   distortion: %bone mean 17.94 median 14.79    %BODY mean 1.451
+
+====================================================================================================
+R8 -- surface-fit cost re-derivation
+====================================================================================================
+  LIM_0    n= 50 mean sq-chamfer 3.391566e-04 median 2.867961e-04
+  LIM_1x   n= 50 mean sq-chamfer 3.542935e-04 median 2.860416e-04
+  LIM_3x   n= 50 mean sq-chamfer 3.531483e-04 median 2.931696e-04
+  LIM_1x/LIM_0 = 1.0446  paired wilcoxon p=0.0894  22/50 specimens fit better under limits
+  LIM_3x/LIM_0 = 1.0413  paired wilcoxon p=0.04  21/50 specimens fit better under limits
+
+  NOTE the deform stages are preceded by a hierarchical stage where the limit term is
+  47x heavier. From the run logs, final H1_legs chamfer: LIM_0 0.00581, LIM_1x 0.00626
+  (+7.7%). The deform stages then bury that with free per-vertex offsets.

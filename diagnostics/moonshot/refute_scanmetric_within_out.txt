@@ -1,0 +1,24 @@
+REFUTE-7 -- WITHIN each corpus, does "% joints outside the scan" track the actual amount of
+rest-space joint displacement the fit applied?
+
+If %outside is a measure of joint PLACEMENT error, then within a corpus the specimens whose
+fits shove their joints furthest from the J_regressor positions (via log_beta_scales and
+betas_trans -- the only two channels that can move a joint in rest space, per
+joint_placement_common.py's reading of trainer.py:224/240) should be the ones whose joints end
+up outside the animal.  A near-zero within-corpus correlation means the statistic carries no
+per-specimen information about placement, and the whole worker-vs-clean signal is a single
+corpus-level offset with n=1 unit per group.
+
+Rest-space joint displacement is computed exactly as the forward pass does, with identity
+rotations:  J_disp = || global_rigid(I, J, parents, logscale, betas_trans) - J || / body_diag.
+
+
+run              n   rest joint disp %body   |betas| L2   rho(disp, %out)         p   rho(|betas|,%out)         p
+LIM_0           50                   6.107        1.641             0.055  7.05e-01              -0.172  2.33e-01
+M7_worker       50                   6.375        0.003             0.245  8.69e-02              -0.165  2.53e-01
+CLEAN_M7        81                   2.344        0.002             0.387  3.57e-04               0.049  6.62e-01
+CLEAN_legacy    81                   2.225        2.308             0.032  7.77e-01              -0.007  9.49e-01
+
+Interpretation: a placement metric should have rho(disp, %out) > 0 within a
+corpus. Values near zero mean the statistic separates the two corpora by a
+constant offset and orders specimens within a corpus at chance.

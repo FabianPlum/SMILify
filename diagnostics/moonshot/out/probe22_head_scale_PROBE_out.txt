@@ -1,0 +1,89 @@
+model 3D_model_prep/OmniAnt_25PCs_joint_limited.pkl: 55 joints
+groups: {'thorax': 1, 'gaster': 5, 'leg': 36, 'wing': 4, 'head': 1, 'mandible': 2, 'antenna': 6}
+
+non-leg joint names (for eyeball check of the grouping):
+   [ 0] b_t                      -> thorax
+   [ 1] b_a_1                    -> gaster
+   [ 2] b_a_2                    -> gaster
+   [ 3] b_a_3                    -> gaster
+   [ 4] b_a_4                    -> gaster
+   [ 5] b_a_5                    -> gaster
+   [24] w_1_r                    -> wing
+   [25] w_2_r                    -> wing
+   [44] w_1_l                    -> wing
+   [45] w_2_l                    -> wing
+   [46] b_h                      -> head
+   [47] ma_r                     -> mandible
+   [48] an_1_r                   -> antenna
+   [49] an_2_r                   -> antenna
+   [50] an_3_r                   -> antenna
+   [51] ma_l                     -> mandible
+   [52] an_1_l                   -> antenna
+   [53] an_2_l                   -> antenna
+   [54] an_3_l                   -> antenna
+
+=== baseline  (n=50 specimens)
+group       n_j   median     p05     p95   % <0.8  % >1.25
+thorax        1    1.073   0.897   1.408      0.0     16.0
+gaster        5    1.731   0.584   5.581     10.8     76.8
+head          1    1.572   0.428   2.432      8.0     78.0
+mandible      2    1.419   0.356   5.118     12.0     66.0
+antenna       6    0.803   0.138   3.548     49.3     31.0
+wing          4    1.000   1.000   1.000      0.0      0.0
+leg          36    0.961   0.158   4.011     41.9     37.6
+  head scale     median 1.572  [0.070, 3.156]
+  mand/ant scale median 1.105  [0.482, 3.543]
+  SIGNATURE (head<1 AND mand/ant>1): 4/50 specimens (8%)   median ratio 0.68
+
+=== M7_handoff_midline  (n=50 specimens)
+group       n_j   median     p05     p95   % <0.8  % >1.25
+thorax        1    0.855   0.754   1.036     26.0      0.0
+gaster        5    1.013   0.804   1.354      4.8     15.6
+head          1    1.006   0.690   1.233     14.0      6.0
+mandible      2    1.164   0.790   1.347      6.0     32.0
+antenna       6    1.000   0.888   1.140      0.0      0.7
+wing          4    1.000   1.000   1.000      0.0      0.0
+leg          36    1.038   0.872   1.329      1.0      8.8
+  head scale     median 1.006  [0.595, 1.334]
+  mand/ant scale median 1.037  [0.888, 1.152]
+  SIGNATURE (head<1 AND mand/ant>1): 21/50 specimens (42%)   median ratio 1.07
+
+=== BPX_noprior  (n=50 specimens)
+group       n_j   median     p05     p95   % <0.8  % >1.25
+thorax        1    0.866   0.755   1.032     26.0      0.0
+gaster        5    1.002   0.806   1.307      4.4     11.2
+head          1    1.012   0.696   1.241     14.0      4.0
+mandible      2    1.115   0.815   1.337      4.0     14.0
+antenna       6    1.008   0.893   1.135      0.0      0.7
+wing          4    1.000   1.000   1.000      0.0      0.0
+leg          36    1.034   0.869   1.327      1.2      9.6
+  head scale     median 1.012  [0.595, 1.354]
+  mand/ant scale median 1.032  [0.902, 1.190]
+  SIGNATURE (head<1 AND mand/ant>1): 18/50 specimens (36%)   median ratio 1.05
+
+=== LIM_0  (n=50 specimens)
+group       n_j   median     p05     p95   % <0.8  % >1.25
+thorax        1    0.858   0.754   1.035     20.0      0.0
+gaster        5    1.050   0.795   1.471      5.6     12.0
+head          1    1.008   0.718   1.207     16.0      2.0
+mandible      2    1.053   0.767   1.255      6.0      6.0
+antenna       6    1.011   0.856   1.191      1.3      2.0
+wing          4    1.000   1.000   1.010      0.0      0.0
+leg          36    1.024   0.863   1.349      1.3     10.0
+  head scale     median 1.008  [0.562, 1.283]
+  mand/ant scale median 1.033  [0.851, 1.185]
+  SIGNATURE (head<1 AND mand/ant>1): 17/50 specimens (34%)   median ratio 1.06
+
+=== LIM_1x  (n=50 specimens)
+group       n_j   median     p05     p95   % <0.8  % >1.25
+thorax        1    0.865   0.771   1.077     14.0      0.0
+gaster        5    1.065   0.836   1.555      3.6     18.4
+head          1    1.000   0.706   1.253     14.0      6.0
+mandible      2    1.081   0.741   1.258      6.0      6.0
+antenna       6    1.022   0.860   1.213      1.3      1.3
+wing          4    1.000   1.000   1.010      0.0      0.0
+leg          36    1.018   0.851   1.321      2.1      8.8
+  head scale     median 1.000  [0.628, 1.285]
+  mand/ant scale median 1.038  [0.852, 1.286]
+  SIGNATURE (head<1 AND mand/ant>1): 20/50 specimens (40%)   median ratio 1.04
+

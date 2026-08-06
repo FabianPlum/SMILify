@@ -1,0 +1,37 @@
+======================================================================================================
+PROBE 24d -- PART-MATCHED and RADIUS-MATCHED landmark controls
+======================================================================================================
+
+[LIM_0]  n=50  J_regressor support 10 verts;  shared radius r=0.00944 -> 11.2 verts per read-out on average
+   anatomical joints, J_regressor weights        gen@10/spread = 0.9154
+   anatomical joints, radius-0.0094 uniform mean  gen@10/spread = 0.9399
+   PART-matched random, 10-NN mean            gen@10/spread = 0.8849  (sd over 24 draws 0.0146)
+      paired diff joints-minus-landmarks = +0.0306  95% CI [+0.0097, +0.0520]  specimens worse: 66%
+   PART+RADIUS-matched random                    gen@10/spread = 0.9151  (sd over 24 draws 0.0111)
+      paired diff joints-minus-landmarks = +0.0248  95% CI [+0.0007, +0.0483]  specimens worse: 58%
+
+[BPX_noprior]  n=50  J_regressor support 37 verts;  shared radius r=0.02286 -> 24.9 verts per read-out on average
+   anatomical joints, J_regressor weights        gen@10/spread = 0.8580
+   anatomical joints, radius-0.0229 uniform mean  gen@10/spread = 0.9054
+   PART-matched random, 37-NN mean            gen@10/spread = 0.8415  (sd over 24 draws 0.0114)
+      paired diff joints-minus-landmarks = +0.0165  95% CI [-0.0077, +0.0416]  specimens worse: 48%
+   PART+RADIUS-matched random                    gen@10/spread = 0.8855  (sd over 24 draws 0.0100)
+      paired diff joints-minus-landmarks = +0.0198  95% CI [-0.0031, +0.0447]  specimens worse: 54%
+
+[ALL_ANTS_CLEAN]  n=81  J_regressor support 20 verts;  shared radius r=0.01957 -> 23.1 verts per read-out on average
+   anatomical joints, J_regressor weights        gen@10/spread = 0.4608
+   anatomical joints, radius-0.0196 uniform mean  gen@10/spread = 0.4645
+   PART-matched random, 20-NN mean            gen@10/spread = 0.4356  (sd over 24 draws 0.0069)
+      paired diff joints-minus-landmarks = +0.0251  95% CI [+0.0185, +0.0320]  specimens worse: 84%
+   PART+RADIUS-matched random                    gen@10/spread = 0.4433  (sd over 24 draws 0.0068)
+      paired diff joints-minus-landmarks = +0.0213  95% CI [+0.0139, +0.0285]  specimens worse: 77%
+
+------------------------------------------------------------------------------------------------------
+SUMMARY -- probe 23c's claimed dissociation vs the same test under region matching
+------------------------------------------------------------------------------------------------------
+corpus                vs UNIFORM (23c)    vs LIMB-only   vs PART-matched    vs PART+RADIUS
+LIM_0                          +0.1084         +0.0454           +0.0306           +0.0248
+BPX_noprior                    +0.0708         -0.0021           +0.0165           +0.0198
+ALL_ANTS_CLEAN                 -0.0043         +0.0142           +0.0251           +0.0213
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24d_partmatched.json

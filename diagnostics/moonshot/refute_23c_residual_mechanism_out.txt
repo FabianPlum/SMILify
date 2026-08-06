@@ -1,0 +1,86 @@
+====================================================================================================
+REFUTE-23c -- residual mechanism after betas_trans
+====================================================================================================
+
+====================================================================================================
+C1  FULL GRID -- median over specimens of mean|log(L/L0)| over the 36 leg bones
+====================================================================================================
+
+  normaliser = body   (published probe-23 statistic is body / bt / root)
+  run                 kind           bt/root      nobt/root      bt/noroot    nobt/noroot
+  LIM_0               worker          0.3030         0.1819         0.2712         0.1580
+  LIM_1x              worker          0.3131         0.1839         0.2831         0.1554
+  BPX_noprior         worker          0.3686         0.2022         0.3301         0.1690
+  M7_handoff_midline  worker          0.3382         0.1807         0.3186         0.1597
+  baseline            worker          0.6203         0.6203         0.6185         0.6185
+  ALL_ANTS_CLEAN      clean           0.1850         0.1850         0.1742         0.1742
+  --> worker/clean gap       
+  LIM_0                                1.64x          0.98x          1.56x          0.91x
+  LIM_1x                               1.69x          0.99x          1.63x          0.89x
+  BPX_noprior                          1.99x          1.09x          1.90x          0.97x
+  M7_handoff_midline                   1.83x          0.98x          1.83x          0.92x
+  baseline                             3.35x          3.35x          3.55x          3.55x
+
+  normaliser = all   (published probe-23 statistic is body / bt / root)
+  run                 kind           bt/root      nobt/root      bt/noroot    nobt/noroot
+  LIM_0               worker          0.2602         0.1660         0.2444         0.1388
+  LIM_1x              worker          0.2672         0.1569         0.2575         0.1412
+  BPX_noprior         worker          0.3025         0.1561         0.2816         0.1386
+  M7_handoff_midline  worker          0.3075         0.1497         0.2736         0.1342
+  baseline            worker          0.5546         0.5546         0.5665         0.5665
+  ALL_ANTS_CLEAN      clean           0.1220         0.1220         0.1184         0.1184
+  --> worker/clean gap       
+  LIM_0                                2.13x          1.36x          2.06x          1.17x
+  LIM_1x                               2.19x          1.29x          2.18x          1.19x
+  BPX_noprior                          2.48x          1.28x          2.38x          1.17x
+  M7_handoff_midline                   2.52x          1.23x          2.31x          1.13x
+  baseline                             4.55x          4.55x          4.79x          4.79x
+
+  normaliser = unnorm   (published probe-23 statistic is body / bt / root)
+  run                 kind           bt/root      nobt/root      bt/noroot    nobt/noroot
+  LIM_0               worker          0.3277         0.2337         0.2541         0.1584
+  LIM_1x              worker          0.3117         0.2216         0.2622         0.1475
+  BPX_noprior         worker          0.3913         0.2170         0.2982         0.1529
+  M7_handoff_midline  worker          0.3683         0.2300         0.3068         0.1421
+  baseline            worker          0.5728         0.5728         0.5708         0.5708
+  ALL_ANTS_CLEAN      clean           0.1493         0.1493         0.1338         0.1338
+  --> worker/clean gap       
+  LIM_0                                2.19x          1.57x          1.90x          1.18x
+  LIM_1x                               2.09x          1.48x          1.96x          1.10x
+  BPX_noprior                          2.62x          1.45x          2.23x          1.14x
+  M7_handoff_midline                   2.47x          1.54x          2.29x          1.06x
+  baseline                             3.84x          3.84x          4.27x          4.27x
+
+====================================================================================================
+C2  ROOT TERM: isotropic global size factor vs anisotropic distortion
+    s0inv = exp(-log_beta_scales[:,0,:]).  iso = geometric mean over the 3 axes
+    (a plain whole-animal size factor); aniso = max/min of s0inv/iso.
+====================================================================================================
+  run                 kind      iso p05   iso p50   iso p95   aniso p50   aniso p95
+  LIM_0               worker      0.967     1.166     1.336       1.172       1.370
+  LIM_1x              worker      0.936     1.158     1.305       1.196       1.512
+  BPX_noprior         worker      0.970     1.161     1.328       1.114       1.400
+  M7_handoff_midline  worker      0.971     1.174     1.331       1.126       1.372
+  baseline            worker      0.736     0.963     1.119       1.466       2.500
+  ALL_ANTS_CLEAN      clean       0.866     0.992     1.119       1.143       1.311
+
+  |log iso| (the pure global size term, in the same units as every D above):
+    LIM_0                median |log iso| = 0.1536
+    LIM_1x               median |log iso| = 0.1463
+    BPX_noprior          median |log iso| = 0.1490
+    M7_handoff_midline   median |log iso| = 0.1608
+    baseline             median |log iso| = 0.1003
+    ALL_ANTS_CLEAN       median |log iso| = 0.0522
+
+====================================================================================================
+C3  Is betas_trans magnitude itself predictive of the failures it is blamed for?
+====================================================================================================
+  run                   med |bt| leg joints  rho vs n_viol        p  rho vs probe19        p
+  LIM_0                             0.04976          0.415   0.0027           0.810   0.0000
+  LIM_1x                            0.06125          0.228   0.1111           0.746   0.0000
+  BPX_noprior                       0.05154          0.350   0.0127           0.778   0.0000
+  M7_handoff_midline                0.05200          0.444   0.0012           0.831   0.0000
+  baseline                          0.00000 n/a (all zero)
+  ALL_ANTS_CLEAN                    0.00000 n/a (all zero)
+
+done.

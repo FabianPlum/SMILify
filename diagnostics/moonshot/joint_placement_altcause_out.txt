@@ -1,0 +1,148 @@
+PROBE 23 -- ALTERNATIVE-CAUSE test of the claim "61.5% vs 30.1% joints-outside-scan
+proves worker joint PLACEMENT is worse".
+
+The claim (probe 21) compares two corpora that differ in far more than fit quality:
+
+  * bench50   = 50 raw CT worker scans from antscan_proofread_castes/worker
+                (~50k verts each, real tarsi/spines/hairs)
+  * clean81   = ALL_ANTS_CLEAN, the corpus OmniAnt's own shape space was built from
+                (preprocess_meshes.py says so explicitly), ~5k verts each
+
+"Fraction of joints OUTSIDE the surface" is not a scale-free quantity. A joint is outside iff
+its placement error exceeds the LOCAL HALF-THICKNESS of the body part it sits in. So the same
+metric will report a higher number on a corpus with thinner limbs / finer scans EVEN IF THE
+PLACEMENT ERROR IS IDENTICAL. Probe 21's floor (10.9-14.5%) was measured on the smooth
+authored TEMPLATE mesh, never on the actual worker scans, so it cannot control for this.
+
+WHAT THIS PROBE MEASURES
+
+ F1  CORPUS-SPECIFIC FLOOR.  J_regressor rows are non-negative and sum to 1 (verified), so
+     J_ref = J_regressor . (posed fitted verts, deform included) is a skeleton that is
+     PERFECTLY CONSISTENT WITH THE FITTED SURFACE by construction -- it is a convex
+     combination of the very surface vertices that match the scan. Its %-outside against the
+     raw scan is the floor for THAT scan, with placement error removed by construction.
+
+ F2  LOCAL LIMB HALF-THICKNESS.  Shrinking-ball medial radius T at the scan point nearest each
+     joint (Ma et al.); T/diag is the error budget available at that joint. Then
+       rho = |j - c_medial| / T   (rho<1 == inside the maximal inscribed ball)
+     is the scale-free placement error, and P(T < eps) is the outside-fraction a UNIFORM
+     placement error of eps would produce on that corpus.
+
+ F3  EQUIVALENT-ERROR INVERSION.  Solve P(T < eps) = observed outfrac in each corpus. If the
+     two corpora need the SAME eps, thinness alone explains the 61.5 vs 30.1 split.
+
+ F4  ARTICULATION / CONTRACTION, and whether it predicts outfrac within a corpus.
+
+ F5  GENUS-MATCHED subset (both corpora contain Acanthostichus, Acromyrmex, Cephalotes, ...).
+
+ F6  deform_verts magnitude relative to T -- deform_verts is added AFTER skinning, so if it is
+     of order the limb radius the surface leaves the bones behind and "joint outside scan"
+     measures the surface offset, not the joint.
+
+
+====================================================================================================
+### LIM_0 (worker)   n=50   scans=diagnostics/moonshot/bench50
+    ... 10
+    ... 20
+    ... 30
+    ... 40
+    ... 50
+  scans: nv median=48904  nf median=94450  NN spacing median=0.259%diag
+  F1 %joints outside scan: FITTED skeleton=61.5   SURFACE-CONSISTENT floor J_reg.posed_verts=42.4   excess=19.1pp   ratio=1.45
+  F2 local medial radius T/diag: median=0.545%  q25=0.297%  q75=1.164%
+  F2 rho=|j-c_medial|/T : median=1.301  p75=2.434  %rho>1=66.1
+  F6 |deform_verts| at joint / diag: median=0.749%   ratio to T: median=1.320
+  F4 scan spread (mean|v-c|/diag) median=0.2079   mean |joint rot| rad median=0.8722
+  group           %out fit  %out FLOOR  excess pp  T/diag %  med rho
+  body                55.6        38.6       17.1     0.785    1.246
+  leg_distal          65.0        39.7       25.3     0.372    1.386
+  leg_middle          72.2        45.5       26.7     0.493    1.456
+  leg_proximal        52.8        44.7        8.2     0.536    1.176
+  mandible            77.0        58.0       19.0     0.790    1.502
+
+====================================================================================================
+### baseline (worker, stock)   n=50   scans=diagnostics/moonshot/bench50
+    ... 10
+    ... 20
+    ... 30
+    ... 40
+    ... 50
+  scans: nv median=48904  nf median=94450  NN spacing median=0.259%diag
+  F1 %joints outside scan: FITTED skeleton=52.7   SURFACE-CONSISTENT floor J_reg.posed_verts=33.2   excess=19.5pp   ratio=1.59
+  F2 local medial radius T/diag: median=0.632%  q25=0.323%  q75=1.351%
+  F2 rho=|j-c_medial|/T : median=1.155  p75=1.957  %rho>1=60.3
+  F6 |deform_verts| at joint / diag: median=1.409%   ratio to T: median=2.242
+  F4 scan spread (mean|v-c|/diag) median=0.2079   mean |joint rot| rad median=0.2094
+  group           %out fit  %out FLOOR  excess pp  T/diag %  med rho
+  body                43.6        32.6       11.1     0.839    1.066
+  leg_distal          57.8        28.2       29.7     0.438    1.169
+  leg_middle          59.7        29.5       30.2     0.578    1.212
+  leg_proximal        51.3        44.0        7.3     0.659    1.182
+  mandible            64.0        26.0       38.0     1.012    1.235
+
+====================================================================================================
+### ALL_ANTS_CLEAN (81)   n=81   scans=diagnostics/moonshot/clean81
+    ... 10
+    ... 20
+    ... 30
+    ... 40
+    ... 50
+    ... 60
+    ... 70
+    ... 80
+  scans: nv median=18823  nf median=41375  NN spacing median=0.325%diag
+  F1 %joints outside scan: FITTED skeleton=30.1   SURFACE-CONSISTENT floor J_reg.posed_verts=9.8   excess=20.3pp   ratio=3.07
+  F2 local medial radius T/diag: median=0.422%  q25=0.293%  q75=0.803%
+  F2 rho=|j-c_medial|/T : median=0.891  p75=1.216  %rho>1=39.4
+  F6 |deform_verts| at joint / diag: median=0.569%   ratio to T: median=1.190
+  F4 scan spread (mean|v-c|/diag) median=0.1787   mean |joint rot| rad median=0.0884
+  group           %out fit  %out FLOOR  excess pp  T/diag %  med rho
+  body                49.9        20.3       29.6     0.823    1.047
+  leg_distal          22.1         3.1       19.0     0.282    0.845
+  leg_middle          12.4         0.4       12.0     0.357    0.697
+  leg_proximal        27.1         7.9       19.1     0.580    0.878
+  mandible            32.7        28.4        4.3     0.729    0.941
+
+====================================================================================================
+CROSS-CORPUS
+
+-- F1  does the SURFACE-CONSISTENT floor already reproduce the gap?
+   worker LIM_0     fitted= 61.5%  floor= 42.4%  excess= 19.1pp
+   worker baseline  fitted= 52.7%  floor= 33.2%  excess= 19.5pp
+   clean            fitted= 30.1%  floor=  9.8%  excess= 20.3pp
+   EXCESS over own floor, worker vs clean: 19.1pp vs 20.3pp   U=1930 p=0.656
+   FLOOR alone, worker vs clean: 42.4% vs 9.8%  U=4050 p=7.06e-22
+
+-- F2/F3  equivalent-error inversion   P(T < eps) = observed outfrac
+   worker: outfrac=61.5%  -> eps=0.744%diag
+   clean : outfrac=30.1%  -> eps=0.317%diag
+   ratio eps_worker/eps_clean = 2.35   (vs the claimed outfrac ratio 2.04)
+   median T/diag: worker=0.545%  clean=0.422%  baseline-scans=0.632%   thinness ratio=0.77
+   COUNTERFACTUAL: outfrac the WORKER scans would show at the CLEAN corpus' eps: 27.7%   (observed worker 61.5%)
+   COUNTERFACTUAL: outfrac the CLEAN scans would show at the WORKER corpus' eps: 73.2%   (observed clean 30.1%)
+
+-- F2  scale-free placement error rho = |j - medial centre| / T
+   per-specimen median rho: worker=1.294  clean=0.898  ratio=1.44  U=4007 p=6.12e-21
+
+-- F4  contraction / articulation
+   spread   worker=0.2079  clean=0.1787  ratio=1.16  p=1.83e-10
+   legrot   worker=0.8722  clean=0.0884  ratio=9.86  p=8.67e-22
+   chamf    worker=0.0032  clean=0.0022  ratio=1.42  p=1.19e-09
+   nnsp     worker=0.0026  clean=0.0032  ratio=0.80  p=1.24e-05
+   within worker: spearman(outfrac, median T) = -0.373 (p=0.00766); spearman(outfrac, scan spread) = -0.173 (p=0.23)
+   within clean: spearman(outfrac, median T) = -0.257 (p=0.0206); spearman(outfrac, scan spread) = -0.258 (p=0.0202)
+
+-- F5  genus-matched subset
+   shared genera (11): acanthostichus, acromyrmex, cephalotes, cyphomyrmex, dorylus, ectatomma, labidus, odontomachus, polyrhachis, stigmatomma, strumigenys
+     acanthostichus     worker %out= 65.5 (n=1)  clean %out= 18.2 (n=1)   T/diag 0.794% vs 0.397%
+     acromyrmex         worker %out= 59.1 (n=2)  clean %out= 32.7 (n=1)   T/diag 0.663% vs 0.401%
+     cephalotes         worker %out= 56.4 (n=3)  clean %out= 33.6 (n=2)   T/diag 0.575% vs 0.544%
+     cyphomyrmex        worker %out= 69.1 (n=1)  clean %out= 16.4 (n=1)   T/diag 1.020% vs 0.447%
+     dorylus            worker %out= 45.5 (n=1)  clean %out= 37.3 (n=2)   T/diag 0.675% vs 0.373%
+     ectatomma          worker %out= 63.6 (n=1)  clean %out= 45.5 (n=2)   T/diag 0.436% vs 0.322%
+     labidus            worker %out= 56.4 (n=2)  clean %out= 23.6 (n=1)   T/diag 0.457% vs 0.365%
+     odontomachus       worker %out= 63.6 (n=1)  clean %out= 40.0 (n=1)   T/diag 0.429% vs 0.290%
+     polyrhachis        worker %out= 51.8 (n=2)  clean %out= 34.5 (n=1)   T/diag 0.846% vs 0.360%
+     stigmatomma        worker %out= 65.5 (n=1)  clean %out= 23.6 (n=1)   T/diag 0.455% vs 0.321%
+     strumigenys        worker %out= 64.0 (n=5)  clean %out= 30.9 (n=1)   T/diag 0.550% vs 0.420%
+   paired-by-genus: worker 60.0% vs clean 30.6%  wilcoxon p=0.000977; median T 0.575% vs 0.373%

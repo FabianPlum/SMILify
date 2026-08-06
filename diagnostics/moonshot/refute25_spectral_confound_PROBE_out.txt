@@ -1,0 +1,71 @@
+================================================================================================
+SECTION 1+2 — calibration of the prior agent's estimator, and the SPECTRUM of each corpus
+================================================================================================
+corpus              kind      n  effdim  alpha  cum@10  gen10/sp  gen40/sp  RMSgen10/sp
+LIM_0 FREE(deform_verts)   worker   50   33.68   0.39   0.427    0.9998    0.9828       1.0044
+LIM_0 SUM(rest shape)      worker   50   25.27   0.56   0.486    0.9182    0.8787       0.9409
+
+BPX_noprior FREE(deform_verts)worker   50   33.08   0.41   0.433    0.9988    0.9810       1.0031
+BPX_noprior SUM(rest shape)worker   50   26.30   0.54   0.475    0.9353    0.8998       0.9526
+
+M7_handoff_midline FREE(deform_verts)worker   50   32.35   0.44   0.443    0.9870    0.9655       0.9927
+M7_handoff_midline SUM(rest shape)worker   50   32.34   0.44   0.443    0.9870    0.9654       0.9926
+
+baseline FREE(deform_verts)worker   50   33.09   0.42   0.434    0.9829    0.9460       0.9853
+baseline SUM(rest shape)   worker   50   31.66   0.46   0.451    0.9706    0.9309       0.9731
+
+CLEAN81_M7 FREE(deform_verts)clean    81    8.26   1.05   0.625    0.7792    0.7292       0.7657
+CLEAN81_M7 SUM(rest shape) clean    81    8.22   1.05   0.626    0.7787    0.7287       0.7651
+
+ALL_ANTS_CLEAN FREE(deform_verts)clean    81   16.41   0.91   0.571    0.7932    0.7070       0.7935
+ALL_ANTS_CLEAN SUM(rest shape)clean    81    3.76   1.36   0.805    0.5304    0.4496       0.5450
+
+================================================================================================
+SECTION 3 — DESTROY CORRESPONDENCE, keep the spectrum: random orthogonal map of the
+            3V ambient space (coordinate permutation + sign flip, same map for every
+            specimen).  After this, 'vertex i' is a meaningless label.
+================================================================================================
+corpus (free-form field)      gen10/sp real   scrambled   RMS real  RMS scrambled
+LIM_0                                0.9998      1.0010     1.0044         1.0044
+BPX_noprior                          0.9988      0.9998     1.0031         1.0031
+M7_handoff_midline                   0.9870      0.9879     0.9927         0.9927
+baseline                             0.9829      0.9836     0.9853         0.9853
+CLEAN81_M7                           0.7792      0.7720     0.7657         0.7657
+ALL_ANTS_CLEAN                       0.7932      0.7931     0.7935         0.7935
+
+================================================================================================
+SECTION 4 — EXACT-CORRESPONDENCE SYNTHETIC CORPORA.  Gaussian samples in a random
+            orthonormal basis carrying each corpus's own measured spectrum.  No
+            registration exists, so correspondence is perfect by construction.
+================================================================================================
+spectrum taken from            n  real gen10/sp   synthetic gen10/sp   real@40   synth@40
+LIM_0                         50         0.9998         0.8493 +/-0.0036    0.9828     0.3651
+BPX_noprior                   50         0.9988         0.8471 +/-0.0049    0.9810     0.3614
+M7_handoff_midline            50         0.9870         0.8430 +/-0.0053    0.9655     0.3591
+baseline                      50         0.9829         0.8472 +/-0.0038    0.9460     0.3721
+CLEAN81_M7                    81         0.7792         0.6640 +/-0.0100    0.7292     0.4407
+ALL_ANTS_CLEAN                81         0.7932         0.7077 +/-0.0127    0.7070     0.4402
+
+  power-law sweep (exact correspondence, n=50 and n=81, lambda_j ~ j^-alpha):
+     alpha    n=50 gen10/sp    n=81 gen10/sp
+       0.2           0.8825           0.9353
+       0.4           0.8580           0.9076
+       0.6           0.8067           0.8595
+       0.8           0.7344           0.7955
+       1.0           0.6512           0.7175
+       1.4           0.4798           0.5329
+       2.0           0.2470           0.2806
+       3.0           0.0694           0.0807
+
+================================================================================================
+SECTION 5 — IN-DISTRIBUTION-BY-CONSTRUCTION evidence
+================================================================================================
+corpus                |mean(F)| / spread   F var inside shapedirs span  top10 PCA inside span
+LIM_0                              0.302                          0.9%                   1.1%
+BPX_noprior                        0.307                          0.6%                   0.7%
+M7_handoff_midline                 0.341                          2.7%                   3.3%
+baseline                           0.339                          3.5%                   4.0%
+CLEAN81_M7                         0.357                         24.4%                  16.7%
+ALL_ANTS_CLEAN                     0.514                          7.3%                   7.8%
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/refute25_spectral_confound.json

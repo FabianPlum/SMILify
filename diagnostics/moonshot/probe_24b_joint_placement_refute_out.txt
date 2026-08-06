@@ -1,0 +1,84 @@
+========================================================================================================
+PROBE 24b -- adversarial re-derivation of probe 23 (joint-placement claim)
+========================================================================================================
+
+[load] LIM_0            n= 50 V=10235 betas=25 J_regressor support mean= 10 median= 10  betas_trans in npz: True
+[load] BPX_noprior      n= 50 V=10229 betas=13 J_regressor support mean= 37 median= 24  betas_trans in npz: True
+[load] ALL_ANTS_CLEAN   n= 81 V=10236 betas=20 J_regressor support mean= 20 median= 20  betas_trans in npz: False
+
+--------------------------------------------------------------------------------------------------------
+1. VERIFY PARAMETERISATION -- rebuild stored `verts` from the stored parameters
+--------------------------------------------------------------------------------------------------------
+  LIM_0            mean |verts_rebuilt - verts_stored| = 2.420e-02  max 1.725e+00   (mesh extent 2.025)  -> MISMATCH
+  BPX_noprior      mean |verts_rebuilt - verts_stored| = 2.123e-02  max 1.177e+00   (mesh extent 2.020)  -> MISMATCH
+  ALL_ANTS_CLEAN   mean |verts_rebuilt - verts_stored| = 1.041e-02  max 6.898e-01   (mesh extent 1.990)  -> MISMATCH
+
+--------------------------------------------------------------------------------------------------------
+2. REPRODUCE probe 23 panel A (J_regressor . v_shaped, normalised, gen@10/spread)
+--------------------------------------------------------------------------------------------------------
+corpus              gen@10/spread  probe23 quoted
+LIM_0                      0.9154          0.9154
+BPX_noprior                0.8580          0.8580
+ALL_ANTS_CLEAN             0.4608          0.4608
+
+--------------------------------------------------------------------------------------------------------
+3. SUPPORT-MATCHED READ-OUT -- uniform mean of the m nearest template verts to each
+   anatomical joint, SAME m for every corpus (the shipped J_regressors use 10/37/20)
+--------------------------------------------------------------------------------------------------------
+    m             LIM_0       BPX_noprior    ALL_ANTS_CLEAN
+    1            0.9281            0.9313            0.4963
+    3            0.9297            0.9046            0.4821
+   10            0.9058            0.8934            0.4743
+   20            0.9014            0.8883            0.4572
+   40            0.8573            0.8566            0.4300
+   80            0.7990            0.8042            0.3846
+  160            0.7177            0.7037            0.3384
+  320            0.6336            0.5953            0.3244
+
+   worker-minus-clean gap at each m (positive = worker worse):
+    m     LIM_0 - CLEAN       BPX - CLEAN
+    1            0.4318            0.4350
+    3            0.4476            0.4225
+   10            0.4315            0.4191
+   20            0.4442            0.4311
+   40            0.4274            0.4267
+   80            0.4144            0.4196
+  160            0.3793            0.3653
+  320            0.3092            0.2709
+
+--------------------------------------------------------------------------------------------------------
+4. SPATIALLY-MATCHED CONTROL LANDMARKS -- is it JOINTS, or is it LEGS?
+--------------------------------------------------------------------------------------------------------
+  LIM_0   (m=10, anatomical joints on legs: 65% of the 55)
+    anatomical joints                     gen@10/spread = 0.9154
+    (a) random landmarks, uniform verts   gen@10/spread = 0.8079 (sd 0.0296) | on legs 46% | joints-minus-control +0.1075 CI [+0.0746,+0.1434] 86% spec
+    (b) BONE-MATCHED, off-articulation    gen@10/spread = 0.8768 (sd 0.0120) | on legs 65% | joints-minus-control +0.0386 CI [+0.0093,+0.0690] 62% spec
+    (c) random landmarks, LEG verts only  gen@10/spread = 0.8727 (sd 0.0269) | on legs 100% | joints-minus-control +0.0427 CI [+0.0104,+0.0775] 54% spec
+
+  BPX_noprior   (m=37, anatomical joints on legs: 65% of the 55)
+    anatomical joints                     gen@10/spread = 0.8580
+    (a) random landmarks, uniform verts   gen@10/spread = 0.7858 (sd 0.0402) | on legs 46% | joints-minus-control +0.0722 CI [+0.0349,+0.1096] 70% spec
+    (b) BONE-MATCHED, off-articulation    gen@10/spread = 0.8331 (sd 0.0073) | on legs 65% | joints-minus-control +0.0249 CI [+0.0000,+0.0510] 56% spec
+    (c) random landmarks, LEG verts only  gen@10/spread = 0.8646 (sd 0.0206) | on legs 100% | joints-minus-control -0.0066 CI [-0.0449,+0.0321] 48% spec
+
+  ALL_ANTS_CLEAN   (m=20, anatomical joints on legs: 65% of the 55)
+    anatomical joints                     gen@10/spread = 0.4608
+    (a) random landmarks, uniform verts   gen@10/spread = 0.4669 (sd 0.0255) | on legs 46% | joints-minus-control -0.0062 CI [-0.0204,+0.0081] 46% spec
+    (b) BONE-MATCHED, off-articulation    gen@10/spread = 0.4148 (sd 0.0084) | on legs 65% | joints-minus-control +0.0460 CI [+0.0379,+0.0545] 90% spec
+    (c) random landmarks, LEG verts only  gen@10/spread = 0.4512 (sd 0.0248) | on legs 100% | joints-minus-control +0.0096 CI [-0.0038,+0.0236] 59% spec
+
+--------------------------------------------------------------------------------------------------------
+5. THE JOINTS THE MODEL ACTUALLY USES -- rest pose (identity rotations) through
+   batch_global_rigid_transformation with the fitted log_beta_scales + betas_trans
+--------------------------------------------------------------------------------------------------------
+corpus               J_reg.v_shaped   +betas_trans    +scale   +both (REAL)
+LIM_0                        0.9154         0.7301    0.5081         0.6601
+                    free-channel joint displacement: mean 0.1722 = 8.7x the population joint spread (0.0198)
+BPX_noprior                  0.8580         0.6914    0.4656         0.6378
+                    free-channel joint displacement: mean 0.1619 = 9.7x the population joint spread (0.0167)
+ALL_ANTS_CLEAN               0.4608         0.4608    0.4552         0.4552
+                    free-channel joint displacement: mean 0.0561 = 2.0x the population joint spread (0.0276)
+
+   NOTE: probe 23 measured ONLY the first column.
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24b_refute.json

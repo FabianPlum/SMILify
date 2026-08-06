@@ -1,0 +1,58 @@
+REFUTE-A -- independent re-derivation of the forward-pass gate and of the model flags
+that decide what "the joint" even is.
+
+Checks, from scratch (no reuse of the prior agent's conclusions):
+  1. static_joint_locs / sym_verts / J_regressor storage type / shapedirs shape per model
+  2. vertex reconstruction error with align on and off, per corpus
+  3. whether the JOINT definition used downstream (J_regressor . v_shaped, then
+     batch_global_rigid) is the one the fitter would have used
+  4. whether J_regressor rows sum to 1 and how localised they are (a J_regressor whose
+     support is a thin surface patch necessarily places the joint ON the surface)
+
+============================================================================================
+1. MODEL FLAGS (these decide what J is)
+  OmniAnt_25PCs_joint_limited.pkl
+     v_template (10235, 3)  shapedirs (10235, 3, 25)  J_regressor ndarray (55, 10235)
+     static_joint_locs=<absent>   sym_verts present=True   scaledirs=yes  transdirs=yes
+     J_regressor row sums: min=1.000000 max=1.000000   nnz per row: median=10 min=10 max=10
+     mean(v_template) [scalar] = 8.315005e-03   mean y of sym verts = 0.000000e+00
+  SMIL_OmniAnt.pkl
+     v_template (10229, 3)  shapedirs (10229, 3, 13)  J_regressor ndarray (55, 10229)
+     static_joint_locs=<absent>   sym_verts present=True   scaledirs=yes  transdirs=yes
+     J_regressor row sums: min=1.000000 max=1.000000   nnz per row: median=24 min=10 max=200
+     mean(v_template) [scalar] = 9.571036e-03   mean y of sym verts = 0.000000e+00
+  SMPL_fit.pkl
+     v_template (10236, 3)  shapedirs (10236, 3, 20)  J_regressor ndarray (55, 10236)
+     static_joint_locs=<absent>   sym_verts present=True   scaledirs=no  transdirs=no
+     J_regressor row sums: min=1.000000 max=1.000000   nnz per row: median=20 min=20 max=20
+     mean(v_template) [scalar] = 2.778818e-03   mean y of sym verts = 0.000000e+00
+
+============================================================================================
+2. FORWARD-PASS GATE  (vert reconstruction error / bbox diag)
+  LIM_0      align=False static=False rel_err mean=2.280e-08  max=3.576e-07
+  LIM_0      align=False static=True  rel_err mean=1.318e-03  max=1.933e-02
+  LIM_0      align=True  static=False rel_err mean=4.819e-03  max=4.821e-03
+  LIM_0      align=True  static=True  rel_err mean=6.004e-03  max=5.551e-02
+  baseline   align=False static=False rel_err mean=2.329e-08  max=3.403e-06
+  baseline   align=False static=True  rel_err mean=2.832e-02  max=4.805e+00
+  baseline   align=True  static=False rel_err mean=5.592e-03  max=5.598e-03
+  baseline   align=True  static=True  rel_err mean=3.097e-02  max=5.241e+00
+  CLEAN      align=False static=False rel_err mean=1.621e-03  max=1.622e-03
+  CLEAN      align=False static=True  rel_err mean=3.176e-03  max=1.256e-01
+  CLEAN      align=True  static=False rel_err mean=1.793e-08  max=3.847e-07
+  CLEAN      align=True  static=True  rel_err mean=2.357e-03  max=1.162e-01
+
+============================================================================================
+3. HOW DIFFERENT ARE THE COMPETING JOINT DEFINITIONS?
+   J_static  = batch_global_rigid output + trans   (what the probe used)
+   J_rp      = J_regressor . posed verts           (smal_torch STATIC=False branch)
+   J_rd      = J_regressor . FINAL stored verts    (includes deform_verts)
+  LIM_0      |static-regressed|      median= 0.849%diag  p90= 3.022%
+  LIM_0      |static-regressed_def|  median= 1.121%diag  p90= 3.289%
+  LIM_0      |regressed-reg_def|     median= 0.587%diag  p90= 1.568%   <- pure deform_verts effect
+  baseline   |static-regressed|      median= 0.085%diag  p90= 0.479%
+  baseline   |static-regressed_def|  median= 1.193%diag  p90= 2.866%
+  baseline   |regressed-reg_def|     median= 1.160%diag  p90= 2.736%   <- pure deform_verts effect
+  CLEAN      |static-regressed|      median= 0.015%diag  p90= 0.065%
+  CLEAN      |static-regressed_def|  median= 0.524%diag  p90= 1.213%
+  CLEAN      |regressed-reg_def|     median= 0.523%diag  p90= 1.208%   <- pure deform_verts effect

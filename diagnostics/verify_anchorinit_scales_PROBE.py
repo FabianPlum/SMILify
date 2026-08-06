@@ -75,7 +75,7 @@ def run_arm(tag, area_sampled=True, free_scales=True, n_it=400):
             ]
         )
     # step-size trace over the first few Adam steps
-    trace = []
+    []
     real_run = init.run
     hist = real_run(pts, scale=None) if n_it else []
 

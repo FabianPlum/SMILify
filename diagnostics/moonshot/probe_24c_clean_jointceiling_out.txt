@@ -1,0 +1,6 @@
+PROBE 24c (completion) -- ALL_ANTS_CLEAN, JOINT read-out only, n=81, 16 smoothing passes
+   joints (norm)  REAL 0.4608   ceiling iid 0.9357   ceiling smooth 0.9089 +-0.0084   real - smooth ceiling -0.4482
+
+   for comparison (from probe_24c_metric_ceiling_out.txt):
+     LIM_0       joints REAL 0.9154  ceiling smooth 0.9303 +-0.0116  ->  -0.0149
+     BPX_noprior joints REAL 0.8580  ceiling smooth 0.9092 +-0.0133  ->  -0.0512

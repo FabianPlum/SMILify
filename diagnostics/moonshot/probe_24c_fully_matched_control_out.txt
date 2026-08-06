@@ -1,0 +1,61 @@
+============================================================================================================
+PROBE 24c -- fully matched control and the difference-in-differences
+============================================================================================================
+
+
+------------------------------------------------------------------------------------------------------------
+A. joints - random landmarks, for every (control design x channel)
+------------------------------------------------------------------------------------------------------------
+corpus          chan       design     joints   random  sd(draw)  paired diff     95% CI over specimens  %worse
+LIM_0           full       U          0.9154   0.8022    0.0295      +0.1132      [+0.0821, +0.1458]      84
+LIM_0           full       C          0.9154   0.8542    0.0337      +0.0612      [+0.0369, +0.0867]      78
+LIM_0           full       L          0.9154   0.8371    0.0288      +0.0784      [+0.0541, +0.1038]      88
+LIM_0           freeform   U          0.9320   0.8963    0.0256      +0.0357      [+0.0032, +0.0687]      64
+LIM_0           freeform   C          0.9320   0.8970    0.0317      +0.0350      [+0.0091, +0.0608]      64
+LIM_0           freeform   L          0.9320   0.8964    0.0323      +0.0356      [+0.0111, +0.0604]      70
+
+BPX_noprior     full       U          0.8580   0.7772    0.0301      +0.0807      [+0.0449, +0.1175]      78
+BPX_noprior     full       C          0.8580   0.8264    0.0232      +0.0316      [+0.0035, +0.0600]      58
+BPX_noprior     full       L          0.8580   0.8192    0.0189      +0.0388      [+0.0110, +0.0680]      60
+BPX_noprior     freeform   U          0.9084   0.8898    0.0271      +0.0186      [-0.0195, +0.0571]      50
+BPX_noprior     freeform   C          0.9084   0.9066    0.0129      +0.0017      [-0.0284, +0.0330]      42
+BPX_noprior     freeform   L          0.9084   0.9090    0.0153      -0.0007      [-0.0297, +0.0303]      42
+
+ALL_ANTS_CLEAN  full       U          0.4608   0.4682    0.0266      -0.0074      [-0.0222, +0.0079]      46
+ALL_ANTS_CLEAN  full       C          0.4608   0.4247    0.0210      +0.0361      [+0.0246, +0.0481]      78
+ALL_ANTS_CLEAN  full       L          0.4608   0.4610    0.0100      -0.0003      [-0.0104, +0.0095]      58
+ALL_ANTS_CLEAN  freeform   U          0.7221   0.7073    0.0252      +0.0148      [-0.0054, +0.0349]      63
+ALL_ANTS_CLEAN  freeform   C          0.7221   0.7272    0.0352      -0.0050      [-0.0249, +0.0147]      49
+ALL_ANTS_CLEAN  freeform   L          0.7221   0.7049    0.0230      +0.0173      [+0.0008, +0.0330]      64
+
+------------------------------------------------------------------------------------------------------------
+B. DIFFERENCE IN DIFFERENCES -- the reversal claim itself
+------------------------------------------------------------------------------------------------------------
+   DiD = (joints-random)_worker - (joints-random)_clean.  The report's verdict needs
+   this to be reliably positive. Bootstrap over specimens in both corpora.
+worker corpus   chan       design         DiD                    95% CI       verdict
+LIM_0           full       U          +0.1206      [+0.0861, +0.1579]      supports
+BPX_noprior     full       U          +0.0882      [+0.0511, +0.1287]      supports
+LIM_0           full       C          +0.0252      [-0.0019, +0.0539]      NOT sig.
+BPX_noprior     full       C          -0.0044      [-0.0346, +0.0269]      NOT sig.
+LIM_0           full       L          +0.0786      [+0.0514, +0.1069]      supports
+BPX_noprior     full       L          +0.0390      [+0.0099, +0.0703]      supports
+
+LIM_0           freeform   U          +0.0209      [-0.0161, +0.0610]      NOT sig.
+BPX_noprior     freeform   U          +0.0038      [-0.0375, +0.0478]      NOT sig.
+LIM_0           freeform   C          +0.0401      [+0.0091, +0.0732]      supports
+BPX_noprior     freeform   C          +0.0068      [-0.0281, +0.0437]      NOT sig.
+LIM_0           freeform   L          +0.0183      [-0.0104, +0.0490]      NOT sig.
+BPX_noprior     freeform   L          -0.0179      [-0.0513, +0.0173]      NOT sig.
+
+------------------------------------------------------------------------------------------------------------
+C. ABSOLUTE scale -- the ratio's denominator differs between corpora
+------------------------------------------------------------------------------------------------------------
+corpus            spread k=0  gen@10 ratio   gen@10 ABSOLUTE    ratio vs clean   absolute vs clean
+LIM_0                0.02296        0.9154           0.02102              1.99x               1.54x
+BPX_noprior          0.01980        0.8580           0.01699              1.86x               1.24x
+ALL_ANTS_CLEAN       0.02969        0.4608           0.01368              1.00x               1.00x
+   -> the headline '2x worse' is on the ratio scale; on the absolute scale (same
+      normalised joint units for every corpus) the worker penalty is 1.5x / 1.2x.
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24c_fully_matched.json

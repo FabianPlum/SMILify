@@ -1,0 +1,191 @@
+========================================================================================================
+PROBE 24 -- STATISTICAL REFUTATION PASS on probe 23 (limb segment stretch)
+========================================================================================================
+
+========================================================================================================
+T0 -- ALGEBRA CHECK on the posed bone length
+  claim:  L4_i = | diag(1/s_0) . (R_1..R_p) . diag(s_p) . u_i |     (u = rest offset + betas_trans)
+  corollary A: global_rot cannot change any bone length
+  corollary B: if s_0 is ISOTROPIC then L4 = (1/s_0)*L3 exactly, a per-specimen constant
+               -> probe-23's size-normaliser removes it -> the whole L4/L3 step is
+                  (root-scale ANISOTROPY) x (pose), carrying no joint-placement info.
+========================================================================================================
+run                   max rel err vs closed form   max rel err, global_rot=0  max rel |L4-(1/s0)L3|/L4, s0 iso
+LIM_0                                   2.90e-16                    2.90e-16                          1.91e-15
+LIM_1x                                  2.57e-16                    2.57e-16                          9.53e-16
+BPX_noprior                             4.45e-16                    3.34e-16                          4.97e-15
+M7_handoff_midline                      3.67e-16                    3.67e-16                          1.23e-15
+baseline                                4.38e-16                    3.51e-16                          7.77e-15
+ALL_ANTS_CLEAN                          4.31e-16                    4.31e-16                          1.53e-15
+  -> all three ~1e-15: the identity holds exactly. The L4/L3 step IS the root-anisotropy x pose term.
+
+========================================================================================================
+T1 -- NULL CORPUS WITH ZERO JOINT-PLACEMENT ERROR
+  NULL = template skeleton (betas=0), betas_trans=0, ALL per-joint scales = 1,
+         only the specimen's REAL root scale s_0 and REAL joint_rot.
+         Every joint is exactly where the template puts it, by construction.
+========================================================================================================
+run                 kind     D_pose real  D_pose NULL  NULL/real  D_dist real  D_dist NULL  NULL/real
+LIM_0               worker        0.3030       0.0587       0.19       0.3352       0.0383       0.11
+LIM_1x              worker        0.3131       0.0552       0.18       0.3410       0.0464       0.14
+BPX_noprior         worker        0.3686       0.0539       0.15       0.4486       0.0372       0.08
+M7_handoff_midline  worker        0.3382       0.0559       0.17       0.4189       0.0359       0.09
+baseline            worker        0.6203       0.0988       0.16       0.7564       0.1045       0.14
+ALL_ANTS_CLEAN      clean         0.1850       0.0311       0.17       0.2196       0.0263       0.12
+  a NULL with literally zero joint-placement error still scores this much D_pose.
+
+========================================================================================================
+T7 -- THE WORKER-vs-CLEAN GAP, confound by confound (median per-specimen D over leg bones)
+  D_pose  as published                       | D_nbt   betas_trans zeroed (clean has none)
+  D_iso   root scale made isotropic          | D_both  both removed
+  D_L3    pose-free (bt + per-joint scale)   | D_L3_nbt pose-free AND bt-free = pure scale effect
+========================================================================================================
+run                 kind      D_pose    D_nbt    D_iso   D_both     D_L3  D_L3_nbt   D_rest
+LIM_0               worker    0.3030   0.1819   0.2952   0.1839   0.2957    0.1884   0.0099
+LIM_1x              worker    0.3131   0.1839   0.3128   0.1743   0.3091    0.1740   0.0093
+BPX_noprior         worker    0.3686   0.2022   0.3599   0.1883   0.3555    0.1817   0.0227
+M7_handoff_midline  worker    0.3382   0.1807   0.3336   0.1718   0.3330    0.1743   0.0000
+baseline            worker    0.6203   0.6203   0.6073   0.6073   0.6306    0.6306   0.0136
+ALL_ANTS_CLEAN      clean     0.1850   0.1850   0.1805   0.1805   0.1813    0.1813   0.0477
+
+  worker/clean RATIO of medians, and the statistic for the gap (Mann-Whitney + Cliff's delta):
+run                 metric       worker    clean   ratio      MWU p  Cliff d  overlap%
+LIM_0               D_pose       0.3030   0.1850    1.64   3.94e-08    0.573       86%
+LIM_0               D_nbt        0.1819   0.1850    0.98   3.98e-01    0.088       99%
+LIM_0               D_iso        0.2952   0.1805    1.64   1.61e-08    0.589       88%
+LIM_0               D_both       0.1839   0.1805    1.02   3.54e-01    0.097       99%
+LIM_0               D_L3         0.2957   0.1813    1.63   8.28e-08    0.559       89%
+LIM_0               D_L3_nbt     0.1884   0.1813    1.04   4.82e-01    0.074       98%
+LIM_0               D_rest       0.0099   0.0477    0.21   1.09e-21   -0.998        5%
+--------------------------------------------------------------------------------------
+LIM_1x              D_pose       0.3131   0.1850    1.69   1.70e-08    0.588       92%
+LIM_1x              D_nbt        0.1839   0.1850    0.99   7.28e-01    0.037       99%
+LIM_1x              D_iso        0.3128   0.1805    1.73   5.71e-09    0.607       90%
+LIM_1x              D_both       0.1743   0.1805    0.97   7.85e-01    0.029       98%
+LIM_1x              D_L3         0.3091   0.1813    1.71   3.45e-08    0.575       88%
+LIM_1x              D_L3_nbt     0.1740   0.1813    0.96   9.64e-01   -0.005       96%
+LIM_1x              D_rest       0.0093   0.0477    0.19   9.95e-22   -0.999        3%
+--------------------------------------------------------------------------------------
+BPX_noprior         D_pose       0.3686   0.1850    1.99   4.84e-12    0.720       78%
+BPX_noprior         D_nbt        0.2022   0.1850    1.09   5.75e-01    0.059       99%
+BPX_noprior         D_iso        0.3599   0.1805    1.99   2.47e-12    0.730       79%
+BPX_noprior         D_both       0.1883   0.1805    1.04   4.64e-01    0.077       99%
+BPX_noprior         D_L3         0.3555   0.1813    1.96   2.06e-11    0.699       79%
+BPX_noprior         D_L3_nbt     0.1817   0.1813    1.00   7.78e-01    0.030       97%
+BPX_noprior         D_rest       0.0227   0.0477    0.48   1.00e-14   -0.807       76%
+--------------------------------------------------------------------------------------
+M7_handoff_midline  D_pose       0.3382   0.1850    1.83   4.05e-11    0.688       79%
+M7_handoff_midline  D_nbt        0.1807   0.1850    0.98   6.89e-01    0.042       98%
+M7_handoff_midline  D_iso        0.3336   0.1805    1.85   1.54e-11    0.703       78%
+M7_handoff_midline  D_both       0.1718   0.1805    0.95   7.56e-01    0.033       99%
+M7_handoff_midline  D_L3         0.3330   0.1813    1.84   4.18e-11    0.688       79%
+M7_handoff_midline  D_L3_nbt     0.1743   0.1813    0.96   9.75e-01    0.003       97%
+M7_handoff_midline  D_rest       0.0000   0.0477    0.00   8.67e-22   -1.000        0%
+--------------------------------------------------------------------------------------
+
+========================================================================================================
+T3/T4 -- WHAT ACTUALLY TRACKS THE ROTATION VIOLATIONS?  Spearman vs n_viol
+  D_pose  published metric (pose-contaminated)
+  D_L3    pose-FREE joint placement (betas_trans + per-joint scale)
+  D_rp    pure artifact term  mean|log(L4/L3)|  = root anisotropy x pose
+  pm      mean |joint rotation| in deg;   pm_con = same on constrained axes only
+========================================================================================================
+run                    D_pose        p     D_L3        p     D_rp        p   pm_con        p   D_pose|pm partial        p
+LIM_0                   0.341   0.0153    0.228   0.1114    0.187   0.1931    0.806   0.0000              -0.025   0.9417
+LIM_1x                  0.157   0.2767    0.073   0.6166    0.183   0.2032    0.254   0.0749               0.121   0.4966
+BPX_noprior             0.468   0.0006    0.465   0.0007    0.179   0.2148    0.869   0.0000               0.103   0.5934
+M7_handoff_midline      0.443   0.0013    0.416   0.0026    0.156   0.2784    0.785   0.0000               0.123   0.4671
+baseline                0.132   0.3603    0.178   0.2154    0.134   0.3537    0.696   0.0000               0.049   0.8537
+ALL_ANTS_CLEAN          0.145   0.1960    0.135   0.2288    0.057   0.6102    0.328   0.0028               0.088   0.4323
+
+  Is the published D_pose just a pose measure?  Spearman D_pose vs pose magnitude / root anisotropy
+run                   D_pose~pm_con        p  D_pose~aniso        p  D_rp~pm_con        p  D_L3~pm_con        p
+LIM_0                         0.440   0.0014         0.336   0.0170        0.073   0.6147        0.342   0.0151
+LIM_1x                        0.164   0.2549         0.465   0.0007        0.120   0.4054        0.099   0.4933
+BPX_noprior                   0.487   0.0003         0.423   0.0022        0.153   0.2884        0.471   0.0006
+M7_handoff_midline            0.479   0.0004         0.219   0.1270        0.151   0.2958        0.442   0.0013
+baseline                      0.139   0.3340        -0.112   0.4374        0.222   0.1208        0.157   0.2769
+ALL_ANTS_CLEAN                0.194   0.0820         0.242   0.0297        0.099   0.3790        0.192   0.0864
+
+========================================================================================================
+T2 -- POSE-SWAP.  D_pose recomputed from SHAPE of specimen i and POSE (+root scale) of a
+  random other specimen j.  If stretch->violation is a real per-specimen property it must
+  follow the SHAPE.  200 random derangements; reported as mean Spearman over repeats.
+========================================================================================================
+run                   rho(swapD, n_viol SHAPE owner)   rho(swapD, n_viol POSE owner)  real rho
+LIM_0                              0.246 +/- 0.046                0.056 +/- 0.129     0.341
+LIM_1x                             0.023 +/- 0.051                0.059 +/- 0.133     0.157
+BPX_noprior                        0.459 +/- 0.030                0.033 +/- 0.145     0.468
+M7_handoff_midline                 0.426 +/- 0.037                0.006 +/- 0.136     0.443
+ALL_ANTS_CLEAN                     0.146 +/- 0.031                0.006 +/- 0.120     0.145
+
+========================================================================================================
+T5 -- ROBUSTNESS of the headline rho (D_pose vs n_viol): bootstrap CI and leverage
+========================================================================================================
+run                      rho           boot 95% CI  P(rho<=0)  drop-3 worst rho  max |drho| 1 spec
+LIM_0                  0.341   [ 0.075, 0.557]         0.006             0.300             0.0413
+LIM_1x                 0.157   [-0.162, 0.439]         0.153             0.102             0.0479
+BPX_noprior            0.468   [ 0.215, 0.660]         0.000             0.439             0.0334
+M7_handoff_midline     0.443   [ 0.200, 0.643]         0.001             0.426             0.0479
+baseline               0.132   [-0.182, 0.415]         0.203            -0.023             0.0479
+ALL_ANTS_CLEAN         0.145   [-0.068, 0.337]         0.088             0.211             0.0573
+
+========================================================================================================
+T6 -- ARE THE FOUR WORKER ARMS INDEPENDENT REPLICATIONS?  (same 50 specimens)
+========================================================================================================
+  identical specimen list & order across the four worker arms: True
+
+  pair                                      rho(D_pose)  rho(n_viol)
+  LIM_0 vs LIM_1x                                 0.870        0.159
+  LIM_0 vs BPX_noprior                            0.874        0.702
+  LIM_0 vs M7_handoff_midline                     0.844        0.660
+  LIM_1x vs BPX_noprior                           0.835        0.076
+  LIM_1x vs M7_handoff_midline                    0.783        0.095
+  BPX_noprior vs M7_handoff_midline               0.895        0.869
+
+  Bonferroni over the KEY TEST grid probe 23 printed (3 metrics x 6 corpora = 18 tests):
+  alpha=0.05 -> threshold p < 0.00278
+    LIM_0                D_pose vs n_viol p=0.0153   FAILS
+    LIM_1x               D_pose vs n_viol p=0.2767   FAILS
+    BPX_noprior          D_pose vs n_viol p=0.0006   PASSES
+    M7_handoff_midline   D_pose vs n_viol p=0.0013   PASSES
+    baseline             D_pose vs n_viol p=0.3603   FAILS
+    ALL_ANTS_CLEAN       D_pose vs n_viol p=0.1960   FAILS
+
+========================================================================================================
+T8 -- IS THE 'DISTAL CONCENTRATION' A DENOMINATOR ARTIFACT?
+  betas_trans is an ABSOLUTE offset. If its magnitude is bone-independent, then
+  |log(L2/L1)| grows like |bt|/L0 and short distal bones inflate mechanically.
+========================================================================================================
+run                   rho(per-bone stretch, 1/L0)        p   rho(|bt|, L0) per bone        p
+LIM_0                                       0.789   0.0000                    0.038   0.7852
+LIM_1x                                      0.775   0.0000                    0.019   0.8922
+BPX_noprior                                 0.867   0.0000                   -0.270   0.0508
+M7_handoff_midline                          0.861   0.0000                   -0.225   0.1059
+
+  per-bone-group: template length L0 and mean |betas_trans| (model units), LIM_0
+    body       L0 median 0.2041   |bt| mean 0.0652   ratio |bt|/L0 0.320
+    mandible   L0 median 0.2509   |bt| mean 0.0588   ratio |bt|/L0 0.234
+    antenna    L0 median 0.2632   |bt| mean 0.0748   ratio |bt|/L0 0.284
+    leg_prox   L0 median 0.3343   |bt| mean 0.0474   ratio |bt|/L0 0.142
+    leg_dist   L0 median 0.1609   |bt| mean 0.0554   ratio |bt|/L0 0.344
+  per leg segment type (bone named by CHILD joint):
+    co   L0 median 0.33425   |bt| mean 0.04879   |bt|/L0 0.146   published posed median ratio 0.811   NULL median ratio 0.869
+    tr   L0 median 0.09044   |bt| mean 0.04394   |bt|/L0 0.486   published posed median ratio 1.028   NULL median ratio 1.007
+    fe   L0 median 0.37576   |bt| mean 0.04958   |bt|/L0 0.132   published posed median ratio 0.894   NULL median ratio 0.997
+    ti   L0 median 0.29797   |bt| mean 0.04711   |bt|/L0 0.158   published posed median ratio 1.038   NULL median ratio 1.006
+    ta   L0 median 0.16090   |bt| mean 0.06286   |bt|/L0 0.391   published posed median ratio 1.145   NULL median ratio 1.005
+    pt   L0 median 0.08839   |bt| mean 0.05617   |bt|/L0 0.635   published posed median ratio 1.530   NULL median ratio 1.004
+
+========================================================================================================
+T9 -- SPECIMEN-SIZE CONFOUND
+========================================================================================================
+run                  body size p05      p50      p95  rho(size,D_pose)        p  rho(size,n_viol)        p
+LIM_0                       0.2031   0.2041   0.2047            -0.102   0.4807            -0.122   0.3982
+LIM_1x                      0.2032   0.2041   0.2046            -0.434   0.0016            -0.141   0.3280
+BPX_noprior                 0.1145   0.1312   0.1439            -0.279   0.0495            -0.353   0.0119
+M7_handoff_midline          0.1255   0.1255   0.1255            -0.097   0.5009            -0.215   0.1331
+baseline                    0.1167   0.1289   0.1424            -0.064   0.6612            -0.110   0.4489
+ALL_ANTS_CLEAN              0.1413   0.1825   0.2050             0.206   0.0645             0.085   0.4512
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24_refutation.npz

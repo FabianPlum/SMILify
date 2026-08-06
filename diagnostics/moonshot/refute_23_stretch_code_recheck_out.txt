@@ -1,0 +1,269 @@
+========================================================================================================
+REFUTE-23 -- independent re-derivation of the 'worker limb segments are stretched 2x' claim
+========================================================================================================
+
+========================================================================================================
+R0  TEMPLATE FACTS -- the two corpora are measured against DIFFERENT L0
+========================================================================================================
+  LIMITED(OmniAnt25)     V= 10235  shapedirs K= 25  J_regressor type=ndarray shape=(55, 10235) nnz/row=10.0  posedirs=(0,)  scaledirs=True
+  OMNI(SMIL_OmniAnt)     V= 10229  shapedirs K= 13  J_regressor type=ndarray shape=(55, 10229) nnz/row=36.9  posedirs=(0,)  scaledirs=True
+  SMPLFIT(clean)         V= 10236  shapedirs K= 20  J_regressor type=ndarray shape=(55, 10236) nnz/row=20.0  posedirs=(0,)  scaledirs=False
+  LIMITED(OmniAnt25)     vs OMNI(SMIL_OmniAnt)      J_names identical=True  kintree identical=True
+  LIMITED(OmniAnt25)     vs SMPLFIT(clean)          J_names identical=True  kintree identical=True
+  OMNI(SMIL_OmniAnt)     vs SMPLFIT(clean)          J_names identical=True  kintree identical=True
+
+  per-bone TEMPLATE rest length L0, and the cross-template ratio that probe-23's
+  worker-vs-clean comparison silently divides by:
+  bone          group       L0 OmniAnt25  L0 SMIL_Omni  L0 SMPL_fit  Omni25/SMPLfit
+  l_2_tr_r      leg_prox         0.06742       0.06760      0.05437           1.240
+  l_2_tr_l      leg_prox         0.06742       0.06692      0.05437           1.240
+  b_a_2         body             0.07124       0.06996      0.06242           1.141
+  l_3_pt_l      leg_dist         0.08347       0.11265      0.06307           1.323
+  l_3_pt_r      leg_dist         0.08347       0.11315      0.06307           1.323
+  l_1_pt_l      leg_dist         0.08839       0.03985      0.08224           1.075
+  l_1_pt_r      leg_dist         0.08839       0.04226      0.08224           1.075
+  b_a_3         body             0.11621       0.10570      0.08365           1.389
+  l_3_tr_r      leg_prox         0.09044       0.09208      0.08558           1.057
+  l_3_tr_l      leg_prox         0.09044       0.09055      0.08558           1.057
+  l_2_pt_r      leg_dist         0.09721       0.10220      0.08973           1.083
+  l_2_pt_l      leg_dist         0.09721       0.03528      0.08973           1.083
+  l_1_tr_r      leg_prox         0.12790       0.12175      0.10971           1.166
+  l_1_tr_l      leg_prox         0.12790       0.12448      0.10971           1.166
+  l_1_ta_r      leg_dist         0.14083       0.14478      0.13801           1.020
+  l_1_ta_l      leg_dist         0.14083       0.14501      0.13801           1.020
+  l_2_ta_l      leg_dist         0.16090       0.15265      0.16259           0.990
+  l_2_ta_r      leg_dist         0.16090       0.15208      0.16259           0.990
+  l_1_co_l      leg_prox         0.16392       0.15978      0.16489           0.994
+  l_1_co_r      leg_prox         0.16392       0.15281      0.16489           0.994
+  b_a_5         body             0.20409       0.12552      0.18553           1.100
+  b_a_4         body             0.21380       0.20044      0.19235           1.112
+  w_1_r         wing             0.20710       0.18650      0.21360           0.970
+  w_1_l         wing             0.20710       0.19244      0.21360           0.970
+  an_2_r        antenna          0.25022       0.25066      0.23129           1.082
+  an_2_l        antenna          0.25022       0.24997      0.23129           1.082
+  l_3_ta_r      leg_dist         0.22881       0.22611      0.23550           0.972
+  l_3_ta_l      leg_dist         0.22881       0.22620      0.23550           0.972
+  l_1_ti_r      leg_dist         0.25007       0.24733      0.24016           1.041
+  l_1_ti_l      leg_dist         0.25007       0.24747      0.24016           1.041
+  ma_l          mandible         0.25086       0.24027      0.24472           1.025
+  ma_r          mandible         0.25086       0.24926      0.24472           1.025
+  an_1_l        antenna          0.26319       0.28193      0.25485           1.033
+  an_1_r        antenna          0.26319       0.27871      0.25486           1.033
+  an_3_l        antenna          0.32812       0.23389      0.29087           1.128
+  an_3_r        antenna          0.32812       0.25474      0.29087           1.128
+  l_2_ti_r      leg_dist         0.29797       0.30108      0.29591           1.007
+  l_2_ti_l      leg_dist         0.29797       0.29863      0.29591           1.007
+  l_1_fe_l      leg_prox         0.34613       0.34208      0.33354           1.038
+  l_1_fe_r      leg_prox         0.34613       0.34242      0.33354           1.038
+  l_2_co_l      leg_prox         0.33425       0.32666      0.33707           0.992
+  l_2_co_r      leg_prox         0.33425       0.32093      0.33707           0.992
+  l_2_fe_l      leg_prox         0.37576       0.37624      0.36353           1.034
+  l_2_fe_r      leg_prox         0.37576       0.37545      0.36353           1.034
+  l_3_ti_l      leg_dist         0.38499       0.35343      0.38727           0.994
+  l_3_ti_r      leg_dist         0.38499       0.35358      0.38727           0.994
+  l_3_co_l      leg_prox         0.40928       0.40449      0.40482           1.011
+  l_3_co_r      leg_prox         0.40928       0.40088      0.40482           1.011
+  l_3_fe_l      leg_prox         0.43040       0.43412      0.41010           1.050
+  l_3_fe_r      leg_prox         0.43040       0.43410      0.41010           1.050
+  w_2_r         wing             0.41262       0.38541      0.41889           0.985
+  w_2_l         wing             0.41262       0.37934      0.41889           0.985
+  b_a_1         body             0.45156       0.42898      0.44721           1.010
+  GROUP body       Omni25/SMPLfit  p05=1.028 p50=1.112 p95=1.340 mean|log|=0.1343   |  SMILOmni/SMPLfit mean|log|=0.1643
+  GROUP mandible   Omni25/SMPLfit  p05=1.025 p50=1.025 p95=1.025 mean|log|=0.0247   |  SMILOmni/SMPLfit mean|log|=0.0184
+  GROUP antenna    Omni25/SMPLfit  p05=1.033 p50=1.082 p95=1.128 mean|log|=0.0771   |  SMILOmni/SMPLfit mean|log|=0.1165
+  GROUP leg_prox   Omni25/SMPLfit  p05=0.992 p50=1.038 p95=1.240 mean|log|=0.0630   |  SMILOmni/SMPLfit mean|log|=0.0676
+  GROUP leg_dist   Omni25/SMPLfit  p05=0.972 p50=1.020 p95=1.323 mean|log|=0.0606   |  SMILOmni/SMPLfit mean|log|=0.2331
+  GROUP wing       Omni25/SMPLfit  p05=0.970 p50=0.977 p95=0.985 mean|log|=0.0230   |  SMILOmni/SMPLfit mean|log|=0.1056
+
+========================================================================================================
+R2  FORWARD-CONVENTION TEST -- which forward model actually reproduces stored `verts`?
+    variants: dv=posed  (verts = skin(vt+sd.b) + trans + dv)   [what probe-23 assumed]
+              dv=rest   (verts = skin(vt+sd.b+dv) + trans)
+              x propagate_scaling False / True
+    residual is reported AFTER removing a per-specimen rigid offset (lengths are
+    translation invariant); 'scale' is the mean bbox diagonal.
+========================================================================================================
+  run                    dv=posed,prop=F    dv=rest,prop=F   dv=posed,prop=T    dv=rest,prop=T   winner
+  LIM_0                         3.45e-07          7.05e-01          6.52e-01          1.16e+00   dv=posed,prop=False
+  LIM_1x                        2.80e-07          6.02e-01          1.30e+00          1.67e+00   dv=posed,prop=False
+  BPX_noprior                   2.92e-07          3.56e-01          9.90e-01          1.26e+00   dv=posed,prop=False
+  M7_handoff_midline            2.38e-07          3.92e-01          1.08e+00          1.53e+00   dv=posed,prop=False
+  baseline                      3.29e-06          8.14e+00          4.74e+01          8.68e+01   dv=posed,prop=False
+  ALL_ANTS_CLEAN                6.87e-04          2.84e-01          1.57e+00          1.44e+00   dv=posed,prop=False
+
+========================================================================================================
+R1  REPRODUCTION of probe-23's headline (median over specimens of mean|log ratio| over LEG bones)
+========================================================================================================
+  run                 kind     D_rest(L1)  D_pose(L4)  D_dist(L4)   probe-23 published D_pose
+  LIM_0               worker       0.0099      0.3030      0.3352   0.303
+  LIM_1x              worker       0.0093      0.3131      0.3410   0.313
+  BPX_noprior         worker       0.0227      0.3686      0.4486   0.369
+  M7_handoff_midline  worker       0.0000      0.3382      0.4189   0.338
+  baseline            worker       0.0136      0.6203      0.7564   nan
+  ALL_ANTS_CLEAN      clean        0.0477      0.1850      0.2196   0.185
+
+========================================================================================================
+R3/R4  CONTROLS -- strip the two mechanisms that CANNOT be joint-placement error
+  D_pose      L4 : everything (parent scale + betas_trans + global root anisotropy)
+  D_nobt      L4 with betas_trans = 0  (removes a parameter the clean corpus does not have)
+  D_noroot    L3 : root anisotropy s_0^-1 removed (rotations preserve length, so this is exact)
+  D_bare      L3 with betas_trans = 0 : parent scale + rest shape only == the ONLY
+              mechanism both corpora can express
+========================================================================================================
+  run                 kind       D_pose    D_nobt  D_noroot    D_bare  |log s0| aniso
+  LIM_0               worker     0.3030    0.1819    0.2957    0.1884          0.1585
+  LIM_1x              worker     0.3131    0.1839    0.3091    0.1740          0.1788
+  BPX_noprior         worker     0.3686    0.2022    0.3555    0.1817          0.1082
+  M7_handoff_midline  worker     0.3382    0.1807    0.3330    0.1743          0.1189
+  baseline            worker     0.6203    0.6203    0.6306    0.6306          0.3825
+  ALL_ANTS_CLEAN      clean      0.1850    0.1850    0.1813    0.1813          0.1340
+
+  worker/clean RATIO of each statistic (headline claims ~2x):
+  LIM_0                D_pose  1.64x   D_nobt  0.98x   D_noroot  1.63x   D_bare  1.04x
+  LIM_1x               D_pose  1.69x   D_nobt  0.99x   D_noroot  1.71x   D_bare  0.96x
+  BPX_noprior          D_pose  1.99x   D_nobt  1.09x   D_noroot  1.96x   D_bare  1.00x
+  M7_handoff_midline   D_pose  1.83x   D_nobt  0.98x   D_noroot  1.84x   D_bare  0.96x
+  baseline             D_pose  3.35x   D_nobt  3.35x   D_noroot  3.48x   D_bare  3.48x
+
+  same four statistics for the DISTAL leg only (the headline's strongest claim):
+  run                     D_pose    D_nobt  D_noroot    D_bare
+  LIM_0                   0.3352    0.2570    0.3398    0.2406
+  LIM_1x                  0.3410    0.2072    0.3577    0.2193
+  BPX_noprior             0.4486    0.2201    0.4416    0.2155
+  M7_handoff_midline      0.4189    0.2029    0.4052    0.2042
+  baseline                0.7564    0.7564    0.7893    0.7893
+  ALL_ANTS_CLEAN          0.2196    0.2196    0.2150    0.2150
+
+  pretarsus bone (ta->pt), median ratio and mean|log ratio| under each control:
+  run                     med L4  med L4nb    med L3  med L3nb  |log| L4  |log| L3nb
+  LIM_0                   1.5295    1.3634    1.5383    1.3733    0.5822      0.3768
+  LIM_1x                  1.3678    1.3545    1.3533    1.3383    0.5118      0.3506
+  BPX_noprior             1.9686    1.3092    1.9401    1.3248    0.8193      0.3294
+  M7_handoff_midline      2.0103    1.2710    2.0577    1.2568    0.8180      0.3178
+  baseline                0.8794    0.8794    0.8517    0.8517    0.9759      0.9961
+  ALL_ANTS_CLEAN          1.1802    1.1802    1.1763    1.1763    0.3084      0.3135
+
+========================================================================================================
+R5  TEMPLATE-FREE.  Replace the template L0 by the CORPUS's own per-bone median length.
+    SYS  = mean over leg bones of |median_specimens log(L/L0)|  -> systematic template
+           mismatch, IDENTICAL for every specimen, cannot explain per-specimen failure
+    IDIO = median over specimens of mean|log(L / corpus_median_L)| -> real per-specimen
+           dispersion, i.e. what 'this segment is stretched unnaturally' should mean
+========================================================================================================
+  run                 kind     POSED SYS  POSED IDIO  BARE SYS  BARE IDIO  REST IDIO
+  LIM_0               worker      0.1830      0.2631    0.1424     0.1595     0.0086
+  LIM_1x              worker      0.1457      0.2639    0.1074     0.1474     0.0080
+  BPX_noprior         worker      0.2090      0.3090    0.1169     0.1584     0.0185
+  M7_handoff_midline  worker      0.2194      0.2903    0.1137     0.1532     0.0000
+  baseline            worker      0.2930      0.5638    0.3035     0.5534     0.0123
+  ALL_ANTS_CLEAN      clean       0.0479      0.1729    0.0487     0.1586     0.0405
+
+========================================================================================================
+R6  SHORT-BONE ARTIFACT.  betas_trans is an ABSOLUTE offset added to j_here, so the
+    log RATIO it produces scales like |betas_trans| / L0.  Rank bones by L0.
+========================================================================================================
+  bone            L0(Omni25) L0(SMPLfit)  med|bt| LIM_0   |bt|/L0  |log L4| LIM_0  |log L4| CLEAN
+  l_2_tr_r           0.06742     0.05437        0.04111     0.610          0.2909          0.1861
+  l_2_tr_l           0.06742     0.05437        0.04069     0.604          0.2846          0.1824
+  b_a_2              0.07124     0.06242        0.05310     0.745          0.3738          0.2558
+  l_3_pt_l           0.08347     0.06307        0.02418     0.290          0.5698          0.3662
+  l_3_pt_r           0.08347     0.06307        0.02417     0.290          0.5669          0.3824
+  l_1_pt_l           0.08839     0.08224        0.03754     0.425          0.5632          0.2346
+  l_1_pt_r           0.08839     0.08224        0.03749     0.424          0.5686          0.2408
+  l_3_tr_l           0.09044     0.08558        0.04225     0.467          0.2647          0.1655
+  l_3_tr_r           0.09044     0.08558        0.04275     0.473          0.2680          0.1585
+  l_2_pt_r           0.09721     0.08973        0.03488     0.359          0.6242          0.3216
+  l_2_pt_l           0.09721     0.08973        0.03481     0.358          0.6002          0.3049
+  b_a_3              0.11621     0.08365        0.05188     0.446          0.2480          0.3124
+  l_1_tr_r           0.12790     0.10971        0.03930     0.307          0.2906          0.1374
+  l_1_tr_l           0.12790     0.10971        0.03892     0.304          0.2971          0.1376
+  l_1_ta_r           0.14083     0.13801        0.05642     0.401          0.4162          0.2868
+  l_1_ta_l           0.14083     0.13801        0.05662     0.402          0.4247          0.2791
+  l_2_ta_l           0.16090     0.16259        0.06521     0.405          0.4044          0.2700
+  l_2_ta_r           0.16090     0.16259        0.06579     0.409          0.4176          0.2779
+  l_1_co_l           0.16392     0.16489        0.04361     0.266          0.2206          0.1481
+  l_1_co_r           0.16392     0.16489        0.04350     0.265          0.2208          0.1481
+  b_a_5              0.20409     0.18553        0.04276     0.210          0.1402          0.1532
+  w_1_l              0.20710     0.21360        0.00000     0.000          0.1892          0.1300
+  w_1_r              0.20710     0.21360        0.00000     0.000          0.1892          0.1300
+  b_a_4              0.21380     0.19235        0.06994     0.327          0.2164          0.0546
+  l_3_ta_l           0.22881     0.23550        0.04426     0.193          0.2307          0.3203
+  l_3_ta_r           0.22881     0.23550        0.04416     0.193          0.2398          0.3205
+  l_1_ti_r           0.25007     0.24016        0.04399     0.176          0.2345          0.1623
+  l_1_ti_l           0.25007     0.24016        0.04468     0.179          0.2447          0.1717
+  an_2_l             0.25022     0.23129        0.06429     0.257          0.2888          0.2962
+  an_2_r             0.25022     0.23129        0.06461     0.258          0.2780          0.2987
+  ma_l               0.25086     0.24472        0.03660     0.146          0.1933          0.1348
+  ma_r               0.25086     0.24472        0.03664     0.146          0.1878          0.1348
+  an_1_r             0.26319     0.25486        0.05906     0.224          0.2434          0.1211
+  an_1_l             0.26319     0.25485        0.05913     0.225          0.2409          0.1210
+  l_2_ti_r           0.29797     0.29591        0.04717     0.158          0.2622          0.1935
+  l_2_ti_l           0.29797     0.29591        0.04667     0.157          0.2640          0.1944
+  an_3_l             0.32812     0.29087        0.07058     0.215          0.2755          0.2606
+  an_3_r             0.32812     0.29087        0.07067     0.215          0.2696          0.2720
+  l_2_co_l           0.33425     0.33707        0.04376     0.131          0.2593          0.1443
+  l_2_co_r           0.33425     0.33707        0.04403     0.132          0.2594          0.1443
+  l_1_fe_l           0.34613     0.33354        0.04198     0.121          0.2247          0.1655
+  l_1_fe_r           0.34613     0.33354        0.04181     0.121          0.2366          0.1698
+  l_2_fe_l           0.37576     0.36353        0.04081     0.109          0.2340          0.1646
+  l_2_fe_r           0.37576     0.36353        0.04042     0.108          0.2336          0.1608
+  l_3_ti_r           0.38499     0.38727        0.03683     0.096          0.2264          0.2087
+  l_3_ti_l           0.38499     0.38727        0.03638     0.095          0.2387          0.2098
+  l_3_co_l           0.40928     0.40482        0.05361     0.131          0.2649          0.1449
+  l_3_co_r           0.40928     0.40482        0.05397     0.132          0.2652          0.1449
+  w_2_r              0.41262     0.41889        0.11163     0.271          0.2314          0.1463
+  w_2_l              0.41262     0.41889        0.11163     0.271          0.2314          0.1463
+  l_3_fe_l           0.43040     0.41010        0.04908     0.114          0.2255          0.1944
+  l_3_fe_r           0.43040     0.41010        0.04898     0.114          0.2177          0.1964
+  b_a_1              0.45156     0.44721        0.04486     0.099          0.2153          0.1465
+
+  ACROSS BONES (LIM_0): Spearman( median|betas_trans|/L0 , mean|log posed ratio| ) = 0.663 p=6.239e-08 n=53
+  ACROSS BONES (LIM_0): Spearman( template L0 , mean|log posed ratio| )             = -0.571 p=8.178e-06
+  ACROSS BONES (CLEAN): Spearman( template L0 , mean|log posed ratio| )             = -0.351 p=0.01002
+
+  ABSOLUTE length error instead of log ratio (mm-equivalent, divided by the specimen's
+  own bbox diagonal so the two corpora are on the same scale):
+  run                 kind     legs |dL|/bbox  distal |dL|/bbox  bare legs |dL|/bbox
+  LIM_0               worker          0.02705           0.02528              0.01739
+  LIM_1x              worker          0.02559           0.02608              0.01551
+  BPX_noprior         worker          0.02892           0.03185              0.01748
+  M7_handoff_midline  worker          0.02717           0.03070              0.01690
+  baseline            worker          0.04173           0.04319              0.04219
+  ALL_ANTS_CLEAN      clean           0.01383           0.01508              0.01388
+
+========================================================================================================
+R7  Does the stretch still track rotation violations once the non-placement mechanisms
+    are removed?  Spearman per specimen vs n_violations.
+========================================================================================================
+  run                           D_pose          D_nobt          D_bare       IDIO_bare
+  LIM_0                 0.341(p0.0153)  0.385(p0.0058)  0.241(p0.0918)  0.097(p0.5033)
+  LIM_1x                0.157(p0.2767)  0.252(p0.0775)  0.206(p0.1519) -0.027(p0.8526)
+  BPX_noprior           0.468(p0.0006)  0.359(p0.0104)  0.321(p0.0229)  0.313(p0.0269)
+  M7_handoff_midline    0.443(p0.0013)  0.337(p0.0166)  0.322(p0.0227)  0.292(p0.0394)
+  baseline              0.132(p0.3603)  0.132(p0.3603)  0.178(p0.2154)  0.347(p0.0136)
+  ALL_ANTS_CLEAN        0.145(p0.1960)  0.145(p0.1960)  0.135(p0.2288)  0.139(p0.2161)
+
+done.
+
+========================================================================================================
+CONCLUSIONS (see also refute_23b_betastrans_isolation_out.txt, refute_23c_residual_mechanism_out.txt)
+========================================================================================================
+REPLICATES EXACTLY: probe-23's D_pose = 0.3030 / 0.3131 / 0.3686 / 0.3382 vs clean 0.1850.
+CODE CHECKS THAT DID NOT REFUTE:
+  - J_names and kintree_table are byte-identical across all three templates.
+  - J_regressor is a dense ndarray in all three (no sparse-matrix handling bug).
+  - betas width == shapedirs width in every run (25/25, 13/13, 20/20); sd[:,:,:K] was a no-op.
+  - the forward convention (deform_verts in POSED space, propagate_scaling=False) is correct for
+    ALL SIX corpora INCLUDING the clean one: rel. residual 6.9e-04 vs 2.8e-01 / 1.6e+00 / 1.4e+00
+    for the three alternatives. probe-23b's "MISMATCH" label on clean is not a wrong forward model.
+  - cross-template L0 differences are too small to make 0.185 into 0.35 for the LIM arms
+    (OmniAnt25/SMPL_fit leg mean|log| = 0.063 prox / 0.061 dist).
+WHAT REFUTES IT:
+  - betas_trans does not exist in the clean corpus (the parameter is absent from the npz and the
+    clean verts reconstruct with it zeroed). Zeroing it in the worker arms collapses the published
+    gap from 1.64-1.99x to 0.98-1.09x under probe-23's own body-bone normaliser.
+  - the second contributor is the ROOT joint's scale, which is a 1.16-1.17x ISOTROPIC whole-animal
+    size factor (|log iso| 0.15-0.16 worker vs 0.052 clean) with anisotropy no larger than clean's
+    (1.11-1.20 vs 1.14). Removing it too gives 0.89-1.19x under every normaliser.
+  - the pretarsus headline (1.97-2.01x, BPX/M7) is measured against SMIL_OmniAnt, whose template
+    pretarsus bones are left/right asymmetric by up to 2.90x (l_2_pt_l 0.0353 vs l_2_pt_r 0.1022).

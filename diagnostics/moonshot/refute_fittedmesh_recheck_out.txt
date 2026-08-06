@@ -1,0 +1,60 @@
+REFUTE-G -- independent re-derivation of "% joints outside the OWN FITTED MESH".
+
+This is the reference surface that is IDENTICAL in kind across the two corpora: the authored
+template topology (10235 vs 10236 verts, 20466 vs 20468 faces), watertightness checked below,
+no photogrammetry holes, no resolution difference, no scan-provenance difference. If the
+worker/clean separation is a property of joint placement it must show up here too.
+
+Also scores the same point sets as REFUTE-C so the definitional and control comparisons are
+available on this surface as well.
+
+
+### LIM_0 (worker)   n=50  verts=10235  faces=20466
+   TEMPLATE MESH TOPOLOGY: boundary edges=0  non-manifold edges=0   (of 30699)   -> GWN valid
+   point set                   %out all 55  %out no wings
+   J_static (probe20/21)              66.5           66.8
+   J_regressed (real cfg)             59.1           60.0
+   C_skinweight (CONTROL)             38.6           38.0
+   per-group %outside (J_static | CONTROL):
+     body              62.6      40.8
+     leg_distal        73.5      39.0
+     leg_middle        82.5      54.3
+     leg_proximal      46.8      16.7
+     mandible          79.0      55.0
+
+### baseline (worker)   n=50  verts=10229  faces=20454
+   TEMPLATE MESH TOPOLOGY: boundary edges=0  non-manifold edges=0   (of 30681)   -> GWN valid
+   point set                   %out all 55  %out no wings
+   J_static (probe20/21)              53.7           54.5
+   J_regressed (real cfg)             53.6           54.4
+   C_skinweight (CONTROL)             29.4           28.3
+   per-group %outside (J_static | CONTROL):
+     body              45.2      30.0
+     leg_distal        68.7      23.2
+     leg_middle        63.2      36.0
+     leg_proximal      38.5      26.7
+     mandible          70.0      39.0
+
+### CLEAN (81)   n=81  verts=10236  faces=20468
+   TEMPLATE MESH TOPOLOGY: boundary edges=0  non-manifold edges=0   (of 30702)   -> GWN valid
+   point set                   %out all 55  %out no wings
+   J_static (probe20/21)              57.4           56.5
+   J_regressed (real cfg)             57.1           56.0
+   C_skinweight (CONTROL)             24.9           22.0
+   per-group %outside (J_static | CONTROL):
+     body              56.9      37.0
+     leg_distal        70.2      37.8
+     leg_middle        62.4      18.1
+     leg_proximal      44.4       0.6
+     mandible          34.0      31.5
+
+============================================================================================
+WORKER vs CLEAN on the TEMPLATE-TOPOLOGY reference surface
+point set                    worker    clean   ratio           p
+J_static (probe20/21)          65.5     56.4    1.16    9.86e-09
+J_regressed (real cfg)         60.0     56.4    1.06    2.08e-01
+C_skinweight (CONTROL)         39.1     25.5    1.54    4.69e-13
+
+Compare with the headline, which used the RAW SCAN as the reference surface:
+   worker 61.5  clean 30.1  ratio 2.12
+============================================================================================

@@ -1,0 +1,63 @@
+====================================================================================================
+PROBE 23b -- controls: is it the ANATOMICAL joints, or any 55 landmarks?
+====================================================================================================
+
+[load] LIM_0            n= 50  J_regressor mean support = 10 verts
+[load] BPX_noprior      n= 50  J_regressor mean support = 37 verts
+[load] ALL_ANTS_CLEAN   n= 81  J_regressor mean support = 20 verts
+
+----------------------------------------------------------------------------------------------------
+A. NUMERICS -- reproduce probe_19's float32 torch path on RAW vertices
+----------------------------------------------------------------------------------------------------
+corpus            dtype         spread     gen@5    gen@10    gen@20
+LIM_0             float64      0.02407    0.9175    0.8998    0.8847
+LIM_0             float32      0.02407    0.9175    0.8998    0.8847
+BPX_noprior       float64      0.02291    0.9279    0.9166    0.9024
+BPX_noprior       float32      0.02291    0.9279    0.9166    0.9024
+ALL_ANTS_CLEAN    float64      0.02636    0.5691    0.5239    0.4839
+ALL_ANTS_CLEAN    float32      0.02636    0.5691    0.5239    0.4839
+   (quoted in the report: LIM_0-class worker ~0.92, ALL_ANTS_CLEAN 0.5383 at gen@10)
+
+----------------------------------------------------------------------------------------------------
+B. ANATOMICAL JOINTS vs 55 RANDOM LANDMARKS (matched dim 165, matched smoothing)
+----------------------------------------------------------------------------------------------------
+corpus            read-out                      spread     gen@5    gen@10    gen@20
+LIM_0             anatomical joints (55)       0.02296    0.9345    0.9154    0.8768
+LIM_0             random landmarks (55)                   0.8416    0.8035    0.7568
+LIM_0               sd over 8 draws                       0.0212    0.0236    0.0240
+LIM_0               RATIO joints/random                   1.1103    1.1393    1.1586
+
+BPX_noprior       anatomical joints (55)       0.01980    0.8857    0.8580    0.8125
+BPX_noprior       random landmarks (55)                   0.8190    0.7783    0.7329
+BPX_noprior         sd over 8 draws                       0.0267    0.0282    0.0257
+BPX_noprior         RATIO joints/random                   1.0814    1.1024    1.1086
+
+ALL_ANTS_CLEAN    anatomical joints (55)       0.02969    0.5302    0.4608    0.3861
+ALL_ANTS_CLEAN    random landmarks (55)                   0.5285    0.4777    0.4159
+ALL_ANTS_CLEAN      sd over 8 draws                       0.0295    0.0273    0.0275
+ALL_ANTS_CLEAN      RATIO joints/random                   1.0031    0.9646    0.9282
+
+   RATIO > 1 => the anatomical joint positions are LESS consistent than arbitrary
+   surface landmarks of the same dimension and smoothing. RATIO ~ 1 => joints are
+   nothing special and probe 23's gap was a dimensionality artefact.
+
+----------------------------------------------------------------------------------------------------
+C. WHICH CHANNEL places the joints? parametric (shapedirs.betas) vs free-form
+----------------------------------------------------------------------------------------------------
+corpus            joint source                          spread     gen@5    gen@10    gen@20
+LIM_0             full  vt+deform+shapedirs.betas      0.02296    0.9345    0.9154    0.8768
+LIM_0             parametric only  vt+shapedirs.b      0.00411    0.4016    0.2226    0.0677
+LIM_0             free-form only   vt+deform           0.02146    0.9470    0.9320    0.9004
+LIM_0               joint variance share              parametric  8.04%   free-form 91.96%
+
+BPX_noprior       full  vt+deform+shapedirs.betas      0.01980    0.8857    0.8580    0.8125
+BPX_noprior       parametric only  vt+shapedirs.b      0.00548    0.3713    0.0980    0.0001
+BPX_noprior       free-form only   vt+deform           0.01777    0.9301    0.9084    0.8629
+BPX_noprior         joint variance share              parametric 13.97%   free-form 86.03%
+
+ALL_ANTS_CLEAN    full  vt+deform+shapedirs.betas      0.02969    0.5302    0.4608    0.3861
+ALL_ANTS_CLEAN    parametric only  vt+shapedirs.b      0.02220    0.2812    0.1434    0.0069
+ALL_ANTS_CLEAN    free-form only   vt+deform           0.01648    0.7981    0.7221    0.6421
+ALL_ANTS_CLEAN      joint variance share              parametric 67.26%   free-form 32.74%
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe23b_controls.json

@@ -1,0 +1,9 @@
+isotropic-noise null for cumulative variance @k  (D=30687 dims, 20 draws)
+    n       @5      @10      @20      @40
+   50     10.9     21.6     42.5     82.7
+   81      6.8     13.5     26.7     52.2
+
+published compactness@10 of the free-form field:
+  workers  n=50 : LIM_0 42.7  LIM_1x 42.5  BPX 43.3  M7 44.3  baseline 43.4
+  clean    n=81 : ALL_ANTS_CLEAN 57.1  CLEAN81_M7 62.5
+  -> read each against its OWN row above.

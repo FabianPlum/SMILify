@@ -1,0 +1,14 @@
+========================================================================================================
+PROBE 24c -- probe 23b's C3 reproduced, then stratified WITHIN joint
+  stretch(j) = mean |log R4n| over {bone(j)} U {bones of j's children}   (23b's definition)
+========================================================================================================
+run                  POOLED @v    @no-v  ratio  | WITHIN-JOINT @v    @no-v  ratio   #j | bt=0 pooled ratio  within ratio
+LIM_0                   0.3097   0.2685   1.15             0.3008   0.2986   1.01   32                1.37          1.10
+LIM_1x                  0.3141   0.3009   1.04             0.3237   0.2857   1.13   23                1.22          1.26
+BPX_noprior             0.3671   0.2832   1.30             0.3577   0.2956   1.21   32                1.31          1.18
+M7_handoff_midline      0.3667   0.2955   1.24             0.3528   0.3208   1.10   31                1.19          1.05
+baseline                0.5759   0.6295   0.91             0.5931   0.6528   0.91   24                0.91          0.91
+ALL_ANTS_CLEAN          0.1216   0.2050   0.59             0.1212   0.1358   0.89    2                0.59          0.89
+
+  reproduces probe 23b C3 in the POOLED columns; the WITHIN-JOINT columns are the
+  composition-controlled version of the same test.

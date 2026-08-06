@@ -1,0 +1,64 @@
+====================================================================================================
+COHERENCE OF THE REST-SPACE JOINT RELOCATION
+====================================================================================================
+  n = 50 specimens, so pure churn gives coherence ~ 1/sqrt(50) = 0.141
+  mask = the 32 hinged joints (where the limit prior acts)
+
+  LIM_0 -> LIM_1x        relocation  3.985% of body   coherence(mask) mean 0.319  median 0.298  max 0.578
+  LIM_0 -> LIM_3x        relocation  3.994% of body   coherence(mask) mean 0.314  median 0.307  max 0.566
+  LIM_1x -> LIM_3x       relocation  1.453% of body   coherence(mask) mean 0.158  median 0.161  max 0.254
+  M7 s0 -> s1            relocation  3.040% of body   coherence(mask) mean 0.190  median 0.185  max 0.367
+  M7 s0 -> s2            relocation  2.852% of body   coherence(mask) mean 0.159  median 0.145  max 0.309
+  M7 s1 -> s2            relocation  3.065% of body   coherence(mask) mean 0.159  median 0.122  max 0.339
+
+  same, for the placement PARAMETERS themselves (per-joint mean over specimens):
+    LIM_0 -> LIM_1x      dlbs  per-specimen |delta| 0.3370   coherence 0.364
+    LIM_0 -> LIM_1x      dbt   per-specimen |delta| 0.0509   coherence 0.271
+    LIM_0 -> LIM_3x      dlbs  per-specimen |delta| 0.3394   coherence 0.376
+    LIM_0 -> LIM_3x      dbt   per-specimen |delta| 0.0517   coherence 0.273
+    M7 s0 -> s1          dlbs  per-specimen |delta| 0.1794   coherence 0.166
+    M7 s0 -> s1          dbt   per-specimen |delta| 0.0407   coherence 0.171
+    M7 s0 -> s2          dlbs  per-specimen |delta| 0.1774   coherence 0.176
+    M7 s0 -> s2          dbt   per-specimen |delta| 0.0399   coherence 0.167
+    M7 s1 -> s2          dlbs  per-specimen |delta| 0.1877   coherence 0.192
+    M7 s1 -> s2          dbt   per-specimen |delta| 0.0408   coherence 0.189
+
+====================================================================================================
+DOES THE REALISED RELOCATION TRACK THE VIOLATION REMOVED? (specimen level, n=50)
+====================================================================================================
+  rho(overshoot removed [deg], realised joint relocation [%body]) = +0.517  p = 0.000
+  NULL: same correlation using a seed pair's relocation and LIM_0's overshoot = +0.244
+  per-specimen relocation: mean 3.985% sd 1.717% range [1.411, 9.751]
+
+====================================================================================================
+WHERE DID EACH JOINT GO? top hinged joints by coherent (systematic) displacement
+====================================================================================================
+  joint         hinged  systematic %body  per-spec %body  coherence
+  l_3_pt_l       False             6.553          10.669      0.614
+  l_3_pt_r       False             6.548          10.665      0.614
+  l_1_pt_r       False             5.161           9.293      0.555
+  l_1_pt_l       False             5.141           9.300      0.553
+  l_3_ta_l        True             4.856           8.732      0.556
+  l_3_ta_r        True             4.850           8.746      0.555
+  l_2_pt_l       False             4.528           8.810      0.514
+  l_2_pt_r       False             4.489           8.782      0.511
+  l_2_ta_l        True             4.481           7.914      0.566
+  l_2_ta_r        True             4.433           7.872      0.563
+  l_1_ta_r        True             4.255           7.356      0.578
+  l_1_ta_l        True             4.230           7.351      0.575
+  l_3_ti_l        True             2.646           6.011      0.440
+  l_3_ti_r        True             2.627           6.007      0.437
+
+====================================================================================================
+DONE
+====================================================================================================
+
+====================================================================================================
+ADDENDUM -- specimen-level dose-response, controlled for specimen INSTABILITY
+====================================================================================================
+  instability proxy = mean pairwise M7 seed-to-seed joint relocation, same 50 meshes
+    mean 2.985% sd 1.714%
+  rho(LIM_0 overshoot, instability)            = +0.268   <- the confound, measured
+  rho(overshoot removed, realised relocation ) = +0.517   PARTIAL|instability = +0.471
+  rho(overshoot removed, d|lbs|              ) = +0.496   PARTIAL|instability = +0.442
+  rho(overshoot removed, d|bt|               ) = +0.477   PARTIAL|instability = +0.421

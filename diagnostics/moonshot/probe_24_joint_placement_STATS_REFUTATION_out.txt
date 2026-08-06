@@ -1,0 +1,117 @@
+========================================================================================================
+PROBE 24 -- STATISTICAL REFUTATION TEST of probe 23's 'joint placement' verdict
+========================================================================================================
+
+[load] LIM_0            kind=worker  n= 50 K=25 J_regressor support= 10  rms(deform)=0.01645 rms(para)=0.01040
+[load] BPX_noprior      kind=worker  n= 50 K=13 J_regressor support= 37  rms(deform)=0.01655 rms(para)=0.00866
+[load] ALL_ANTS_CLEAN   kind=clean   n= 81 K=20 J_regressor support= 20  rms(deform)=0.01231 rms(para)=0.01521
+
+--------------------------------------------------------------------------------------------------------
+A. REPRODUCE probe 23b/23c: anatomical joints vs UNIFORM random landmarks, gen@10
+--------------------------------------------------------------------------------------------------------
+corpus              joints  unif-rand  sd(draw)     min     max  paired diff                95% CI
+LIM_0               0.9154     0.8070    0.0300  0.7434  0.8622      +0.1084   [+0.0765, +0.1427]
+BPX_noprior         0.8580     0.7872    0.0373  0.7113  0.8484      +0.0708   [+0.0343, +0.1082]
+ALL_ANTS_CLEAN      0.4608     0.4650    0.0236  0.4332  0.5204      -0.0043   [-0.0191, +0.0101]
+   (matches probe 23c panel B: +0.1084 / +0.0708 / -0.0043)
+
+--------------------------------------------------------------------------------------------------------
+B. THE TWO NUISANCE VARIABLES THE CONTROL DOES NOT MATCH
+--------------------------------------------------------------------------------------------------------
+B1. spatial composition (fraction of the 55 read-out points in each body part)
+                                   body     proximal          mid       distal      antenna     mandible
+anatomical joints                 0.309        0.218        0.218        0.218        0.000        0.036
+uniform random (=vertex           0.503        0.262        0.169        0.030        0.000        0.037
+  density on the mesh)    
+   -> the control under-samples the distal leg 7x and over-samples the body 1.6x.
+      probe 23 panel F per-region gen@10: distal is WORST on workers, BEST on clean.
+
+B2. parametric (shapedirs.betas) variance share of each read-out
+corpus               joints   unif-random  ratio j/r   gen@10 of para-only  gen@10 free-only
+LIM_0                 0.080         0.299      0.269                0.2226            0.9320
+BPX_noprior           0.140         0.306      0.457                0.0980            0.9084
+ALL_ANTS_CLEAN        0.673         0.617      1.090                0.1434            0.7221
+   -> the parametric channel is EXACTLY rank K, so it generalises nearly for free.
+      On workers the control landmarks carry ~4x the joints' share of it; on clean
+      the shares are matched. That is the same sign pattern as the reported effect.
+
+--------------------------------------------------------------------------------------------------------
+C. IS THE EFFECT EXPLAINED BY THE NUISANCE? gen@10 vs parametric share across draws
+--------------------------------------------------------------------------------------------------------
+   40 uniform random landmark sets per corpus; OLS gen@10 ~ parametric share;
+   then predict the anatomical joints from their own parametric share.
+corpus               slope     R2  resid sd  joints share  predicted  observed       z
+LIM_0               -0.344  0.234    0.0229         0.080     0.8915    0.9154   +1.05
+BPX_noprior         -0.330  0.238    0.0264         0.140     0.8541    0.8580   +0.15
+ALL_ANTS_CLEAN      -0.424  0.502    0.0208         0.673     0.4460    0.4608   +0.71
+   (|z| < 2 => the joints are where the nuisance variable alone says they should be;
+    extrapolation beyond the draws' share range is flagged in the caveats.)
+
+--------------------------------------------------------------------------------------------------------
+D. COMPOSITION-MATCHED random landmarks (same body-part mix as joints)
+--------------------------------------------------------------------------------------------------------
+corpus              joints  matched-rand  sd(draw)     min     max  paired diff                95% CI  %worse  para share
+LIM_0               0.9154        0.8542    0.0337  0.7370  0.8986      +0.0612   [+0.0376, +0.0875]      78       0.205
+BPX_noprior         0.8580        0.8264    0.0232  0.7680  0.8659      +0.0316   [+0.0031, +0.0596]      58       0.256
+ALL_ANTS_CLEAN      0.4608        0.4247    0.0210  0.3767  0.4595      +0.0361   [+0.0242, +0.0476]      78       0.745
+
+--------------------------------------------------------------------------------------------------------
+E. JOINT-LOCAL random landmarks (drawn from the 200 verts nearest each joint)
+--------------------------------------------------------------------------------------------------------
+corpus              joints  matched-rand  sd(draw)     min     max  paired diff                95% CI  %worse  para share
+LIM_0               0.9154        0.8371    0.0288  0.7585  0.8798      +0.0784   [+0.0534, +0.1056]      88       0.221
+BPX_noprior         0.8580        0.8192    0.0189  0.7694  0.8474      +0.0388   [+0.0103, +0.0678]      60       0.252
+ALL_ANTS_CLEAN      0.4608        0.4610    0.0100  0.4424  0.4777      -0.0003   [-0.0109, +0.0098]      58       0.658
+
+--------------------------------------------------------------------------------------------------------
+F. MIXTURE-FREE: joints vs uniform random landmarks, one channel at a time
+--------------------------------------------------------------------------------------------------------
+corpus           channel          joints   random      sd      diff                95% CI
+LIM_0            free-form        0.9320   0.8921  0.0297   +0.0399   [+0.0090, +0.0728]
+LIM_0            parametric       0.2226   0.4549  0.0292   -0.2324   [-0.2544, -0.2110]
+
+BPX_noprior      free-form        0.9084   0.8885  0.0266   +0.0198   [-0.0194, +0.0591]
+BPX_noprior      parametric       0.0980   0.1871  0.0387   -0.0890   [-0.1035, -0.0752]
+
+ALL_ANTS_CLEAN   free-form        0.7221   0.7116  0.0240   +0.0106   [-0.0103, +0.0292]
+ALL_ANTS_CLEAN   parametric       0.1434   0.1305  0.0156   +0.0129   [+0.0052, +0.0216]
+
+--------------------------------------------------------------------------------------------------------
+G. CROSS-CORPUS GAP AFTER MATCHING THE PARAMETRIC MIXTURE AT THE JOINTS
+--------------------------------------------------------------------------------------------------------
+   read-out = J . (v_template + deform_verts + alpha * shapedirs.betas); alpha is
+   solved per corpus so the joint parametric variance share hits the target.
+corpus            native share      share=0.08       share=0.3     share=0.673
+LIM_0                    0.080          0.9155          0.8448          0.7028
+BPX_noprior              0.140          0.8785          0.8002          0.6224
+ALL_ANTS_CLEAN           0.673          0.6879          0.6087          0.4605
+   -> if the worker/clean gap collapses when the mixture is matched, the headline
+      cross-corpus contrast was a statement about how much of the fit was expressed
+      in the shared low-rank basis, not about joint placement.
+
+--------------------------------------------------------------------------------------------------------
+H. LEVERAGE / OUTLIERS on the load-bearing within-corpus effect (uniform control)
+--------------------------------------------------------------------------------------------------------
+LIM_0             mean +0.1084  median +0.0898  10% trimmed +0.1006  jackknife range [+0.0991,+0.1139]  max |single-specimen| influence 0.0094
+BPX_noprior       mean +0.0708  median +0.0458  10% trimmed +0.0637  jackknife range [+0.0632,+0.0763]  max |single-specimen| influence 0.0077
+ALL_ANTS_CLEAN    mean -0.0043  median -0.0012  10% trimmed -0.0034  jackknife range [-0.0074,-0.0012]  max |single-specimen| influence 0.0031
+
+   per-joint drop test on LIM_0: recompute the joints' gen@10 after removing the
+   m worst joints, and compare with a random landmark set of the same size.
+      drop  0 worst joints -> 55 joints: gen@10 0.9154   random 55-landmark control 0.8186
+      drop  5 worst joints -> 50 joints: gen@10 0.9055   random 50-landmark control 0.8153
+      drop 10 worst joints -> 45 joints: gen@10 0.8941   random 45-landmark control 0.7958
+      drop 15 worst joints -> 40 joints: gen@10 0.8892   random 40-landmark control 0.7985
+
+--------------------------------------------------------------------------------------------------------
+I. SAMPLE SIZE, EFFECTIVE RANK, AND NEAR-DUPLICATE LEAKAGE
+--------------------------------------------------------------------------------------------------------
+corpus              n  eff.rank(joints)  gen@10 n=50  gen@10 n=40  gen@10 n=30  NN/mean dist  #twins<0.5
+LIM_0              50             21.81       0.9154       0.9211       0.9294         0.782           0
+BPX_noprior        50             17.20       0.8580       0.8683       0.8749         0.752           2
+ALL_ANTS_CLEAN     81              3.68       0.4882       0.4902       0.5032         0.489          50
+   (eff.rank = participation ratio of the joint covariance spectrum; a corpus whose
+    variance is concentrated in few modes is EASY for a k=10 LOO metric regardless
+    of correspondence quality.)
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24_stats_refutation.json

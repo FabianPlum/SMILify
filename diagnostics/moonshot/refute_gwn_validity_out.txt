@@ -1,0 +1,43 @@
+REFUTE-D -- is the inside/outside verdict trustworthy on these scans at JOINT DEPTH?
+
+The generalized winding number is only 1-inside/0-outside for a CLOSED, consistently
+oriented surface. Measured in refute_scan_integrity_out.txt:
+
+    worker scans: median 8075 boundary edges, 4095 non-manifold edges, 44.5 components
+    clean  scans: median 1999 boundary edges, 5239 non-manifold edges,  2.0 components
+
+The prior probe's validity check offsets random face centroids by 1e-3 * diag -- i.e. it
+only ever probes GWN at 0.1% of the body diagonal from the surface. The joints it then
+scores sit at a median gap of 0.28-0.50% of the diagonal, 3-5x deeper, and inside thin
+appendages. This probe measures the FALSE-OUTSIDE RATE of GWN as a function of depth, on
+points that are inside by construction (surface vertices pushed along -normal), split by
+body region, for both corpora.
+
+If the worker false-outside rate at joint depth is much higher than the clean one, the
+61.5% vs 30.1% headline is (at least partly) a scan-topology artefact.
+
+
+### worker   n_scans=12
+   sanity: fraction of OUTWARD-offset points wrongly called INSIDE at 0.1%diag = 5.00%
+   depth %diag      FALSE-OUTSIDE rate, all verts    leg verts only
+   0.10                                       4.5               2.0
+   0.20                                       6.5               5.5
+   0.40                                       8.0              11.0
+   0.80                                      14.0              18.5
+
+### clean   n_scans=20
+   sanity: fraction of OUTWARD-offset points wrongly called INSIDE at 0.1%diag = 3.00%
+   depth %diag      FALSE-OUTSIDE rate, all verts    leg verts only
+   0.10                                       0.0               2.0
+   0.20                                       0.0               2.0
+   0.40                                       1.0               3.0
+   0.80                                      10.5              13.0
+
+============================================================================================
+FALSE-OUTSIDE RATE, worker vs clean (median over scans)
+depth %diag     all: worker    clean   ratio    |  leg: worker    clean   ratio
+0.10                    4.5      0.045000000.00               2.0      2.0    1.00
+0.20                    6.5      0.065000000.00               5.5      2.0    2.75
+0.40                    8.0      1.0    8.00              11.0      3.0    3.67
+0.80                   14.0     10.5    1.33              18.5     13.0    1.42
+============================================================================================

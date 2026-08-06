@@ -1,0 +1,50 @@
+REFUTE-4 -- decompose the headline 61.5% vs 30.1% into a PIPELINE effect and a CORPUS effect.
+
+The headline compares
+    LIM_0            worker scans + OmniAnt_25PCs template + moonshot/LIM fitter
+vs
+    ALL_ANTS_CLEAN   clean  scans + SMPL_fit     template + legacy fitter
+and reads the difference as "the worker FITS misplace joints".  Four things change at once
+(scans, specimens, template, fitter), so the design has n=1 unit per level of the thing that
+actually varies.  Every p-value in the headline (1.9e-21 etc.) is a WITHIN-corpus consistency
+p-value, not a p-value for the causal claim.
+
+Two matched controls already exist on disk and were not used:
+    runs/CLEAN_M7           clean scans, SMIL_OmniAnt template, the SAME moonshot pipeline
+                            as the worker M7 run  ->  isolates SCANS+SPECIMENS
+    runs/M7_handoff_midline worker scans, SMIL_OmniAnt template, moonshot pipeline
+    runs/baseline           worker scans, SMIL_OmniAnt template, stock fitter
+
+So we can hold template+pipeline fixed and vary only the corpus (M7_worker vs CLEAN_M7), and
+hold scans fixed and vary only the pipeline (LIM_0 vs M7_worker vs baseline on bench50;
+CLEAN_M7 vs ALL_ANTS_CLEAN on clean81).
+
+Metric is the HEADLINE metric verbatim: |generalized winding number| < 0.5 against the raw
+target scan, scans normalised by replaying fitter_3d/utils.py:340-344.
+
+
+run            scans     template                             n  %out(GWN)  med gap%  chamfer%
+LIM_0          bench50   OmniAnt_25PCs_joint_limited.pkl     50      61.82     0.496     0.317
+M7_worker      bench50   SMIL_OmniAnt.pkl                    50      58.18     0.601     0.331
+baseline       bench50   SMIL_OmniAnt.pkl                    50      51.82     0.452     0.275
+CLEAN_M7       clean81   SMIL_OmniAnt.pkl                    81      29.09     0.294     0.218
+CLEAN_legacy   clean81   SMPL_fit.pkl                        81      29.09     0.274     0.222
+
+============================================================================================
+A) PIPELINE VARIED, SCANS HELD FIXED (paired, same specimen)
+   [bench50] LIM_0         61.82   vs  M7_worker       58.18   median paired diff  +3.64  n=50  p=3.63e-03
+   [bench50] LIM_0         61.82   vs  baseline        51.82   median paired diff  +9.09  n=50  p=1.43e-05
+   [bench50] M7_worker     58.18   vs  baseline        51.82   median paired diff  +5.45  n=50  p=4.41e-03
+   [clean81] CLEAN_M7      29.09   vs  CLEAN_legacy    29.09   median paired diff  +0.00  n=81  p=6.13e-01
+
+B) CORPUS VARIED, TEMPLATE AND PIPELINE HELD FIXED  (the matched control)
+   M7 pipeline + SMIL_OmniAnt:  worker scans  58.18  vs  clean scans  29.09   ratio 2.00  p=3.37e-20
+
+C) THE HEADLINE CONTRAST, AND WHAT THE CONTROLS ATTRIBUTE IT TO
+   headline               LIM_0 61.82  -  CLEAN_legacy 29.09  = +32.73 pts   (ratio 2.12)
+   matched corpus effect  M7_worker 58.18  -  CLEAN_M7 29.09  = +29.09 pts   (ratio 2.00)
+   pipeline effect ON THE SAME CLEAN SCANS  CLEAN_M7 29.09  -  CLEAN_legacy 29.09  = +0.00 pts   (ratio 1.00)
+   pipeline effect ON THE SAME WORKER SCANS LIM_0 61.82  -  M7_worker 58.18  = +3.64 pts
+
+   => share of the headline gap explained WITHOUT any corpus difference (pipeline alone, clean scans): 0.0%
+============================================================================================

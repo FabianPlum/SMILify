@@ -1,0 +1,64 @@
+PROBE 26 -- is the inside/outside INSTRUMENT itself biased between the two corpora?
+
+The whole claim rests on a binary produced by a generalized winding number thresholded at 0.5.
+GWN equals +/-1 inside a CLOSED, consistently oriented surface. The worker scans are raw CT
+isosurfaces; preprocess_meshes.py already measured, on 40 vs 40 meshes:
+
+      vertex components (median)      clean 3       worker 34.5
+      boundary-edge fraction          clean 0.0388  worker 0.0471
+
+Holes and stray components make the solid angle leak, which pushes |w| DOWN and therefore
+mislabels genuinely interior points as "outside". Probe 21's validity gate offsets face
+centroids by 1e-3 of the diagonal along +/- the normal -- a purely LOCAL test, one thousandth
+of the body, which a holey mesh passes trivially. It does not test the instrument at the depth
+a joint actually sits at.
+
+TEST 1  FALSE-OUTSIDE RATE ON GUARANTEED-INTERIOR POINTS
+  Sample surface points, orient the normal inward (locally, by GWN), run the shrinking-ball
+  medial estimate to get radius r, and probe at p + alpha*r*n for alpha in {0.5, 1.0}. Those
+  points are interior by construction for any closed surface. Any of them that GWN reports as
+  "outside" is an instrument error. Also report median |w| there: a watertight mesh gives 1.0.
+
+TEST 2  MESH INTEGRITY per scan actually used (components, boundary edges).
+
+TEST 3  ARTICULATION CONDITIONAL. Probe 25's ceiling-free statistic is P(fit outside | ref
+  inside). Compute the same conditional in probe 24's zero-placement-error articulation arms:
+  P(joint outside its own posed mesh | that joint was inside at rest). That is the part of the
+  conditional that articulation alone contributes.
+
+====================================================================================================
+TEST 1+2  instrument bias and mesh integrity  (all 50 worker / 81 clean scans)
+
+  worker bench50   n=50
+    connected components   median=44   p90=164   max=301
+    boundary-edge fraction median=0.0554
+    GWN far outside (should be 0) median=0.0000  max=0.0000
+    median |w| at the MEDIAL CENTRE (watertight -> 1.000) = 0.981   worst specimen=0.386
+    FALSE-OUTSIDE rate on guaranteed-interior probes: alpha=0.5 -> 12.3%   alpha=1.0 -> 14.0%
+
+  clean81   n=81
+    connected components   median=29   p90=52   max=1043
+    boundary-edge fraction median=0.0316
+    GWN far outside (should be 0) median=0.0000  max=0.0000
+    median |w| at the MEDIAL CENTRE (watertight -> 1.000) = 1.000   worst specimen=0.988
+    FALSE-OUTSIDE rate on guaranteed-interior probes: alpha=0.5 -> 0.9%   alpha=1.0 -> 0.9%
+
+  false-outside @ medial centre  worker=0.0870  clean=0.0074  p=5.48e-17
+
+  false-outside @ half depth     worker=0.0759  clean=0.0073  p=4.29e-17
+
+  median |w| interior            worker=0.9814  clean=1.0000  p=1.25e-12
+
+  components                     worker=44.5000  clean=29.0000  p=0.000167
+
+  boundary frac                  worker=0.0554  clean=0.0316  p=2.08e-12
+
+====================================================================================================
+TEST 3  the articulation-only contribution to the ceiling-free conditional
+  joints inside at rest: 49/55
+  worker poses   P(outside | inside at rest) = 10.0%   median=10.2%   max=20.4%
+      body=8.0  leg_distal=18.6  leg_middle=10.8  leg_proximal=1.8  mandible=17.0
+  clean poses    P(outside | inside at rest) = 0.2%   median=0.0%   max=2.0%
+      body=0.0  leg_distal=0.0  leg_middle=0.0  leg_proximal=0.0  mandible=4.9
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/joint_placement_instrument_out.txt

@@ -1,0 +1,19 @@
+====================================================================================================
+PROBE 24d -- surface-vs-joints, split by channel
+====================================================================================================
+
+corpus           read-out      para share  gen@10 full  gen@10 free-form  gen@10 para-only
+LIM_0            surface            0.213       0.7070            0.6939            0.5440
+LIM_0            joints             0.080       0.9154            0.9320            0.2226
+
+BPX_noprior      surface            0.152       0.6866            0.6740            0.2388
+BPX_noprior      joints             0.140       0.8580            0.9084            0.0980
+
+ALL_ANTS_CLEAN   surface            0.594       0.5030            0.7724            0.1502
+ALL_ANTS_CLEAN   joints             0.673       0.4608            0.7221            0.1434
+
+   The report's 'joints worse than the surface on workers, better on clean' compares
+   two read-outs with different parametric shares. On the free-form channel, where
+   that nuisance is absent, compare the joints/surface columns directly.
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24d_surface_vs_joints.json

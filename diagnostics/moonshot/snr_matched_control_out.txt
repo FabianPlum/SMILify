@@ -1,0 +1,69 @@
+============================================================================================
+0. VERIFY the fast Gram LOO against the published numbers
+============================================================================================
+    LIM_0            ratio@10 = 0.9998  (published 0.9998, delta +0.00002)   mean|F| = 0.019184
+    M7_worker        ratio@10 = 0.9870  (published 0.9870, delta +0.00002)   mean|F| = 0.020509
+    BPX_noprior      ratio@10 = 0.9988  (published 0.9988, delta -0.00000)   mean|F| = 0.019507
+    CLEAN81_M7       ratio@10 = 0.7792  (published 0.7792, delta +0.00002)   mean|F| = 0.008880
+    ALL_ANTS_CLEAN   ratio@10 = 0.7932  (published 0.7932, delta -0.00005)   mean|F| = 0.017305
+
+============================================================================================
+Q1. WHAT DOES ACTUAL PURE NOISE SCORE? -- the null for 'explains literally nothing'
+============================================================================================
+    iid Gaussian field, same n and same dimension as each corpus, 8 realisations
+    NULL n= 50  ratio@10 = 1.0203 +/- 0.0000   residual-energy@10 = 0.9997 +/- 0.0000   @40 = 0.9987
+    NULL n= 50  ratio@10 = 1.0202 +/- 0.0000   residual-energy@10 = 0.9997 +/- 0.0000   @40 = 0.9987
+    NULL n= 81  ratio@10 = 1.0123 +/- 0.0000   residual-energy@10 = 0.9997 +/- 0.0000   @40 = 0.9987
+
+    observed, same estimator:
+    LIM_0            ratio@10 = 0.9998   residual-energy@10 = 0.9718  (structure recovered out of sample = 2.82% of the field's energy)
+    M7_worker        ratio@10 = 0.9870   residual-energy@10 = 0.9517  (structure recovered out of sample = 4.83% of the field's energy)
+    BPX_noprior      ratio@10 = 0.9988   residual-energy@10 = 0.9698  (structure recovered out of sample = 3.02% of the field's energy)
+    CLEAN81_M7       ratio@10 = 0.7792   residual-energy@10 = 0.5543  (structure recovered out of sample = 44.57% of the field's energy)
+    ALL_ANTS_CLEAN   ratio@10 = 0.7932   residual-energy@10 = 0.6310  (structure recovered out of sample = 36.90% of the field's energy)
+
+============================================================================================
+Q2a. SNR SWEEP -- iid noise into the CLEAN field, ratio AND absolute explained energy
+============================================================================================
+    worker M7 target: mean|F| = 0.020509  ratio@10 = 0.9870  resE@10 = 0.9517  ABSOLUTE explained energy@10 = 4.097e-05
+
+      sigma    mean|F|  ratio@10   resE@10   absExpl@10   absExpl@40
+     0.0000   0.008880    0.7792    0.5543    5.873e-05    6.820e-05
+     0.0040   0.011329    0.8801    0.6887    5.616e-05    6.255e-05
+     0.0080   0.016130    0.9516    0.8443    5.079e-05    5.422e-05
+     0.0100   0.018859    0.9694    0.8902    4.786e-05    5.068e-05
+     0.0110   0.020244    0.9760    0.9070    4.639e-05    4.881e-05
+     0.0120   0.021674    0.9813    0.9210    4.491e-05    4.724e-05
+     0.0140   0.024571    0.9893    0.9421    4.202e-05    4.404e-05
+     0.0200   0.033601    1.0018    0.9746    3.414e-05    3.613e-05
+
+    NOTE the absolute explained energy is the scale-free statement of 'how much real
+    structure did 10 out-of-sample modes recover'. The ratio is that divided by the
+    field's total energy, so it falls as noise is added even when the structure is
+    untouched.
+
+============================================================================================
+Q2b. FULLY MATCHED CONTROL: clean n=50 + genus-blocked + noised to the worker's
+     exact field magnitude, versus worker M7 n=50 + genus-blocked
+============================================================================================
+    WORKER M7   n=50 genus-blocked:  ratio@10 = 0.9891  resE@10 = 0.9528  absExpl@10 = 4.012e-05  mean|F| = 0.020509
+    CLEAN81_M7  n=50 genus-blocked, magnitude-matched (10 draws):
+        sigma        = 0.01113 +/- 0.00008
+        mean|F|      = 0.020507  (target 0.020509)
+        ratio@10     = 0.9990 +/- 0.0041   [worker 0.9891]
+        resE@10      = 0.9142 +/- 0.0147   [worker 0.9528]
+        absExpl@10   = 4.580e-05 +/- 8.4e-06   [worker 4.012e-05]
+
+    and the same clean draws WITHOUT the magnitude match, for reference:
+        ratio@10 = 0.8510 +/- 0.0118   resE@10 = 0.6023   absExpl@10 = 5.906e-05
+
+============================================================================================
+Q3. SPATIAL BANDWIDTH of the free-form fields (mesh-Laplacian roughness per unit
+    magnitude). A smoother field is low-rank-friendly independently of anatomy.
+============================================================================================
+    LIM_0            Laplacian roughness = 0.1903   (1.0 = white on the mesh; 0 = perfectly smooth)   mean|F| = 0.019184
+    M7_worker        Laplacian roughness = 0.1687   (1.0 = white on the mesh; 0 = perfectly smooth)   mean|F| = 0.020509
+    BPX_noprior      Laplacian roughness = 0.1786   (1.0 = white on the mesh; 0 = perfectly smooth)   mean|F| = 0.019507
+    CLEAN81_M7       Laplacian roughness = 0.0802   (1.0 = white on the mesh; 0 = perfectly smooth)   mean|F| = 0.008880
+    ALL_ANTS_CLEAN   Laplacian roughness = 0.0164   (1.0 = white on the mesh; 0 = perfectly smooth)   mean|F| = 0.017305
+

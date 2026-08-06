@@ -1,0 +1,18 @@
+template OmniAnt_25PCs_joint_limited.pkl  V=10235  K=25
+Each corpus below is 50 meshes of this model driven by betas with the stated
+covariance.  Correspondence is EXACT in every one of them.
+
+beta covariance                         effdim  alpha   gen10/sp   gen20/sp   gen40/sp
+isotropic  var_j = 1 (flat, K=25)        15.50   0.75     0.7781     0.4243     0.0000
+mild decay var_j = j^-0.5                13.43   0.89     0.7263     0.3762     0.0000
+decay      var_j = j^-1                   8.33   1.22     0.6157     0.3385     0.0000
+steep      var_j = j^-2                   2.37   2.22     0.2410     0.1142     0.0000
+steep      var_j = j^-3                   1.36   3.18     0.0790     0.0303     0.0000
+
+FOR COMPARISON (measured, real registrations):
+  worker LIM_0 free-form                 33.68   0.39     0.9998     0.9935     0.9828
+  worker M7 free-form                    32.35   0.44     0.9870     0.9794     0.9655
+  CLEAN81_M7 free-form                    8.26   1.05     0.7792     0.7509     0.7292
+  ALL_ANTS_CLEAN rest shape               3.76   1.36     0.5304     0.4899     0.4496
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/refute25_synthetic_exact.json

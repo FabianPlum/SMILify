@@ -1,0 +1,80 @@
+====================================================================================================
+PART E -- mesh-level effect of the placement parameters (full LBS at identity pose)
+====================================================================================================
+  'placement-driven vertex displacement' = ||LBS(J, lbs, bt) - v_shaped|| per vertex,
+  i.e. how far the rest geometry is dragged by the per-joint scale/translation params
+  alone, with every rotation set to identity. Normalised by the body bbox diagonal.
+
+  arm                by lbs+bt   by lbs only   by bt only   |deform_verts|
+  ------------------------------------------------------------------------
+  [LIM_0] identity-LBS deviates from v_shaped by max 0.3206 (154 vertices with weight rows != 1); baseline = identity LBS
+  LIM_0                  4.69%         3.00%        2.76%            0.81%
+  [LIM_1x] identity-LBS deviates from v_shaped by max 0.3230 (154 vertices with weight rows != 1); baseline = identity LBS
+  LIM_1x                 4.65%         3.02%        2.82%            0.84%
+  [BPX_noprior] identity-LBS deviates from v_shaped by max 0.0361 (120 vertices with weight rows != 1); baseline = identity LBS
+  BPX_noprior            4.73%         3.03%        2.83%            0.83%
+  [ALL_ANTS_CLEAN] identity-LBS deviates from v_shaped by max 0.3297 (154 vertices with weight rows != 1); baseline = identity LBS
+  ALL_ANTS_CLEAN         2.00%         2.00%        0.00%            0.74%
+
+====================================================================================================
+PART F -- does the across-joint placement/violation link survive the distal confound?
+====================================================================================================
+
+### LIM_0
+    ACROSS-JOINT rho(viol rate, cum displacement), ALL constrained joints (n=32) = +0.898   <- probe-23's number
+    rho(viol rate, depth) = +0.922    rho(cum displacement, depth) = +0.979   <- the confound
+    PARTIAL rho(viol rate, cum displacement | depth) = -0.056
+    within each depth level:
+      depth 1: n= 6  rho(viol,cumdisp) +0.551   rho(viol,|bt|) +0.551   rho(viol,|lbs|) +0.580   viol_rate 0.44
+      depth 2: n= 8  rho(viol,cumdisp) -0.252   rho(viol,|bt|) -0.132   rho(viol,|lbs|) +0.204   viol_rate 0.65
+      depth 3: n= 6  rho(viol,cumdisp) +0.696   rho(viol,|bt|) +0.464   rho(viol,|lbs|) +0.812   viol_rate 0.78
+      depth 4: n= 6  rho(viol,cumdisp) -0.353   rho(viol,|bt|) +0.088   rho(viol,|lbs|) +0.177   viol_rate 0.87
+      depth 5: n= 6  rho(viol,cumdisp) -0.319   rho(viol,|bt|) -0.899   rho(viol,|lbs|) -0.812   viol_rate 0.90
+
+### BPX_noprior
+    ACROSS-JOINT rho(viol rate, cum displacement), ALL constrained joints (n=32) = +0.872   <- probe-23's number
+    rho(viol rate, depth) = +0.914    rho(cum displacement, depth) = +0.979   <- the confound
+    PARTIAL rho(viol rate, cum displacement | depth) = -0.272
+    within each depth level:
+      depth 1: n= 6  rho(viol,cumdisp) +0.486   rho(viol,|bt|) +0.486   rho(viol,|lbs|) -0.486   viol_rate 0.47
+      depth 2: n= 8  rho(viol,cumdisp) -0.143   rho(viol,|bt|) -0.119   rho(viol,|lbs|) -0.119   viol_rate 0.68
+      depth 3: n= 6  rho(viol,cumdisp) -0.213   rho(viol,|bt|) +0.698   rho(viol,|lbs|) +0.638   viol_rate 0.77
+      depth 4: n= 6  rho(viol,cumdisp) -0.235   rho(viol,|bt|) -0.441   rho(viol,|lbs|) -0.088   viol_rate 0.87
+      depth 5: n= 6  rho(viol,cumdisp) -0.754   rho(viol,|bt|) -0.203   rho(viol,|lbs|) -0.029   viol_rate 0.90
+
+====================================================================================================
+PART G -- LIM_1x minus LIM_0: which joints picked up the compensation, and on which axis
+====================================================================================================
+
+  top 15 joints by increase in |log_beta_scales| (LIM_1x - LIM_0):
+  joint        depth #child  |lbs| LIM_0  |lbs| LIM_1x     delta     d|bt|
+  l_3_ta_r         5      1       0.4046        0.7202   +0.3156   +0.0267
+  l_3_ta_l         5      1       0.4046        0.7202   +0.3156   +0.0269
+  l_3_ti_l         4      1       0.3864        0.6794   +0.2930   +0.0301
+  l_3_ti_r         4      1       0.3864        0.6794   +0.2930   +0.0301
+  l_2_ti_r         4      1       0.6349        0.8700   +0.2351   +0.0191
+  l_2_ti_l         4      1       0.6350        0.8700   +0.2349   +0.0190
+  l_2_ta_l         5      1       0.6872        0.8738   +0.1866   +0.0129
+  l_2_ta_r         5      1       0.6873        0.8738   +0.1866   +0.0125
+  l_1_ta_r         5      1       0.5126        0.6915   +0.1788   +0.0146
+  l_1_ta_l         5      1       0.5126        0.6914   +0.1788   +0.0144
+  l_2_fe_l         3      1       0.2953        0.4339   +0.1387   +0.0002
+  l_2_fe_r         3      1       0.2951        0.4338   +0.1386   +0.0002
+  l_3_fe_l         3      1       0.3408        0.4513   +0.1106   +0.0024
+  l_3_fe_r         3      1       0.3408        0.4514   +0.1105   +0.0025
+  l_1_ti_l         4      1       0.5120        0.6184   +0.1064   +0.0151
+
+  leaf joints (scale here moves NO joint, only stretches skinned vertices), n=15:
+    |lbs| 0.2293 -> 0.2446 (+6.7%)
+  non-leaf joints, n=40:
+    |lbs| 0.3676 -> 0.4634 (+26.1%)
+  |joint_rot| LIM_0: mean 0.8516 rad (48.79 deg) per joint
+  |joint_rot| LIM_1x: mean 0.6537 rad (37.46 deg) per joint
+
+====================================================================================================
+PART H -- did the compensation cost surface fit? chamfer of stored verts vs bench50 targets
+====================================================================================================
+  LIM_0    n= 50  mean sq-chamfer 3.391566e-04   median 2.867961e-04
+  LIM_1x   n= 50  mean sq-chamfer 3.542935e-04   median 2.860416e-04
+  LIM_1x / LIM_0 = 1.0446   paired wilcoxon p = 0.0894
+  specimens where LIM_1x fits BETTER: 22/50

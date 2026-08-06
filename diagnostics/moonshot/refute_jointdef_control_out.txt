@@ -1,0 +1,134 @@
+REFUTE-C -- two attacks on "61.5% of worker joints lie outside their own scan vs 30.1%".
+
+ATTACK 1 -- JOINT DEFINITION.
+  `config.STATIC_JOINT_LOCATIONS` is driven by dd['static_joint_locs'], which is ABSENT in all
+  three models, so the flag is False and smal_torch.py:380-382 returns
+  joints = J_regressor . posed_verts, NOT the batch_global_rigid output the probe used.
+  Measured in refute_jointplacement_gate_out.txt: the two definitions disagree by
+  0.849 %diag (median) for LIM_0 but only 0.015 %diag for CLEAN -- a 57x asymmetry, and the
+  worker disagreement alone is bigger than the entire claimed effect (median joint->scan gap
+  0.50% vs 0.28% of diag). So the metric is re-run under every definition.
+
+ATTACK 2 -- A ZERO-PLACEMENT-ERROR CONTROL POINT SET.
+  C_w[j] = sum_v W[v,j] * verts[v] / sum_v W[v,j]   on the FINAL fitted verts.
+  This is the skin-weight centroid of the fitted surface patch that joint j controls. It is
+  a medial point of the FITTED mesh BY CONSTRUCTION and carries no joint-placement
+  information at all. If C_w is also ~2x more often outside the scan for workers, then
+  "% outside the scan" is measuring fitted-surface-vs-scan disagreement and/or scan
+  pathology, not joint placement.
+
+ATTACK 3 -- SENSITIVITY CALIBRATION.
+  outfrac as a function of isotropic joint jitter eps*diag, per corpus. Gives the physical
+  displacement that the 30.1 -> 61.5 gap corresponds to, and shows whether the metric has
+  the same gain in both corpora (it does not if the corpora's limbs differ in thickness).
+
+
+### LIM_0 (worker)  n_used=50  missing=0
+   point set                         %out all 55  %out no wings (51)
+   J_static (probe21)                       61.8                61.8
+   J_regressed (real cfg)                   54.5                56.9
+   J_regressed_deformed                     40.0                42.2
+   C_skinweight_final (CONTROL)             40.0                39.2
+   C_skinweight_posed (CONTROL)             43.6                44.1
+   median joint->scan gap (J_static) = 0.496 %diag
+   median local limb thickness at joints (fitted mesh, W>0.5) = 5.268 %diag
+   jitter eps (%diag)         % outside
+   0.00                            61.8
+   0.25                            62.3
+   0.50                            64.5
+   1.00                            70.9
+   2.00                            74.5
+
+### CLEAN (81)  n_used=81  missing=0
+   point set                         %out all 55  %out no wings (51)
+   J_static (probe21)                       29.1                27.5
+   J_regressed (real cfg)                   30.9                27.5
+   J_regressed_deformed                      9.1                 7.8
+   C_skinweight_final (CONTROL)             10.9                 9.8
+   C_skinweight_posed (CONTROL)             23.6                21.6
+   median joint->scan gap (J_static) = 0.274 %diag
+   median local limb thickness at joints (fitted mesh, W>0.5) = 3.708 %diag
+   jitter eps (%diag)         % outside
+   0.00                            29.1
+   0.25                            45.5
+   0.50                            62.7
+   1.00                            74.5
+   2.00                            82.7
+
+============================================================================================
+WORKER vs CLEAN, per point set (Mann-Whitney over specimens)
+point set                           worker     clean    ratio           p   | no-wing worker/clean/ratio
+J_static (probe21)                    61.8      29.1     2.12    1.88e-21   |   61.8    27.5    2.25
+J_regressed (real cfg)                54.5      30.9     1.76    2.45e-20   |   56.9    27.5    2.07
+J_regressed_deformed                  40.0       9.1     4.40    7.06e-22   |   42.2     7.8    5.38
+C_skinweight_final (CONTROL)          40.0      10.9     3.67    2.17e-20   |   39.2     9.8    4.00
+C_skinweight_posed (CONTROL)          43.6      23.6     1.85    1.39e-16   |   44.1    21.6    2.05
+
+PER-JOINT %outside (J_static vs CONTROL), worker | clean:
+  b_t        J_static  34.0  32.1   CONTROL  12.0   0.0
+  b_a_1      J_static  30.0  23.5   CONTROL  26.0   8.6
+  b_a_2      J_static  14.0  22.2   CONTROL  32.0   4.9
+  b_a_3      J_static  44.0  42.0   CONTROL  22.0   0.0
+  b_a_4      J_static  64.0  11.1   CONTROL  28.0   0.0
+  b_a_5      J_static  82.0  56.8   CONTROL  46.0   1.2
+  l_1_co_r   J_static  46.0   4.9   CONTROL  40.0   0.0
+  l_1_tr_r   J_static  64.0  16.0   CONTROL  48.0   1.2
+  l_1_fe_r   J_static  76.0  22.2   CONTROL  60.0   0.0
+  l_1_ti_r   J_static  76.0  14.8   CONTROL  34.0   0.0
+  l_1_ta_r   J_static  70.0  19.8   CONTROL  50.0  32.1
+  l_1_pt_r   J_static  58.0  22.2   CONTROL  44.0   3.7
+  l_2_co_r   J_static  32.0  50.6   CONTROL  42.0   1.2
+  l_2_tr_r   J_static  70.0  27.2   CONTROL  38.0   1.2
+  l_2_fe_r   J_static  76.0   9.9   CONTROL  50.0   0.0
+  l_2_ti_r   J_static  66.0   0.0   CONTROL  42.0   0.0
+  l_2_ta_r   J_static  66.0   8.6   CONTROL  60.0  39.5
+  l_2_pt_r   J_static  70.0  23.5   CONTROL  42.0   2.5
+  l_3_co_r   J_static  48.0  40.7   CONTROL  40.0   0.0
+  l_3_tr_r   J_static  68.0  17.3   CONTROL  30.0   0.0
+  l_3_fe_r   J_static  76.0  28.4   CONTROL  36.0   0.0
+  l_3_ti_r   J_static  82.0   7.4   CONTROL  34.0   2.5
+  l_3_ta_r   J_static  74.0  22.2   CONTROL  42.0   9.9
+  l_3_pt_r   J_static  48.0  35.8   CONTROL  26.0   3.7
+  w_1_r      J_static  28.0  74.1   CONTROL  28.0  74.1
+  w_2_r      J_static  82.0  58.0   CONTROL  46.0  17.3
+  l_1_co_l   J_static  40.0   6.2   CONTROL  46.0   0.0
+  l_1_tr_l   J_static  60.0  18.5   CONTROL  40.0   1.2
+  l_1_fe_l   J_static  46.0  14.8   CONTROL  62.0   0.0
+  l_1_ti_l   J_static  60.0  11.1   CONTROL  48.0   0.0
+  l_1_ta_l   J_static  66.0  16.0   CONTROL  56.0  34.6
+  l_1_pt_l   J_static  50.0  30.9   CONTROL  30.0   1.2
+  l_2_co_l   J_static  38.0  46.9   CONTROL  52.0   0.0
+  l_2_tr_l   J_static  72.0  30.9   CONTROL  36.0   0.0
+  l_2_fe_l   J_static  70.0  16.0   CONTROL  46.0   0.0
+  l_2_ti_l   J_static  80.0   1.2   CONTROL  52.0   0.0
+  l_2_ta_l   J_static  74.0   8.6   CONTROL  62.0  39.5
+  l_2_pt_l   J_static  70.0  14.8   CONTROL  46.0   2.5
+  l_3_co_l   J_static  36.0  40.7   CONTROL  36.0   0.0
+  l_3_tr_l   J_static  60.0  24.7   CONTROL  26.0   0.0
+  l_3_fe_l   J_static  80.0  17.3   CONTROL  36.0   0.0
+  l_3_ti_l   J_static  78.0   6.2   CONTROL  30.0   3.7
+  l_3_ta_l   J_static  74.0  30.9   CONTROL  30.0  16.0
+  l_3_pt_l   J_static  60.0  32.1   CONTROL  32.0   6.2
+  w_1_l      J_static  30.0  70.4   CONTROL  30.0  70.4
+  w_2_l      J_static  82.0  61.7   CONTROL  42.0  19.8
+  b_h        J_static  22.0  32.1   CONTROL  10.0   0.0
+  ma_r       J_static  78.0  32.1   CONTROL  30.0  40.7
+  an_1_r     J_static  60.0  65.4   CONTROL  38.0  43.2
+  an_2_r     J_static  80.0  67.9   CONTROL  48.0  54.3
+  an_3_r     J_static  76.0  51.9   CONTROL  46.0   1.2
+  ma_l       J_static  76.0  33.3   CONTROL  34.0  48.1
+  an_1_l     J_static  56.0  63.0   CONTROL  30.0  40.7
+  an_2_l     J_static  76.0  64.2   CONTROL  50.0  55.6
+  an_3_l     J_static  86.0  51.9   CONTROL  40.0   1.2
+
+PER-GROUP, control point set C_skinweight_final:
+  body           CONTROL worker= 35.3 clean= 23.5  ratio= 1.50   ||   J_static worker= 55.9 clean= 47.1 ratio= 1.19
+  leg_distal     CONTROL worker= 41.7 clean=  8.3  ratio= 5.00   ||   J_static worker= 66.7 clean= 25.0 ratio= 2.67
+  leg_middle     CONTROL worker= 45.8 clean=  0.0  ratio=458333333.33   ||   J_static worker= 75.0 clean=  8.3 ratio= 9.00
+  leg_proximal   CONTROL worker= 37.5 clean=  0.0  ratio=375000000.00   ||   J_static worker= 50.0 clean= 25.0 ratio= 2.00
+  mandible       CONTROL worker=  0.0 clean= 50.0  ratio= 0.00   ||   J_static worker=100.0 clean=  0.0 ratio=1000000000.00
+
+METRIC GAIN (how much jitter reproduces the other corpus):
+  LIM_0 (worker)   eps=0.00%->61.8%  eps=0.25%->62.3%  eps=0.50%->64.5%  eps=1.00%->70.9%  eps=2.00%->74.5%
+  CLEAN (81)       eps=0.00%->29.1%  eps=0.25%->45.5%  eps=0.50%->62.7%  eps=1.00%->74.5%  eps=2.00%->82.7%
+============================================================================================

@@ -1,0 +1,76 @@
+
+====================================================================================================
+PART G -- corrected bone distortion (zero-length bones masked as probe-23 masks them)
+====================================================================================================
+  arm               bone dist %  cumdisp %  |betas| mean
+  CLEAN_M7                25.72      2.405      0.000353
+  M7_worker               79.06      6.466      0.000418
+  GATE_easy_M7            38.22      4.562      0.000249
+  GATE_rand_M7            79.90      6.520      0.000352
+  S0_oldmodel_M7          47.23      4.674      0.000243
+  BPX_noprior             78.45      6.440      0.325837
+  LIM_0                   58.72      6.845      0.269563
+  LIM_1x                  58.32      6.473      0.265502
+
+  NOTE the shape space is DEAD in the SMIL_OmniAnt M7 arms (|betas| ~ 1e-3), for the
+  clean corpus exactly as much as for the workers -- so 'clean scans are in-distribution
+  for the shape space' cannot be what separates them in this block.
+
+====================================================================================================
+PART H -- ANCOVA. Does corpus still predict placement once pose magnitude is held fixed?
+====================================================================================================
+  pooled n = 281  (81 clean, 200 worker)
+  r(legrot, cumdisp) pooled           = +0.755
+  r(corpus, cumdisp) pooled           = +0.656
+  r(legrot, corpus)                   = +0.907   <- the two predictors are near-collinear
+  PARTIAL r(corpus, cumdisp | legrot) = -0.104  p=0.0821
+  PARTIAL r(legrot, cumdisp | corpus) = +0.503  p=1.93e-19
+
+  WORKER-ONLY regression cumdisp ~ a + b*legrot, extrapolated to the clean corpus mean:
+    slope 0.1091 %body per deg, intercept -0.4465;  worker r = +0.516
+    clean mean leg rotation 14.61 deg -> PREDICTED cumdisp 1.147%
+    OBSERVED clean cumdisp 2.405%   (worker observed 5.556%)
+    gap explained by pose alone: 139.9% of the worker-clean difference is reproduced by the worker arm's OWN pose slope
+
+    CLEAN-ONLY slope 0.0543, intercept 1.6111; extrapolated to worker mean rotation 55.02 deg -> 4.601% (observed worker 5.556%)
+
+  same for |log_beta_scales| and |betas_trans|:
+    |lbs|  r(corpus,.)=+0.549  partial|legrot=-0.169  worker-slope prediction at clean pose 0.02120 vs observed clean 0.07075 (worker 0.13010)
+    |bt|   r(corpus,.)=+0.600  partial|legrot=-0.130  worker-slope prediction at clean pose 0.00415 vs observed clean 0.01203 (worker 0.02335)
+
+  TAIL TEST -- the 10 most folded clean specimens vs the 10 most extended workers:
+    cumdisp%  clean-folded   3.4181 (rot  30.4 deg) | worker-extended   3.7998 (rot  34.5 deg) | ratio  1.11  p=0.521
+    |lbs|     clean-folded   0.0849 (rot  30.4 deg) | worker-extended   0.0839 (rot  34.5 deg) | ratio  0.99  p=0.791
+    |bt|      clean-folded   0.0135 (rot  30.4 deg) | worker-extended   0.0141 (rot  34.5 deg) | ratio  1.05  p=0.91
+
+====================================================================================================
+PART I -- the DIRECT causal test the hypothesis needs: does per-specimen placement
+          magnitude predict per-specimen CORRESPONDENCE quality (probe-19 LOO error)?
+====================================================================================================
+
+  CLEAN_M7  (n=81)  LBS singular values min 0.213 max 2.204
+    gen@10 probe-19 as-is 0.7242   with deform_verts un-rotated 0.7169
+    [as-is ] rho(LOO err, cumdisp)=+0.582  rho(., |lbs|)=+0.641  rho(., |bt|)=+0.487  rho(., bone dist)=+0.548  rho(., legrot)=+0.147
+    [un-rot] rho(LOO err, cumdisp)=+0.571  rho(., |lbs|)=+0.634  rho(., |bt|)=+0.475  rho(., bone dist)=+0.543  rho(., legrot)=+0.133
+
+  M7_worker  (n=50)  LBS singular values min 0.003 max 4.990
+    gen@10 probe-19 as-is 0.9508   with deform_verts un-rotated 0.9483
+    [as-is ] rho(LOO err, cumdisp)=+0.852  rho(., |lbs|)=+0.861  rho(., |bt|)=+0.873  rho(., bone dist)=+0.892  rho(., legrot)=+0.569
+    [un-rot] rho(LOO err, cumdisp)=+0.849  rho(., |lbs|)=+0.862  rho(., |bt|)=+0.868  rho(., bone dist)=+0.891  rho(., legrot)=+0.570
+
+  GATE_easy_M7  (n=50)  LBS singular values min 0.071 max 2.651
+    gen@10 probe-19 as-is 0.9697   with deform_verts un-rotated 0.9689
+    [as-is ] rho(LOO err, cumdisp)=+0.430  rho(., |lbs|)=+0.531  rho(., |bt|)=+0.781  rho(., bone dist)=+0.617  rho(., legrot)=+0.397
+    [un-rot] rho(LOO err, cumdisp)=+0.429  rho(., |lbs|)=+0.532  rho(., |bt|)=+0.772  rho(., bone dist)=+0.622  rho(., legrot)=+0.388
+
+  BPX_noprior  (n=50)  LBS singular values min 0.051 max 5.019
+    gen@10 probe-19 as-is 0.9199   with deform_verts un-rotated 0.9148
+    [as-is ] rho(LOO err, cumdisp)=+0.825  rho(., |lbs|)=+0.840  rho(., |bt|)=+0.876  rho(., bone dist)=+0.893  rho(., legrot)=+0.539
+    [un-rot] rho(LOO err, cumdisp)=+0.823  rho(., |lbs|)=+0.844  rho(., |bt|)=+0.875  rho(., bone dist)=+0.889  rho(., legrot)=+0.547
+
+  LIM_0  (n=50)  LBS singular values min 0.012 max 16.010
+    gen@10 probe-19 as-is 0.9115   with deform_verts un-rotated 0.9100
+    [as-is ] rho(LOO err, cumdisp)=+0.820  rho(., |lbs|)=+0.823  rho(., |bt|)=+0.860  rho(., bone dist)=+0.894  rho(., legrot)=+0.413
+    [un-rot] rho(LOO err, cumdisp)=+0.823  rho(., |lbs|)=+0.829  rho(., |bt|)=+0.864  rho(., bone dist)=+0.897  rho(., legrot)=+0.419
+
+DONE

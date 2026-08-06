@@ -1,0 +1,11 @@
+ROBUSTNESS OF THE SIZE NORMALISER -- median leg-bone D_pose under 3 conventions
+  body   : divide by median(L_body_fit/L_body_tmpl)   [used in probe 23]
+  allbone: divide by median over ALL 53 bones
+  none   : no normalisation at all
+run                 kind        body  allbone     none | dist body  allbone     none
+LIM_0               worker    0.3030   0.2602   0.3277      0.3352    0.3292    0.4446
+LIM_1x              worker    0.3131   0.2672   0.3117      0.3410    0.3127    0.4158
+BPX_noprior         worker    0.3686   0.3025   0.3913      0.4486    0.4099    0.5387
+M7_handoff_midline  worker    0.3382   0.3075   0.3683      0.4189    0.4083    0.5337
+baseline            worker    0.6203   0.5546   0.5728      0.7564    0.7064    0.7606
+ALL_ANTS_CLEAN      clean     0.1850   0.1220   0.1493      0.2196    0.1447    0.1527

@@ -1,0 +1,96 @@
+================================================================================================
+PROBE 23 -- consistency of fitted REST-SPACE JOINT LOCATIONS across specimens
+================================================================================================
+metric: leave-one-out reconstruction error / population spread (k=0).
+        lower = joints land in a predictable, learnable place across specimens.
+        1.00 = k modes predict a held-out specimen no better than the mean does.
+
+[load] LIM_0            kind=worker  n= 50  V=10235  betas=25  joint-scale (max|coord|) mean 0.9129 sd 0.0117
+[load] BPX_noprior      kind=worker  n= 50  V=10229  betas=13  joint-scale (max|coord|) mean 0.9069 sd 0.0112
+[load] ALL_ANTS_CLEAN   kind=clean   n= 81  V=10236  betas=20  joint-scale (max|coord|) mean 0.9216 sd 0.0122
+
+------------------------------------------------------------------------------------------------
+A. HEADLINE -- JOINT locations, per-specimen normalised (centred, /max|coord|)
+------------------------------------------------------------------------------------------------
+corpus            kind       n  spread(k=0)     gen@1     gen@5    gen@10    gen@20    gen@40
+LIM_0             worker    50      0.02296    0.9596    0.9345    0.9154    0.8768    0.8066
+BPX_noprior       worker    50      0.01980    0.9463    0.8857    0.8580    0.8125    0.7400
+ALL_ANTS_CLEAN    clean     81      0.02969    0.7272    0.5302    0.4608    0.3861    0.3127
+   (columns after spread are gen@k / spread; spread is in normalised units)
+
+------------------------------------------------------------------------------------------------
+B. CONTROL -- same thing WITHOUT per-specimen normalisation (size left in)
+------------------------------------------------------------------------------------------------
+corpus            kind       n  spread(k=0)     gen@1     gen@5    gen@10    gen@20    gen@40
+LIM_0             worker    50      0.02019    0.9802    0.9586    0.9432    0.9075    0.8376
+BPX_noprior       worker    50      0.01700    0.9588    0.9221    0.8947    0.8483    0.7797
+ALL_ANTS_CLEAN    clean     81      0.02792    0.7397    0.5275    0.4599    0.3896    0.3150
+
+------------------------------------------------------------------------------------------------
+C. CONTROL -- FULL-VERTEX probe-19, recomputed with this same code
+------------------------------------------------------------------------------------------------
+corpus            kind       n  spread(k=0)     gen@1     gen@5    gen@10    gen@20    gen@40
+LIM_0             worker    50      0.02407    0.9412    0.9175    0.8998    0.8847    0.8611
+BPX_noprior       worker    50      0.02291    0.9470    0.9279    0.9166    0.9024    0.8818
+ALL_ANTS_CLEAN    clean     81      0.02636    0.7334    0.5691    0.5239    0.4839    0.4440
+   (raw, unnormalised -- directly comparable to the quoted 0.92 / 0.5383 figures)
+
+corpus            kind       n  spread(k=0)     gen@1     gen@5    gen@10    gen@20    gen@40
+LIM_0             worker    50      0.03155    0.7758    0.7193    0.7070    0.6928    0.6753
+BPX_noprior       worker    50      0.03120    0.7439    0.6965    0.6866    0.6751    0.6601
+ALL_ANTS_CLEAN    clean     81      0.02847    0.7011    0.5388    0.5030    0.4626    0.4283
+   (per-specimen normalised vertices, matched to panel A's normalisation)
+
+------------------------------------------------------------------------------------------------
+D. CONTROL -- clean corpus SUBSAMPLED to n=50, matching the worker arms
+------------------------------------------------------------------------------------------------
+quantity                               gen@1           gen@5          gen@10          gen@20          gen@40
+CLEAN n=50 JOINTS               0.7361+-0.0227    0.5459+-0.0160    0.4792+-0.0121    0.4123+-0.0128    0.3440+-0.0074
+CLEAN n=50 VERTICES             0.7051+-0.0179    0.5592+-0.0169    0.5186+-0.0160    0.4802+-0.0145    0.4489+-0.0128
+   (20 random 50-of-81 draws; mean +- sd over draws)
+
+------------------------------------------------------------------------------------------------
+E. REFERENCE -- exact-correspondence synthetic joints (each template's own space)
+------------------------------------------------------------------------------------------------
+template                             K    n     gen@1     gen@5    gen@10    gen@20    gen@40
+LIM_0                               25   50    0.8698    0.5296    0.3523    0.0904    0.0000
+BPX_noprior                         13   50    0.9305    0.5022    0.1482    0.0000    0.0000
+ALL_ANTS_CLEAN                      20   81    0.8936    0.6566    0.4337    0.0242    0.0000
+   (joints of shapes drawn from the model's own K-dim space: correspondence is
+    exact by construction. This is the FLOOR of the joint metric, not 0.42 --
+    a 165-dim joint vector is far easier to cover with k modes than 30k verts.)
+
+------------------------------------------------------------------------------------------------
+F. LOCALISATION -- per-joint gen@10/spread on normalised joints
+------------------------------------------------------------------------------------------------
+joint group        n             LIM_0       BPX_noprior    ALL_ANTS_CLEAN
+body              17            0.8702            0.7824            0.4585
+leg-proximal      12            0.9914            0.8882            0.6120
+leg-mid           12            0.9594            0.9584            0.4999
+leg-distal        12            0.9338            0.9419            0.3427
+mandible           2            0.8996            0.8196            0.6674
+
+worst 12 joints by gen@10/spread, LIM_0 (worker) vs ALL_ANTS_CLEAN:
+  joint                  LIM_0       BPX     CLEAN
+  l_1_fe_r              1.0777    1.0003    0.4846
+  b_a_2                 1.0697    1.0127    0.5155
+  l_1_tr_l              1.0485    1.0280    0.8170
+  l_1_tr_r              1.0471    1.0393    0.7709
+  l_2_co_r              1.0399    0.7915    0.5675
+  l_2_tr_r              1.0375    1.0200    0.5929
+  b_a_1                 1.0338    0.8489    0.5319
+  l_2_fe_r              1.0230    1.0596    0.6450
+  l_2_co_l              1.0143    0.8227    0.5591
+  l_1_ti_r              1.0073    0.8981    0.3737
+  l_1_fe_l              1.0059    1.0442    0.4605
+  b_a_4                 1.0001    0.7399    0.4082
+
+------------------------------------------------------------------------------------------------
+G. ABSOLUTE -- per-joint spread of placement (normalised units, and % of body len)
+------------------------------------------------------------------------------------------------
+corpus               median joint sd   distal-leg sd     body sd
+LIM_0                         0.0213          0.0282      0.0252
+BPX_noprior                   0.0183          0.0232      0.0233
+ALL_ANTS_CLEAN                0.0287          0.0321      0.0368
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe23_joint_placement.json

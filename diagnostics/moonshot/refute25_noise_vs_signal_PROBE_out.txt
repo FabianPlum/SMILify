@@ -1,0 +1,51 @@
+================================================================================================
+SECTION A — REPRODUCIBILITY of the worker free-form field across INDEPENDENT runs
+            (same 50 scans, different initialisation / different arm).
+            diag = same specimen, run A vs run B.  off-diag = different specimens,
+            which is the null a genuinely per-specimen-random field would sit at.
+================================================================================================
+pair                                  same-specimen r   cross-specimen r     gap
+M7 vs M7_s1 (seed replicate)                   0.5264            -0.0081  0.5345
+M7 vs M7_s2 (seed replicate)                   0.5224            -0.0083  0.5307
+M7_s1 vs M7_s2 (seed replicate)                0.5210            -0.0083  0.5293
+LIM_0 vs LIM_1x (different arm)                0.4645            -0.0069  0.4714
+C0_control_s1 vs _s2 (seed)                    0.7196            -0.0127  0.7322
+
+  Interpretation guide: a field that is per-specimen NOISE would give same-specimen r
+  close to the cross-specimen null.  A field that is a deterministic function of the
+  specimen gives same-specimen r near 1 regardless of how it PCAs across specimens.
+
+================================================================================================
+SECTION B — POSE spread: the posed/extended vs contracted/folded domain difference
+================================================================================================
+corpus                      mean|joint angle| deg   sd across specimens deg  mean dist to mean pose deg
+LIM_0 (worker)                              49.16                     29.08                       45.77
+M7 (worker)                                 46.79                     28.35                       44.18
+baseline (worker)                           12.36                      7.50                       11.57
+CLEAN81_M7 (clean)                          14.20                      9.76                       14.25
+ALL_ANTS_CLEAN (clean)                       5.14                      2.62                        4.11
+
+================================================================================================
+SECTION C — SCAN-ONLY descriptors (no fit involved): how far apart are the two
+            populations of INPUT meshes?  Columns from probe17 feature tables.
+================================================================================================
+feature                   clean81 median  worker50 median  clean pct-ile in worker dist
+limb_area_frac                    0.2340           0.0560                        100.0%
+radial_p95_over_med               3.3647           2.0309                        100.0%
+elongation                        2.9194           3.5869                         34.0%
+flatness                          4.9478           1.4331                        100.0%
+clump_frac                        0.0000           0.0000                          0.0%
+n_components                   2985.0000        2424.0000                         62.0%
+frac_boundary_edges               0.0388           0.0554                         20.0%
+  (n clean = 81, n worker50 = 50)
+
+================================================================================================
+SECTION D — DOSE-RESPONSE inside the worker corpus: does a specimen's LOO residual
+            track a SCAN-ONLY descriptor of how far it is from the clean regime?
+================================================================================================
+  limb_area_frac           corr(scan feature, per-specimen LOO ratio) = -0.142   corr(feature, |deform|) = -0.121   n=50
+  radial_p95_over_med      corr(scan feature, per-specimen LOO ratio) = -0.100   corr(feature, |deform|) = -0.130   n=50
+  clump_frac               corr(scan feature, per-specimen LOO ratio) = +0.166   corr(feature, |deform|) = +0.125   n=50
+  elongation               corr(scan feature, per-specimen LOO ratio) = -0.137   corr(feature, |deform|) = -0.498   n=50
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/refute25_noise_vs_signal.json

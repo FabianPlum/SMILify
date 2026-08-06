@@ -1,0 +1,66 @@
+========================================================================================================
+PROBE 24b -- does gen@k/spread measure correspondence, or population structure?
+========================================================================================================
+
+
+--------------------------------------------------------------------------------------------------------
+1. EFFECTIVE RANK of the joint population (participation ratio), per channel
+--------------------------------------------------------------------------------------------------------
+corpus              n      full   parametric   free-form   var frac in top-10 modes
+LIM_0              50     21.81         2.91       22.48                     0.5584
+BPX_noprior        50     17.20         2.87       20.37                     0.6130
+ALL_ANTS_CLEAN     81      3.68         2.28       13.37                     0.8578
+   -> gen@10 is a question about the top 10 modes. A corpus already concentrated in
+      ~4 effective modes answers it well whatever its correspondence quality.
+
+--------------------------------------------------------------------------------------------------------
+2. BLOCKED LEAVE-ONE-OUT -- exclude the m nearest neighbours from the training fold
+--------------------------------------------------------------------------------------------------------
+corpus                  m=0       m=1       m=3       m=5      m=10   delta m=0->10
+LIM_0                0.9154    0.9186    0.9222    0.9224    0.9245         +0.0090
+BPX_noprior          0.8580    0.8623    0.8675    0.8703    0.8746         +0.0166
+ALL_ANTS_CLEAN       0.4608    0.4666    0.4694    0.4723    0.4700         +0.0092
+   -> a large delta means plain LOO was partly copying a near-twin specimen.
+
+corpus              NN/mean  2ndNN/mean   #spec with NN<0.5 mean
+LIM_0                 0.761       0.786                        0
+BPX_noprior           0.732       0.757                        3
+ALL_ANTS_CLEAN        0.490       0.534                       50
+
+--------------------------------------------------------------------------------------------------------
+3. POPULATION COMPOSITION WITHIN THE CLEAN CORPUS (registration quality held fixed)
+--------------------------------------------------------------------------------------------------------
+subset of the SAME 81 clean specimens          gen@10    spread  eff.rank  mean pairwise d
+random 50 (mean of 10 draws)                   0.4796   0.03014      3.60           0.3415
+maximally DIVERSE 50 (farthest-point)          0.5529   0.02953      4.64           0.3422
+maximally CLUSTERED 50 (tightest nbhd)         0.6015   0.02198      8.04           0.2556
+   -> correspondence is identical across these three rows; only the population is
+      different. Any swing is the metric responding to population structure.
+
+--------------------------------------------------------------------------------------------------------
+4. EXTRAPOLATION RANGE for probe 24 panel C's regression
+--------------------------------------------------------------------------------------------------------
+corpus            joints share   random-draw share range  gap in sd of the draws
+LIM_0                    0.080        0.239 - 0.374                           -6.2
+BPX_noprior              0.140        0.234 - 0.412                           -4.0
+ALL_ANTS_CLEAN           0.673        0.528 - 0.723                           +1.0
+
+--------------------------------------------------------------------------------------------------------
+5. SIZE CONFOUND -- does specimen size predict its LOO residual?
+--------------------------------------------------------------------------------------------------------
+corpus             size cv%  r(size, LOO resid)      p~   r(|betas|, LOO resid)
+LIM_0                  1.28              +0.403   <0.05                  +0.505
+BPX_noprior            1.24              +0.090    n.s.                  +0.383
+ALL_ANTS_CLEAN         1.33              -0.358   <0.05                  +0.469
+
+--------------------------------------------------------------------------------------------------------
+6. SHAPE-PRIOR PROVENANCE -- was the shape basis estimated from the evaluated corpus?
+--------------------------------------------------------------------------------------------------------
+corpus              Ksd(betas) first 6                            corr(diag(shape_cov), var(betas))
+LIM_0              25[0.457 0.402 0.226 0.331 0.434 0.291]                                    0.754
+BPX_noprior        13[0.496 0.445 0.31  0.398 0.254 0.288]                                    0.884
+ALL_ANTS_CLEAN     20[0.917 0.894 0.848 0.949 0.651 0.566]                                    0.875
+   (a fitted-beta variance close to 1 per dim and matching the stored shape_cov is
+    what you expect when the basis was PCA'd from these same registrations.)
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24b_metric_validity.json

@@ -1,0 +1,64 @@
+PROBE 24 -- is "% joints outside the surface" a measure of PLACEMENT, or of ARTICULATION?
+
+Probe 23 measured that the clean corpus is fitted with mean |joint rotation| 0.088 rad (5 deg)
+and the worker corpus with 0.872 rad (50 deg) -- a factor 9.9. Every joint-vs-surface metric
+is evaluated on a POSED mesh, so before any of it can be read as placement quality we have to
+know what articulation on its own does to the number.
+
+THE CONTROLLED EXPERIMENT (zero placement error by construction)
+Take the AUTHORED template mesh and the AUTHORED skeleton. Skin the mesh with the model's own
+LBS using a pose theta, and take the skeleton straight out of the same
+batch_global_rigid_transformation. Surface and skeleton are then EXACTLY consistent: there is
+no shape error, no betas_trans, no log_beta_scales, no deform_verts, no fitting at all. The
+only thing that varies is theta.
+
+  arm A   theta = 0                          -> the published "template floor"
+  arm B   theta = each CLEAN specimen's pose  (81 poses)
+  arm C   theta = each WORKER specimen's pose (50 poses, LIM_0)
+  arm D   theta = c * worker pose, c in [0,1] -> dose-response
+
+If arm C scores far above arm A/B with placement error identically zero, then the 61.5 vs 30.1
+split is (at least partly) a pose artefact and cannot be attributed to joint placement.
+
+SECOND CHECK: is probe 23's surface-consistent floor J_reg . posed_verts itself valid?
+Measure it against its OWN fitted mesh (not the scan). If it is inside its own mesh, the floor
+is real (the fitted surface locally disagrees with the scan). If it is outside its own mesh,
+the linear regressor breaks under bending and the floor is itself an articulation artefact --
+which refutes the placement reading either way, but by a different mechanism.
+
+template: V=(10235, 3) F=(20466, 3) joints=55
+pose magnitude (mean |theta_j| over 54 joints, rad): worker=0.8580  clean=0.0898
+
+--- ARM A: theta = 0 (rest pose) --------------------------------------
+   rest pose (the published floor)    %joints outside OWN posed mesh: mean= 10.9  median= 10.9  p90= 10.9   (mean|theta|=0.000 rad)
+
+--- ARM B: theta = CLEAN corpus poses ---------------------------------
+   clean poses on template            %joints outside OWN posed mesh: mean= 11.1  median= 10.9  p90= 10.9   (mean|theta|=0.090 rad)
+
+--- ARM C: theta = WORKER corpus poses --------------------------------
+   worker poses on template           %joints outside OWN posed mesh: mean= 19.0  median= 18.2  p90= 23.6   (mean|theta|=0.858 rad)
+
+   ARM C vs ARM B: 19.0% vs 11.1%  U=4046  p=5.73e-26   PLACEMENT ERROR IS ZERO IN BOTH ARMS
+   group            A rest  B clean  C worker   C-B pp
+   body               11.8     11.8      18.4      6.6
+   leg_distal         16.7     16.7      31.7     15.0
+   leg_middle          0.0      0.0      10.8     10.8
+   leg_proximal       16.7     16.7      15.8     -0.8
+   mandible            0.0      4.9      17.0     12.1
+
+--- ARM D: dose-response, theta = c * worker pose ---------------------
+   c=0.00                             %joints outside OWN posed mesh: mean= 10.9  median= 10.9  p90= 10.9   (mean|theta|=0.000 rad)
+   c=0.25                             %joints outside OWN posed mesh: mean= 11.0  median= 10.9  p90= 10.9   (mean|theta|=0.214 rad)
+   c=0.50                             %joints outside OWN posed mesh: mean= 11.7  median= 10.9  p90= 12.7   (mean|theta|=0.429 rad)
+   c=0.75                             %joints outside OWN posed mesh: mean= 15.5  median= 16.4  p90= 18.2   (mean|theta|=0.643 rad)
+   c=1.00                             %joints outside OWN posed mesh: mean= 19.0  median= 18.2  p90= 23.6   (mean|theta|=0.858 rad)
+
+   spearman(mean|theta|, %outside) pooled over B+C = +0.799  p=3.06e-30
+   spearman within worker poses only = +0.507  p=0.000173
+
+====================================================================================================
+SECOND CHECK: J_reg . posed_verts against its OWN fitted mesh
+   LIM_0 (worker)   J_reg.posed_verts outside OWN mesh =  15.1%   fitted skeleton outside OWN mesh =  66.5%   median |J_ref - J_fit| = 1.129%diag
+   ALL_ANTS_CLEAN   J_reg.posed_verts outside OWN mesh =   9.4%   fitted skeleton outside OWN mesh =  57.4%   median |J_ref - J_fit| = 0.527%diag
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/joint_placement_articulation_out.txt

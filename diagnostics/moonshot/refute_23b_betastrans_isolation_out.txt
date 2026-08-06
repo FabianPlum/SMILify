@@ -1,0 +1,100 @@
+====================================================================================================
+REFUTE-23b -- betas_trans isolation
+====================================================================================================
+
+====================================================================================================
+B1  MECHANISM STEPS, computed on the SAME starting vector for both corpora (leg bones)
+    probe-23 compared L3/L2 and L4/L3, which for a worker start from a betas_trans-
+    displaced vector.  Here every step starts from L1 (the rest bone).
+====================================================================================================
+  run                 kind      bt step  scale step  root step  TOTAL(L4/L1)  TOTAL no bt
+  LIM_0               worker     0.1693      0.1870     0.1593        0.3636       0.2599
+  LIM_1x              worker     0.1764      0.1810     0.1502        0.3416       0.2447
+  BPX_noprior         worker     0.2182      0.1789     0.1525        0.4016       0.2518
+  M7_handoff_midline  worker     0.2086      0.1795     0.1595        0.3993       0.2548
+  baseline            worker     0.0000      0.5906     0.1615        0.5701       0.5701
+  ALL_ANTS_CLEAN      clean      0.0000      0.1286     0.0685        0.1275       0.1275
+
+  probe-23's caveat quoted L3/L2=0.172-0.180 (worker) vs 0.129 (clean) as the
+  'parent-scale step surviving'.  The scale-step column above is the like-for-like one.
+
+====================================================================================================
+B2  TAIL STATISTICS the headline quotes, with and without betas_trans
+    (ratios size-normalised by the median body-bone ratio, exactly as probe-23)
+====================================================================================================
+  run                 set           p50 WITH  p95 WITH  >1.25 WITH  p50 NO-bt  p95 NO-bt  >1.25 NO-bt
+  LIM_0               distal leg       1.163     3.111       44.4%      1.228      2.121        47.7%
+  LIM_0               all legs         1.006     2.570       28.9%      1.049      1.911        28.2%
+  LIM_0               pretarsus        1.530     4.267       63.0%      1.363      2.352        63.3%
+  ------------------------------------------------------------------------------------------------
+  LIM_1x              distal leg       1.075     2.821       37.0%      1.168      2.073        40.8%
+  LIM_1x              all legs         0.957     2.290       24.7%      1.022      1.812        24.9%
+  LIM_1x              pretarsus        1.368     3.465       58.3%      1.354      2.426        55.7%
+  ------------------------------------------------------------------------------------------------
+  BPX_noprior         distal leg       1.191     4.368       46.7%      1.203      2.018        45.4%
+  BPX_noprior         all legs         1.008     3.031       30.8%      1.031      1.805        27.3%
+  BPX_noprior         pretarsus        1.969     6.688       69.3%      1.309      2.266        55.0%
+  ------------------------------------------------------------------------------------------------
+  M7_handoff_midline  distal leg       1.206     4.278       47.3%      1.178      1.966        42.1%
+  M7_handoff_midline  all legs         1.029     3.151       32.0%      1.019      1.766        25.4%
+  M7_handoff_midline  pretarsus        2.010     7.318       68.3%      1.271      2.112        53.0%
+  ------------------------------------------------------------------------------------------------
+  baseline            distal leg       0.821     3.427       31.8%      0.821      3.427        31.8%
+  baseline            all legs         0.845     3.296       26.7%      0.845      3.296        26.7%
+  baseline            pretarsus        0.879     4.630       40.7%      0.879      4.630        40.7%
+  ------------------------------------------------------------------------------------------------
+  ALL_ANTS_CLEAN      distal leg       1.030     1.615       26.2%      1.030      1.615        26.2%
+  ALL_ANTS_CLEAN      all legs         1.008     1.495       19.2%      1.008      1.495        19.2%
+  ALL_ANTS_CLEAN      pretarsus        1.180     1.921       40.7%      1.180      1.921        40.7%
+  ------------------------------------------------------------------------------------------------
+
+====================================================================================================
+B3  NORMALISER ROBUSTNESS x betas_trans  (median over specimens of mean|log| over legs)
+====================================================================================================
+  run                   body-norm  all-bone   unnorm  | body NObt  all NObt  unnorm NObt
+  LIM_0                    0.3030    0.2602   0.3277       0.1819    0.1660       0.2337
+  LIM_1x                   0.3131    0.2672   0.3117       0.1839    0.1569       0.2216
+  BPX_noprior              0.3686    0.3025   0.3913       0.2022    0.1561       0.2170
+  M7_handoff_midline       0.3382    0.3075   0.3683       0.1807    0.1497       0.2300
+  baseline                 0.6203    0.5546   0.5728       0.6203    0.5546       0.5728
+  ALL_ANTS_CLEAN           0.1850    0.1220   0.1493       0.1850    0.1220       0.1493
+
+  worker/clean GAP under each normaliser:
+  run                   body WITH  all WITH  unn WITH  | body NObt  all NObt    unn NObt
+  LIM_0                     1.64x      2.13x      2.19x        0.98x      1.36x      1.57x
+  LIM_1x                    1.69x      2.19x      2.09x        0.99x      1.29x      1.48x
+  BPX_noprior               1.99x      2.48x      2.62x        1.09x      1.28x      1.45x
+  M7_handoff_midline        1.83x      2.52x      2.47x        0.98x      1.23x      1.54x
+  baseline                  3.35x      4.55x      3.84x        3.35x      4.55x      3.84x
+
+====================================================================================================
+B4  TEMPLATE PROVENANCE -- is each corpus centred on its own template?
+    off-centre = |mean_specimens(v_shaped) - v_template| / population spread
+====================================================================================================
+  run                 kind    |mean betas|  off-centre(rest)  off-centre(+dv)
+  LIM_0               worker        0.1637             0.749            0.473
+  LIM_1x              worker        0.1506             0.670            0.429
+  BPX_noprior         worker        0.2064             0.776            0.446
+  M7_handoff_midline  worker        0.0003             1.036            0.342
+  baseline            worker        0.1033             0.453            0.344
+  ALL_ANTS_CLEAN      clean         0.2034             0.648            0.596
+
+====================================================================================================
+B5  TEMPLATE LEFT/RIGHT ASYMMETRY of the pretarsus bone (the headline's vivid number)
+====================================================================================================
+  OmniAnt25 (LIM runs)    l_1_pt_l=0.0884  l_1_pt_r=0.0884  l_2_pt_l=0.0972  l_2_pt_r=0.0972  l_3_pt_l=0.0835  l_3_pt_r=0.0835   max L/R asymmetry = 1.00x
+  SMIL_OmniAnt (BPX/M7)   l_1_pt_l=0.0398  l_1_pt_r=0.0423  l_2_pt_l=0.0353  l_2_pt_r=0.1022  l_3_pt_l=0.1127  l_3_pt_r=0.1131   max L/R asymmetry = 2.90x
+  SMPL_fit (clean)        l_1_pt_l=0.0822  l_1_pt_r=0.0822  l_2_pt_l=0.0897  l_2_pt_r=0.0897  l_3_pt_l=0.0631  l_3_pt_r=0.0631   max L/R asymmetry = 1.00x
+
+====================================================================================================
+B6  D_pose vs probe-19 LOO error, RAW, with and without betas_trans
+====================================================================================================
+  run                    rho WITH bt        p   rho NO bt        p
+  LIM_0                        0.708   0.0000       0.767   0.0000
+  LIM_1x                       0.557   0.0000       0.716   0.0000
+  BPX_noprior                  0.734   0.0000       0.657   0.0000
+  M7_handoff_midline           0.771   0.0000       0.665   0.0000
+  baseline                     0.074   0.6082       0.074   0.6082
+  ALL_ANTS_CLEAN               0.243   0.0288       0.243   0.0288
+
+done.

@@ -1,0 +1,73 @@
+======================================================================================================
+PROBE 24b -- pose contamination of rest space, region-matched CIs, provenance
+======================================================================================================
+
+------------------------------------------------------------------------------------------------------
+1. IS REST-SPACE GEOMETRY PREDICTABLE FROM POSE?  (LOO ridge, R^2 > 0 = contaminated)
+------------------------------------------------------------------------------------------------------
+   target = per-specimen rest-space quantity, centred; features = top-q PCs of joint_rot
+
+   q = 3 pose PCs, ridge lambda = 1.0
+   corpus            kind         LOO R2 rest JOINTS   LOO R2 deform field   LOO R2 betas
+   LIM_0             worker                  -0.0135               -0.0185        -0.0332
+   BPX_noprior       worker                   0.0001               -0.0058         0.0313
+   ALL_ANTS_CLEAN    clean                    0.2232                0.0781         0.2798
+
+   q = 5 pose PCs, ridge lambda = 1.0
+   corpus            kind         LOO R2 rest JOINTS   LOO R2 deform field   LOO R2 betas
+   LIM_0             worker                  -0.0202               -0.0312         0.0081
+   BPX_noprior       worker                  -0.0073               -0.0182         0.0804
+   ALL_ANTS_CLEAN    clean                    0.2566                0.0793         0.3388
+
+   q = 8 pose PCs, ridge lambda = 1.0
+   corpus            kind         LOO R2 rest JOINTS   LOO R2 deform field   LOO R2 betas
+   LIM_0             worker                  -0.0381               -0.0495        -0.0380
+   BPX_noprior       worker                  -0.0316               -0.0347         0.0303
+   ALL_ANTS_CLEAN    clean                    0.2790                0.0824         0.3675
+
+   'rest JOINTS' = the exact quantity probe 23 scored.  'deform field' = the free-form
+   channel alone.  'betas' = the parametric channel read out at the joints (a negative
+   control: shapedirs.betas has no mechanical reason to encode pose).
+
+------------------------------------------------------------------------------------------------------
+2. PAIRED SIGNIFICANCE vs REGION-MATCHED landmarks (repeats probe 23c panel B)
+------------------------------------------------------------------------------------------------------
+LIM_0
+   anatomical joints  gen@10/spread = 0.9154
+   UNIFORM random     gen@10/spread = 0.8070 (sd over 24 draws 0.0300)
+      paired diff joints-minus-landmarks = +0.1084  95% CI [+0.0766, +0.1425]  specimens worse: 86%
+   LIMB-only random   gen@10/spread = 0.8700 (sd over 24 draws 0.0241)
+      paired diff joints-minus-landmarks = +0.0454  95% CI [+0.0122, +0.0802]  specimens worse: 56%
+   MID-BONE landmarks gen@10/spread = 0.8489
+      paired diff joints-minus-midbone   = +0.0665  95% CI [+0.0336, +0.1010]  specimens worse: 66%
+
+BPX_noprior
+   anatomical joints  gen@10/spread = 0.8580
+   UNIFORM random     gen@10/spread = 0.7872 (sd over 24 draws 0.0373)
+      paired diff joints-minus-landmarks = +0.0708  95% CI [+0.0351, +0.1084]  specimens worse: 70%
+   LIMB-only random   gen@10/spread = 0.8601 (sd over 24 draws 0.0206)
+      paired diff joints-minus-landmarks = -0.0021  95% CI [-0.0383, +0.0357]  specimens worse: 52%
+   MID-BONE landmarks gen@10/spread = 0.8150
+      paired diff joints-minus-midbone   = +0.0430  95% CI [+0.0106, +0.0779]  specimens worse: 60%
+
+ALL_ANTS_CLEAN
+   anatomical joints  gen@10/spread = 0.4608
+   UNIFORM random     gen@10/spread = 0.4650 (sd over 24 draws 0.0236)
+      paired diff joints-minus-landmarks = -0.0043  95% CI [-0.0181, +0.0096]  specimens worse: 49%
+   LIMB-only random   gen@10/spread = 0.4466 (sd over 24 draws 0.0252)
+      paired diff joints-minus-landmarks = +0.0142  95% CI [+0.0007, +0.0284]  specimens worse: 64%
+   MID-BONE landmarks gen@10/spread = 0.4585
+      paired diff joints-minus-midbone   = +0.0023  95% CI [-0.0110, +0.0157]  specimens worse: 48%
+
+------------------------------------------------------------------------------------------------------
+3. PROVENANCE -- does the template's shape space coincide with the corpus's own PCs?
+------------------------------------------------------------------------------------------------------
+corpus               K  mean cos^2 principal angle   var of v_shaped in shapedirs span
+LIM_0               25                      0.1959                              0.2470
+BPX_noprior         13                      0.1749                              0.1801
+ALL_ANTS_CLEAN      20                      0.4007                              0.6589
+
+   cos^2 near 1 => the shape space and the corpus's own principal variation are the
+   same subspace, i.e. the corpus is in-distribution by construction.
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/probe24b_pose_contamination.json

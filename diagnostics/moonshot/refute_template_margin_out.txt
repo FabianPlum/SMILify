@@ -1,0 +1,43 @@
+REFUTE-E -- do the two corpora's TEMPLATES put joints at the same depth inside the skin?
+
+"% of joints outside the scan" is a THRESHOLD on a signed distance. Its floor was reported
+as similar for the three templates (10.9-14.5% outside), but a threshold statistic is
+governed by the MARGIN distribution, not by the floor: if template A's joints sit 0.10% of
+the body diagonal inside the skin and template B's sit 0.35% inside, the same absolute
+placement error flips A's joints out 3.5x more often. The two corpora use different
+templates (OmniAnt 10235v/25betas/J_regressor with 10 nnz per row vs SMPL_fit
+10236v/20betas/20 nnz per row), so this must be measured, not assumed.
+
+Also measures what drives the J_static vs J_regressed disagreement per specimen.
+
+
+### OmniAnt_25PCs_joint_limited   diag=2.3463   nnz/row of J_regressor=10
+   %joints inside own template mesh = 89.1
+   ALL  margin (dist to own skin, INSIDE joints only): median=0.092 %diag   p25=0.071   p75=0.126
+   ALL  local limb radius (median dist to dominated verts): median=3.609 %diag
+   ALL  margin / limb radius: median=0.033
+   LEG  margin (dist to own skin, INSIDE joints only): median=0.087 %diag   p25=0.073   p75=0.133
+   LEG  local limb radius (median dist to dominated verts): median=3.114 %diag
+   LEG  margin / limb radius: median=0.033
+
+### SMIL_OmniAnt   diag=2.3446   nnz/row of J_regressor=24
+   %joints inside own template mesh = 85.5
+   ALL  margin (dist to own skin, INSIDE joints only): median=0.229 %diag   p25=0.164   p75=0.516
+   ALL  local limb radius (median dist to dominated verts): median=3.993 %diag
+   ALL  margin / limb radius: median=0.058
+   LEG  margin (dist to own skin, INSIDE joints only): median=0.218 %diag   p25=0.171   p75=0.271
+   LEG  local limb radius (median dist to dominated verts): median=3.206 %diag
+   LEG  margin / limb radius: median=0.058
+
+### SMPL_fit   diag=2.3018   nnz/row of J_regressor=20
+   %joints inside own template mesh = 89.1
+   ALL  margin (dist to own skin, INSIDE joints only): median=0.148 %diag   p25=0.096   p75=0.232
+   ALL  local limb radius (median dist to dominated verts): median=3.794 %diag
+   ALL  margin / limb radius: median=0.049
+   LEG  margin (dist to own skin, INSIDE joints only): median=0.119 %diag   p25=0.091   p75=0.191
+   LEG  local limb radius (median dist to dominated verts): median=2.925 %diag
+   LEG  margin / limb radius: median=0.049
+
+============================================================================================
+READ-OFF: a threshold metric with a small margin is a high-gain detector.
+The floor (%outside) can match while the margin differs by a factor.

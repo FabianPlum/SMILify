@@ -1,0 +1,43 @@
+REFUTE-1 -- is the "% joints outside the scan" statistic a property of the FIT, or of the SCAN?
+
+The headline claim rests on a generalized winding number (GWN) test:  |w| < 0.5  =>  the joint
+is outside the animal.  GWN is only a valid inside/outside oracle on a CLOSED, CONSISTENTLY
+ORIENTED mesh (Jacobson et al. 2013 degrade gracefully with holes, but NOT with flipped faces:
+a flipped patch subtracts solid angle and drives |w| toward 0, i.e. toward "outside").
+
+The two corpora come from two entirely different mesh pipelines:
+    worker  /media/fabi/Data/.../antscan_proofread_castes/worker/*_processed.obj  (raw isosurface)
+    clean   /media/fabi/Data/SMILify_DATASETS_BACKUP/ALL_ANTS_CLEAN/*.obj         (Blender 2.92 export)
+
+so the SCAN is a corpus-level variable that is perfectly confounded with the FIT.  This probe
+audits the topology of every scan actually used and asks whether the GWN oracle is equally
+trustworthy in both corpora.
+
+
+### bench50   n=50
+   field               median        mean         min         max
+   nv              48904.5000  43602.8800  13048.0000  49997.0000
+   nf              94450.0000  87001.0600  27551.0000 106831.0000
+   bnd_frac            0.0554      0.0638      0.0179      0.1521
+   nonman_frac         0.0365      0.0435      0.0036      0.1642
+   ncomp              44.5000     65.5000      5.0000    301.0000
+   euler            -556.5000   -600.4000  -2530.0000   1823.0000
+   watertight   :   0 / 50
+   winding-consistent (REQUIRED for the GWN oracle):   0 / 50
+
+### clean81   n=81
+   field               median        mean         min         max
+   nv              19060.0000  21268.4568   9277.0000  46497.0000
+   nf              41375.0000  42125.4444  10132.0000  97669.0000
+   bnd_frac            0.0388      0.1326      0.0115      0.5189
+   nonman_frac         0.0808      0.0663      0.0000      0.1291
+   ncomp               3.0000    346.4074      1.0000   2392.0000
+   euler             454.0000    643.0370    245.0000   2085.0000
+   watertight   :   0 / 81
+   winding-consistent (REQUIRED for the GWN oracle):  20 / 81
+
+============================================================================================
+VERDICT ON THE ORACLE
+   bench50    winding-consistent   0.0%   median boundary-edge frac 0.0554   median components 44
+   clean81    winding-consistent  24.7%   median boundary-edge frac 0.0388   median components 3
+============================================================================================

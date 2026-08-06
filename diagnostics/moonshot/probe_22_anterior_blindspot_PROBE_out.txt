@@ -1,0 +1,40 @@
+CLAIM 1 — authored joint-limit coverage by anatomical group
+group         joints    constrained axes    
+thorax             1            3/3     
+gaster             5            0/15       <-- UNCONSTRAINED
+waist              4            0/12       <-- UNCONSTRAINED
+head               1            0/3        <-- UNCONSTRAINED
+mandible           2            6/6     
+antenna            6            0/18       <-- UNCONSTRAINED
+leg               36           90/108   
+
+CLAIM 2 — free-form deform_verts per group, RELATIVE TO THORAX (b_t) only
+arm                     thorax abs     gaster      waist       head   mandible    antenna        leg
+baseline                   0.04254      1.17x         --      0.99x      1.08x      0.86x      0.99x
+M7_handoff_midline         0.02558      0.82x         --      0.60x      0.81x      1.44x      0.78x
+BPX_noprior                0.01963      1.06x         --      0.76x      1.09x      1.79x      1.01x
+LIM_0                      0.01874      1.08x         --      0.73x      1.29x      1.82x      1.07x
+LIM_1x                     0.01975      1.05x         --      0.72x      1.24x      1.72x      1.05x
+
+CLAIM 3 — per-joint SCALE across specimens, exp(log_beta_scales), by group
+arm                   group          min     p50     max    range
+baseline              head         0.033   1.479   4.612   138.2x
+baseline              mandible     0.030   1.332  11.801   388.8x
+baseline              antenna      0.024   0.540  21.227   889.3x
+M7_handoff_midline    head         0.376   0.986   1.689     4.5x
+M7_handoff_midline    mandible     0.584   1.065   2.028     3.5x
+M7_handoff_midline    antenna      0.686   0.989   1.701     2.5x
+BPX_noprior           head         0.341   1.029   1.733     5.1x
+BPX_noprior           mandible     0.611   1.059   1.836     3.0x
+BPX_noprior           antenna      0.610   1.001   1.685     2.8x
+LIM_0                 head         0.310   1.011   1.577     5.1x
+LIM_0                 mandible     0.530   1.043   1.641     3.1x
+LIM_0                 antenna      0.342   0.987   2.201     6.4x
+LIM_1x                head         0.353   1.031   1.724     4.9x
+LIM_1x                mandible     0.547   1.082   1.569     2.9x
+LIM_1x                antenna      0.357   0.994   2.333     6.5x
+
+CLAIM 3b — is per-joint scale bounded by ANY loss term?
+   fitter_3d/joint_limits.py hinges on joint_rot only (limit_hinge signature).
+   Terms touching log_beta_scales: symmetry_penalty (L/R tie) and w_jresid (opt-in L2).
+   Neither is an absolute bound, so nothing prevents a head scale of 0.03 or 4.6.

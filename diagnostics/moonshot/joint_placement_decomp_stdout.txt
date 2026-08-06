@@ -1,0 +1,61 @@
+PROBE 25 -- decompose the 61.5 vs 30.1 gap, and remove the ceiling artefact from probe 23.
+
+Probe 23's "excess over own floor" (worker 19.1pp vs clean 20.3pp, p=0.66) can be criticised:
+the worker floor is already 42.4%, so only 57.6pp of headroom remains, against 90.2pp for
+clean. A compressed excess could be a ceiling artefact rather than equality.
+
+The ceiling-free statistic is CONDITIONAL:
+    among the joints where the surface-consistent reference J_ref = J_reg . posed_verts is
+    INSIDE the scan -- i.e. where "inside" is demonstrably reachable for that joint, that
+    specimen, that scan -- what fraction of the FITTED joints are outside?
+That is a like-for-like per-joint failure rate with the corpus-specific floor conditioned out.
+
+Also reported:
+  * the reverse conditional (J_ref outside, J_fit inside) -- how often the fit beats its floor
+  * the additive decomposition of the 31.4pp corpus gap
+  * the same conditional on the genus-matched subset
+
+--- CEILING-FREE CONDITIONAL  P(fitted joint OUTSIDE | reference joint INSIDE)
+   worker LIM_0     P(out|ref in) =  49.1%  (median  48.1%, n joints/spec=31.7)    P(in|ref out) =  21.7%  (n=23.3)
+   worker baseline  P(out|ref in) =  45.4%  (median  44.7%, n joints/spec=36.7)    P(in|ref out) =  32.6%  (n=18.3)
+   clean            P(out|ref in) =  26.1%  (median  25.0%, n joints/spec=49.6)    P(in|ref out) =  31.7%  (n=5.4)
+   worker vs clean: 49.1% vs 26.1%  ratio=1.88  U=3877  p=1.75e-18
+   baseline vs clean: 45.4% vs 26.1%  ratio=1.74  p=2.52e-15
+
+--- per group, P(fit outside | ref inside)
+   group            worker    clean   ratio
+   body               45.6     44.3    1.03
+   leg_distal         52.5     22.0    2.38
+   leg_middle         61.9     12.4    5.00
+   leg_proximal       39.2     24.1    1.63
+   mandible           68.8     22.7    3.02
+
+--- ADDITIVE DECOMPOSITION of the corpus gap in %joints-outside-scan
+   observed gap                                   61.5 -  30.1 =  31.4 pp
+   carried by the surface-consistent FLOOR        42.4 -   9.8 =  32.6 pp   (104% of the gap)
+   left for joint PLACEMENT (excess over floor)   19.1 -  20.3 =  -1.2 pp   (-4% of the gap)
+   of the FLOOR component, probe 24 attributes:
+     articulation alone, zero placement error       19.0 - 11.1 =   7.9 pp
+     J_ref vs its OWN fitted mesh                   15.1 -  9.4 =   5.7 pp
+     fitted surface vs scan, locally at the joints  42.4 - 15.1 vs 9.8 - 9.4 =  26.9 pp
+
+--- gap of the REFERENCE skeleton to the scan (how far the fitted SURFACE sits from the scan at the joints)
+   worker LIM_0     median gap_ref=0.298%diag  median gap_fit=0.495%diag  global chamfer=0.317%   gap_ref/chamfer=0.94
+   worker baseline  median gap_ref=0.331%diag  median gap_fit=0.441%diag  global chamfer=0.275%   gap_ref/chamfer=1.20
+   clean            median gap_ref=0.280%diag  median gap_fit=0.280%diag  global chamfer=0.222%   gap_ref/chamfer=1.26
+
+--- genus-matched, ceiling-free conditional
+   acanthostichus     worker= 61.0%  clean= 15.7%
+   acromyrmex         worker= 46.4%  clean= 26.0%
+   cephalotes         worker= 38.1%  clean= 32.1%
+   cyphomyrmex        worker= 35.0%  clean= 13.2%
+   dorylus            worker= 39.0%  clean= 31.4%
+   ectatomma          worker= 55.6%  clean= 44.4%
+   labidus            worker= 53.2%  clean= 21.6%
+   odontomachus       worker= 47.2%  clean= 23.3%
+   polyrhachis        worker= 38.5%  clean= 30.6%
+   stigmatomma        worker= 43.5%  clean= 21.2%
+   strumigenys        worker= 52.4%  clean= 28.3%
+   paired by genus (n=11): worker 46.3% vs clean 26.2%  wilcoxon p=0.000977
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/joint_placement_decomp_out.txt

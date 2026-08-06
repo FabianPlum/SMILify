@@ -1,0 +1,26 @@
+[gate] 2500 (specimen, run) outcomes across 50 runs, 196 distinct specimens
+
+Marginal Spearman vs deform_mag_mean (lower deform = more fittable, so negative rho is good):
+   radial_med       rho = +0.325
+   radial_p90       rho = +0.303
+   aspect           rho = +0.010
+   radial_spread    rho = +0.238
+   log_radial       rho = +0.325
+   yaw_deg          rho = +0.084
+   [noise floor]    |rho| p95 under permutation = 0.037
+
+Run-grouped cross-validation (predicting held-out runs):
+   radial_med alone   rho = +0.254  (n=2500)
+   all 6 features    rho = +0.261  (n=2500)
+   -> multi-feature does NOT beat the single score  => keep radial_med, the extra features add nothing
+
+KEEP/DISCARD over all 757 workers, cutting on radial_med:
+   keep    cutoff   n kept   expected quality vs corpus median
+    25%    0.1955      190   deform_mag median 0.01451   (-26.6% vs all)
+    50%    0.2367      379   deform_mag median 0.01555   (-21.3% vs all)
+    60%    0.2547      454   deform_mag median 0.01597   (-19.1% vs all)
+    75%    0.2847      568   deform_mag median 0.01741   (-11.9% vs all)
+    90%    0.3422      681   deform_mag median 0.01904   (-3.6% vs all)
+   100%    0.4656      757   deform_mag median 0.01975   (+0.0% vs all)
+
+wrote /home/fabi/dev/SMILify/diagnostics/moonshot/out/fittability_gate.csv

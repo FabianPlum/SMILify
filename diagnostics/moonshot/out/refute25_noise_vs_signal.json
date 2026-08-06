@@ -1,0 +1,110 @@
+{
+ "reproducibility": {
+  "M7 vs M7_s1 (seed replicate)": {
+   "same": 0.5263673440459682,
+   "cross": -0.008084232464080934
+  },
+  "M7 vs M7_s2 (seed replicate)": {
+   "same": 0.5224298274996797,
+   "cross": -0.00825159939794893
+  },
+  "M7_s1 vs M7_s2 (seed replicate)": {
+   "same": 0.5210275959788649,
+   "cross": -0.008297707913932703
+  },
+  "LIM_0 vs LIM_1x (different arm)": {
+   "same": 0.4645488195223029,
+   "cross": -0.006900108107238299
+  },
+  "C0_control_s1 vs _s2 (seed)": {
+   "same": 0.7195700064497459,
+   "cross": -0.012672357576725841
+  }
+ },
+ "pose": {
+  "LIM_0 (worker)": {
+   "mean_angle_deg": 49.15833894404093,
+   "sd_deg": 29.08123799016691,
+   "dist_to_mean_deg": 45.772247133416826
+  },
+  "M7 (worker)": {
+   "mean_angle_deg": 46.78973247935129,
+   "sd_deg": 28.34523150971177,
+   "dist_to_mean_deg": 44.176884419149886
+  },
+  "baseline (worker)": {
+   "mean_angle_deg": 12.355244067637024,
+   "sd_deg": 7.503923414423897,
+   "dist_to_mean_deg": 11.571821683086391
+  },
+  "CLEAN81_M7 (clean)": {
+   "mean_angle_deg": 14.196413992255923,
+   "sd_deg": 9.757086813764428,
+   "dist_to_mean_deg": 14.253783992998187
+  },
+  "ALL_ANTS_CLEAN (clean)": {
+   "mean_angle_deg": 5.143385513896512,
+   "sd_deg": 2.62005618621698,
+   "dist_to_mean_deg": 4.10943273681369
+  }
+ },
+ "scan_features": {
+  "limb_area_frac": {
+   "clean_median": 0.234,
+   "worker_median": 0.056025,
+   "clean_median_pctile_in_worker": 100.0
+  },
+  "radial_p95_over_med": {
+   "clean_median": 3.3646707898101873,
+   "worker_median": 2.030913534120488,
+   "clean_median_pctile_in_worker": 100.0
+  },
+  "elongation": {
+   "clean_median": 2.919409789387915,
+   "worker_median": 3.5868718513166975,
+   "clean_median_pctile_in_worker": 34.0
+  },
+  "flatness": {
+   "clean_median": 4.947796529252711,
+   "worker_median": 1.433129254907286,
+   "clean_median_pctile_in_worker": 100.0
+  },
+  "clump_frac": {
+   "clean_median": 0.0,
+   "worker_median": 0.0,
+   "clean_median_pctile_in_worker": 0.0
+  },
+  "n_components": {
+   "clean_median": 2985.0,
+   "worker_median": 2424.0,
+   "clean_median_pctile_in_worker": 62.0
+  },
+  "frac_boundary_edges": {
+   "clean_median": 0.03875682312391829,
+   "worker_median": 0.0553500037498527,
+   "clean_median_pctile_in_worker": 20.0
+  }
+ },
+ "dose": {
+  "limb_area_frac": {
+   "corr_loo": -0.1418938631528265,
+   "corr_deform": -0.12071300864124743,
+   "n": 50
+  },
+  "radial_p95_over_med": {
+   "corr_loo": -0.10036817460031609,
+   "corr_deform": -0.1296109199722899,
+   "n": 50
+  },
+  "clump_frac": {
+   "corr_loo": 0.1660985071768144,
+   "corr_deform": 0.12532417905482973,
+   "n": 50
+  },
+  "elongation": {
+   "corr_loo": -0.13714243048198382,
+   "corr_deform": -0.4976556838381394,
+   "n": 50
+  }
+ }
+}

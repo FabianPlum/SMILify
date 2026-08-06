@@ -1,0 +1,95 @@
+====================================================================================================
+A -- DEPTH-STRATIFIED HINGE SPECIFICITY (does R3's x1.32 vs x1.04 survive depth?)
+====================================================================================================
+  every joint, grouped by kinematic depth, split by whether the authored limits
+  constrain it at all. ratio = mean |lbs| LIM_1x / mean |lbs| LIM_0.
+
+  depth group        n  |lbs| L0       L1x   ratio  L3x ratio   joints
+  ------------------------------------------------------------------------------------------
+      0 free         1    0.3092    0.3107   1.005      0.977   ['b_t']
+      1 hinged       6    0.2479    0.2666   1.075      1.056   ['l_1_co_r', 'l_2_co_r', 'l_3_co_r', 'l_1_co_l']...
+      1 free         6    0.1158    0.1211   1.045      1.023   ['b_a_1', 'w_1_r', 'w_2_r', 'w_1_l']...
+      2 hinged       8    0.2686    0.3305   1.231      1.204   ['l_1_tr_r', 'l_2_tr_r', 'l_3_tr_r', 'l_1_tr_l']...
+      2 free         3    0.3587    0.3636   1.014      0.991   ['b_a_2', 'an_1_r', 'an_1_l']
+      3 hinged       6    0.3409    0.4356   1.278      1.283   ['l_1_fe_r', 'l_2_fe_r', 'l_3_fe_r', 'l_1_fe_l']...
+      3 free         3    0.2962    0.3130   1.057      1.029   ['b_a_3', 'an_2_r', 'an_2_l']
+      4 hinged       6    0.5111    0.7226   1.414      1.430   ['l_1_ti_r', 'l_2_ti_r', 'l_3_ti_r', 'l_1_ti_l']...
+      4 free         3    0.3491    0.3426   0.981      0.994   ['b_a_4', 'an_3_r', 'an_3_l']
+      5 hinged       6    0.5348    0.7618   1.424      1.406   ['l_1_ta_r', 'l_2_ta_r', 'l_3_ta_r', 'l_1_ta_l']...
+      5 free         1    0.7537    0.7870   1.044      1.090   ['b_a_5']
+      6 free         6    0.2361    0.2604   1.103      1.079   ['l_1_pt_r', 'l_2_pt_r', 'l_3_pt_r', 'l_1_pt_l']...
+
+  THE CLEAN CONTRAST -- deepest joints, hinge on vs hinge off, same stratum:
+    pretarsus (FREE, depth 6)    n=6  |lbs| 0.2361 -> 0.2604  ratio 1.103   (3x ratio 1.079)   |bt| 0.0562 -> 0.0715 ratio 1.273
+    tarsus (HINGED, depth 5)     n=6  |lbs| 0.5348 -> 0.7618  ratio 1.424   (3x ratio 1.406)   |bt| 0.0629 -> 0.0809 ratio 1.286
+    tibia (HINGED, depth 4)      n=6  |lbs| 0.5111 -> 0.7226  ratio 1.414   (3x ratio 1.430)   |bt| 0.0471 -> 0.0686 ratio 1.455
+
+    LEG CHAIN ONLY: hinged n=30 median ratio 1.271 | free (pretarsi) n=6 median ratio 1.118  mannwhitney p=0.00645
+    PARTIAL rho(per-joint |lbs| ratio, is_hinged | depth), all 55 joints = +0.754
+
+====================================================================================================
+B -- SPECIMEN-LEVEL TEST (n=50): do the specimens that lost the most violation
+    gain the most placement?
+====================================================================================================
+  LIM_0 violating axes/specimen: mean 37.42 sd 5.66 range [17, 46]  (spread exists: good)
+  LIM_0 total overshoot deg/spec: mean 1111.4 sd 300.1 range [514, 1973]
+    rho(n violating axes (LIM_0)  , d|lbs| ) = +0.398   p = 0.004
+    rho(n violating axes (LIM_0)  , d|bt|  ) = +0.381   p = 0.006
+    rho(total overshoot deg (LIM_0), d|lbs| ) = +0.496   p = 0.000
+    rho(total overshoot deg (LIM_0), d|bt|  ) = +0.477   p = 0.000
+    rho(violation removed         , d|lbs| ) = +0.381   p = 0.006
+    rho(violation removed         , d|bt|  ) = +0.386   p = 0.006
+  INTERPRETATION: if the hinge forces placement, a specimen with 2x the violation to
+  remove should need more compensation. A null here means the +22% is a fixed offset
+  of the arm, not a response tracking the amount of rotation actually forbidden.
+
+====================================================================================================
+C -- DID THE JOINTS ACTUALLY MOVE? (parameter magnitude vs realised placement)
+====================================================================================================
+  rest-space joint position, LIM_0 as reference. All numbers % of body bbox diagonal.
+    headline 'placement magnitude' (LIM_0 params vs no params)   : 7.309%
+    TOTAL change LIM_0 -> LIM_1x (all channels)                  : 4.054%
+      ...of which swapping ONLY log_beta_scales                  : 2.081%
+      ...of which swapping ONLY betas_trans                      : 3.549%
+      ...of which swapping ONLY betas (rest skeleton)            : 0.092%
+    for scale: LIM_1x total displacement from no-params          : 6.872%
+    net displacement CHANGE (probe-23 caveat 2): 7.309% -> 6.872%
+
+  restricted to the 32 hinged joints:
+    TOTAL change LIM_0 -> LIM_1x : 3.985%   (lbs-only 2.080%, bt-only 3.409%)
+
+  SEED-NOISE FLOOR for the same relocation (M7, identical recipe):
+    s0->s1: TOTAL joint relocation 3.259%   lbs-only 1.511%
+    s0->s2: TOTAL joint relocation 3.104%   lbs-only 1.451%
+    s1->s2: TOTAL joint relocation 3.328%   lbs-only 1.547%
+
+====================================================================================================
+D -- PERMUTATION p FOR THE DEPTH-PARTIALLED CORRELATION, at effective n
+====================================================================================================
+  rho(drop, d|lbs|):
+    n=32 (probe-23's n, twins double-counted) raw +0.848
+    n=16 (bilateral pairs collapsed)          raw +0.854  perm p 0.0004
+    n=32 partial|depth +0.247  perm p 0.1744
+    n=16 partial|depth +0.271  perm p 0.3315    <-- NOT SIGNIFICANT
+  rho(drop, d|bt|):
+    n=32 (probe-23's n, twins double-counted) raw +0.734
+    n=16 (bilateral pairs collapsed)          raw +0.737  perm p 0.0020
+    n=32 partial|depth +0.164  perm p 0.3717
+    n=16 partial|depth +0.190  perm p 0.5007    <-- NOT SIGNIFICANT
+
+====================================================================================================
+E -- BOOTSTRAP CI ON THE EFFECT vs THE SEED-NOISE CI FOR THE SAME STATISTIC
+====================================================================================================
+  |log_beta_scales|    LIM_1x/LIM_0 = 1.2240  bootstrap 95% CI [1.1704, 1.2843]
+  |betas_trans|        LIM_1x/LIM_0 = 1.1042  bootstrap 95% CI [1.0690, 1.1419]
+  seed-noise reference for the same ratio statistic (identical recipe):
+    s0->s1 |lbs|  ratio 1.0093  95% CI [0.9904, 1.0299]
+    s0->s1 |bt|   ratio 1.0579  95% CI [1.0231, 1.0946]
+    s0->s2 |lbs|  ratio 1.0047  95% CI [0.9775, 1.0356]
+    s0->s2 |bt|   ratio 1.0266  95% CI [0.9922, 1.0629]
+    s1->s2 |lbs|  ratio 0.9954  95% CI [0.9714, 1.0222]
+    s1->s2 |bt|   ratio 0.9705  95% CI [0.9329, 1.0089]
+
+====================================================================================================
+DONE
+====================================================================================================

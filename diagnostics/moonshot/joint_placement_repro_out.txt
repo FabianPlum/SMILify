@@ -1,0 +1,20 @@
+LIM_0 (worker, w_limit=0)
+   n=50 nJ=55 nverts=10235 nbetas=25 betas_trans_present=True
+   mean bbox diag           = 2.439240
+   vert reconstruction err  mean=5.560e-08  max=8.724e-07  (rel to bbox diag: mean=2.28e-08 max=3.58e-07)
+
+LIM_1x (worker, w_limit=0.273)
+   n=50 nJ=55 nverts=10235 nbetas=25 betas_trans_present=True
+   mean bbox diag           = 2.437818
+   vert reconstruction err  mean=5.371e-08  max=6.611e-07  (rel to bbox diag: mean=2.20e-08 max=2.71e-07)
+
+M7_handoff_midline (worker)
+   n=50 nJ=55 nverts=10229 nbetas=13 betas_trans_present=True
+   mean bbox diag           = 2.442291
+   vert reconstruction err  mean=5.552e-08  max=6.828e-07  (rel to bbox diag: mean=2.27e-08 max=2.80e-07)
+
+ALL_ANTS_CLEAN (81)
+   n=81 nJ=55 nverts=10236 nbetas=20 betas_trans_present=False
+   mean bbox diag           = 2.422613
+   vert reconstruction err  mean=3.928e-03  max=3.930e-03  (rel to bbox diag: mean=1.62e-03 max=1.62e-03)
+

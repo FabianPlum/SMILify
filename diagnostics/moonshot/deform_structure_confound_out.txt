@@ -1,0 +1,129 @@
+==========================================================================================
+A. CALIBRATION -- reproduce the published free-form gen/spread numbers
+==========================================================================================
+    LIM_0 free-form                    n= 50 spread=0.018814  gen/spread @10=0.9998  @20=0.9935  @40=0.9828
+        published @10 = 0.9998   here = 0.9998   delta = +0.0000   mean|F| = 0.019184
+    M7_worker free-form                n= 50 spread=0.019960  gen/spread @10=0.9870  @20=0.9794  @40=0.9655
+        published @10 = 0.9870   here = 0.9870   delta = +0.0000   mean|F| = 0.020509
+    BPX_noprior free-form              n= 50 spread=0.019156  gen/spread @10=0.9988  @20=0.9911  @40=0.9810
+        published @10 = 0.9988   here = 0.9988   delta = -0.0000   mean|F| = 0.019507
+    CLEAN81_M7 free-form               n= 81 spread=0.008289  gen/spread @10=0.7792  @20=0.7509  @40=0.7292
+        published @10 = 0.7792   here = 0.7792   delta = +0.0000   mean|F| = 0.008880
+    ALL_ANTS_CLEAN free-form           n= 81 spread=0.015375  gen/spread @10=0.7932  @20=0.7561  @40=0.7070
+        published @10 = 0.7932   here = 0.7932   delta = -0.0000   mean|F| = 0.017305
+
+==========================================================================================
+B. UNCERTAINTY -- is the gap bigger than the sampling noise?
+==========================================================================================
+  per-specimen ratio e_i(10)/spread : distribution, outlier leverage, bootstrap CI
+    LIM_0            mean=0.9998 median=0.9494 sd=0.2756 min=0.5578 max=1.6463  boot95=[0.9234,1.0766]  max|jackknife shift|=0.0132
+    M7_worker        mean=0.9870 median=0.9697 sd=0.2659 min=0.5589 max=1.6431  boot95=[0.9132,1.0604]  max|jackknife shift|=0.0134
+    BPX_noprior      mean=0.9988 median=0.9571 sd=0.2765 min=0.5598 max=1.7064  boot95=[0.9225,1.0746]  max|jackknife shift|=0.0144
+    CLEAN81_M7       mean=0.7792 median=0.7202 sd=0.2158 min=0.5321 max=1.7823  boot95=[0.7363,0.8282]  max|jackknife shift|=0.0125
+    ALL_ANTS_CLEAN   mean=0.7932 median=0.7497 sd=0.2290 min=0.5084 max=2.0150  boot95=[0.7459,0.8455]  max|jackknife shift|=0.0153
+
+  REPEATED SUBSAMPLE of the clean corpora to n=50, 40 draws (published used 5):
+    CLEAN81_M7       n=50 free-form gen/spread@10 = 0.7964 +/- 0.0102 (range 0.7754-0.8135, 40 draws)
+    ALL_ANTS_CLEAN   n=50 free-form gen/spread@10 = 0.8130 +/- 0.0107 (range 0.7862-0.8373, 40 draws)
+
+==========================================================================================
+C. PHYLOGENETIC / DUPLICATE LEAKAGE -- leave-one-GENUS-out instead of one-specimen
+==========================================================================================
+    LIM_0            37 groups for 50 specimens; multi-specimen groups: {'acromyrmex': 2, 'anochetus': 2, 'cephalotes': 3, 'labidus': 2, 'myrmecina': 2, 'polyrhachis': 2, 'ponera': 2, 'strumigenys': 5, 'temnothorax': 2}
+    M7_worker        37 groups for 50 specimens; multi-specimen groups: {'acromyrmex': 2, 'anochetus': 2, 'cephalotes': 3, 'labidus': 2, 'myrmecina': 2, 'polyrhachis': 2, 'ponera': 2, 'strumigenys': 5, 'temnothorax': 2}
+    BPX_noprior      37 groups for 50 specimens; multi-specimen groups: {'acromyrmex': 2, 'anochetus': 2, 'cephalotes': 3, 'labidus': 2, 'myrmecina': 2, 'polyrhachis': 2, 'ponera': 2, 'strumigenys': 5, 'temnothorax': 2}
+    CLEAN81_M7       54 groups for 81 specimens; multi-specimen groups: {'NUMBERED_BLOCK': 20, 'cephalotes': 2, 'dolichoderus': 3, 'dorylus': 2, 'ectatomma': 2, 'pheidole': 4}
+    ALL_ANTS_CLEAN   54 groups for 81 specimens; multi-specimen groups: {'NUMBERED_BLOCK': 20, 'cephalotes': 2, 'dolichoderus': 3, 'dorylus': 2, 'ectatomma': 2, 'pheidole': 4}
+
+    LIM_0 free-form LOGO               n= 50 spread=0.018814  gen/spread @10=1.0007  @20=0.9947  @40=0.9841
+    M7_worker free-form LOGO           n= 50 spread=0.019960  gen/spread @10=0.9891  @20=0.9817  @40=0.9683
+    BPX_noprior free-form LOGO         n= 50 spread=0.019156  gen/spread @10=0.9997  @20=0.9923  @40=0.9823
+    CLEAN81_M7 free-form LOGO          n= 81 spread=0.008289  gen/spread @10=0.8413  @20=0.8124  @40=0.7919
+    ALL_ANTS_CLEAN free-form LOGO      n= 81 spread=0.015375  gen/spread @10=0.8565  @20=0.8188  @40=0.7750
+
+  clean-corpus variant: 01..20 numbered block treated as 20 INDEPENDENT specimens
+    CLEAN81_M7 LOGO (block split)      n= 81 spread=0.008289  gen/spread @10=0.7837  @20=0.7558  @40=0.7349
+    ALL_ANTS_CLEAN LOGO (block split)  n= 81 spread=0.015375  gen/spread @10=0.7968  @20=0.7615  @40=0.7135
+
+  and: clean corpus with the 20 numbered meshes REMOVED entirely (n=61)
+    CLEAN81_M7 n=61 plain LOO          n= 61 spread=0.008261  gen/spread @10=0.8269  @20=0.7943  @40=0.7683
+    CLEAN81_M7 n=61 LOGO               n= 61 spread=0.008261  gen/spread @10=0.8355  @20=0.8023  @40=0.7768
+    ALL_ANTS_CLEAN n=61 plain LOO      n= 61 spread=0.015565  gen/spread @10=0.8426  @20=0.7996  @40=0.7502
+    ALL_ANTS_CLEAN n=61 LOGO           n= 61 spread=0.015565  gen/spread @10=0.8478  @20=0.8079  @40=0.7611
+
+  nearest-neighbour leakage: corr(LOO error@10, distance to nearest other specimen)
+    LIM_0            corr = +0.991   NN-dist mean=2.9951 min=1.8072 (min/mean = 0.603)
+    M7_worker        corr = +0.984   NN-dist mean=3.1117 min=1.9527 (min/mean = 0.628)
+    BPX_noprior      corr = +0.986   NN-dist mean=3.0242 min=1.8755 (min/mean = 0.620)
+    CLEAN81_M7       corr = +0.946   NN-dist mean=1.0443 min=0.4522 (min/mean = 0.433)
+    ALL_ANTS_CLEAN   corr = +0.927   NN-dist mean=1.8062 min=0.7993 (min/mean = 0.443)
+
+==========================================================================================
+D. SNR CONFOUND -- inject iid noise into the CLEAN free-form field and sweep
+==========================================================================================
+  Question: gen/spread is signal/TOTAL. The decisive matched control compares a
+  0.00888-magnitude clean field against a 0.02051-magnitude worker field (2.3x).
+  How much incoherent error must be added to the CLEAN field to make it look like
+  the worker field on this metric?
+    worker M7 reference: mean|F| = 0.020509  gen/spread@10 = 0.9870
+    sigma=0.000  mean|F|=0.008880  gen/spread @10=0.7792  @40=0.7292
+    sigma=0.002  mean|F|=0.009599  gen/spread @10=0.8196  @40=0.7846
+    sigma=0.004  mean|F|=0.011328  gen/spread @10=0.8800  @40=0.8622
+    sigma=0.006  mean|F|=0.013574  gen/spread @10=0.9232  @40=0.9144
+    sigma=0.008  mean|F|=0.016132  gen/spread @10=0.9515  @40=0.9470
+    sigma=0.010  mean|F|=0.018855  gen/spread @10=0.9693  @40=0.9667
+    sigma=0.012  mean|F|=0.021681  gen/spread @10=0.9814  @40=0.9796
+    sigma=0.015  mean|F|=0.026068  gen/spread @10=0.9923  @40=0.9910
+    sigma=0.020  mean|F|=0.033583  gen/spread @10=1.0018  @40=1.0011
+
+  same sweep on the worker field, for symmetry (does it start from a floor?):
+    sigma=0.000  mean|F|=0.020509  gen/spread@10=0.9870
+    sigma=0.005  mean|F|=0.022608  gen/spread@10=0.9941
+    sigma=0.010  mean|F|=0.027295  gen/spread@10=1.0042
+
+==========================================================================================
+E. BASIS TRANSFER -- M7_worker and CLEAN81_M7 share topology and template
+==========================================================================================
+    k=10  worker by CLEAN basis    residual energy fraction = 0.9437 (explained 0.0563)
+    k=10  worker by WORKER basis   residual energy fraction = 0.5568 (explained 0.4432)
+    k=10  clean  by WORKER basis   residual energy fraction = 0.7493 (explained 0.2507)
+    k=10  clean  by CLEAN basis    residual energy fraction = 0.3748 (explained 0.6252)
+    k=10  principal angles worker-vs-clean basis: cos = 0.61, 0.23, 0.18, 0.14, 0.09 ...  mean=0.144
+    k=20  worker by CLEAN basis    residual energy fraction = 0.9298 (explained 0.0702)
+    k=20  worker by WORKER basis   residual energy fraction = 0.3173 (explained 0.6827)
+    k=20  clean  by WORKER basis   residual energy fraction = 0.7190 (explained 0.2810)
+    k=20  clean  by CLEAN basis    residual energy fraction = 0.2549 (explained 0.7451)
+    k=20  principal angles worker-vs-clean basis: cos = 0.66, 0.36, 0.29, 0.24, 0.24 ...  mean=0.158
+
+==========================================================================================
+F. IN-DISTRIBUTION CONFOUND -- was the shape space built from the CLEAN corpus?
+==========================================================================================
+  (preprocess_meshes.py: 'OmniAnt's own shape space was built with the baseline
+   workflow on that exact corpus, so those scans are in-distribution by construction')
+    ALL_ANTS_CLEAN   |corpus mean rest-shape - v_template| = 0.015508 (0.674% bbox)   fraction of corpus rest-shape variance INSIDE shapedirs span = 65.89%
+    CLEAN81_M7       |corpus mean rest-shape - v_template| = 0.002962 (0.126% bbox)   fraction of corpus rest-shape variance INSIDE shapedirs span = 24.58%
+    LIM_0            |corpus mean rest-shape - v_template| = 0.011165 (0.476% bbox)   fraction of corpus rest-shape variance INSIDE shapedirs span = 24.70%
+    M7_worker        |corpus mean rest-shape - v_template| = 0.006820 (0.291% bbox)   fraction of corpus rest-shape variance INSIDE shapedirs span = 2.67%
+
+  Subspace overlap: top-K PCA of ALL_ANTS_CLEAN rest shapes vs SMPL_fit shapedirs
+    principal-angle cosines (K=20): 0.969, 0.934, 0.917, 0.890, 0.850, 0.824, 0.787, 0.753, 0.699, 0.669, 0.568, 0.538, 0.461, 0.308, 0.214, 0.181, 0.156, 0.121, 0.085, 0.050
+    mean cos = 0.5487   #cos>0.9 = 3/20
+
+==========================================================================================
+G. SPECIMEN-SIZE CONFOUND -- is the clean structure just a global scale mode?
+==========================================================================================
+    LIM_0            uniform-scale share of free-form var =   0.01% (of rest-shape var   0.26%)   free-form gen/spread@10 after removing it = 0.9998 (was 0.9998)
+    M7_worker        uniform-scale share of free-form var =   0.02% (of rest-shape var   0.02%)   free-form gen/spread@10 after removing it = 0.9870 (was 0.9870)
+    BPX_noprior      uniform-scale share of free-form var =   0.01% (of rest-shape var   0.17%)   free-form gen/spread@10 after removing it = 0.9988 (was 0.9988)
+    CLEAN81_M7       uniform-scale share of free-form var =   0.18% (of rest-shape var   0.18%)   free-form gen/spread@10 after removing it = 0.7786 (was 0.7792)
+    ALL_ANTS_CLEAN   uniform-scale share of free-form var =   0.96% (of rest-shape var  12.22%)   free-form gen/spread@10 after removing it = 0.7938 (was 0.7932)
+
+==========================================================================================
+H. METRIC CHOICE -- energy (variance-explained) estimator instead of mean distance
+==========================================================================================
+    LIM_0            free-form OUT-OF-SAMPLE residual energy fraction  @10=0.9718  @20=0.9606  @40=0.9416
+    M7_worker        free-form OUT-OF-SAMPLE residual energy fraction  @10=0.9517  @20=0.9389  @40=0.9156
+    BPX_noprior      free-form OUT-OF-SAMPLE residual energy fraction  @10=0.9698  @20=0.9575  @40=0.9398
+    CLEAN81_M7       free-form OUT-OF-SAMPLE residual energy fraction  @10=0.5543  @20=0.5143  @40=0.4824
+    ALL_ANTS_CLEAN   free-form OUT-OF-SAMPLE residual energy fraction  @10=0.6310  @20=0.5708  @40=0.5027
+

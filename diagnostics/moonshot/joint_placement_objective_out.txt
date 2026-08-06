@@ -1,0 +1,300 @@
+PROBE 20 -- can fitted JOINT PLACEMENT be scored against something OBJECTIVE?
+
+Three proxies, none of which needs an annotated joint ground truth:
+
+  P1  BILATERAL ASYMMETRY of the fitted rest-space skeleton.
+      The template symmetry plane is y = 0 (fitter_3d/trainer_moonshot.py:139) and the
+      mirror map on joints is the _l/_r name pair. A correctly placed skeleton on a roughly
+      symmetric specimen must be mirror-symmetric IN REST SPACE (pose is factored out by
+      evaluating with identity rotations). Decomposed into the three channels that can move
+      a joint: betas (via J_regressor . v_shaped), log_beta_scales, betas_trans.
+
+  P2  SEGMENT LENGTHS inside a leg (coxa:trochanter:femur:tibia:tarsus).
+      P2a left/right length asymmetry -- taxon-free, trustworthy.
+      P2b cross-specimen spread of within-leg proportions -- CONFOUNDED by real taxonomic
+          variation (both corpora span many ant genera); reported with that caveat.
+
+  P3  JOINT-INSIDE-MESH. A skeletal joint must lie inside its own skin. Tested with the
+      generalized winding number against the fitted, posed mesh stored in the npz. This is
+      the only proxy that assumes nothing about biology at all.
+
+      NOTE (read off fitter_3d/trainer.py:240): deform_verts is added AFTER skinning, so the
+      surface can be dragged onto the scan while the skeleton stays where betas /
+      log_beta_scales / betas_trans put it. Joints leaving the skin is therefore a
+      mechanically possible failure of this pipeline, not an impossible one.
+
+All lengths are reported as a percentage of that specimen's REST-SPACE BODY DIAGONAL
+(bbox diagonal of v_shaped) so worker and clean corpora are comparable despite different
+templates and betas counts.
+
+============================================================================================
+  TEMPLATE FLOOR (OmniAnt_25PCs_joint_limited.pkl, align=False)  bbox diag=2.3463
+     J_regressor.v_template  L/R mirror gap: median=0.0000%  max=0.0000%  of body diag
+     authored dd['J']        L/R mirror gap: median=0.0000%  max=0.0000%
+     mesh surface mirror NN distance: median=0.0000%  p99=0.0000%
+  TEMPLATE FLOOR (SMIL_OmniAnt.pkl, align=False)  bbox diag=2.3446
+     J_regressor.v_template  L/R mirror gap: median=0.0463%  max=3.0191%  of body diag
+     authored dd['J']        L/R mirror gap: median=1.3308%  max=6.3204%
+     mesh surface mirror NN distance: median=0.0000%  p99=0.0000%
+  TEMPLATE FLOOR (SMPL_fit.pkl, align=True)  bbox diag=2.3018
+     J_regressor.v_template  L/R mirror gap: median=0.0000%  max=0.0000%  of body diag
+     authored dd['J']        L/R mirror gap: median=0.0000%  max=0.0000%
+     mesh surface mirror NN distance: median=0.0000%  p99=0.0000%
+============================================================================================
+
+### LIM_0        (worker, 50, w_limit=0)    n=50  betas=25  L/R joint pairs=24  betas_trans=yes
+  P1 bilateral asymmetry of the REST-SPACE skeleton  [% of rest body diagonal]
+     channel                median     mean      p90      max
+     betas only              0.000    0.000    0.000    0.000
+     + log_beta_scales       0.004    0.007    0.017    0.051
+     + betas_trans           0.104    0.243    0.471    6.635
+     FULL (as fitted)        0.116    0.265    0.606    6.635
+     by group (FULL):
+       body           n_pairs=  5  median=  0.173  mean=  0.580  p90=  1.456
+       leg_distal     n_pairs=  6  median=  0.155  mean=  0.193  p90=  0.358
+       leg_middle     n_pairs=  6  median=  0.122  mean=  0.149  p90=  0.260
+       leg_proximal   n_pairs=  6  median=  0.066  mean=  0.077  p90=  0.138
+       mandible       n_pairs=  1  median=  0.635  mean=  0.943  p90=  1.695
+  P2a left/right SEGMENT-LENGTH asymmetry  |L-R| / mean(L,R)  [%]
+     segment           leg1      leg2      leg3       all
+     coxa              0.59      0.50      0.73      0.61
+     trochanter        0.18      0.17      0.13      0.16
+     femur             0.29      0.20      0.12      0.18
+     tibia             0.33      0.45      0.25      0.34
+     tarsus            0.25      0.31      0.34      0.31
+     OVERALL  median=0.27%  mean=0.45%  p90=1.07%  max=6.08%
+  P2b within-leg PROPORTION spread across specimens  (seg / total leg length)
+      *** confounded: both corpora span many ant genera ***
+     segment       mean prop       sd     CV %   robCV %
+     coxa             0.0864   0.0329    38.06     34.74
+     trochanter       0.3070   0.0460    14.98     13.79
+     femur            0.2790   0.0458    16.41     16.95
+     tibia            0.1914   0.0493    25.77     26.63
+     tarsus           0.1361   0.0554    40.68     49.42
+     MEAN over segments: CV=27.18%   robustCV=28.31%
+     segment length as % of body diagonal: median=12.58 min=2.094 max=34.60   frac < 0.5%% of body = 0.00%
+  P3 joints OUTSIDE the fitted mesh (generalized winding number, |w|<0.5)
+     overall: 66.5% of 50x55 joints (1828 of 2750);  per specimen mean=36.6 joints
+     group          n_joints  % outside  med gap %BL  p90 gap %BL
+     body                 17       62.6        0.889        2.622
+     leg_distal           12       73.5        0.667        1.922
+     leg_middle           12       82.5        0.650        1.488
+     leg_proximal         12       46.8        0.432        0.882
+     mandible              2       79.0        0.716        1.365
+     worst joints: an_3_l=96%, an_2_r=92%, an_3_r=92%, l_2_ta_l=90%, an_2_l=90%, l_3_ti_r=88%, l_2_ti_l=88%, l_3_ti_l=88%, ma_l=86%, l_1_ta_r=86%, l_3_fe_r=86%, l_1_fe_r=86%
+
+### LIM_1x       (worker, 50, limits on)    n=50  betas=25  L/R joint pairs=24  betas_trans=yes
+  P1 bilateral asymmetry of the REST-SPACE skeleton  [% of rest body diagonal]
+     channel                median     mean      p90      max
+     betas only              0.000    0.000    0.000    0.000
+     + log_beta_scales       0.004    0.007    0.019    0.077
+     + betas_trans           0.123    0.291    0.702    5.890
+     FULL (as fitted)        0.140    0.318    0.772    5.907
+     by group (FULL):
+       body           n_pairs=  5  median=  0.258  mean=  0.663  p90=  1.772
+       leg_distal     n_pairs=  6  median=  0.196  mean=  0.245  p90=  0.462
+       leg_middle     n_pairs=  6  median=  0.154  mean=  0.194  p90=  0.396
+       leg_proximal   n_pairs=  6  median=  0.073  mean=  0.096  p90=  0.180
+       mandible       n_pairs=  1  median=  0.896  mean=  1.110  p90=  2.124
+  P2a left/right SEGMENT-LENGTH asymmetry  |L-R| / mean(L,R)  [%]
+     segment           leg1      leg2      leg3       all
+     coxa              0.58      0.76      0.74      0.64
+     trochanter        0.17      0.21      0.13      0.17
+     femur             0.33      0.26      0.21      0.24
+     tibia             0.35      0.34      0.28      0.32
+     tarsus            0.33      0.28      0.35      0.31
+     OVERALL  median=0.31%  mean=0.51%  p90=1.22%  max=5.28%
+  P2b within-leg PROPORTION spread across specimens  (seg / total leg length)
+      *** confounded: both corpora span many ant genera ***
+     segment       mean prop       sd     CV %   robCV %
+     coxa             0.0899   0.0378    42.01     40.03
+     trochanter       0.3201   0.0495    15.46     15.79
+     femur            0.2826   0.0486    17.19     15.49
+     tibia            0.1759   0.0570    32.43     31.02
+     tarsus           0.1315   0.0544    41.34     38.99
+     MEAN over segments: CV=29.69%   robustCV=28.26%
+     segment length as % of body diagonal: median=11.41 min=1.665 max=38.54   frac < 0.5%% of body = 0.00%
+  P3 joints OUTSIDE the fitted mesh (generalized winding number, |w|<0.5)
+     overall: 68.1% of 50x55 joints (1872 of 2750);  per specimen mean=37.4 joints
+     group          n_joints  % outside  med gap %BL  p90 gap %BL
+     body                 17       62.1        0.948        2.455
+     leg_distal           12       78.8        0.773        1.982
+     leg_middle           12       84.0        0.731        1.620
+     leg_proximal         12       48.5        0.443        0.996
+     mandible              2       76.0        0.685        1.418
+     worst joints: l_1_fe_l=94%, l_2_ta_l=94%, an_3_r=94%, an_2_r=92%, an_3_l=92%, an_2_l=92%, l_2_ti_l=90%, l_2_pt_r=90%, l_3_ti_r=88%, l_2_fe_l=86%, l_3_fe_l=86%, l_1_ta_r=86%
+
+### BPX_noprior  (worker, 50)    n=50  betas=13  L/R joint pairs=24  betas_trans=yes
+  P1 bilateral asymmetry of the REST-SPACE skeleton  [% of rest body diagonal]
+     channel                median     mean      p90      max
+     betas only              0.048    0.311    0.913    3.239
+     + log_beta_scales       0.121    0.467    1.005    9.618
+     + betas_trans           0.154    0.499    1.234    8.106
+     FULL (as fitted)        0.217    0.636    1.372    9.235
+     by group (FULL):
+       body           n_pairs=  5  median=  0.712  mean=  0.965  p90=  1.924
+       leg_distal     n_pairs=  6  median=  0.220  mean=  1.075  p90=  4.455
+       leg_middle     n_pairs=  6  median=  0.145  mean=  0.181  p90=  0.343
+       leg_proximal   n_pairs=  6  median=  0.133  mean=  0.201  p90=  0.544
+       mandible       n_pairs=  1  median=  1.308  mean=  1.699  p90=  2.657
+  P2a left/right SEGMENT-LENGTH asymmetry  |L-R| / mean(L,R)  [%]
+     segment           leg1      leg2      leg3       all
+     coxa              1.96      0.90      1.77      1.55
+     trochanter        0.24      0.33      0.09      0.19
+     femur             0.25      1.00      0.21      0.35
+     tibia             0.33      0.59      0.20      0.32
+     tarsus            2.37     67.43      0.36      2.37
+     OVERALL  median=0.51%  mean=5.51%  p90=4.28%  max=164.84%
+  P2b within-leg PROPORTION spread across specimens  (seg / total leg length)
+      *** confounded: both corpora span many ant genera ***
+     segment       mean prop       sd     CV %   robCV %
+     coxa             0.0859   0.0364    42.43     35.72
+     trochanter       0.3125   0.0503    16.09     15.10
+     femur            0.2789   0.0467    16.76     14.71
+     tibia            0.1924   0.0538    27.96     28.76
+     tarsus           0.1303   0.0652    50.04     54.35
+     MEAN over segments: CV=30.65%   robustCV=29.73%
+     segment length as % of body diagonal: median=12.52 min=0.327 max=32.08   frac < 0.5%% of body = 0.20%
+  P3 joints OUTSIDE the fitted mesh (generalized winding number, |w|<0.5)
+     overall: 62.1% of 50x55 joints (1709 of 2750);  per specimen mean=34.2 joints
+     group          n_joints  % outside  med gap %BL  p90 gap %BL
+     body                 17       54.9        0.877        2.343
+     leg_distal           12       82.8        0.829        2.262
+     leg_middle           12       82.5        0.624        1.459
+     leg_proximal         12       30.8        0.430        0.909
+     mandible              2       65.0        1.026        2.488
+     worst joints: an_2_l=98%, l_2_pt_l=94%, an_2_r=94%, l_3_ti_r=90%, l_3_ti_l=90%, l_3_ta_r=90%, l_1_pt_r=88%, l_2_pt_r=88%, l_1_pt_l=88%, l_1_ta_r=86%, l_3_fe_r=86%, l_2_ta_l=84%
+
+### M7_midline   (worker, 50)    n=50  betas=13  L/R joint pairs=24  betas_trans=yes
+  P1 bilateral asymmetry of the REST-SPACE skeleton  [% of rest body diagonal]
+     channel                median     mean      p90      max
+     betas only              0.046    0.302    0.900    3.019
+     + log_beta_scales       0.116    0.462    1.041   10.313
+     + betas_trans           0.157    0.498    1.252    7.831
+     FULL (as fitted)        0.213    0.645    1.464    9.948
+     by group (FULL):
+       body           n_pairs=  5  median=  0.659  mean=  0.969  p90=  2.164
+       leg_distal     n_pairs=  6  median=  0.216  mean=  1.111  p90=  4.477
+       leg_middle     n_pairs=  6  median=  0.152  mean=  0.185  p90=  0.363
+       leg_proximal   n_pairs=  6  median=  0.122  mean=  0.191  p90=  0.501
+       mandible       n_pairs=  1  median=  1.391  mean=  1.702  p90=  2.808
+  P2a left/right SEGMENT-LENGTH asymmetry  |L-R| / mean(L,R)  [%]
+     segment           leg1      leg2      leg3       all
+     coxa              2.21      0.80      1.42      1.36
+     trochanter        0.22      0.25      0.13      0.19
+     femur             0.28      0.95      0.09      0.33
+     tibia             0.33      0.47      0.19      0.32
+     tarsus            3.02     67.08      0.38      3.02
+     OVERALL  median=0.49%  mean=5.45%  p90=4.68%  max=121.42%
+  P2b within-leg PROPORTION spread across specimens  (seg / total leg length)
+      *** confounded: both corpora span many ant genera ***
+     segment       mean prop       sd     CV %   robCV %
+     coxa             0.0881   0.0316    35.88     30.33
+     trochanter       0.3120   0.0474    15.18     13.63
+     femur            0.2814   0.0484    17.21     16.07
+     tibia            0.1904   0.0520    27.33     28.86
+     tarsus           0.1281   0.0646    50.39     55.48
+     MEAN over segments: CV=29.20%   robustCV=28.87%
+     segment length as % of body diagonal: median=12.56 min=0.583 max=33.70   frac < 0.5%% of body = 0.00%
+  P3 joints OUTSIDE the fitted mesh (generalized winding number, |w|<0.5)
+     overall: 60.5% of 50x55 joints (1664 of 2750);  per specimen mean=33.3 joints
+     group          n_joints  % outside  med gap %BL  p90 gap %BL
+     body                 17       50.2        1.007        2.287
+     leg_distal           12       84.0        0.824        2.472
+     leg_middle           12       81.2        0.608        1.455
+     leg_proximal         12       28.7        0.447        1.056
+     mandible              2       74.0        1.090        2.386
+     worst joints: an_2_l=98%, l_2_pt_l=94%, l_3_ti_r=92%, l_3_ta_r=92%, l_2_pt_r=92%, l_3_ti_l=90%, l_2_ti_l=90%, l_1_pt_l=90%, an_2_r=90%, l_1_ta_r=88%, l_1_pt_r=86%, l_1_fe_r=86%
+
+### baseline     (worker, 50, pose frozen)    n=50  betas=13  L/R joint pairs=24  betas_trans=yes
+  P1 bilateral asymmetry of the REST-SPACE skeleton  [% of rest body diagonal]
+     channel                median     mean      p90      max
+     betas only              0.047    0.306    0.882    3.142
+     + log_beta_scales       5.893    9.033   22.925   78.597
+     + betas_trans           0.047    0.306    0.882    3.142
+     FULL (as fitted)        5.893    9.033   22.925   78.597
+     by group (FULL):
+       body           n_pairs=  5  median=  0.709  mean=  3.342  p90= 11.231
+       leg_distal     n_pairs=  6  median= 14.919  mean= 16.503  p90= 28.561
+       leg_middle     n_pairs=  6  median= 11.554  mean= 13.417  p90= 25.873
+       leg_proximal   n_pairs=  6  median=  0.551  mean=  3.210  p90= 11.032
+       mandible       n_pairs=  1  median=  1.198  mean=  1.309  p90=  1.818
+  P2a left/right SEGMENT-LENGTH asymmetry  |L-R| / mean(L,R)  [%]
+     segment           leg1      leg2      leg3       all
+     coxa             46.64     36.75     39.68     40.41
+     trochanter       47.30     39.77     33.34     42.06
+     femur            39.12     39.76     37.55     38.08
+     tibia            62.68     65.39     62.44     62.72
+     tarsus           80.92    109.41     47.25     84.16
+     OVERALL  median=50.92%  mean=63.20%  p90=142.36%  max=196.62%
+  P2b within-leg PROPORTION spread across specimens  (seg / total leg length)
+      *** confounded: both corpora span many ant genera ***
+     segment       mean prop       sd     CV %   robCV %
+     coxa             0.1508   0.1129    74.84     91.35
+     trochanter       0.3231   0.1358    42.04     38.64
+     femur            0.2612   0.1449    55.49     60.16
+     tibia            0.1719   0.1040    60.51     63.98
+     tarsus           0.0930   0.0963   103.50    119.84
+     MEAN over segments: CV=67.28%   robustCV=74.80%
+     segment length as % of body diagonal: median=8.67 min=0.228 max=86.29   frac < 0.5%% of body = 1.40%
+  P3 joints OUTSIDE the fitted mesh (generalized winding number, |w|<0.5)
+     overall: 53.7% of 50x55 joints (1476 of 2750);  per specimen mean=29.5 joints
+     group          n_joints  % outside  med gap %BL  p90 gap %BL
+     body                 17       45.2        0.665        1.588
+     leg_distal           12       68.7        0.523        1.169
+     leg_middle           12       63.2        0.472        1.064
+     leg_proximal         12       38.5        0.501        1.255
+     mandible              2       70.0        0.904        1.951
+     worst joints: an_2_l=92%, an_2_r=88%, l_2_pt_r=86%, l_2_pt_l=80%, l_2_ta_l=78%, l_1_pt_l=78%, l_2_fe_r=76%, l_2_fe_l=74%, l_1_pt_r=72%, ma_r=70%, ma_l=70%, an_3_r=70%
+
+### ALL_ANTS_CLEAN (81)    n=81  betas=20  L/R joint pairs=24  betas_trans=NO
+  P1 bilateral asymmetry of the REST-SPACE skeleton  [% of rest body diagonal]
+     channel                median     mean      p90      max
+     betas only              0.000    0.000    0.000    0.000
+     + log_beta_scales       0.177    0.464    1.317    8.078
+     + betas_trans           n/a (no betas_trans in this fit)
+     FULL (as fitted)        n/a (no betas_trans in this fit)
+     by group (FULL):
+       body           n_pairs=  5  median=  0.000  mean=  0.316  p90=  1.063
+       leg_distal     n_pairs=  6  median=  0.443  mean=  0.860  p90=  2.285
+       leg_middle     n_pairs=  6  median=  0.309  mean=  0.649  p90=  1.909
+       leg_proximal   n_pairs=  6  median=  0.000  mean=  0.082  p90=  0.195
+       mandible       n_pairs=  1  median=  0.000  mean=  0.000  p90=  0.000
+  P2a left/right SEGMENT-LENGTH asymmetry  |L-R| / mean(L,R)  [%]
+     segment           leg1      leg2      leg3       all
+     coxa              0.87      1.43      1.08      1.00
+     trochanter        0.48      0.45      0.36      0.42
+     femur             1.11      1.18      0.94      1.06
+     tibia             2.01      2.41      1.48      2.07
+     tarsus            4.09      5.23      4.32      4.32
+     OVERALL  median=1.33%  mean=3.53%  p90=8.86%  max=57.63%
+  P2b within-leg PROPORTION spread across specimens  (seg / total leg length)
+      *** confounded: both corpora span many ant genera ***
+     segment       mean prop       sd     CV %   robCV %
+     coxa             0.0872   0.0320    36.67     44.14
+     trochanter       0.3668   0.0306     8.35      7.58
+     femur            0.2963   0.0288     9.72     10.84
+     tibia            0.1604   0.0309    19.27     19.41
+     tarsus           0.0892   0.0235    26.37     28.05
+     MEAN over segments: CV=20.08%   robustCV=22.00%
+     segment length as % of body diagonal: median=7.04 min=1.138 max=27.59   frac < 0.5%% of body = 0.00%
+  P3 joints OUTSIDE the fitted mesh (generalized winding number, |w|<0.5)
+     overall: 57.4% of 81x55 joints (2559 of 4455);  per specimen mean=31.6 joints
+     group          n_joints  % outside  med gap %BL  p90 gap %BL
+     body                 17       56.9        0.411        0.883
+     leg_distal           12       70.2        0.181        0.334
+     leg_middle           12       62.4        0.188        0.352
+     leg_proximal         12       44.4        0.278        0.565
+     mandible              2       34.0        0.338        1.114
+     worst joints: an_2_l=93%, an_2_r=86%, an_3_r=86%, l_1_ta_r=83%, an_3_l=81%, l_3_ti_r=79%, l_3_ta_l=78%, l_1_ta_l=77%, l_2_ta_l=77%, w_1_r=75%, l_1_fe_l=73%, l_1_pt_r=73%
+
+============================================================================================
+SUMMARY
+run                                       P1 med %  P1 mean %  P2a med %   P3 %out
+LIM_0        (worker, 50, w_limit=0)         0.116      0.265       0.27      66.5
+LIM_1x       (worker, 50, limits on)         0.140      0.318       0.31      68.1
+BPX_noprior  (worker, 50)                    0.217      0.636       0.51      62.1
+M7_midline   (worker, 50)                    0.213      0.645       0.49      60.5
+baseline     (worker, 50, pose frozen)       5.893      9.033      50.92      53.7
+ALL_ANTS_CLEAN (81)                          0.177      0.464       1.33      57.4
+============================================================================================
