@@ -51,7 +51,7 @@ import torch
 from pytorch3d.ops import knn_points, sample_points_from_meshes
 
 import config
-from fitter_3d.joint_limits import joint_limit_tensors, limit_hinge
+from fitter_3d.joint_limits import joint_limit_tensors, limit_hinge, scale_barrier, trans_barrier
 from fitter_3d.trainer import get_meshes
 from fitter_3d.trainer_moonshot import (
     rest_edge_loss,
@@ -355,6 +355,8 @@ class HierarchicalStage:
             w_offset=0.0,
             w_midline=0.0,
             w_limit=0.0,
+            w_scale=0.0,
+            w_trans=0.0,
         )
         if loss_weights:
             self.lw.update(loss_weights)
@@ -533,6 +535,21 @@ class HierarchicalStage:
             l_lim = limit_hinge(self.smal.joint_rot, self.min_limits, self.max_limits)
             comp["limit"] = l_lim
             loss = loss + self.lw["w_limit"] * l_lim
+
+        if self.lw.get("w_scale", 0.0) > 0:
+            # Bound per-joint scale (REPORT §6.10.1): the anterior partition split was a null,
+            # leaving unbounded scale as the last untested mechanism for the head collapsing
+            # into the thorax while the appendages stretch to cover it.
+            l_sc = scale_barrier(self.smal.log_beta_scales)
+            comp["scale"] = l_sc
+            loss = loss + self.lw["w_scale"] * l_sc
+
+        if self.lw.get("w_trans", 0.0) > 0:
+            # Separate from w_scale: per-part translation is banded in absolute model units
+            # (a fraction of body length), scale in log-ratio. See trans_barrier.
+            l_tr = trans_barrier(self.smal.betas_trans)
+            comp["trans"] = l_tr
+            loss = loss + self.lw["w_trans"] * l_tr
 
         if self.lw.get("w_midline", 0.0) > 0 and self.sym_verts is not None:
             l_m = midline_penalty(mesh.verts_padded(), self.sym_verts)

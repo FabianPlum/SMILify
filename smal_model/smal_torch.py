@@ -328,12 +328,26 @@ class SMAL(nn.Module):
         # carefully where the shape space cannot reach -- but the bulk of the variation is now
         # driven by betas and therefore lives in the shape space, where it transfers.
         if config.COUPLE_JOINT_BLENDSHAPES:
+            # CANONICAL TRANSFORM. This must match the two implementations that already
+            # exist, or the same .pkl means different things in different pipelines:
+            #   smal_fitter/neuralSMIL/smil_image_regressor.py
+            #       _transform_separate_pca_weights_to_joint_values  ('entangled_with_betas')
+            #   smal_fitter/Unreal2Pytorch3D.py:157-159              (merged to master 72df93a)
+            # Both compute  scale = 1 + scaledirs.beta  and only THEN take the log, and both
+            # apply translation_factor to the transdirs contribution.
+            #
+            # An earlier version of this block (commit 32e8260) treated scaledirs.beta as
+            # ALREADY being log-scale and omitted translation_factor entirely, making the
+            # translation contribution 100x too large. REPORT §6.7's conclusion that coupling
+            # "did not fix the frozen shape space" was measured with that wrong transform and
+            # is therefore not trustworthy -- see §6.11.
             _nb = beta.shape[1]
             if self.scaledirs is not None:
                 _sc = torch.einsum("bk,kjc->bjc", beta, self.scaledirs[:_nb])
-                betas_logscale = _sc if betas_logscale is None else betas_logscale + _sc
+                _log_sc = torch.log(torch.clamp(1.0 + _sc, min=config.COUPLE_MIN_SCALE))
+                betas_logscale = _log_sc if betas_logscale is None else betas_logscale + _log_sc
             if self.transdirs is not None:
-                _tr = torch.einsum("bk,kjc->bjc", beta, self.transdirs[:_nb])
+                _tr = torch.einsum("bk,kjc->bjc", beta, self.transdirs[:_nb]) * config.COUPLE_TRANSLATION_FACTOR
                 betas_trans = _tr if betas_trans is None else betas_trans + _tr
 
         self.J_transformed, A = batch_global_rigid_transformation(

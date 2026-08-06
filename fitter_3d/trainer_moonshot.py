@@ -59,7 +59,7 @@ from pytorch3d.ops import sample_points_from_meshes, knn_points
 from pytorch3d.loss import mesh_laplacian_smoothing, mesh_normal_consistency
 
 import config
-from fitter_3d.joint_limits import joint_limit_tensors, limit_hinge
+from fitter_3d.joint_limits import joint_limit_tensors, limit_hinge, scale_barrier, trans_barrier
 from fitter_3d.trainer import SMALParamGroup, get_meshes  # reuse model, unmodified
 from fitter_3d.utils import plot_meshes
 
@@ -76,6 +76,8 @@ default_weights = dict(
     w_sym=0.0,  # NEW: left/right symmetry on per-joint scale & translation (note 7)
     w_midline=0.0,  # NEW: keep midsagittal vertices on y=0 (see midline_penalty)
     w_limit=0.0,  # NEW: authored per-joint rotation limits (see fitter_3d/joint_limits.py)
+    w_scale=0.0,  # NEW: barrier on per-joint scale beyond a 2x free band (see scale_barrier)
+    w_trans=0.0,  # NEW: barrier on per-joint translation beyond an absolute band (trans_barrier)
 )
 
 
@@ -507,6 +509,16 @@ class MoonshotStage:
             l_m = midline_penalty(src_mesh.verts_padded(), self.sym_verts)
             comp["mid"] = l_m
             loss = loss + lw["w_midline"] * l_m
+
+        if lw.get("w_scale", 0.0) > 0:
+            l_sc = scale_barrier(self.smal_3d_fitter.log_beta_scales)
+            comp["scale"] = l_sc
+            loss = loss + lw["w_scale"] * l_sc
+
+        if lw.get("w_trans", 0.0) > 0:
+            l_tr = trans_barrier(self.smal_3d_fitter.betas_trans)
+            comp["trans"] = l_tr
+            loss = loss + lw["w_trans"] * l_tr
 
         if lw.get("w_limit", 0.0) > 0:
             # The handoff stages run 1000 iterations each with scheme 'all', so joint_rot keeps

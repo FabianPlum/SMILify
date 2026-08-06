@@ -160,6 +160,24 @@ def main():
         "area, 3x any leg group.",
     )
     ap.add_argument(
+        "--scale_cap",
+        type=float,
+        default=0.0,
+        help="weight on a barrier penalising per-joint scale beyond a 2x free band "
+        "(quadratic past |ln s| = ln 2). Nothing else in the pipeline bounds log_beta_scales: "
+        "the stock baseline spans 138x on the head joint and 889x on an antenna, which is the "
+        "head collapsing into the thorax while appendages explode to cover it. REPORT §6.10.",
+    )
+    ap.add_argument(
+        "--trans_cap",
+        type=float,
+        default=0.0,
+        help="weight on a barrier penalising per-joint TRANSLATION beyond an absolute band "
+        "(default 0.02 model units, ~1.1%% of specimen extent). Separate from --scale_cap so "
+        "parts can be allowed to shift without being allowed to resize. The free betas_trans "
+        "is otherwise unregularised and reaches 0.97, over half the specimen extent.",
+    )
+    ap.add_argument(
         "--limit",
         type=float,
         default=0.0,
@@ -338,6 +356,8 @@ def main():
                 "w_midline": args.midline,
                 "w_jresid": args.jresid,
                 "w_limit": args.limit,
+                "w_scale": args.scale_cap,
+                "w_trans": args.trans_cap,
             },
             **common,
         ),
@@ -357,6 +377,8 @@ def main():
                 "w_midline": args.midline,
                 "w_jresid": args.jresid,
                 "w_limit": args.limit,
+                "w_scale": args.scale_cap,
+                "w_trans": args.trans_cap,
             },
             **common,
         ),
@@ -376,6 +398,8 @@ def main():
                 "w_midline": args.midline,
                 "w_jresid": args.jresid,
                 "w_limit": args.limit,
+                "w_scale": args.scale_cap,
+                "w_trans": args.trans_cap,
             },
             **common,
         ),
