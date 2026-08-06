@@ -388,6 +388,23 @@ It wins on **both** families, so the pre-registered "size artefact" branch is ex
 check: `rand`'s fscore@0.02 (0.9166) reproduces bench50's M7 (0.9246), as a uniform draw
 should.
 
+**Re-validated on a working model.** The above was measured with `w_beta_prior = 0.002` in
+both files, i.e. with the shape space closed (§6.8). Every arm shared that defect so the
+comparison was internally fair, but it left a real worry: that `radial_med` was selecting for
+"specimens a crippled model happens to fit" rather than for fittability. The identical
+protocol was therefore re-run with the prior off:
+
+| metric | easy | rand | easy better | p | |
+|---|---|---|---|---|---|
+| deform_mag | 0.01233 | 0.02055 | **+40.0%** | 1.8e-12 | target-independent |
+| edge_logratio | 0.33535 | 0.38658 | **+13.3%** | 1.5e-06 | target-independent |
+| fscore@0.01 | 0.87035 | 0.63459 | +37.2% | 3.3e-14 | surface |
+| chamfer_l2 | 0.00014 | 0.00034 | +58.4% | 6.6e-12 | surface |
+| hausdorff_95 | 0.01773 | 0.02560 | +30.7% | 1.8e-08 | surface |
+
+Essentially unchanged from the crippled-model numbers (+38.9% / +13.7%). **The gate is
+robust to the shape-space fix** and does not depend on it.
+
 **Quality versus coverage.** Pooling all 146 fitted specimens that have a rank (bench50 +
 both held-out sets) and cutting at corpus percentiles of `radial_med`:
 
