@@ -123,13 +123,13 @@ def main():
     ap.add_argument(
         "--beta_prior",
         type=float,
-        default=0.002,
-        help="shape-prior weight for EVERY hierarchical stage. The 0.002 default was carried "
-        "over uncritically and pins |betas| at ~0.02: the prior gradient overtakes the chamfer "
-        "gradient at |betas|~0.02 and is 4.9x larger at 0.1 (measured). The stock baseline sets "
-        "NO beta prior and reaches |betas| 0.26. A3b already established 1.5e-4 as the tuned "
-        "value; this argument exists because the hierarchical pipeline never received that fix. "
-        "See REPORT.md §6.8.",
+        default=0.0,
+        help="shape-prior weight. DEFAULT 0, i.e. OFF, which is correct: betas_prec is legacy "
+        "SMAL machinery the SMIL workflow does not use, and the stock ants_cfg.yaml sets no "
+        "shape prior at all. Activating it was a mistake -- at 0.002 the prior gradient "
+        "overtakes the chamfer gradient at |betas|~0.02 and is 4.9x larger at 0.1 (measured), "
+        "which closed the shape space in every arm built on this pipeline. Kept as an argument "
+        "only so the defect can be reproduced. See REPORT.md §6.8.",
     )
     ap.add_argument(
         "--joint_lr_mult",

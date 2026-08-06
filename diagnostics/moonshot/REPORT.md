@@ -27,11 +27,13 @@ lessons, because the *pattern* in how they failed is the most transferable thing
 3. **A one-word free win:** `scheme: 'deform'` → `scheme: 'all'` in the late stages improves
    almost everything at zero cost, replicated over 3 seeds (deform_mag **+23.52 ± 0.05%**).
    `chamfer_l2` is **inconclusive** for this arm — it flips sign across seeds.
-4. **The shape space was closed by a `w_beta_prior` I introduced, applied in two separate
-   files.** Removing it entirely raises betas sd **757×** and produces the only movement in the
-   correspondence metric this investigation has achieved (gen/spread 0.9870 → 0.9353), for free
-   (deform_mag +4.9%, p=2.1e-07; everything else neutral). It remains ~a tenth of the way to
-   what exact correspondence achieves. Four other hypotheses were refuted first (§6.7, §6.8).
+4. **The shape space was closed by a `w_beta_prior` term I added and should never have added.**
+   `betas_prec` is legacy SMAL machinery the SMIL workflow deliberately does not use; I read
+   its absence as a bug and activated it. Removing it entirely raises betas sd **757×** and
+   produces the only movement in the correspondence metric this investigation has achieved
+   (gen/spread 0.9870 → 0.9353), for free (deform_mag +4.9%, p=2.1e-07; everything else
+   neutral). It remains ~a tenth of the way to what exact correspondence achieves. Four other
+   hypotheses were refuted first (§6.7, §6.8). **The term is now removed by default.**
 5. **The hierarchical pipeline freezes the shape space.** Every arm through it has betas sd
    0.00038–0.00050; every arm that is not has 0.068–0.50 — a 100–1000× split with no overlap,
    invisible to every surface metric. It is localised to the pose:shape learning-rate ratio
@@ -90,13 +92,22 @@ result was *worse than its own initialisation*. Increasing step size in a multim
 — six substitutable legs — moves you between basins, not down. This remains the core
 structural finding.
 
-**Three code defects found by reading, all real:**
-- `betas_prec` (Cholesky of the inverse shape covariance) is computed and never used — the
-  shape prior was inactive.
+**Two code defects found by reading, both real:**
 - The edge regulariser compared against the *original template*, penalising legitimate pose
   change rather than distortion.
 - Target points were sampled by vertex rather than by area, so densely-tessellated regions
   dominated the data term.
+
+**And one thing I wrongly called a defect.** Earlier drafts listed "`betas_prec` is computed
+and never used — the shape prior was inactive" as a third defect. It is not a defect.
+`betas_prec` is **legacy SMAL machinery that the SMIL workflow deliberately does not use**;
+it survives in `smal_fitter/fitter.py` (the 2D/photo path, weight `OPT_WEIGHTS[2] = 1.0`) and
+is computed but unused in `fitter_3d/trainer.py` because the 3D path has no use for it. The
+stock `ants_cfg.yaml` correspondingly sets no shape prior at all.
+
+Reading dormant legacy code as a bug and *activating* it is what introduced `w_beta_prior`,
+and that term then closed the shape space in every arm built on the hierarchical pipeline
+(§6.8). The whole cost of that mistake traces to inferring intent from absence.
 
 ---
 
@@ -758,8 +769,14 @@ The prior overtakes the data term at **|betas| ≈ 0.02** and is five times larg
 hierarchical arms settle at 0.005–0.009, exactly where this predicts. The stock baseline sets
 **no beta prior at all** in `ants_cfg.yaml` and reaches |betas| 0.26.
 
-**This is the same defect as §7.2, made twice.** That entry records finding a mis-scaled
-`w_beta_prior` that silently froze shape, and fixing it — for the moonshot YAML arms, where
+**This was never a defect in the first place.** `betas_prec` is legacy SMAL machinery the
+SMIL workflow deliberately does not use — the stock `ants_cfg.yaml` sets no shape prior, and
+`fitter_3d/trainer.py` computes `betas_prec` only because the class is shared with the 2D
+path, where it *is* used (`smal_fitter/fitter.py`, `OPT_WEIGHTS[2] = 1.0`). I read unused
+legacy code as a bug, activated it, and picked the weight myself.
+
+The rest of §7.2 still applies to what happened next: that entry records finding the term
+mis-scaled and fixing it — for the moonshot YAML arms, where
 `M4b_ceiling_free` (prior off) and `A3b_priors_tuned` (1.5e-4) established the tuned value.
 The hierarchical pipeline was then written from scratch with `w_beta_prior: 0.002` hardcoded
 into all four stages, and **never received the fix**. Everything built on it inherited a

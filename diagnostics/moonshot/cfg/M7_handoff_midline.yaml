@@ -13,7 +13,7 @@ stages:
       w_laplacian: 0.01
       w_offset: 0.2
       w_sym: 0.5
-      w_beta_prior: 0.002
+      w_beta_prior: 0.0
       w_midline: 2.0
     custom_lrs:
       joint_rot: 0.002
@@ -31,7 +31,7 @@ stages:
       w_laplacian: 0.001
       w_offset: 0.08
       w_sym: 0.5
-      w_beta_prior: 0.002
+      w_beta_prior: 0.0
       w_midline: 2.0
     custom_lrs:
       joint_rot: 0.002
