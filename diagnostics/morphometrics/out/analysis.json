@@ -1,0 +1,139 @@
+{
+ "signal_genus": {
+  "acc": 0.12987012987012986,
+  "null": 0.021197240259740263,
+  "p": 0.0,
+  "n": 616,
+  "n_genus": 82,
+  "protocol": "lot-blind"
+ },
+ "signal_subfamily": {
+  "acc": 0.4766734279918864,
+  "null": 0.28296653144016226,
+  "p": 0.0,
+  "n": 493,
+  "n_class": 9
+ },
+ "controls": {
+  "scan quality (radial_med) alone": {
+   "acc": 0.024350649350649352,
+   "null": 0.021314935064935064,
+   "p": 0.3925
+  },
+  "L-R asymmetry alone": {
+   "acc": 0.02922077922077922,
+   "null": 0.02174512987012987,
+   "p": 0.1725
+  },
+  "log-size alone": {
+   "acc": 0.02922077922077922,
+   "null": 0.022146915584415585,
+   "p": 0.1975
+  },
+  "shape-dev block alone": {
+   "acc": 0.05844155844155844,
+   "null": 0.02132711038961039,
+   "p": 0.0
+  },
+  "LENGTH log-ratios only (no shape-dev)": {
+   "acc": 0.1396103896103896,
+   "null": 0.021456980519480518,
+   "p": 0.0
+  }
+ },
+ "residualised": {
+  "acc": 0.10876623376623376,
+  "null": 0.02172483766233766,
+  "p": 0.0
+ },
+ "icc": {
+  "attach_b_a_1": 0.2535464034165311,
+  "seg_b_a_1": 0.12961189372965862,
+  "seg_b_a_2": 0.24584412937986924,
+  "seg_b_a_3": 0.1358143652620867,
+  "seg_b_a_4": 0.17407586387382756,
+  "head_wid": 0.2969194553341133,
+  "head_len": 0.04194170453376768,
+  "head_hei": -0.016229889278654687,
+  "mesosoma_wid": 0.2263483484280971,
+  "mesosoma_len": 0.33820472982679456,
+  "mesosoma_hei": 0.19469998542912537,
+  "gaster_wid": 0.41754206141893296,
+  "gaster_len": 0.41111559506009826,
+  "gaster_hei": 0.20782053314133042,
+  "attach_l_1_co": 0.17787395774374923,
+  "seg_l_1_co": 0.007795958740178461,
+  "seg_l_1_tr": 0.11778816852187592,
+  "seg_l_1_fe": 0.08606665690651258,
+  "attach_l_2_co": 0.2799715495689781,
+  "seg_l_2_co": -0.019532467086641372,
+  "seg_l_2_tr": 0.148291467079336,
+  "seg_l_2_fe": 0.10362874158957583,
+  "attach_l_3_co": 0.2958469114232441,
+  "seg_l_3_co": -0.08362016614561035,
+  "seg_l_3_tr": 0.13005172516400537,
+  "seg_l_3_fe": 0.12055580121574215,
+  "attach_ma": 0.10354003783927991,
+  "attach_an_1": 0.07490650607389429,
+  "seg_an_1": 0.09641107871553099,
+  "seg_an_2": 0.048025820398031376,
+  "mandible_wid": 0.22352977222818268,
+  "mandible_len": 0.23072215653592307,
+  "mandible_hei": 0.1929612058012057,
+  "leaflen_ma": 0.19619996003242582,
+  "shapedev_gaster": 0.15951176704746303,
+  "shapedev_head": 0.1747620778114052,
+  "shapedev_mesosoma": 0.4552884097604279,
+  "shapedev_mandible": 0.10476245893179313
+ },
+ "icc_median": 0.1667938154606453,
+ "crosscorpus": {
+  "n": 46,
+  "n_genera": 38,
+  "top1": 0.08695652173913043,
+  "top3": 0.21739130434782608,
+  "chance": 0.02631578947368421,
+  "p": 0.0125,
+  "median_rank": 10.5
+ },
+ "crosscorpus_hits": {
+  "acanthomyrmex": 13,
+  "acanthostichus": 4,
+  "acromyrmex": 5,
+  "aenictus": 1,
+  "apomyrma": 1,
+  "atta": 15,
+  "brachyponera": 2,
+  "cataulacus": 38,
+  "cephalotes": 3,
+  "colobopsis": 27,
+  "cyphomyrmex": 25,
+  "daceton": 4,
+  "dolichoderus": 26,
+  "dorylus": 15,
+  "ectatomma": 19,
+  "formica": 1,
+  "fulakora": 7,
+  "harpegnathos": 38,
+  "labidus": 3,
+  "leptogenys": 1,
+  "manica": 34,
+  "meranoplus": 37,
+  "messor": 9,
+  "nomamyrmex": 2,
+  "odontomachus": 3,
+  "ophthalmopone": 11,
+  "pachycondyla": 34,
+  "pheidole": 9,
+  "plectroctena": 31,
+  "polyrhachis": 10,
+  "proatta": 7,
+  "stigmatomma": 3,
+  "streblognathus": 5,
+  "strumigenys": 10,
+  "tapinoma": 28,
+  "tatuidris": 24,
+  "terataner": 24,
+  "tetraponera": 5
+ }
+}
