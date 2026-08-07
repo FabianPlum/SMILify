@@ -1,0 +1,181 @@
+{
+ "per_mesh": [
+  {
+   "name": "Acanthostichus_aff.brevicornis_CASENT0",
+   "corpus": "worker",
+   "watertight": false,
+   "boundary_edge_frac": 0.021135626493683852,
+   "n_components": 621,
+   "diag": 2.3310523109053847,
+   "vol_single_dir": 0.0925258326185201,
+   "vol_majority": 0.09442433930091779,
+   "single_vs_majority_disagree_frac_of_interior": 0.031834683049427534,
+   "per_dir_vol_cv": 0.05212296708799816,
+   "per_dir_vol_minmax_spread": 0.17476336638436693,
+   "unstable_frac_of_interior": 3.011449315833566
+  },
+  {
+   "name": "Acromyrmex_coronatus_CASENT0744365_pro",
+   "corpus": "worker",
+   "watertight": false,
+   "boundary_edge_frac": 0.06649324619665455,
+   "n_components": 5521,
+   "diag": 2.4725066940937372,
+   "vol_single_dir": 0.08459172393936686,
+   "vol_majority": 0.08943129813375257,
+   "single_vs_majority_disagree_frac_of_interior": 0.06877113866967305,
+   "per_dir_vol_cv": 0.10853468955056082,
+   "per_dir_vol_minmax_spread": 0.3806984804052254,
+   "unstable_frac_of_interior": 6.627959413754227
+  },
+  {
+   "name": "Acromyrmex_lobicornis_CASENT0878007_pr",
+   "corpus": "worker",
+   "watertight": false,
+   "boundary_edge_frac": 0.06248030404853842,
+   "n_components": 3823,
+   "diag": 2.768524218961101,
+   "vol_single_dir": 0.2012129131402362,
+   "vol_majority": 0.21202376650009913,
+   "single_vs_majority_disagree_frac_of_interior": 0.0645859085290482,
+   "per_dir_vol_cv": 0.049227541995897045,
+   "per_dir_vol_minmax_spread": 0.20681026446199918,
+   "unstable_frac_of_interior": 4.591161928306552
+  },
+  {
+   "name": "Anochetus_risii_CASENT0877608_processe",
+   "corpus": "worker",
+   "watertight": false,
+   "boundary_edge_frac": 0.025887526208656586,
+   "n_components": 3084,
+   "diag": 2.2729001091247905,
+   "vol_single_dir": 0.06570547465864875,
+   "vol_majority": 0.06699958427591847,
+   "single_vs_majority_disagree_frac_of_interior": 0.024582967515364356,
+   "per_dir_vol_cv": 0.05107605825307137,
+   "per_dir_vol_minmax_spread": 0.19617270891431862,
+   "unstable_frac_of_interior": 4.0083406496927125
+  },
+  {
+   "name": "Anochetus_risii_CASENT0877609_processe",
+   "corpus": "worker",
+   "watertight": false,
+   "boundary_edge_frac": 0.02638381914687263,
+   "n_components": 1700,
+   "diag": 3.0900511782545617,
+   "vol_single_dir": 0.21739960564017619,
+   "vol_majority": 0.22021323297805595,
+   "single_vs_majority_disagree_frac_of_interior": 0.01788756388415673,
+   "per_dir_vol_cv": 0.05522165876217348,
+   "per_dir_vol_minmax_spread": 0.16981267838725936,
+   "unstable_frac_of_interior": 3.2687393526405453
+  },
+  {
+   "name": "Aphaenogaster_pallida_CASENT0745235_pr",
+   "corpus": "worker",
+   "watertight": false,
+   "boundary_edge_frac": 0.035748374064948615,
+   "n_components": 789,
+   "diag": 2.264684977779552,
+   "vol_single_dir": 0.11381099653989235,
+   "vol_majority": 0.12173258846871574,
+   "single_vs_majority_disagree_frac_of_interior": 0.07930859176410777,
+   "per_dir_vol_cv": 0.08638150087628038,
+   "per_dir_vol_minmax_spread": 0.3023676150004139,
+   "unstable_frac_of_interior": 4.291560752414846
+  },
+  {
+   "name": "Atopomyrmex_mocquerysi_CASENT0744784_p",
+   "corpus": "worker",
+   "watertight": false,
+   "boundary_edge_frac": 0.03135042622035648,
+   "n_components": 664,
+   "diag": 2.2040586591683575,
+   "vol_single_dir": 0.04048743237003961,
+   "vol_majority": 0.04308618805826972,
+   "single_vs_majority_disagree_frac_of_interior": 0.08361891706648389,
+   "per_dir_vol_cv": 0.16058729637089486,
+   "per_dir_vol_minmax_spread": 0.47417375183788285,
+   "unstable_frac_of_interior": 7.201507882111034
+  },
+  {
+   "name": "Carebara_trechideros_CASENT0877591_pro",
+   "corpus": "worker",
+   "watertight": false,
+   "boundary_edge_frac": 0.019815301816402668,
+   "n_components": 2356,
+   "diag": 2.37886100564834,
+   "vol_single_dir": 0.040450703276321436,
+   "vol_majority": 0.041555698097528265,
+   "single_vs_majority_disagree_frac_of_interior": 0.03418803418803419,
+   "per_dir_vol_cv": 0.10906495174945713,
+   "per_dir_vol_minmax_spread": 0.4362664116163813,
+   "unstable_frac_of_interior": 7.425451092117759
+  },
+  {
+   "name": "01.obj",
+   "corpus": "clean",
+   "watertight": false,
+   "boundary_edge_frac": 0.32481461052889626,
+   "n_components": 1465,
+   "diag": 2.418645978364178,
+   "vol_single_dir": 0.03575917558795482,
+   "vol_majority": 0.03575917558795482,
+   "single_vs_majority_disagree_frac_of_interior": 0.0,
+   "per_dir_vol_cv": 0.043957043643690276,
+   "per_dir_vol_minmax_spread": 0.14448594456457634,
+   "unstable_frac_of_interior": 2.233985165205664
+  },
+  {
+   "name": "02.obj",
+   "corpus": "clean",
+   "watertight": false,
+   "boundary_edge_frac": 0.21655647770431846,
+   "n_components": 2392,
+   "diag": 2.5016635421736857,
+   "vol_single_dir": 0.04992136661005598,
+   "vol_majority": 0.04992136661005598,
+   "single_vs_majority_disagree_frac_of_interior": 0.001397624039133473,
+   "per_dir_vol_cv": 0.06987888140490023,
+   "per_dir_vol_minmax_spread": 0.22490677439403345,
+   "unstable_frac_of_interior": 3.1642208245981833
+  },
+  {
+   "name": "03.obj",
+   "corpus": "clean",
+   "watertight": false,
+   "boundary_edge_frac": 0.1447056584842666,
+   "n_components": 1625,
+   "diag": 2.2754282195859337,
+   "vol_single_dir": 0.03432481645530936,
+   "vol_majority": 0.03437262260636132,
+   "single_vs_majority_disagree_frac_of_interior": 0.0013908205841446453,
+   "per_dir_vol_cv": 0.044273116233256984,
+   "per_dir_vol_minmax_spread": 0.1657776583905751,
+   "unstable_frac_of_interior": 3.283031988873435
+  }
+ ],
+ "voxel": [
+  {
+   "n": 64,
+   "pitch_frac_of_diag": 0.013159654804602542,
+   "shell_voxels": 3685,
+   "filled_voxels": 5496,
+   "fill_ratio": 1.4914518317503391
+  },
+  {
+   "n": 128,
+   "pitch_frac_of_diag": 0.006579827402301271,
+   "shell_voxels": 14980,
+   "filled_voxels": 15564,
+   "fill_ratio": 1.038985313751669
+  },
+  {
+   "n": 256,
+   "pitch_frac_of_diag": 0.0032899137011506356,
+   "shell_voxels": 59938,
+   "filled_voxels": 61221,
+   "fill_ratio": 1.0214054523007108
+  }
+ ]
+}

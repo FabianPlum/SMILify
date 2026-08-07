@@ -1,0 +1,466 @@
+{
+ "vertex_spacing": 0.010263094533402262,
+ "diag": 2.5086519382228745,
+ "parts": {
+  "gaster": {
+   "rows": [
+    {
+     "part": "gaster",
+     "mode": "T_long",
+     "delta": "0.01026",
+     "chamfer": 0.012336348080133336,
+     "detect_chamfer": 44.28991543922475,
+     "viou": 0.9349360914246634,
+     "detect_viou": 15.24005705341808
+    },
+    {
+     "part": "gaster",
+     "mode": "T_long",
+     "delta": "0.02053",
+     "chamfer": 0.01740625225121363,
+     "detect_chamfer": 64.89934258516863,
+     "viou": 0.8709109827134912,
+     "detect_viou": 27.558302643634228
+    },
+    {
+     "part": "gaster",
+     "mode": "T_long",
+     "delta": "0.04105",
+     "chamfer": 0.029104363941596604,
+     "detect_chamfer": 89.79874961090836,
+     "viou": 0.7572134016867299,
+     "detect_viou": 35.55740118289297
+    },
+    {
+     "part": "gaster",
+     "mode": "T_long",
+     "delta": "0.08210",
+     "chamfer": 0.05433554829655058,
+     "detect_chamfer": 87.59897369845159,
+     "viou": 0.5723854237012371,
+     "detect_viou": 42.38381101604667
+    },
+    {
+     "part": "gaster",
+     "mode": "T_short",
+     "delta": "0.01026",
+     "chamfer": 0.016605151260970456,
+     "detect_chamfer": 112.89471748899976,
+     "viou": 0.8777450230145519,
+     "detect_viou": 17.05398033854837
+    },
+    {
+     "part": "gaster",
+     "mode": "T_short",
+     "delta": "0.02053",
+     "chamfer": 0.027567188138317388,
+     "detect_chamfer": 118.4592458746726,
+     "viou": 0.7681012900994576,
+     "detect_viou": 26.702003692062032
+    },
+    {
+     "part": "gaster",
+     "mode": "T_short",
+     "delta": "0.04105",
+     "chamfer": 0.05094627932228399,
+     "detect_chamfer": 130.9301674737673,
+     "viou": 0.58321724875739,
+     "detect_viou": 35.58513557028462
+    },
+    {
+     "part": "gaster",
+     "mode": "T_short",
+     "delta": "0.08210",
+     "chamfer": 0.09656698268190211,
+     "detect_chamfer": 152.72336444718323,
+     "viou": 0.33002504564554197,
+     "detect_viou": 72.40390408164859
+    },
+    {
+     "part": "gaster",
+     "mode": "R_long",
+     "delta": "2.0deg",
+     "chamfer": 0.009603141824971106,
+     "detect_chamfer": 2.4205235353775754,
+     "viou": 0.9929249198266579,
+     "detect_viou": 4.2459326136964295
+    },
+    {
+     "part": "gaster",
+     "mode": "R_long",
+     "delta": "4.0deg",
+     "chamfer": 0.009767933213910946,
+     "detect_chamfer": 6.508420021286732,
+     "viou": 0.9853182722037278,
+     "detect_viou": 5.280976148478832
+    },
+    {
+     "part": "gaster",
+     "mode": "R_long",
+     "delta": "8.0deg",
+     "chamfer": 0.01029426968925645,
+     "detect_chamfer": 11.888313776901121,
+     "viou": 0.9723367260222061,
+     "detect_viou": 6.137974956057171
+    },
+    {
+     "part": "gaster",
+     "mode": "R_long",
+     "delta": "16.0deg",
+     "chamfer": 0.011744484162517006,
+     "detect_chamfer": 29.27092581231904,
+     "viou": 0.9471601894794724,
+     "detect_viou": 10.37722073423196
+    }
+   ],
+   "long_extent": 0.5958174297378406,
+   "axis_ratio": 2.057538477777811,
+   "viou_zero_at": null
+  },
+  "head": {
+   "rows": [
+    {
+     "part": "head",
+     "mode": "T_long",
+     "delta": "0.01026",
+     "chamfer": 0.013431159760188077,
+     "detect_chamfer": 57.847001060387015,
+     "viou": 0.9062258250791199,
+     "detect_viou": 22.27333076249487
+    },
+    {
+     "part": "head",
+     "mode": "T_long",
+     "delta": "0.02053",
+     "chamfer": 0.020850033171334673,
+     "detect_chamfer": 75.82906104591883,
+     "viou": 0.8260408875030799,
+     "detect_viou": 26.232206097213293
+    },
+    {
+     "part": "head",
+     "mode": "T_long",
+     "delta": "0.04105",
+     "chamfer": 0.036936519558223704,
+     "detect_chamfer": 83.88826945095516,
+     "viou": 0.6860530362367968,
+     "detect_viou": 32.68180396669556
+    },
+    {
+     "part": "head",
+     "mode": "T_long",
+     "delta": "0.08210",
+     "chamfer": 0.06854085309339665,
+     "detect_chamfer": 89.0601738676231,
+     "viou": 0.49495759855052773,
+     "detect_viou": 59.42772000415326
+    },
+    {
+     "part": "head",
+     "mode": "T_short",
+     "delta": "0.01026",
+     "chamfer": 0.016661254076827364,
+     "detect_chamfer": 112.47108874280931,
+     "viou": 0.8677381550235407,
+     "detect_viou": 27.030440781510645
+    },
+    {
+     "part": "head",
+     "mode": "T_short",
+     "delta": "0.02053",
+     "chamfer": 0.028589189174300613,
+     "detect_chamfer": 160.2664837658138,
+     "viou": 0.7568424261001868,
+     "detect_viou": 40.8222828425665
+    },
+    {
+     "part": "head",
+     "mode": "T_short",
+     "delta": "0.04105",
+     "chamfer": 0.053759119710927145,
+     "detect_chamfer": 196.00912731376326,
+     "viou": 0.5762239983307487,
+     "detect_viou": 107.67969638130901
+    },
+    {
+     "part": "head",
+     "mode": "T_short",
+     "delta": "0.08210",
+     "chamfer": 0.10270076207387202,
+     "detect_chamfer": 263.4230842173173,
+     "viou": 0.3283713942099456,
+     "detect_viou": 163.34174979023413
+    },
+    {
+     "part": "head",
+     "mode": "R_long",
+     "delta": "2.0deg",
+     "chamfer": 0.009157493426975409,
+     "detect_chamfer": 5.926622224726832,
+     "viou": 0.972692788955119,
+     "detect_viou": 10.546357975935935
+    },
+    {
+     "part": "head",
+     "mode": "R_long",
+     "delta": "4.0deg",
+     "chamfer": 0.010274511767351736,
+     "detect_chamfer": 19.89607177219247,
+     "viou": 0.9464275315755447,
+     "detect_viou": 16.52468759742112
+    },
+    {
+     "part": "head",
+     "mode": "R_long",
+     "delta": "8.0deg",
+     "chamfer": 0.013188826609492907,
+     "detect_chamfer": 66.96532489978009,
+     "viou": 0.9004585607334842,
+     "detect_viou": 21.33578368252866
+    },
+    {
+     "part": "head",
+     "mode": "R_long",
+     "delta": "16.0deg",
+     "chamfer": 0.020029334375937104,
+     "detect_chamfer": 88.20748709911643,
+     "viou": 0.8215265441196907,
+     "detect_viou": 29.244628156660777
+    }
+   ],
+   "long_extent": 0.3414289383775,
+   "axis_ratio": 1.527203588700199,
+   "viou_zero_at": null
+  },
+  "mesosoma": {
+   "rows": [
+    {
+     "part": "mesosoma",
+     "mode": "T_long",
+     "delta": "0.01026",
+     "chamfer": 0.01053234163407273,
+     "detect_chamfer": 51.21879093230347,
+     "viou": 0.8209130406950681,
+     "detect_viou": 24.23920734765345
+    },
+    {
+     "part": "mesosoma",
+     "mode": "T_long",
+     "delta": "0.02053",
+     "chamfer": 0.015527949866150163,
+     "detect_chamfer": 80.09677201475421,
+     "viou": 0.684382106309725,
+     "detect_viou": 27.21181951285158
+    },
+    {
+     "part": "mesosoma",
+     "mode": "T_long",
+     "delta": "0.04105",
+     "chamfer": 0.026611072530002947,
+     "detect_chamfer": 103.62198079427085,
+     "viou": 0.5073729809485267,
+     "detect_viou": 50.162629939528316
+    },
+    {
+     "part": "mesosoma",
+     "mode": "T_long",
+     "delta": "0.08210",
+     "chamfer": 0.048077663212158915,
+     "detect_chamfer": 105.00803213623392,
+     "viou": 0.3503703944708931,
+     "detect_viou": 81.18350713951835
+    },
+    {
+     "part": "mesosoma",
+     "mode": "T_short",
+     "delta": "0.01026",
+     "chamfer": 0.015349825572004358,
+     "detect_chamfer": 69.15939727402899,
+     "viou": 0.7636309424065854,
+     "detect_viou": 21.981063213652664
+    },
+    {
+     "part": "mesosoma",
+     "mode": "T_short",
+     "delta": "0.02053",
+     "chamfer": 0.02651031890810864,
+     "detect_chamfer": 90.34477362945917,
+     "viou": 0.5943444072799428,
+     "detect_viou": 42.88457390255469
+    },
+    {
+     "part": "mesosoma",
+     "mode": "T_short",
+     "delta": "0.04105",
+     "chamfer": 0.04944786389898606,
+     "detect_chamfer": 116.29215768872196,
+     "viou": 0.37544363719508955,
+     "detect_viou": 86.55601195546376
+    },
+    {
+     "part": "mesosoma",
+     "mode": "T_short",
+     "delta": "0.08210",
+     "chamfer": 0.09073624370859218,
+     "detect_chamfer": 109.24404817220083,
+     "viou": 0.16068052969483668,
+     "detect_viou": 140.62432671804842
+    },
+    {
+     "part": "mesosoma",
+     "mode": "R_long",
+     "delta": "2.0deg",
+     "chamfer": 0.00773714498047101,
+     "detect_chamfer": 2.748336879235583,
+     "viou": 0.9458176243476917,
+     "detect_viou": 13.303464273742254
+    },
+    {
+     "part": "mesosoma",
+     "mode": "R_long",
+     "delta": "4.0deg",
+     "chamfer": 0.008035752916219654,
+     "detect_chamfer": 9.07773864150719,
+     "viou": 0.8964285003369223,
+     "detect_viou": 16.07354459540342
+    },
+    {
+     "part": "mesosoma",
+     "mode": "R_long",
+     "delta": "8.0deg",
+     "chamfer": 0.00899695721601102,
+     "detect_chamfer": 33.96618937158743,
+     "viou": 0.8104782361146632,
+     "detect_viou": 28.00186257073735
+    },
+    {
+     "part": "mesosoma",
+     "mode": "R_long",
+     "delta": "16.0deg",
+     "chamfer": 0.01155777458334211,
+     "detect_chamfer": 50.50736715799413,
+     "viou": 0.6628657458092259,
+     "detect_viou": 26.348678666944632
+    }
+   ],
+   "long_extent": 0.456823656962838,
+   "axis_ratio": 2.201367325882264,
+   "viou_zero_at": 0.19499879613464297
+  },
+  "femur_R1": {
+   "rows": [
+    {
+     "part": "femur_R1",
+     "mode": "T_long",
+     "delta": "0.01026",
+     "chamfer": 0.0033101071675578947,
+     "detect_chamfer": 62.81482097573501,
+     "viou": 0.8527596262880345,
+     "detect_viou": 9.44014158044412
+    },
+    {
+     "part": "femur_R1",
+     "mode": "T_long",
+     "delta": "0.02053",
+     "chamfer": 0.005153662027916538,
+     "detect_chamfer": 62.699854356162234,
+     "viou": 0.7444578755320107,
+     "detect_viou": 10.529109126112148
+    },
+    {
+     "part": "femur_R1",
+     "mode": "T_long",
+     "delta": "0.04105",
+     "chamfer": 0.01018323896079889,
+     "detect_chamfer": 49.88861046855951,
+     "viou": 0.5599538511167544,
+     "detect_viou": 17.032448914957175
+    },
+    {
+     "part": "femur_R1",
+     "mode": "T_long",
+     "delta": "0.08210",
+     "chamfer": 0.026761665478630372,
+     "detect_chamfer": 57.6189030642148,
+     "viou": 0.31334270110079365,
+     "detect_viou": 36.18365679572146
+    },
+    {
+     "part": "femur_R1",
+     "mode": "T_short",
+     "delta": "0.01026",
+     "chamfer": 0.013499521787849493,
+     "detect_chamfer": 135.0766152089362,
+     "viou": 0.3541642375451213,
+     "detect_viou": 28.197585422592837
+    },
+    {
+     "part": "femur_R1",
+     "mode": "T_short",
+     "delta": "0.02053",
+     "chamfer": 0.024161575528900196,
+     "detect_chamfer": 147.23206426978254,
+     "viou": 0.08929101023014548,
+     "detect_viou": 84.18804476975225
+    },
+    {
+     "part": "femur_R1",
+     "mode": "T_short",
+     "delta": "0.04105",
+     "chamfer": 0.05839888723439452,
+     "detect_chamfer": 245.7740801994333,
+     "viou": 0.0,
+     "detect_viou": 999999999.9999999
+    },
+    {
+     "part": "femur_R1",
+     "mode": "T_short",
+     "delta": "0.08210",
+     "chamfer": 0.13863892835220867,
+     "detect_chamfer": 583.2541994722312,
+     "viou": 0.0,
+     "detect_viou": 999999999.9999999
+    },
+    {
+     "part": "femur_R1",
+     "mode": "R_long",
+     "delta": "2.0deg",
+     "chamfer": 0.0022772950412153713,
+     "detect_chamfer": 0.7928121799154096,
+     "viou": 0.9827725123727262,
+     "detect_viou": 4.17963728888615
+    },
+    {
+     "part": "femur_R1",
+     "mode": "R_long",
+     "delta": "4.0deg",
+     "chamfer": 0.002315096270571995,
+     "detect_chamfer": 3.3640459025201097,
+     "viou": 0.9710491204471808,
+     "detect_viou": 3.429407422288649
+    },
+    {
+     "part": "femur_R1",
+     "mode": "R_long",
+     "delta": "8.0deg",
+     "chamfer": 0.0024313990080539285,
+     "detect_chamfer": 14.292394492959424,
+     "viou": 0.9463249489809176,
+     "detect_viou": 4.409636733739119
+    },
+    {
+     "part": "femur_R1",
+     "mode": "R_long",
+     "delta": "16.0deg",
+     "chamfer": 0.002710550679548993,
+     "detect_chamfer": 27.337337009518304,
+     "viou": 0.9066198390967095,
+     "detect_viou": 4.636235499832327
+    }
+   ],
+   "long_extent": 0.2756914530627712,
+   "axis_ratio": 10.0845649895772,
+   "viou_zero_at": 0.030789283600206788
+  }
+ }
+}

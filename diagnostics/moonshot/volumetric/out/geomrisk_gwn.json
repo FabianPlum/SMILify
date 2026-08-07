@@ -1,0 +1,348 @@
+{
+ "per_mesh": [
+  {
+   "name": "Acanthostichus_aff.brevicornis_CASENT0",
+   "n_boundary_edges": 5943,
+   "boundary_edge_frac": 0.021135626493683852,
+   "n_components": 621,
+   "largest_component_area_frac": 0.9968363566253113,
+   "debris_area_frac": 0.0031636433746886627,
+   "n_comp_above_1pct": 1,
+   "vol_gwn": 0.09598006005454922,
+   "vol_parity": 0.0959009556094493,
+   "gwn_vs_parity_disagree": 0.0030244707176244156,
+   "ambiguous_band_vol_frac_of_interior": 0.0228021978021978,
+   "gwn_rotation_instability": 0.0,
+   "ray_rotation_instability": 0.06357728171799944
+  },
+  {
+   "name": "Acromyrmex_coronatus_CASENT0744365_pro",
+   "n_boundary_edges": 18711,
+   "boundary_edge_frac": 0.06649324619665455,
+   "n_components": 5521,
+   "largest_component_area_frac": 0.9867663446470998,
+   "debris_area_frac": 0.01323365535290022,
+   "n_comp_above_1pct": 1,
+   "vol_gwn": 0.08796934342919854,
+   "vol_parity": 0.08817099235396463,
+   "gwn_vs_parity_disagree": 0.005717552887364208,
+   "ambiguous_band_vol_frac_of_interior": 0.048137535816618914,
+   "gwn_rotation_instability": 0.0,
+   "ray_rotation_instability": 0.10848484848484849
+  },
+  {
+   "name": "Acromyrmex_lobicornis_CASENT0878007_pr",
+   "n_boundary_edges": 16456,
+   "boundary_edge_frac": 0.06248030404853842,
+   "n_components": 3823,
+   "largest_component_area_frac": 0.9843388997708667,
+   "debris_area_frac": 0.01566110022913325,
+   "n_comp_above_1pct": 1,
+   "vol_gwn": 0.21923100207334106,
+   "vol_parity": 0.2193620427201273,
+   "gwn_vs_parity_disagree": 0.002986857825567503,
+   "ambiguous_band_vol_frac_of_interior": 0.022713687985654513,
+   "gwn_rotation_instability": 0.0,
+   "ray_rotation_instability": 0.09384711000621504
+  },
+  {
+   "name": "Anochetus_risii_CASENT0877608_processe",
+   "n_boundary_edges": 7618,
+   "boundary_edge_frac": 0.025887526208656586,
+   "n_components": 3084,
+   "largest_component_area_frac": 0.9876430882399904,
+   "debris_area_frac": 0.012356911760009637,
+   "n_comp_above_1pct": 1,
+   "vol_gwn": 0.06605841364517685,
+   "vol_parity": 0.06594076731633415,
+   "gwn_vs_parity_disagree": 0.001784121320249777,
+   "ambiguous_band_vol_frac_of_interior": 0.009795191451469279,
+   "gwn_rotation_instability": 0.0,
+   "ray_rotation_instability": 0.06002728512960437
+  },
+  {
+   "name": "Anochetus_risii_CASENT0877609_processe",
+   "n_boundary_edges": 7481,
+   "boundary_edge_frac": 0.02638381914687263,
+   "n_components": 1700,
+   "largest_component_area_frac": 0.9942233633881735,
+   "debris_area_frac": 0.00577663661182648,
+   "n_comp_above_1pct": 1,
+   "vol_gwn": 0.21993187024426797,
+   "vol_parity": 0.21993187024426797,
+   "gwn_vs_parity_disagree": 0.00255863539445629,
+   "ambiguous_band_vol_frac_of_interior": 0.012366737739872067,
+   "gwn_rotation_instability": 0.0,
+   "ray_rotation_instability": 0.026758739749676307
+  },
+  {
+   "name": "Aphaenogaster_pallida_CASENT0745235_pr",
+   "n_boundary_edges": 9663,
+   "boundary_edge_frac": 0.035748374064948615,
+   "n_components": 789,
+   "largest_component_area_frac": 0.9952620691394936,
+   "debris_area_frac": 0.004737930860506445,
+   "n_comp_above_1pct": 1,
+   "vol_gwn": 0.12219674424579524,
+   "vol_parity": 0.12216580052732327,
+   "gwn_vs_parity_disagree": 0.003292806484295846,
+   "ambiguous_band_vol_frac_of_interior": 0.034945555836920744,
+   "gwn_rotation_instability": 0.0,
+   "ray_rotation_instability": 0.1196808510638298
+  }
+ ],
+ "thin_segments": [
+  {
+   "name": "b_t",
+   "minor_diam": 0.18143008355089085,
+   "frac_diag": 0.07732572497779867,
+   "grid_N": 26
+  },
+  {
+   "name": "b_a_1",
+   "minor_diam": 0.056671111285686485,
+   "frac_diag": 0.024153297400836143,
+   "grid_N": 83
+  },
+  {
+   "name": "b_a_2",
+   "minor_diam": 0.09418855421233241,
+   "frac_diag": 0.04014327776592999,
+   "grid_N": 50
+  },
+  {
+   "name": "b_a_3",
+   "minor_diam": 0.1863876962370322,
+   "frac_diag": 0.07943866560821779,
+   "grid_N": 26
+  },
+  {
+   "name": "b_a_4",
+   "minor_diam": 0.24473517272965253,
+   "frac_diag": 0.10430643192411321,
+   "grid_N": 20
+  },
+  {
+   "name": "l_1_co_r",
+   "minor_diam": 0.0662015544378493,
+   "frac_diag": 0.028215184005733026,
+   "grid_N": 71
+  },
+  {
+   "name": "l_1_tr_r",
+   "minor_diam": 0.05678171678509625,
+   "frac_diag": 0.024200437600857008,
+   "grid_N": 83
+  },
+  {
+   "name": "l_1_fe_r",
+   "minor_diam": 0.03149941107703519,
+   "frac_diag": 0.013425087781664577,
+   "grid_N": 149
+  },
+  {
+   "name": "l_1_ti_r",
+   "minor_diam": 0.00910887567885019,
+   "frac_diag": 0.0038822140287564817,
+   "grid_N": 516
+  },
+  {
+   "name": "l_1_ta_r",
+   "minor_diam": 0.010051072532478979,
+   "frac_diag": 0.004283779487762683,
+   "grid_N": 467
+  },
+  {
+   "name": "l_2_co_r",
+   "minor_diam": 0.07643548642256177,
+   "frac_diag": 0.03257689841716581,
+   "grid_N": 62
+  },
+  {
+   "name": "l_2_tr_r",
+   "minor_diam": 0.04138994402072771,
+   "frac_diag": 0.017640445099037484,
+   "grid_N": 114
+  },
+  {
+   "name": "l_2_fe_r",
+   "minor_diam": 0.027137031734971694,
+   "frac_diag": 0.011565836335315476,
+   "grid_N": 173
+  },
+  {
+   "name": "l_2_ti_r",
+   "minor_diam": 0.005508753502105159,
+   "frac_diag": 0.002347837524722218,
+   "grid_N": 852
+  },
+  {
+   "name": "l_2_ta_r",
+   "minor_diam": 0.008356565062002878,
+   "frac_diag": 0.003561578317645783,
+   "grid_N": 562
+  },
+  {
+   "name": "l_3_co_r",
+   "minor_diam": 0.06366980942019258,
+   "frac_diag": 0.02713615116223923,
+   "grid_N": 74
+  },
+  {
+   "name": "l_3_tr_r",
+   "minor_diam": 0.05092948083961693,
+   "frac_diag": 0.021706207435888872,
+   "grid_N": 93
+  },
+  {
+   "name": "l_3_fe_r",
+   "minor_diam": 0.027659670347844962,
+   "frac_diag": 0.011788585555570786,
+   "grid_N": 170
+  },
+  {
+   "name": "l_3_ti_r",
+   "minor_diam": 0.006184599156894046,
+   "frac_diag": 0.002635883774863457,
+   "grid_N": 759
+  },
+  {
+   "name": "l_3_ta_r",
+   "minor_diam": 0.009039955176390654,
+   "frac_diag": 0.003852840025756462,
+   "grid_N": 520
+  },
+  {
+   "name": "l_1_co_l",
+   "minor_diam": 0.06609913630065321,
+   "frac_diag": 0.028171533269567537,
+   "grid_N": 71
+  },
+  {
+   "name": "l_1_tr_l",
+   "minor_diam": 0.05678171678509625,
+   "frac_diag": 0.024200437600857008,
+   "grid_N": 83
+  },
+  {
+   "name": "l_1_fe_l",
+   "minor_diam": 0.03149941107703519,
+   "frac_diag": 0.013425087781664577,
+   "grid_N": 149
+  },
+  {
+   "name": "l_1_ti_l",
+   "minor_diam": 0.00910887567885019,
+   "frac_diag": 0.0038822140287564817,
+   "grid_N": 516
+  },
+  {
+   "name": "l_1_ta_l",
+   "minor_diam": 0.010051072532478979,
+   "frac_diag": 0.004283779487762683,
+   "grid_N": 467
+  },
+  {
+   "name": "l_2_co_l",
+   "minor_diam": 0.07643548642256177,
+   "frac_diag": 0.03257689841716581,
+   "grid_N": 62
+  },
+  {
+   "name": "l_2_tr_l",
+   "minor_diam": 0.04138994402072771,
+   "frac_diag": 0.017640445099037484,
+   "grid_N": 114
+  },
+  {
+   "name": "l_2_fe_l",
+   "minor_diam": 0.027137031734971694,
+   "frac_diag": 0.011565836335315476,
+   "grid_N": 173
+  },
+  {
+   "name": "l_2_ti_l",
+   "minor_diam": 0.005508753502105159,
+   "frac_diag": 0.002347837524722218,
+   "grid_N": 852
+  },
+  {
+   "name": "l_2_ta_l",
+   "minor_diam": 0.008356565062002878,
+   "frac_diag": 0.003561578317645783,
+   "grid_N": 562
+  },
+  {
+   "name": "l_3_co_l",
+   "minor_diam": 0.06366980942019258,
+   "frac_diag": 0.02713615116223923,
+   "grid_N": 74
+  },
+  {
+   "name": "l_3_tr_l",
+   "minor_diam": 0.05092948083961693,
+   "frac_diag": 0.021706207435888872,
+   "grid_N": 93
+  },
+  {
+   "name": "l_3_fe_l",
+   "minor_diam": 0.027659670347844962,
+   "frac_diag": 0.011788585555570786,
+   "grid_N": 170
+  },
+  {
+   "name": "l_3_ti_l",
+   "minor_diam": 0.006184599156894046,
+   "frac_diag": 0.002635883774863457,
+   "grid_N": 759
+  },
+  {
+   "name": "l_3_ta_l",
+   "minor_diam": 0.009039955176390654,
+   "frac_diag": 0.003852840025756462,
+   "grid_N": 520
+  },
+  {
+   "name": "b_h",
+   "minor_diam": 0.20857186531981842,
+   "frac_diag": 0.08889358578343418,
+   "grid_N": 23
+  },
+  {
+   "name": "ma_r",
+   "minor_diam": 0.06899664095089063,
+   "frac_diag": 0.029406453318773736,
+   "grid_N": 69
+  },
+  {
+   "name": "an_1_r",
+   "minor_diam": 0.01609299796688762,
+   "frac_diag": 0.006858855546449508,
+   "grid_N": 292
+  },
+  {
+   "name": "an_2_r",
+   "minor_diam": 0.014229340012052229,
+   "frac_diag": 0.00606456223164835,
+   "grid_N": 330
+  },
+  {
+   "name": "ma_l",
+   "minor_diam": 0.05835450312951677,
+   "frac_diag": 0.024870761077191543,
+   "grid_N": 81
+  },
+  {
+   "name": "an_1_l",
+   "minor_diam": 0.01609299796688762,
+   "frac_diag": 0.006858855546449508,
+   "grid_N": 292
+  },
+  {
+   "name": "an_2_l",
+   "minor_diam": 0.014229340012052229,
+   "frac_diag": 0.00606456223164835,
+   "grid_N": 330
+  }
+ ]
+}
