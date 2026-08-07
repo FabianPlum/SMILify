@@ -1,0 +1,36 @@
+TEMPLATE watertight=True winding_consistent=True n_v=10229 n_f=20454 components=1
+TEMPLATE sdf: 0.7s  nan_frac=0.0007
+TEMPLATE SDF by anatomical group (relative to bbox diagonal):
+   thorax   n=10222  sdf/scale p10=0.0031 p50=0.0261 p90=0.0924
+
+REAL SCANS (bench50) — G1 reproducibility across two independent surface samplings, G4 cost
+  Acanthostichus_aff.brevicornis_CASENT07443   wt=F comp=621 nan=0.000 r=0.9381 med_rel_diff=0.0904 2way_agree=92.80% 0.7s
+  Acromyrmex_coronatus_CASENT0744365_process   wt=F comp=5521 nan=0.002 r=0.7997 med_rel_diff=0.0944 2way_agree=90.18% 1.2s
+  Acromyrmex_lobicornis_CASENT0878007_proces   wt=F comp=3823 nan=0.001 r=0.7653 med_rel_diff=0.1238 2way_agree=87.82% 0.6s
+  Anochetus_risii_CASENT0877608_processed.ob   wt=F comp=3084 nan=0.003 r=0.8882 med_rel_diff=0.0874 2way_agree=93.11% 0.7s
+  Anochetus_risii_CASENT0877609_processed.ob   wt=F comp=1700 nan=0.000 r=0.8844 med_rel_diff=0.0863 2way_agree=93.90% 0.6s
+  Aphaenogaster_pallida_CASENT0745235_proces   wt=F comp=789 nan=0.001 r=0.9232 med_rel_diff=0.0849 2way_agree=95.22% 0.7s
+
+TEMPLATE (SMIL_OmniAnt.pkl, 10229v / 20454f, watertight, 1 component) — corrected anatomy map
+group SDF/scale (bbox-diagonal-normalised):
+  gaster   n= 1231 p10=0.0380 p50=0.0844 p90=0.0988
+  thorax   n= 1372 p10=0.0491 p50=0.0635 p90=0.0714
+  head     n= 2552 p10=0.0185 p50=0.0838 p90=0.1006
+  leg      n= 4705 p10=0.0023 p50=0.0111 p90=0.0237
+  antenna  n=  362 p10=0.0009 p50=0.0023 p90=0.0059
+gaster-vs-leg      AUC=0.9948  best balanced acc=96.91% at one global threshold sdf/scale=0.0294
+body-vs-appendage  AUC=0.9730  best balanced acc=95.11% at one global threshold sdf/scale=0.0307
+
+Leg INSTANCE recovery = threshold at 0.0307*scale, connected components of the thin side:
+  comp0 faces= 2873 dominant=l_1_r       purity=0.50   <-- FRONT LEG PAIR MERGED (l_1_r + l_1_l)
+  comp1 faces= 1817 dominant=l_3_r       purity=1.00
+  comp2 faces= 1777 dominant=l_3_l       purity=1.00
+  comp3 faces= 1275 dominant=l_2_r       purity=1.00
+  comp4 faces= 1275 dominant=l_2_l       purity=1.00
+  comp5..8  head appendages (antennae/mandibles) l/r, purity 0.98-1.00
+=> 5 of 6 leg instances recovered pure; the 6th failure is a LATERALITY merge, not a
+   body/appendage failure. That is the exact gap a bilateral-symmetry prior fills.
+
+CONCLUSION: SDF passes G1 (>=87.8%, median ~93% vs geodesic's 20%) and G4 (<1.3 s vs 60 s
+budget) on real ethanol scans with 621-5521 connected components and no watertightness,
+using ONLY trimesh 4.4.3 + embreex 4.4.0 already present in the pytorch3d env.
