@@ -245,10 +245,44 @@ benchmark_singleview_*/
 3D_model_prep/*_TEST*.pkl
 
 # Claude Code: project CLAUDE.md is tracked; machine-local settings are not.
+# settings.json here carries machine-local permission rules (mambaforge and
+# /media paths), so it is treated the same as settings.local.json.
 .claude/settings.local.json
+.claude/settings.json
 
 # part-field training corpus: regenerable from make_partfield_data.py in ~4 min, and
 # synth_train.npz alone is 192 MB. The split (split.json) IS tracked, so the corpus can be
 # rebuilt with the same held-out specimens.
 diagnostics/moonshot/partfield/*.npz
 diagnostics/moonshot/partfield/smoke*
+
+# E7 hull-decomposition cache: 51MB of regenerable .npz decompositions.
+# The scored JSON and figures under diagnostics/moonshot/hull/out/ ARE tracked, so every
+# number in REPORT_HULL.md is checkable without re-running CoACD.
+diagnostics/moonshot/hull/cache/
+
+# Symlink farms into local /media storage — dead on any other machine (same situation as
+# bench50/ above). Corpus membership is preserved in the tracked manifests:
+# diagnostics/moonshot/out/e8_corpus_manifest.txt and
+# diagnostics/morphometrics/stage_manifest.txt.
+diagnostics/moonshot/e8_c0/
+diagnostics/moonshot/e8_c1/
+diagnostics/morphometrics/stage/
+
+# June 2026 multi-view benchmark / inference outputs — GBs of renders and per-frame
+# artefacts, unrelated to the registration branch and regenerable from the tracked configs.
+multiview_benchmarks_*/
+multiview_inference_outputs/
+
+# Blender source for the 25-PC joint-limited model: 154MB, over GitHub's 100MB hard limit.
+# Kept in external storage; the portable artefact is the tracked
+# 3D_model_prep/OmniAnt_25PCs_joint_limited.pkl.
+3D_model_prep/SMIL_OmniAnt_25PCs_joint_limits.blend
+# Regenerable via diagnostics/moonshot/build_augmented_model.py.
+3D_model_prep/SMIL_OmniAnt_aug.pkl
+
+# Blender-addon side exports (PCA morphospace CSVs/stats, joint-regressor debug dump)
+# written next to the .pkl during smil_importer sessions; regenerable from the .blend.
+3D_model_prep/smil_morph_*
+3D_model_prep/smil_shape_*
+3D_model_prep/test_joint_regressor.*
