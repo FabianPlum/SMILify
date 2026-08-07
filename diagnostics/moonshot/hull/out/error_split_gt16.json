@@ -1,0 +1,76 @@
+{
+ "run": "SYN_clean",
+ "gt_groups": "16",
+ "n_vertices": 122820,
+ "correct": 5911,
+ "within": 97207,
+ "between": 19702,
+ "median_err_within": 0.032483477145433426,
+ "median_err_between": 0.13719400763511658,
+ "per_part": {
+  "antenna": {
+   "within": 3741,
+   "between": 474
+  },
+  "body": {
+   "within": 26051,
+   "between": 4094
+  },
+  "head": {
+   "within": 23239,
+   "between": 1716
+  },
+  "l1d_l": {
+   "within": 788,
+   "between": 711
+  },
+  "l1d_r": {
+   "within": 762,
+   "between": 699
+  },
+  "l1p_l": {
+   "within": 4964,
+   "between": 2121
+  },
+  "l1p_r": {
+   "within": 5558,
+   "between": 1566
+  },
+  "l2d_l": {
+   "within": 802,
+   "between": 460
+  },
+  "l2d_r": {
+   "within": 902,
+   "between": 339
+  },
+  "l2p_l": {
+   "within": 4988,
+   "between": 1300
+  },
+  "l2p_r": {
+   "within": 4959,
+   "between": 1306
+  },
+  "l3d_l": {
+   "within": 1565,
+   "between": 465
+  },
+  "l3d_r": {
+   "within": 1764,
+   "between": 287
+  },
+  "l3p_l": {
+   "within": 6607,
+   "between": 1917
+  },
+  "l3p_r": {
+   "within": 7463,
+   "between": 970
+  },
+  "mandible": {
+   "within": 3054,
+   "between": 1277
+  }
+ }
+}

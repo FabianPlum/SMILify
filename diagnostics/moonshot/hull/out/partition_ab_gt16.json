@@ -1,0 +1,569 @@
+{
+ "args": {
+  "run": "SYN_clean_hier",
+  "corpus": "synth",
+  "criteria": [
+   "volume",
+   "visibility",
+   "spectral"
+  ],
+  "ks": [
+   7,
+   13,
+   20,
+   30,
+   45
+  ],
+  "threshold": 0.03,
+  "n_points": 8000,
+  "gt_groups": "16",
+  "stages": [
+   "H0_body",
+   "H1_legs",
+   "H2_joint",
+   "H3_deform"
+  ]
+ },
+ "rows": [
+  {
+   "stage": "H0_body",
+   "criterion": "volume",
+   "k": 7,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.36989583333333337,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "volume",
+   "k": 13,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.4331041666666667,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "volume",
+   "k": 20,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.49785416666666665,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "volume",
+   "k": 30,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.5825416666666667,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "volume",
+   "k": 45,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.61803125,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "visibility",
+   "k": 7,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.48521875,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "visibility",
+   "k": 13,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.5921666666666667,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "visibility",
+   "k": 20,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.6545312499999999,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "visibility",
+   "k": 30,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.7347291666666668,
+   "wins": 4,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "visibility",
+   "k": 45,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.7604687499999999,
+   "wins": 6,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "spectral",
+   "k": 7,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.50228125,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "spectral",
+   "k": 13,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.5849791666666667,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "spectral",
+   "k": 20,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.6302083333333334,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "spectral",
+   "k": 30,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.6670729166666667,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H0_body",
+   "criterion": "spectral",
+   "k": 45,
+   "incumbent": 0.7503854166666667,
+   "chunk_vote": 0.7251458333333334,
+   "wins": 4,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "volume",
+   "k": 7,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.37228125000000006,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "volume",
+   "k": 13,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.43793750000000004,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "volume",
+   "k": 20,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.4974166666666668,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "volume",
+   "k": 30,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.5890000000000001,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "volume",
+   "k": 45,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.6133229166666667,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "visibility",
+   "k": 7,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.4701875,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "visibility",
+   "k": 13,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.5832604166666666,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "visibility",
+   "k": 20,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.6378958333333332,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "visibility",
+   "k": 30,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.7280937499999999,
+   "wins": 3,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "visibility",
+   "k": 45,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.7696562499999998,
+   "wins": 7,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "spectral",
+   "k": 7,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.4888645833333333,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "spectral",
+   "k": 13,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.5775833333333333,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "spectral",
+   "k": 20,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.6256458333333333,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "spectral",
+   "k": 30,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.66396875,
+   "wins": 2,
+   "n": 12
+  },
+  {
+   "stage": "H1_legs",
+   "criterion": "spectral",
+   "k": 45,
+   "incumbent": 0.7486770833333334,
+   "chunk_vote": 0.72346875,
+   "wins": 2,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "volume",
+   "k": 7,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.37178125,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "volume",
+   "k": 13,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.43690625,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "volume",
+   "k": 20,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.4933020833333334,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "volume",
+   "k": 30,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.5847291666666666,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "volume",
+   "k": 45,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.6067604166666667,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "visibility",
+   "k": 7,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.4636875,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "visibility",
+   "k": 13,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.5698333333333334,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "visibility",
+   "k": 20,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.6315729166666665,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "visibility",
+   "k": 30,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.7080520833333334,
+   "wins": 2,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "visibility",
+   "k": 45,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.73765625,
+   "wins": 3,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "spectral",
+   "k": 7,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.4888645833333333,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "spectral",
+   "k": 13,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.56359375,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "spectral",
+   "k": 20,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.6115208333333334,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "spectral",
+   "k": 30,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.6469479166666666,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H2_joint",
+   "criterion": "spectral",
+   "k": 45,
+   "incumbent": 0.7444895833333333,
+   "chunk_vote": 0.7090416666666667,
+   "wins": 2,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "volume",
+   "k": 7,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.37228125000000006,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "volume",
+   "k": 13,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.43740625,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "volume",
+   "k": 20,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.49922916666666667,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "volume",
+   "k": 30,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.5893333333333333,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "volume",
+   "k": 45,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.6123437500000001,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "visibility",
+   "k": 7,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.47812499999999997,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "visibility",
+   "k": 13,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.58509375,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "visibility",
+   "k": 20,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.6459270833333334,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "visibility",
+   "k": 30,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.7252291666666667,
+   "wins": 3,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "visibility",
+   "k": 45,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.75778125,
+   "wins": 8,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "spectral",
+   "k": 7,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.4963645833333334,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "spectral",
+   "k": 13,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.5717708333333335,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "spectral",
+   "k": 20,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.62146875,
+   "wins": 0,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "spectral",
+   "k": 30,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.6589062499999999,
+   "wins": 1,
+   "n": 12
+  },
+  {
+   "stage": "H3_deform",
+   "criterion": "spectral",
+   "k": 45,
+   "incumbent": 0.7475625,
+   "chunk_vote": 0.7191770833333333,
+   "wins": 3,
+   "n": 12
+  }
+ ]
+}

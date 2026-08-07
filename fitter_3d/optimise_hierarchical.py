@@ -22,6 +22,7 @@ import glob
 import os
 import pickle
 import sys
+import time
 
 import numpy as np
 import torch
@@ -204,6 +205,52 @@ def main():
         help="ablation: run the same schedule with a GLOBAL data term, so the "
         "benefit of partitioning is separable from the benefit of staging",
     )
+    # ------------------------------------------------------------------ hull hierarchy
+    ap.add_argument(
+        "--offset",
+        type=float,
+        default=3.0,
+        help="w_offset in the H3_deform stage: the L2 penalty on free-form deform_verts. "
+        "REPORT_HULL §5 measured that 83% of correspondence error is WITHIN a part, and "
+        "§6.6 that free-form offsets carry 100% of the rest-space shape variance while "
+        "generalising at 0.98 -- i.e. they are per-specimen noise that papers over pose "
+        "error. Raising this trades surface proximity for correspondence consistency. "
+        "Very large values (>=100) pin deform at ~0 while leaving every other parameter "
+        "and the iteration budget untouched, which is the clean way to ablate free-form.",
+    )
+    ap.add_argument(
+        "--hull_partition",
+        type=int,
+        default=0,
+        help="cut size k for a CONVEXITY-derived partition prior (fitter_3d/hull_partition.py). "
+        "0 = off. The target is broken into k near-convex chunks by an approximate convex "
+        "decomposition, and each chunk is assigned to an anatomical group by MAJORITY VOTE of "
+        "its own points, recomputed at every reassignment. So the chunking is target-derived "
+        "and frozen while the naming stays fit-derived and revisable -- unlike --part_field, "
+        "which freezes the naming too and lost decisively for that reason (REPORT §5.3).",
+    )
+    ap.add_argument(
+        "--hull_criterion",
+        default="volume",
+        choices=["volume", "concavity", "hybrid", "visibility"],
+        help="which notion of 'the hulls separate here' drives the merge tree",
+    )
+    ap.add_argument(
+        "--hull_k_schedule",
+        default="",
+        help="comma-separated per-stage cut sizes, e.g. '5,13,20,30' for H0/H1/H2/H3. Empty "
+        "keeps --hull_partition for every stage. This is the whole point of a hierarchy: "
+        "coarse chunks while the body is placed, fine chunks while distal segments are fitted.",
+    )
+    ap.add_argument(
+        "--hull_min_majority",
+        type=float,
+        default=0.0,
+        help="a chunk whose winning group holds less than this fraction of its votes is treated "
+        "as AMBIGUOUS and its points keep their own per-point labels. 0 = always vote.",
+    )
+    ap.add_argument("--hull_threshold", type=float, default=0.03, help="CoACD concavity threshold")
+    ap.add_argument("--hull_points", type=int, default=20000, help="surface samples for the decomposition")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -301,6 +348,32 @@ def main():
                 if args.pf_keep_debris
                 else "both are EXCLUDED from every data term"
             ),
+            flush=True,
+        )
+
+    # ------------------------------------------------------------------ hull hierarchy
+    if args.hull_partition > 0:
+        if partition is not None:
+            raise SystemExit("--hull_partition and --part_field are alternative partitions; pick one")
+        from fitter_3d.hull_partition import build_hull_partition
+
+        t_hull = time.time()
+        partition = build_hull_partition(
+            targets,
+            vg,
+            len(gnames),
+            device,
+            k=args.hull_partition,
+            n_points=args.hull_points,
+            coacd_threshold=args.hull_threshold,
+            criterion=args.hull_criterion,
+            seed=args.seed,
+            min_majority=args.hull_min_majority,
+        )
+        print(
+            f"[hier] hull partition: criterion={args.hull_criterion} k={args.hull_partition} "
+            f"threshold={args.hull_threshold} min_majority={args.hull_min_majority} "
+            f"({time.time() - t_hull:.0f}s for {len(targets)} targets)",
             flush=True,
         )
 
@@ -417,7 +490,7 @@ def main():
                 "w_edge": 0.05,
                 "w_beta_prior": args.beta_prior,
                 "w_sym": 0.5,
-                "w_offset": 3.0,
+                "w_offset": args.offset,
                 "w_midline": args.midline,
             },
             **common,
@@ -455,7 +528,18 @@ def main():
         del tgt0
         torch.cuda.empty_cache()
 
-    for st in stages:
+    # The granularity knob: re-cut the same tree per stage. Nothing geometric is recomputed,
+    # so a coarse body stage and a fine deform stage cost the same as one fixed k.
+    hull_ks = [int(x) for x in args.hull_k_schedule.split(",") if x.strip()] if args.hull_k_schedule else []
+    if hull_ks and args.hull_partition <= 0:
+        raise SystemExit("--hull_k_schedule requires --hull_partition")
+    if hull_ks and len(hull_ks) != len(stages):
+        raise SystemExit(f"--hull_k_schedule needs {len(stages)} values (H0,H1,H2,H3), got {len(hull_ks)}")
+
+    for si, st in enumerate(stages):
+        if hull_ks:
+            partition.set_k(hull_ks[si])
+            print(f"    [{st.name}] hull partition re-cut to k={hull_ks[si]}", flush=True)
         st.run()
         st.save_npz(labels=names)
         if st.churn_history:

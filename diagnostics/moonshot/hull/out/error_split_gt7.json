@@ -1,0 +1,40 @@
+{
+ "run": "SYN_clean",
+ "gt_groups": "7",
+ "n_vertices": 122820,
+ "correct": 5911,
+ "within": 102363,
+ "between": 14546,
+ "median_err_within": 0.0332113578915596,
+ "median_err_between": 0.21075528860092163,
+ "per_part": {
+  "body": {
+   "within": 59852,
+   "between": 3794
+  },
+  "l1_l": {
+   "within": 5931,
+   "between": 2653
+  },
+  "l1_r": {
+   "within": 6570,
+   "between": 2015
+  },
+  "l2_l": {
+   "within": 6100,
+   "between": 1450
+  },
+  "l2_r": {
+   "within": 6117,
+   "between": 1389
+  },
+  "l3_l": {
+   "within": 8377,
+   "between": 2177
+  },
+  "l3_r": {
+   "within": 9416,
+   "between": 1068
+  }
+ }
+}
