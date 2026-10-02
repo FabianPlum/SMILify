@@ -76,6 +76,13 @@ check(
     "no render path writes raw predicted betas_trans to a fitter",
 )
 
+# Scales and translations are applied independently: a checkpoint with only one
+# of the two heads must not lose the other (PR #101 review finding).
+check(
+    '"log_beta_scales" not in predicted_params or "betas_trans" not in predicted_params' not in src,
+    "apply_scale_trans_to_fitter does not require both heads to be present",
+)
+
 # every render path routes scales through the helper
 # 4 render paths (model_only, on_frame, generate_visualization, dataset collage) + 1 def
 check(

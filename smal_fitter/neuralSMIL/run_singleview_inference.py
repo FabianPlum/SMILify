@@ -878,8 +878,13 @@ def apply_scale_trans_to_fitter(
       ``(B, n_joints, 3)`` values via the model's own PCA basis; otherwise they
       are already per-joint and are used directly.
     - ``entangled_with_betas`` → predictions are already per-joint.
+
+    The two heads are handled independently: a checkpoint that predicts only
+    scales, or only translations, still gets the one it has applied.
     """
-    if "log_beta_scales" not in predicted_params or "betas_trans" not in predicted_params:
+    has_scales = "log_beta_scales" in predicted_params
+    has_trans = "betas_trans" in predicted_params
+    if not (has_scales or has_trans):
         return
 
     mode = getattr(model, "scale_trans_mode", "separate")
@@ -887,19 +892,24 @@ def apply_scale_trans_to_fitter(
         # Scales/translations are not part of this model's shape space.
         return
 
-    scales = predicted_params["log_beta_scales"][0:1].detach()
-    trans = predicted_params["betas_trans"][0:1].detach()
+    scales = predicted_params["log_beta_scales"][0:1].detach() if has_scales else None
+    trans = predicted_params["betas_trans"][0:1].detach() if has_trans else None
 
     if mode == "separate":
         scale_trans_config = TrainingConfig.get_scale_trans_config()
         use_pca_transformation = scale_trans_config.get("separate", {}).get("use_pca_transformation", True)
         if use_pca_transformation:
-            # PCA weights -> per-joint values. Same call the trainer makes.
+            # PCA weights -> per-joint values. Same call the trainer makes. The
+            # expansion needs scale weights; zero weights give unit scale
+            # (log-scale 0), so a translation-only checkpoint keeps identity scales.
+            scale_weights = scales if scales is not None else torch.zeros_like(trans)
             try:
-                scales, trans = model._transform_separate_pca_weights_to_joint_values(scales, trans)
+                scales_joint, trans_joint = model._transform_separate_pca_weights_to_joint_values(scale_weights, trans)
             except Exception as e:
                 print(f"Warning: Failed to expand PCA limb scales for visualization: {e}")
                 return
+            scales = scales_joint if has_scales else None
+            trans = trans_joint if has_trans else None
 
     if not disable_scaling and scales is not None:
         temp_fitter.log_beta_scales.data = scales.to(device)
