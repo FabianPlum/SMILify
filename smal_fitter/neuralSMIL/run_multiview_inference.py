@@ -37,7 +37,7 @@ import re
 import pickle
 import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple
 from datetime import timedelta
 
 
@@ -53,7 +53,14 @@ from smal_fitter.neuralSMIL.multiview_smil_regressor import create_multiview_reg
 from smal_fitter.neuralSMIL.smil_image_regressor import rotation_6d_to_axis_angle
 from smal_fitter.fitter import SMALFitter
 from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
-from smal_fitter.neuralSMIL.configs import apply_smal_file_override
+from smal_fitter.neuralSMIL.configs import resolve_smal_file_for_checkpoint
+from smal_fitter.neuralSMIL.inference_utils import (
+    InMemoryImageExporter,
+    PredictionSmoother,
+    pad_or_resize,
+    params_to_cpu,
+    params_to_device,
+)
 import config
 from smal_fitter.neuralSMIL.animation_export import build_recorder_from_config, build_multiview_cameras
 from smal_fitter.neuralSMIL.multiview_visualization import (
@@ -66,82 +73,6 @@ DEFAULT_CHECKPOINTS = [
     "multiview_checkpoints/best_model.pth",
     "multiview_checkpoints/final_model.pth",
 ]
-
-
-class PredictionSmoother:
-    """Temporal smoother that applies moving average over predicted parameters.
-
-    Maintains a ring buffer of the last ``window_size`` predictions and returns
-    their element-wise mean.  Metadata keys (non-tensor values and lists whose
-    length varies across frames) are passed through from the latest frame.
-    """
-
-    _PER_VIEW_KEYS = {"fov_per_view", "cam_rot_per_view", "cam_trans_per_view"}
-    _METADATA_KEYS = {"num_views", "view_mask", "camera_indices"}
-
-    def __init__(self, window_size: int):
-        self.window_size = window_size
-        self._buffer: List[Dict[str, Any]] = []
-
-    def __call__(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Add *params* to the buffer and return the smoothed result."""
-        if self.window_size <= 0:
-            return params
-
-        self._buffer.append(params)
-        if len(self._buffer) > self.window_size:
-            self._buffer.pop(0)
-
-        if len(self._buffer) == 1:
-            return params
-
-        smoothed: Dict[str, Any] = {}
-        for key in params:
-            if key in self._METADATA_KEYS:
-                smoothed[key] = params[key]
-            elif key in self._PER_VIEW_KEYS:
-                num_views = len(params[key])
-                smoothed_list = []
-                for v in range(num_views):
-                    tensors = [buf[key][v] for buf in self._buffer if key in buf and v < len(buf[key])]
-                    if tensors:
-                        smoothed_list.append(torch.stack(tensors).mean(dim=0))
-                    else:
-                        smoothed_list.append(params[key][v])
-                smoothed[key] = smoothed_list
-            elif isinstance(params[key], torch.Tensor):
-                tensors = [buf[key] for buf in self._buffer if key in buf]
-                smoothed[key] = torch.stack(tensors).mean(dim=0)
-            else:
-                smoothed[key] = params[key]
-
-        return smoothed
-
-
-def _params_to_cpu(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Detach and move all tensors in a predicted_params dict to CPU."""
-    out: Dict[str, Any] = {}
-    for key, val in params.items():
-        if isinstance(val, torch.Tensor):
-            out[key] = val.detach().cpu()
-        elif isinstance(val, list) and val and isinstance(val[0], torch.Tensor):
-            out[key] = [t.detach().cpu() for t in val]
-        else:
-            out[key] = val
-    return out
-
-
-def _params_to_device(params: Dict[str, Any], device: str) -> Dict[str, Any]:
-    """Move all tensors in a predicted_params dict to *device*."""
-    out: Dict[str, Any] = {}
-    for key, val in params.items():
-        if isinstance(val, torch.Tensor):
-            out[key] = val.to(device)
-        elif isinstance(val, list) and val and isinstance(val[0], torch.Tensor):
-            out[key] = [t.to(device) for t in val]
-        else:
-            out[key] = val
-    return out
 
 
 def run_forward_multiview(
@@ -318,8 +249,26 @@ def _find_default_checkpoint() -> Path:
     return Path(DEFAULT_CHECKPOINTS[0])
 
 
+def load_checkpoint_and_config(checkpoint_path: Path, map_location: str = "cpu") -> Tuple[dict, dict]:
+    """Load a checkpoint once and return ``(checkpoint, ckpt_config)``.
+
+    The SMAL/SMIL model file recorded in the checkpoint has to be applied to
+    config.py BEFORE the model is constructed, but it can only be read by
+    opening the checkpoint. Loading it once here and passing the result on to
+    load_multiview_model_from_checkpoint() avoids reading a multi-GB file twice.
+    """
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    checkpoint = torch.load(str(checkpoint_path), map_location=map_location)
+    return checkpoint, checkpoint.get("config", {}) or {}
+
+
 def load_multiview_model_from_checkpoint(
-    checkpoint_path: Path, device: str, max_views: int = None, canonical_camera_order: List[str] = None
+    checkpoint_path: Path,
+    device: str,
+    max_views: int = None,
+    canonical_camera_order: List[str] = None,
+    checkpoint: Optional[dict] = None,
 ) -> MultiViewSMILImageRegressor:
     """
     Load a trained MultiViewSMILImageRegressor model from checkpoint.
@@ -334,15 +283,19 @@ def load_multiview_model_from_checkpoint(
         device: PyTorch device
         max_views: Optional max_views (if None, inferred from checkpoint)
         canonical_camera_order: Optional canonical camera order (if None, loaded from checkpoint)
+        checkpoint: Optional already-loaded checkpoint dict (from
+            load_checkpoint_and_config), to avoid reading the file twice.
 
     Returns:
         MultiViewSMILImageRegressor model
     """
-    if not checkpoint_path.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-
-    print(f"Loading checkpoint: {checkpoint_path}")
-    checkpoint = torch.load(str(checkpoint_path), map_location=device)
+    if checkpoint is None:
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+        print(f"Loading checkpoint: {checkpoint_path}")
+        checkpoint = torch.load(str(checkpoint_path), map_location=device)
+    else:
+        print(f"Using checkpoint: {checkpoint_path}")
     ckpt_config = checkpoint.get("config", {})
 
     # Get state dict for inferring model structure
@@ -441,17 +394,22 @@ def load_multiview_model_from_checkpoint(
         for k, v in state_dict.items()
         if not any(k == param or k.startswith(param + ".") for param in smal_optimization_params)
     }
-    model.load_state_dict(nn_state_dict, strict=False)
+    try:
+        model.load_state_dict(nn_state_dict, strict=False)
+    except RuntimeError as e:
+        if "size mismatch" in str(e):
+            raise RuntimeError(
+                f"{e}\n\n"
+                f"Head widths are derived from config.py's SMAL/SMIL model "
+                f"(N_BETAS={config.N_BETAS}, N_POSE={config.N_POSE}). A size mismatch here means the "
+                f"checkpoint was trained with a DIFFERENT model file than the one currently loaded.\n"
+                f"  Checkpoint's recorded smal_file: {ckpt_config.get('smal_file', '(none recorded)')}\n"
+                f"  Currently loaded SMAL_FILE:      {getattr(config, 'SMAL_FILE', '(unset)')}\n"
+                f"  Fix: pass --smal_file <that model>.pkl (and --shape_family if it differs)."
+            ) from e
+        raise
     model.eval()
     return model
-
-
-class _InMemoryImageExporter:
-    def __init__(self):
-        self.image = None
-
-    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, epoch=None):
-        self.image = collage_np
 
 
 def render_singleview_collage(
@@ -650,7 +608,7 @@ def render_singleview_collage(
 
         temp_fitter.renderer.set_camera_parameters(R=cam_rot, T=cam_trans, fov=view_fov, aspect_ratio=aspect)
 
-    exporter = _InMemoryImageExporter()
+    exporter = InMemoryImageExporter()
     vis_mesh_scale = None
     if model.allow_mesh_scaling and "mesh_scale" in predicted_params:
         vis_mesh_scale = predicted_params["mesh_scale"][0:1].detach()
@@ -661,19 +619,6 @@ def render_singleview_collage(
         mesh_scale=vis_mesh_scale,
     )
     return exporter.image
-
-
-def _pad_or_resize(frame: np.ndarray, target_size: Tuple[int, int]) -> np.ndarray:
-    target_w, target_h = target_size
-    if frame.shape[1] == target_w and frame.shape[0] == target_h:
-        return frame
-    if frame.shape[1] > target_w or frame.shape[0] > target_h:
-        return cv2.resize(frame, (target_w, target_h))
-    padded = np.ones((target_h, target_w, 3), dtype=np.uint8) * 40
-    h = min(target_h, frame.shape[0])
-    w = min(target_w, frame.shape[1])
-    padded[:h, :w] = frame[:h, :w]
-    return padded
 
 
 def _compute_rank_indices(
@@ -836,7 +781,7 @@ def run_inference_phase(
             predicted_params = run_forward_multiview(model, x_data, y_data, device)
             if predicted_params is None:
                 continue
-            raw_predictions.append((global_idx, _params_to_cpu(predicted_params)))
+            raw_predictions.append((global_idx, params_to_cpu(predicted_params)))
         except Exception as e:
             print(f"[Rank {rank}] Error in inference for sample {global_idx}: {e}")
             continue
@@ -883,7 +828,7 @@ def run_render_phase(
             if num_available_views == 0:
                 continue
 
-            params = _params_to_device(smoothed_params[global_idx], device)
+            params = params_to_device(smoothed_params[global_idx], device)
 
             mv_frame = create_multiview_visualization(
                 model,
@@ -896,7 +841,7 @@ def run_render_phase(
                 total_view_slots=total_view_slots,
             )
             if mv_frame is not None:
-                mv_frame = _pad_or_resize(mv_frame, (grid_width, grid_height))
+                mv_frame = pad_or_resize(mv_frame, (grid_width, grid_height))
                 multiview_frames.append(cv2.cvtColor(mv_frame, cv2.COLOR_RGB2BGR))
                 mv_frame_indices.append(global_idx)
 
@@ -915,7 +860,7 @@ def run_render_phase(
                     render_resolution=render_resolution,
                 )
                 if sv_frame is not None:
-                    sv_frame = _pad_or_resize(sv_frame, singleview_size)
+                    sv_frame = pad_or_resize(sv_frame, singleview_size)
                     singleview_frames_per_view[view_idx].append(cv2.cvtColor(sv_frame, cv2.COLOR_RGB2BGR))
                     sv_frame_indices_per_view[view_idx].append(global_idx)
 
@@ -1142,17 +1087,12 @@ def main_inference(
         else:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Apply SMAL model override if provided (similar to training script)
-    # This must be done before loading the dataset/model to ensure config.dd, config.N_POSE, etc. are correct
-    if args.smal_file:
-        if rank == 0:
-            print(f"Applying SMAL file override: {args.smal_file}")
-        shape_family = args.shape_family if args.shape_family is not None else config.SHAPE_FAMILY
-        apply_smal_file_override(args.smal_file, shape_family=shape_family)
-        if rank == 0:
-            print(f"  Shape family: {config.SHAPE_FAMILY}")
-            print(f"  N_POSE: {config.N_POSE}")
-            print(f"  N_BETAS: {config.N_BETAS}")
+    # Resolve and read the checkpoint up front: the SMAL/SMIL model it was
+    # trained with must be applied to config.py BEFORE the dataset and model are
+    # built, and that model is recorded inside the checkpoint.
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else _find_default_checkpoint()
+    checkpoint, ckpt_config = load_checkpoint_and_config(checkpoint_path)
+    resolve_smal_file_for_checkpoint(ckpt_config, args.smal_file, args.shape_family, rank=rank)
 
     # Parse view indices from comma-separated string
     view_indices = [int(x.strip()) for x in args.view_indices.split(",")]
@@ -1177,8 +1117,6 @@ def main_inference(
         if args.smoothing_window > 0:
             print(f"Temporal smoothing: {args.smoothing_window} frames")
         print(f"{'=' * 60}\n")
-
-    checkpoint_path = Path(args.checkpoint) if args.checkpoint else _find_default_checkpoint()
 
     # Load dataset
     # Use num_views_to_use=None to use all available views per sample (same as training)
@@ -1208,7 +1146,9 @@ def main_inference(
         device=device,
         max_views=None,  # Infer from checkpoint
         canonical_camera_order=None,  # Load from checkpoint
+        checkpoint=checkpoint,  # already read above for the SMAL override
     )
+    del checkpoint  # the model owns its weights now; free the CPU copy
 
     # Get model's max_views (from checkpoint architecture)
     model_max_views = model.max_views
@@ -1582,13 +1522,19 @@ def main():
         help="Master port for distributed processing (default: from MASTER_PORT env var or 12355)",
     )
     parser.add_argument(
-        "--smal_file", type=str, default=None, help="Path to SMAL model file to override config.py SMAL_FILE (optional)"
+        "--smal_file",
+        type=str,
+        default=None,
+        help="Path to a SMAL/SMIL model file overriding config.py SMAL_FILE. Normally unnecessary: "
+        "the checkpoint's own recorded smal_file is applied automatically. Use this only to override "
+        "it, or when the recorded path does not resolve on this machine.",
     )
     parser.add_argument(
         "--shape_family",
         type=int,
         default=None,
-        help="Shape family to use with --smal_file (optional, defaults to config.SHAPE_FAMILY)",
+        help="Shape family override (legacy SMAL setting). Default: the checkpoint's recorded "
+        "shape_family, else config.SHAPE_FAMILY.",
     )
     parser.add_argument(
         "--checkpoint",

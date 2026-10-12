@@ -75,7 +75,7 @@ The `MultiViewSMILImageRegressor` adds:
 
 ### Inference, Testing and Validation
 - `test_smil_regressor_ground_truth.py`: Ground truth validation and 3D keypoint alignment
-- `run_singleview_inference.py`: Single-view inference on a trained checkpoint (folder of images or video input)
+- `run_singleview_inference.py`: Single-view inference on a trained checkpoint (folder of images, video, or preprocessed HDF5 dataset)
 - `run_multiview_inference.py`: Multi-view inference on a trained checkpoint
 - `benchmark_model.py`: Benchmarking script for single-view **and** multi-view models (auto-detects the mode from the checkpoint)
 
@@ -152,14 +152,55 @@ python -m smal_fitter.neuralSMIL.run_multiview_inference \
 #               --max_frames 100  --export_animation path/to/clip   (writes <clip>.npz / .json)
 ```
 
-**Single-view** — folder of images (`--input_folder`) or a video (`--input_video`):
+**Single-view** — one of three mutually exclusive inputs: a folder of images
+(`--input_folder`), a video (`--input_video`), or a preprocessed HDF5 dataset
+(`--dataset`):
 
 ```bash
+# Uncalibrated footage
 python -m smal_fitter.neuralSMIL.run_singleview_inference \
     --checkpoint checkpoints/best_model.pth \
     --input_folder path/to/images/ \
     --output_folder inference_out/
+
+# Preprocessed dataset — mirrors run_multiview_inference.py
+python -m smal_fitter.neuralSMIL.run_singleview_inference \
+    --checkpoint checkpoints/best_model.pth \
+    --dataset path/to/sleap_dataset.h5 \
+    --output_folder inference_out/
+
+# Useful flags: --view_indices 0,4,11  --smoothing_window 5  --render_resolution 512
+#               --max_frames 100  --generate_num_subclips 3  --export_animation out/clip
 ```
+
+`--dataset` is the mode that reproduces training conditions, and is what you want
+for evaluating a checkpoint. Every convention comes from the data and the
+checkpoint rather than from a CLI guess:
+
+| Concern | `--input_folder` / `--input_video` | `--dataset` |
+| --- | --- | --- |
+| Cropping | done here via `--crop_mode` (or `bbox_crop` + `--sleap_project`) | images used exactly as the preprocessor stored them, under the dataset's own `crop_mode`; `--crop_mode` is ignored |
+| Camera (camera-centric ckpt) | fixed identity camera, FOV from `--fov` (default 60°) | fixed identity camera, FOV per view from that view's calibrated intrinsics; `--fov` unused |
+| Camera (model-centric ckpt) | network's predicted camera | network's predicted camera |
+| Frame convention | n/a | dataset opened under the checkpoint's `frame_convention`, so a camera-centric checkpoint gets views re-anchored to the world origin |
+| Joint scale/translation | per checkpoint `scale_trans_mode` | per checkpoint `scale_trans_mode` |
+| Mesh placement | 10× UE scaling or predicted `mesh_scale`, per checkpoint | same |
+
+Notes:
+
+- With a multi-view HDF5, each item is one camera view of one frame. `--view_indices`
+  selects which camera slots to run, and each slot gets its own temporally-ordered
+  output video (`<dataset>_view<N>_singleview_inference.mp4`).
+- A `camera_centric` checkpoint requires a multi-view HDF5 — the re-anchoring is
+  per view — and is rejected with a clear error otherwise.
+- `--smoothing_window` averages **all** predicted parameters per view (like the
+  multi-view script). The older `--camera_smoothing` is video-mode only and
+  smooths camera parameters alone.
+- Aspect ratio: the single-view regressor is trained with `aspect_ratio=1.0`
+  (it never reads the dataset's `cam_aspect`), so rendering defaults to 1.0 to
+  match training and warns when the dataset's calibration is meaningfully
+  non-square. `--use_calibrated_aspect` opts into the dataset value for
+  comparison against the multi-view pipeline.
 
 ### 5. Ground Truth Testing
 
@@ -265,7 +306,7 @@ For **training**, the SMAL/SMIL model file is set only via the JSON config — t
 "smal_model": { "smal_file": "3D_model_prep/SMILy_Mouse.pkl", "shape_family": null }
 ```
 
-A CLI override exists only on the non-training entrypoints (note the inconsistent flag spelling across scripts): `run_multiview_inference.py` (`--smal_file`), `dataset_preprocessing.py` (`--smal-file`), and `test_smil_regressor_ground_truth.py` (`--smal-file`). Either path reloads `config.py` globals (`dd`, `N_POSE`, `N_BETAS`) to match the specified model before any dataset or network construction.
+A CLI override exists only on the non-training entrypoints (note the inconsistent flag spelling across scripts): `run_multiview_inference.py` (`--smal_file`), `run_singleview_inference.py` (`--smal_file`), `dataset_preprocessing.py` (`--smal-file`), and `test_smil_regressor_ground_truth.py` (`--smal-file`). Either path reloads `config.py` globals (`dd`, `N_POSE`, `N_BETAS`) to match the specified model before any dataset or network construction.
 
 ## Distributed Training
 
