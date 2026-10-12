@@ -69,11 +69,14 @@ import config
 from smal_fitter.neuralSMIL.animation_export import AnimationRecorder, build_recorder_from_config
 from smal_fitter.neuralSMIL.configs import resolve_smal_file_for_checkpoint
 from smal_fitter.neuralSMIL.inference_utils import (
+    RENDER_RESOLUTION_CAP,
     InMemoryImageExporter,
     PredictionSmoother,
+    crop_to_network_view,
     pad_or_resize,
     params_to_cpu,
     params_to_device,
+    resolve_render_resolution,
 )
 from sleap_data_loader import SLEAPDataLoader
 import importlib.util
@@ -961,6 +964,22 @@ def apply_camera_to_fitter(
         )
 
 
+# Render resolutions that already ran out of GPU memory (warned once each).
+_WARNED_RENDER_OOM: set = set()
+
+
+def warn_render_oom(render_size: int) -> None:
+    """Free cached GPU memory and explain, once per size, how to avoid the OOM."""
+    torch.cuda.empty_cache()
+    if render_size not in _WARNED_RENDER_OOM:
+        _WARNED_RENDER_OOM.add(render_size)
+        print(
+            f"WARNING: GPU out of memory while rendering at {render_size}x{render_size} px. "
+            f"Pass a smaller --render_resolution (the default caps at {RENDER_RESOLUTION_CAP}). "
+            f"Frames that fail to render are written without the overlay."
+        )
+
+
 def render_model_only(
     model: SMILImageRegressor, predicted_params: Dict[str, torch.Tensor], device: str, render_size: int
 ) -> np.ndarray:
@@ -1065,6 +1084,9 @@ def render_model_only(
         # Convert to [0, 255] range
         return (rendered_np * 255).astype(np.uint8)
 
+    except torch.cuda.OutOfMemoryError:
+        warn_render_oom(render_size)
+        return np.zeros((render_size, render_size, 3), dtype=np.uint8)
     except Exception as e:
         print(f"Warning: Failed to render model: {e}")
         # Return black image on error
@@ -1077,6 +1099,7 @@ def render_prediction_on_frame(
     original_frame: np.ndarray,
     device: str,
     transform_info: Optional[Dict[str, Any]] = None,
+    render_resolution: Optional[int] = None,
 ) -> np.ndarray:
     """
     Render the predicted 3D model onto the original frame.
@@ -1086,10 +1109,15 @@ def render_prediction_on_frame(
         predicted_params: Dictionary of predicted SMIL parameters
         original_frame: Original frame (H, W, 3) in RGB, range [0, 255]
         device: PyTorch device
+        transform_info: Crop applied before inference; the overlay is placed in that region
+        render_resolution: Square render size; default is the crop size capped at
+            RENDER_RESOLUTION_CAP. The camera is FOV-based, so this only changes sharpness.
 
     Returns:
         Rendered frame with 3D model overlay (H, W, 3) in RGB, range [0, 255]
     """
+    network_view = crop_to_network_view(original_frame, transform_info)
+    render_size = resolve_render_resolution(render_resolution, network_view.shape[:2])
     try:
         # Convert rotations to axis-angle if they're in 6D representation
         if model.rotation_representation == "6d":
@@ -1102,16 +1130,13 @@ def render_prediction_on_frame(
         # Get frame dimensions
         frame_h, frame_w = original_frame.shape[:2]
 
-        # Resize to model's expected input size for rendering
-        render_size = model.input_resolution
-
-        # Prepare image for rendering
-        if original_frame.max() > 1.0:
-            rgb_image = original_frame.astype(np.float32) / 255.0
+        # Prepare image for rendering: the view the network saw, at render size
+        # (SMALFitter renders at the size of this image)
+        if network_view.max() > 1.0:
+            rgb_image = network_view.astype(np.float32) / 255.0
         else:
-            rgb_image = original_frame.astype(np.float32)
+            rgb_image = network_view.astype(np.float32)
 
-        # Resize to render size
         rgb_resized = cv2.resize(rgb_image, (render_size, render_size))
 
         # Convert to tensor format expected by SMALFitter
@@ -1232,6 +1257,9 @@ def render_prediction_on_frame(
             blended = alpha * rendered_resized + (1 - alpha) * overlay_base
             return (blended * 255).astype(np.uint8)
 
+    except torch.cuda.OutOfMemoryError:
+        warn_render_oom(render_size)
+        return original_frame
     except Exception as e:
         print(f"Warning: Failed to render prediction: {e}")
         # Return original frame on error
@@ -1245,6 +1273,8 @@ def generate_visualization(
     image_exporter: InferenceImageExporter,
     image_name: str,
     device: str,
+    transform_info: Optional[Dict[str, Any]] = None,
+    render_resolution: Optional[int] = None,
 ) -> None:
     """
     Generate visualization using the SMIL model and predicted parameters.
@@ -1256,7 +1286,13 @@ def generate_visualization(
         image_exporter: Image exporter for saving results
         image_name: Base name for the image
         device: PyTorch device
+        transform_info: Crop applied before inference. The collage shows that
+            crop, not the whole (possibly non-square) frame squashed to a square.
+        render_resolution: Square collage panel size; default is the crop size
+            capped at RENDER_RESOLUTION_CAP.
     """
+    network_view = crop_to_network_view(original_image, transform_info)
+    render_size = resolve_render_resolution(render_resolution, network_view.shape[:2])
     try:
         # Convert rotations to axis-angle if they're in 6D representation
         if model.rotation_representation == "6d":
@@ -1266,18 +1302,15 @@ def generate_visualization(
             global_rot_aa = predicted_params["global_rot"]
             joint_rot_aa = predicted_params["joint_rot"]
 
-        # Create a simplified SMALFitter for visualization
-        # Use the original image as RGB input
-        if original_image.max() > 1.0:
-            rgb_image = original_image.astype(np.float32) / 255.0
+        # Create a simplified SMALFitter for visualization, using the view the
+        # network saw as RGB input
+        if network_view.max() > 1.0:
+            rgb_image = network_view.astype(np.float32) / 255.0
         else:
-            rgb_image = original_image.astype(np.float32)
+            rgb_image = network_view.astype(np.float32)
 
-        # Resize to model's expected input size
-        target_size = (model.input_resolution, model.input_resolution)
-
-        if rgb_image.shape[:2] != target_size:
-            rgb_image = cv2.resize(rgb_image, target_size)
+        if rgb_image.shape[:2] != (render_size, render_size):
+            rgb_image = cv2.resize(rgb_image, (render_size, render_size))
 
         # Convert to tensor format expected by SMALFitter
         rgb_tensor = torch.from_numpy(rgb_image).permute(2, 0, 1).unsqueeze(0)  # (1, 3, H, W)
@@ -1347,7 +1380,10 @@ def generate_visualization(
         print(f"Generated visualization for {image_name}")
 
     except Exception as e:
-        print(f"Warning: Failed to generate visualization for {image_name}: {e}")
+        if isinstance(e, torch.cuda.OutOfMemoryError):
+            warn_render_oom(render_size)
+        else:
+            print(f"Warning: Failed to generate visualization for {image_name}: {e}")
         # Save just the parameters without visualization
         img_parameters = {
             k: v.cpu().data.numpy() if isinstance(v, torch.Tensor) else v for k, v in predicted_params.items()
@@ -1381,6 +1417,7 @@ def process_images_batch(
     batch_size: int = 1,
     sleap_helper: Optional[SLEAPCroppingHelper] = None,
     sleap_camera: Optional[str] = None,
+    render_resolution: Optional[int] = None,
 ) -> None:
     """
     Process a batch of images for inference.
@@ -1394,6 +1431,7 @@ def process_images_batch(
         batch_size: Batch size for processing (currently only supports 1)
         sleap_helper: Optional helper for bbox_crop using SLEAP keypoints
         sleap_camera: Optional camera override for bbox_crop
+        render_resolution: Collage panel size (default: crop size, capped)
     """
     # Create output directory
     os.makedirs(output_folder, exist_ok=True)
@@ -1436,7 +1474,16 @@ def process_images_batch(
             predicted_params = run_inference_on_image(model, preprocessed_tensor, device)
 
             # Generate visualization with unique image name
-            generate_visualization(model, predicted_params, original_image, image_exporter, image_name, device)
+            generate_visualization(
+                model,
+                predicted_params,
+                original_image,
+                image_exporter,
+                image_name,
+                device,
+                transform_info=transform_info,
+                render_resolution=render_resolution,
+            )
 
         except Exception as e:
             print(f"Error processing {image_path}: {e}")
@@ -1495,6 +1542,8 @@ def process_video(
     sleap_camera: Optional[str] = None,
     video_export_mode: str = "overlay",
     animation_recorder: Optional[AnimationRecorder] = None,
+    render_resolution: Optional[int] = None,
+    smoothing_window: int = 0,
 ) -> None:
     """
     Process a video file for inference.
@@ -1512,6 +1561,9 @@ def process_video(
         sleap_helper: Optional helper for bbox_crop using SLEAP keypoints
         sleap_camera: Optional camera override when using bbox_crop
         video_export_mode: Export mode ('overlay' or 'side_by_side')
+        render_resolution: Square render size (default: crop size, capped at RENDER_RESOLUTION_CAP)
+        smoothing_window: Moving average over all predicted parameters before rendering
+            (0 = off). The animation export records the raw predictions.
     """
     # Create output directory
     os.makedirs(output_folder, exist_ok=True)
@@ -1543,15 +1595,17 @@ def process_video(
     print(f"  Resolution: {frame_width}x{frame_height}")
     print(f"  Crop mode: {crop_mode}")
     print(f"  Camera smoothing window: {camera_smoothing_window} frames")
+    print(f"  Parameter smoothing window: {smoothing_window} frames")
     print(f"  Video export mode: {video_export_mode}")
+
+    # Render size: the crop is at most min(frame_h, frame_w) for centred crops,
+    # so this matches the per-frame resolution used by the overlay renders.
+    render_size = resolve_render_resolution(render_resolution, (frame_height, frame_width))
+    print(f"  Render resolution: {render_size}x{render_size}")
 
     # Determine output video dimensions based on export mode
     if video_export_mode == "side_by_side":
-        # Determine render size based on model's input resolution
-        render_size = model.input_resolution
-
-        # For side-by-side: input video will be rescaled to match render_size height
-        # Output width will be 2 * render_size
+        # For side-by-side: the network's view and the render, each render_size square
         output_height = render_size
         output_width = render_size * 2
     else:
@@ -1566,6 +1620,7 @@ def process_video(
 
     # Initialize moving average buffers for camera parameters
     camera_buffer = {"cam_rot": [], "cam_trans": [], "fov": []}
+    smoother = PredictionSmoother(smoothing_window)
 
     # Optionally create frame exporter
     if save_frames:
@@ -1623,19 +1678,20 @@ def process_video(
                 if animation_recorder is not None:
                     animation_recorder.record(predicted_params)
 
-                # Apply camera parameter smoothing
+                # Smooth all parameters (no-op at window 0), then the camera on top
+                smoothed_params = smoother(predicted_params)
                 if camera_smoothing_window > 0:
-                    smoothed_params = smooth_camera_parameters(predicted_params, camera_buffer, camera_smoothing_window)
-                else:
-                    smoothed_params = predicted_params
+                    smoothed_params = smooth_camera_parameters(smoothed_params, camera_buffer, camera_smoothing_window)
 
                 # Process frame based on export mode
                 if video_export_mode == "side_by_side":
                     # Render model only
                     rendered_model = render_model_only(model, smoothed_params, device, render_size)
 
-                    # Resize input frame to match render_size
-                    input_resized = cv2.resize(frame_rgb, (render_size, render_size))
+                    # The view the network saw (cropped, not squashed), at render_size
+                    input_resized = cv2.resize(
+                        crop_to_network_view(frame_rgb, transform_info), (render_size, render_size)
+                    )
 
                     # Create side-by-side visualization
                     side_by_side = np.hstack([input_resized, rendered_model])
@@ -1645,7 +1701,12 @@ def process_video(
                 else:
                     # Render prediction onto frame (using smoothed camera parameters)
                     rendered_frame = render_prediction_on_frame(
-                        model, smoothed_params, frame_rgb, device, transform_info=transform_info
+                        model,
+                        smoothed_params,
+                        frame_rgb,
+                        device,
+                        transform_info=transform_info,
+                        render_resolution=render_resolution,
                     )
 
                     # Convert RGB back to BGR for OpenCV
@@ -1658,7 +1719,16 @@ def process_video(
                 if save_frames and frame_idx % 10 == 0:  # Save every 10th frame
                     frame_name = f"frame_{frame_idx:06d}"
                     try:
-                        generate_visualization(model, predicted_params, frame_rgb, frame_exporter, frame_name, device)
+                        generate_visualization(
+                            model,
+                            predicted_params,
+                            frame_rgb,
+                            frame_exporter,
+                            frame_name,
+                            device,
+                            transform_info=transform_info,
+                            render_resolution=render_resolution,
+                        )
                     except Exception as e:
                         print(f"Warning: Failed to save frame {frame_idx}: {e}")
 
@@ -2296,6 +2366,16 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         "default=direct resize (may distort), bbox_crop=SLEAP-driven bounding box crop. "
         "Should match training preprocessing. (default: centred)",
     )
+    parser.add_argument(
+        "--render_resolution",
+        type=int,
+        default=None,
+        help="Square pixel resolution the mesh is rendered at. Cosmetic only: inference always runs "
+        "at the backbone's input resolution. Default for --input_folder / --input_video: the crop "
+        f"size, capped at {RENDER_RESOLUTION_CAP}; an explicit value is used as given (very large "
+        "values may run out of GPU memory, which is reported). Default for --dataset: the dataset's "
+        "stored image resolution.",
+    )
 
     # Processing options
     parser.add_argument(
@@ -2325,6 +2405,15 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         type=int,
         default=0,
         help="Moving average window size for camera parameter smoothing (default: 0, set to 0 to disable)",
+    )
+    parser.add_argument(
+        "--smoothing_window",
+        type=int,
+        default=0,
+        help="Moving-average window over ALL predicted parameters before rendering, for --input_video "
+        "and --dataset (per view) (default: 0, disabled). The animation export stays unsmoothed. "
+        "--camera_smoothing averages camera parameters only, which has no effect for camera-centric "
+        "checkpoints (fixed camera).",
     )
     parser.add_argument(
         "--video_export_mode",
@@ -2370,14 +2459,6 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         "single-view HDF5s have one implicit slot.",
     )
     dataset_group.add_argument(
-        "--smoothing_window",
-        type=int,
-        default=0,
-        help="Moving-average window over ALL predicted parameters, applied per view "
-        "(default: 0, disabled). Distinct from --camera_smoothing, which is video-mode only "
-        "and smooths camera parameters alone.",
-    )
-    dataset_group.add_argument(
         "--generate_num_subclips",
         type=int,
         default=1,
@@ -2394,14 +2475,6 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         "--disable_translation",
         action="store_true",
         help="Do not apply predicted per-joint translation (betas_trans) when rendering. Debug/comparison only.",
-    )
-    dataset_group.add_argument(
-        "--render_resolution",
-        type=int,
-        default=None,
-        help="Square pixel resolution for the rendered collage. Default: the dataset's own "
-        "stored image resolution. Cosmetic only — does not affect inference, which always "
-        "runs at the backbone's input resolution.",
     )
     dataset_group.add_argument(
         "--use_calibrated_aspect",
@@ -2543,6 +2616,7 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
                 args.batch_size,
                 sleap_helper=sleap_helper,
                 sleap_camera=args.sleap_camera,
+                render_resolution=args.render_resolution,
             )
 
         elif args.input_video:
@@ -2579,6 +2653,8 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
                 sleap_camera=args.sleap_camera,
                 video_export_mode=args.video_export_mode,
                 animation_recorder=animation_recorder,
+                render_resolution=args.render_resolution,
+                smoothing_window=args.smoothing_window,
             )
 
             if animation_recorder is not None and animation_recorder.num_frames() > 0:
