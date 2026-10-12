@@ -55,12 +55,12 @@ New parametric models are authored in Blender via the SMIL addon — see *Adding
 ## Installation
 The conda environment is defined in [environment.yml](environment.yml). The recommended stack is Python 3.10 / **PyTorch 2.3.1** / pytorch-cuda 11.8 / **PyTorch3D 0.7.8** — confirmed on Windows 11 and the run.ai Linux cluster (PyTorch3D ships a `cu118_pyt231` build, so it installs cleanly against torch 2.3.1 on Linux). An older PyTorch 2.1.1 / PyTorch3D 0.7.7 stack also works if you prefer it.
 
-1. **Clone with submodules.** The sample data for the legacy quadruped path (BADJA / StanfordExtra / SMALST) come in as git submodules:
+1. **Clone the repository:**
    ```bash
-   git clone --recurse-submodules https://github.com/FabianPlum/SMILify
+   git clone https://github.com/FabianPlum/SMILify
    cd SMILify
    ```
-   (Already cloned without them? Run `git submodule update --init --recursive`.)
+   (The legacy quadruped sample data — BADJA / StanfordExtra / SMALST — is no longer bundled; see [legacy/README.md](legacy/README.md#installation) if you need it.)
 
 2. **Create the environment** (recommended):
    ```bash
@@ -387,12 +387,12 @@ The disentangled components are exported as part of the `.pkl` model file and ar
 ____________________________________
 ## Code refactor TODOs 
 - [X] Move all legcay funcitonality and documentation to it's own sub-directory to clean up the repo and make its purpose more apparent.
-- [ ] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules. ([#51](https://github.com/FabianPlum/SMILify/issues/51))
-- [ ] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable. ([#52](https://github.com/FabianPlum/SMILify/issues/52))
-- [ ] At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file. ([#53](https://github.com/FabianPlum/SMILify/issues/53))
+- [X] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules. ([#51](https://github.com/FabianPlum/SMILify/issues/51))
+- [X] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable. ([#52](https://github.com/FabianPlum/SMILify/issues/52)) — none were needed by maintained code; all three were dropped.
+- ~~At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.~~ ([#53](https://github.com/FabianPlum/SMILify/issues/53)) — won't do: the SMAL files are MPI-licensed and can't be redistributed (see [docs/THIRD_PARTY_MODELS.md](docs/THIRD_PARTY_MODELS.md)), so a consolidated file could never ship. SMIL models are already single-file, including joint limits.
 - [X] Get rid of the numpy/chumpy dependency mess.
 - [X] Allow importing legacy SMAL models with chumpy variables WITHOUT requiring chumpy to be installed through custom unpickler.
-- [ ] Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable. ([#54](https://github.com/FabianPlum/SMILify/issues/54))
+- ~~Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.~~ ([#54](https://github.com/FabianPlum/SMILify/issues/54)) — won't do, same licensing reason as above.
 - [X] The code is poorly tested. That needs to be fixed. Write integration tests for main functionality.
 
 ## Functionality / broader project TODOs
