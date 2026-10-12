@@ -290,3 +290,64 @@ def apply_smal_file_override(smal_file: str, shape_family: Optional[int] = None)
 
     print(f"[config] SMAL_FILE overridden to: {config.SMAL_FILE}")
     print(f"[config] N_POSE={config.N_POSE}, N_BETAS={config.N_BETAS}, joints={len(config.joint_names)}")
+
+
+def resolve_smal_file_for_checkpoint(
+    ckpt_config: dict,
+    cli_smal_file: Optional[str],
+    cli_shape_family: Optional[int],
+    rank: int = 0,
+) -> Optional[int]:
+    """Apply the SMAL/SMIL model a checkpoint was trained with.
+
+    config.py derives ``dd``, ``N_POSE``, ``N_BETAS`` and the joint tables from
+    the SMAL pickle at import time, and the network's head widths are sized from
+    them. If the checkpoint was trained on a different model than config.py's
+    default, building the model without this override produces head shapes that
+    do not match the saved weights — e.g. a 5-beta model loaded against a
+    13-beta default fails with a `betas_head` / `token_embedding` size mismatch.
+
+    The trainers record ``smal_file`` and ``shape_family`` in the checkpoint
+    precisely so inference can reproduce them, so the checkpoint is the default
+    source and ``--smal_file`` is an explicit override of it. Precedence, for
+    both values: CLI > checkpoint > config.py. Used by both inference scripts.
+
+    Returns:
+        The resolved shape family, for callers that pass it on to the model.
+    """
+    import config  # top-level config.py (must be on sys.path)
+
+    if cli_shape_family is not None:
+        shape_family = cli_shape_family
+    elif ckpt_config.get("shape_family") is not None:
+        shape_family = ckpt_config["shape_family"]
+    else:
+        shape_family = config.SHAPE_FAMILY
+
+    smal_file = cli_smal_file or ckpt_config.get("smal_file")
+    if not smal_file:
+        return shape_family
+
+    source = "--smal_file" if cli_smal_file else "checkpoint"
+    if not Path(smal_file).exists():
+        msg = (
+            f"SMAL model file from {source} does not exist: {smal_file}\n"
+            f"  The path was recorded on the training machine and may not resolve here "
+            f"(paths like '3D_model_prep/...' are relative to the repo root).\n"
+            f"  Pass --smal_file /path/to/model.pkl to point at it."
+        )
+        if cli_smal_file:
+            raise FileNotFoundError(msg)
+        # Checkpoint-sourced path: warn rather than hard-fail, since the model
+        # may still match config.py's current default.
+        if rank == 0:
+            print(f"WARNING: {msg}")
+        return shape_family
+
+    if rank == 0:
+        print(f"Applying SMAL file override from {source}: {smal_file}")
+    apply_smal_file_override(smal_file, shape_family=shape_family)
+    if rank == 0:
+        print(f"  N_POSE: {config.N_POSE}")
+        print(f"  N_BETAS: {config.N_BETAS}")
+    return shape_family
