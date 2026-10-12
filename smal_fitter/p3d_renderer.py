@@ -124,6 +124,71 @@ class Renderer(torch.nn.Module):
         if hasattr(self.color_renderer.shader, "cameras"):
             self.color_renderer.shader.cameras = self.cameras
 
+    def orbit_view(self, vertices, points, angle_deg=90.0, axis="camera_x", fill=0.8):
+        """Place the subject for a second view: the camera orbiting it by *angle_deg* about *axis*.
+
+        Works in camera (view) space, so it does not matter where the camera sits in the
+        world (camera-centric identity camera or model-centric predicted camera). The
+        subject is rotated about its own centre, then put on the optical axis at the
+        distance where its bounding sphere fills *fill* of the narrower half field of
+        view, so it is always fully in front of the camera and in frame.
+
+        Args:
+            vertices, points: (B, N, 3) world-space mesh vertices and joints.
+            angle_deg: Orbit angle.
+            axis: "camera_x" (horizontal image axis; 90 deg gives a view over the top),
+                "camera_y" (vertical image axis), or "world_y" (the world's y axis; with
+                180 deg this is the old turn-around view for model-centric checkpoints).
+            fill: Fraction of the narrower half field of view the bounding sphere spans.
+
+        Returns:
+            World-space (vertices, points) to render with the unchanged camera.
+        """
+        w2v = self.cameras.get_world_to_view_transform()
+        v = w2v.transform_points(vertices.float())
+        p = w2v.transform_points(points.float())
+        centre = v.mean(dim=1, keepdim=True)
+
+        batch = v.shape[0]
+        if axis == "camera_x":
+            k = torch.tensor([1.0, 0.0, 0.0], device=v.device).expand(batch, 3)
+        elif axis == "camera_y":
+            k = torch.tensor([0.0, 1.0, 0.0], device=v.device).expand(batch, 3)
+        elif axis == "world_y":
+            ends = torch.tensor([[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]], device=v.device).expand(batch, 2, 3)
+            ends = w2v.transform_points(ends)
+            k = ends[:, 1] - ends[:, 0]
+        else:
+            raise ValueError(f"Unknown orbit axis '{axis}'; use 'camera_x', 'camera_y' or 'world_y'.")
+        k = k / k.norm(dim=-1, keepdim=True)
+
+        # Rodrigues: R = I cos(a) + sin(a) [k]x + (1 - cos(a)) k k^T, per sample
+        a = torch.tensor(np.radians(angle_deg), dtype=v.dtype, device=v.device)
+        zero = torch.zeros(batch, device=v.device)
+        k_cross = torch.stack(
+            [
+                torch.stack([zero, -k[:, 2], k[:, 1]], dim=-1),
+                torch.stack([k[:, 2], zero, -k[:, 0]], dim=-1),
+                torch.stack([-k[:, 1], k[:, 0], zero], dim=-1),
+            ],
+            dim=1,
+        )
+        eye = torch.eye(3, device=v.device).expand(batch, 3, 3)
+        rot = eye * torch.cos(a) + torch.sin(a) * k_cross + (1 - torch.cos(a)) * k.unsqueeze(2) * k.unsqueeze(1)
+
+        v = (v - centre) @ rot.transpose(1, 2)
+        p = (p - centre) @ rot.transpose(1, 2)
+
+        radius = v.norm(dim=-1).max(dim=1).values
+        half_fov = torch.deg2rad(self.cameras.fov.reshape(-1).float()) / 2  # vertical
+        aspect = self.cameras.aspect_ratio.reshape(-1).float()
+        half_fov = torch.atan(torch.tan(half_fov) * aspect.clamp(max=1.0))  # narrower of vertical / horizontal
+        offset = torch.zeros_like(centre)
+        offset[:, 0, 2] = radius / torch.sin(half_fov * fill)  # nearest point at distance - radius > 0
+
+        v2w = w2v.inverse()
+        return v2w.transform_points(v + offset), v2w.transform_points(p + offset)
+
     def forward(self, vertices, points, faces, render_texture=False, joints_only=False):
         # PyTorch3D expects float32 inputs; upstream code can accidentally produce float64
         # (e.g., from SMAL model buffers / numpy defaults). Force here to avoid dtype mismatch.
