@@ -11,6 +11,8 @@
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
+    "split_method": "random",
+    "holdout_fold": null,
     "dataset_fraction": 0.2,
 
     "from_multiview": true,

@@ -72,6 +72,7 @@ from typing import Optional
 from smal_fitter.neuralSMIL.multiview_smil_regressor import MultiViewSMILImageRegressor, create_multiview_regressor
 from smal_fitter.neuralSMIL.smil_image_regressor import rotation_6d_to_axis_angle
 from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
+from smal_fitter.neuralSMIL.data_splits import add_split_args, split_args_to_overrides, split_dataset
 from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
@@ -386,6 +387,8 @@ class MultiViewTrainingConfig:
         "train_ratio": 0.85,
         "val_ratio": 0.05,
         "test_ratio": 0.1,
+        "split_method": "random",
+        "holdout_fold": None,
         # Mesh scaling - allows network to predict global mesh scale
         # (useful when 3D ground truth has different scale than model)
         "allow_mesh_scaling": False,
@@ -2386,14 +2389,15 @@ def main(config: dict):
         if rank == 0:
             print(f"\nCreating new model with max_views={max_views} from dataset")
 
-    # Split dataset
-    total_size = len(dataset)
-    train_size = int(total_size * config["train_ratio"])
-    val_size = int(total_size * config["val_ratio"])
-    test_size = total_size - train_size - val_size
-
-    train_set, val_set, test_set = torch.utils.data.random_split(
-        dataset, [train_size, val_size, test_size], generator=torch.Generator().manual_seed(config["seed"])
+    # Split dataset at the sample level (random or blocked, see data_splits.py)
+    (train_set, val_set, test_set), sample_split = split_dataset(
+        dataset,
+        split_method=config.get("split_method", "random"),
+        train_ratio=config["train_ratio"],
+        val_ratio=config["val_ratio"],
+        test_ratio=config["test_ratio"],
+        seed=config["seed"],
+        holdout_fold=config.get("holdout_fold"),
     )
 
     # Get dataset fraction config
@@ -2401,6 +2405,8 @@ def main(config: dict):
 
     if rank == 0:
         print("\nDataset split:")
+        for line in sample_split.log_lines():
+            print(f"  {line}")
         print(f"  Train: {len(train_set)}")
         print(f"  Val: {len(val_set)}")
         print(f"  Test: {len(test_set)}")
@@ -2915,6 +2921,7 @@ if __name__ == "__main__":
         help="Fraction of training data to use per epoch (0-1, default: from config). "
         "Useful for large datasets - samples different subset each epoch.",
     )
+    add_split_args(parser)
 
     # Multi-view specific
     parser.add_argument("--num_views_to_use", type=int, default=None, help="Max views to use per sample (None = all)")
@@ -2984,6 +2991,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    split_overrides = split_args_to_overrides(parser, args)
 
     # ---------------------------------------------------------------
     # Configuration loading: new JSON config system or legacy CLI args
@@ -3019,6 +3027,8 @@ if __name__ == "__main__":
             if args.dataset_path is not None:
                 cli_overrides["dataset"] = cli_overrides.get("dataset", {})
                 cli_overrides["dataset"]["data_path"] = args.dataset_path
+            if split_overrides:
+                cli_overrides.setdefault("dataset", {}).update(split_overrides)
             if args.backbone_name is not None:
                 cli_overrides["model"] = cli_overrides.get("model", {})
                 cli_overrides["model"]["backbone_name"] = args.backbone_name

@@ -67,8 +67,24 @@ If you omit `--config`, the scripts fall back to the previous behavior (e.g. `Tr
 | `data_path` | string | *required* | Path to the HDF5 dataset file. Images and 2D keypoints must be undistorted (see note below). |
 | `train_ratio` | float | `0.85` | Fraction of data used for training. |
 | `val_ratio` | float | `0.05` | Fraction of data used for validation. |
-| `test_ratio` | float | `0.1` | Fraction of data used for testing. |
+| `test_ratio` | float | `0.1` | Fraction of data used for testing. `train_ratio + val_ratio + test_ratio` must sum to 1. |
+| `split_method` | string | `"random"` | How frames are assigned to train/val/test: `"random"` (seeded random split) or `"blocked"` (blocked k-fold cross-validation along time within each session, see below). |
+| `holdout_fold` | int or null | `null` | `"blocked"` only: index of the held-out block, `0` = start of each session, `null` = last block. Must be `null` for `"random"`, which splits with `training.seed`. |
 | `dataset_fraction` | float | `0.5` | Fraction of training split sampled per epoch (a different random subset is drawn each epoch for diversity). |
+
+**Blocked split:** neighbouring video frames are near-duplicates, so a random split puts almost the same frame in train and test. `"blocked"` orders each session by `frame_idx` and cuts it into `K = 1 / (val_ratio + test_ratio)` contiguous blocks. Fold `k` holds out block `k` of every session: its first `val_ratio` share is validation, the rest is test, and the remainder of the session trains. Blocks are adjacent with no buffer gap, so only the frames at each block edge have a near-duplicate neighbour in another split. The ratios must tile a session (`train_ratio = 1 - val_ratio - test_ratio`, `K` a whole number), and the dataset must be a multi-view HDF5 (single-view needs `from_multiview: true`). The split does not depend on `training.seed`, so runs with different seeds share it. Trainers save the split settings in the checkpoint and `benchmark_model.py` rebuilds the same test set from them. For 5-fold cross-validation, run `--holdout_fold 0` to `4` with:
+
+```json
+"dataset": {
+  "train_ratio": 0.80,
+  "val_ratio": 0.05,
+  "test_ratio": 0.15,
+  "split_method": "blocked",
+  "holdout_fold": null
+}
+```
+
+`holdout_fold: null` (fold 4) trains on the first 80% of each session, validates on the next 5% and tests on the last 15%.
 
 **Undistortion:** All input images and 2D keypoints must be in undistorted (ideal pinhole) space. PyTorch3D's `FoVPerspectiveCameras` does not model lens distortion, so raw barrel-distorted images would cause a mismatch between rendered projections and ground truth keypoints. Undistort images with `cv2.undistort()` and use `reprojections.h5` (ideal pinhole projections of triangulated 3D points) as 2D keypoint ground truth.
 

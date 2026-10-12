@@ -107,6 +107,8 @@ class MultiViewConfig(BaseTrainingConfig):
             "train_ratio": self.dataset.train_ratio,
             "val_ratio": self.dataset.val_ratio,
             "test_ratio": self.dataset.test_ratio,
+            "split_method": self.dataset.split_method,
+            "holdout_fold": self.dataset.holdout_fold,
             # Scale/trans
             "scale_trans_mode": self.scale_trans_beta.mode,
             "allow_mesh_scaling": self.mesh_scaling.allow_mesh_scaling,

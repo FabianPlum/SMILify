@@ -50,6 +50,7 @@ from smal_fitter.neuralSMIL.configs import apply_smal_file_override
 from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
 from smal_fitter.neuralSMIL.multiview_smil_regressor import create_multiview_regressor
 from smal_fitter.neuralSMIL.train_multiview_regressor import MultiViewTrainingConfig, load_checkpoint, set_random_seeds
+from smal_fitter.neuralSMIL.data_splits import split_dataset
 
 # Single-view imports
 from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
@@ -649,6 +650,10 @@ def _create_singleview_model(
             ),
         ),
         "val_ratio": ckpt_tp.get("val_ratio", training_config_fallback.get("split_config", {}).get("val_size", 0.1)),
+        # Absent from checkpoints that predate the blocked split; those were random.
+        "test_ratio": ckpt_tp.get("test_ratio"),
+        "split_method": ckpt_tp.get("split_method", "random"),
+        "holdout_fold": ckpt_tp.get("holdout_fold"),
         # Single-view-from-multiview / camera-centric flags.
         "frame_convention": frame_convention,
         "camera_centric": camera_centric,
@@ -788,46 +793,32 @@ def _run_singleview_benchmark(
 
     _log_keypoint_rescaling_info_sv(log_fn, target_resolution, override_size)
 
-    # Split (mirror the training script).
-    if camera_centric and getattr(dataset, "item_sample_indices", None) is not None:
-        # Sample-grouped split reproducing the trainer's split (same seed +
-        # ratios) so the benchmark TEST set == the training / multi-view test set.
-        from torch.utils.data import Subset
-
-        n_samples = int(dataset.num_samples)
-        train_ratio = sv_config["train_ratio"]
-        val_ratio = sv_config["val_ratio"]
-        n_train = int(n_samples * train_ratio)
-        n_val = int(n_samples * val_ratio)
-        n_test = n_samples - n_train - n_val
-        _, _, sample_test = torch.utils.data.random_split(
-            range(n_samples),
-            [n_train, n_val, n_test],
-            generator=torch.Generator().manual_seed(sv_config["seed"]),
-        )
-        test_samples = set(int(s) for s in sample_test)
-        isi = dataset.item_sample_indices
-        test_idx = [i for i, s in enumerate(isi) if int(s) in test_samples]
-        test_set = Subset(dataset, test_idx)
-        log_fn(f"\nDataset split (camera-centric, sample-grouped, seed={sv_config['seed']}):")
-        log_fn(f"  {n_train}/{n_val}/{n_test} samples -> Test: {len(test_set)} view-items")
+    # Split (same call as the training script, from the settings it persisted).
+    # Camera-centric datasets are split over samples and expanded to view-items,
+    # so the benchmark TEST set == the training / multi-view test set.
+    # random: test is the remainder (a stored test_ratio may predate the sum
+    # check); blocked: the stored value, which sets the val/test cut exactly as
+    # in training (an inferred 1 - train - val can round it differently).
+    split_method = sv_config["split_method"]
+    if split_method == "blocked":
+        test_ratio = sv_config["test_ratio"]
     else:
-        total_size = len(dataset)
-        train_ratio = sv_config["train_ratio"]
-        val_ratio = sv_config["val_ratio"]
-        train_size = int(total_size * train_ratio)
-        val_size = int(total_size * val_ratio)
-        test_size = total_size - train_size - val_size
-
-        train_set, val_set, test_set = torch.utils.data.random_split(
-            dataset,
-            [train_size, val_size, test_size],
-            generator=torch.Generator().manual_seed(sv_config["seed"]),
-        )
-        log_fn("\nDataset split sizes:")
-        log_fn(f"  Train: {len(train_set)}")
-        log_fn(f"  Val:   {len(val_set)}")
-        log_fn(f"  Test:  {len(test_set)}")
+        test_ratio = 1.0 - sv_config["train_ratio"] - sv_config["val_ratio"]
+    (train_set, val_set, test_set), sample_split = split_dataset(
+        dataset,
+        split_method=split_method,
+        train_ratio=sv_config["train_ratio"],
+        val_ratio=sv_config["val_ratio"],
+        test_ratio=test_ratio,
+        seed=sv_config["seed"],
+        holdout_fold=sv_config["holdout_fold"],
+    )
+    log_fn("\nDataset split:")
+    for line in sample_split.log_lines():
+        log_fn(f"  {line}")
+    log_fn(f"  Train: {len(train_set)}")
+    log_fn(f"  Val:   {len(val_set)}")
+    log_fn(f"  Test:  {len(test_set)}")
 
     test_loader = DataLoader(
         test_set,
@@ -1244,17 +1235,28 @@ def _run_multiview_benchmark(
 
     _log_keypoint_rescaling_info(log_fn, dataset, override_size)
 
-    # Data splits (mirror train_multiview_regressor.py)
-    total_size = len(dataset)
-    train_size = int(total_size * config_from_ckpt["train_ratio"])
-    val_size = int(total_size * config_from_ckpt["val_ratio"])
-    test_size = total_size - train_size - val_size
-
-    train_set, val_set, test_set = torch.utils.data.random_split(
-        dataset, [train_size, val_size, test_size], generator=torch.Generator().manual_seed(config_from_ckpt["seed"])
+    # Data splits (same call as train_multiview_regressor.py; checkpoints that
+    # predate split_method were random). random: test is the remainder (a stored
+    # test_ratio may predate the sum check); blocked: the stored value, which
+    # sets the val/test cut exactly as in training.
+    split_method = config_from_ckpt.get("split_method", "random")
+    if split_method == "blocked":
+        test_ratio = config_from_ckpt["test_ratio"]
+    else:
+        test_ratio = 1.0 - config_from_ckpt["train_ratio"] - config_from_ckpt["val_ratio"]
+    (train_set, val_set, test_set), sample_split = split_dataset(
+        dataset,
+        split_method=split_method,
+        train_ratio=config_from_ckpt["train_ratio"],
+        val_ratio=config_from_ckpt["val_ratio"],
+        test_ratio=test_ratio,
+        seed=config_from_ckpt["seed"],
+        holdout_fold=config_from_ckpt.get("holdout_fold"),
     )
 
-    log_fn("\nDataset split sizes:")
+    log_fn("\nDataset split:")
+    for line in sample_split.log_lines():
+        log_fn(f"  {line}")
     log_fn(f"  Train: {len(train_set)}")
     log_fn(f"  Val: {len(val_set)}")
     log_fn(f"  Test: {len(test_set)}")

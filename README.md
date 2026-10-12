@@ -224,7 +224,7 @@ torchrun --nproc_per_node=4 -m smal_fitter.neuralSMIL.train_multiview_regressor 
 | Section | Key fields | Purpose |
 |---|---|---|
 | `smal_model` | `smal_file` | Path to the SMIL/SMAL `.pkl` model |
-| `dataset` | `data_path`, `train_ratio`, `val_ratio`, `test_ratio` | Dataset file and split ratios |
+| `dataset` | `data_path`, `train_ratio`, `val_ratio`, `test_ratio`, `split_method`, `holdout_fold` | Dataset file, split ratios and split method (random or blocked by session time) |
 | `model` | `backbone_name`, `freeze_backbone`, `head_type`, `hidden_dim` | Network architecture |
 | `optimizer` | `learning_rate`, `weight_decay`, `lr_schedule` | Optimiser and epoch-based LR schedule |
 | `loss_curriculum` | `base_weights`, `curriculum_stages` | Per-loss weights stepped at specified epoch boundaries |
