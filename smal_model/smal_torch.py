@@ -13,7 +13,7 @@ import torch
 from torch.autograd import Variable
 import pickle as pkl
 from .batch_lbs import batch_rodrigues, batch_global_rigid_transformation
-from .smal_basics import align_smal_template_to_symmetry_axis  # , get_smal_template
+from .smal_basics import align_smal_template_to_symmetry_axis
 import torch.nn as nn
 import config
 
@@ -88,7 +88,6 @@ class SMAL(nn.Module):
     def __init__(self, device, shape_family_id=-1, dtype=torch.float):
         super(SMAL, self).__init__()
 
-        # Replace the existing loading code with:
         dd = load_smal_model(config.SMAL_FILE)
 
         if config.DEBUG:
@@ -104,12 +103,6 @@ class SMAL(nn.Module):
         self.f = dd["f"]
 
         self.faces = torch.from_numpy(self.f.astype(int)).to(device)
-
-        # replaced logic in here (which requried SMPL library with L58-L68)
-        # v_template = get_smal_template(
-        #     model_name=config.SMAL_FILE,
-        #     data_name=config.SMAL_DATA_FILE,
-        #     shape_family_id=shape_family_id)
 
         v_template = dd["v_template"]
 
@@ -131,18 +124,10 @@ class SMAL(nn.Module):
             print(self.shapedirs[0][:21])
 
         if shape_family_id != -1:
-            with open(config.SMAL_DATA_FILE, "rb") as f:
-                data = CustomUnpickler(f).load()
-
-            betas = data["cluster_means"][shape_family_id]
-            # TODO - THESE CLUSTER MEANS ARE NOT GOING TO BE USED IN OUR SMIL MODEL FOR NOW!
-            v_template = v_template + np.matmul(betas[None, :], shapedir).reshape(-1, self.size[0], self.size[1])[0]
-
-        try:
-            symmetry_axis_vertices = dd["sym_verts"]
-        except KeyError:
-            print("No symmetry axis vertices provided - using default values!")
-            symmetry_axis_vertices = None
+            raise ValueError(
+                f"shape_family_id={shape_family_id}: legacy SMAL shape families are no longer supported "
+                "(removed in #110); SMIL models use shape_family_id=-1."
+            )
 
         if config.ignore_sym:
             # Skip symmetry alignment entirely when ignore_sym is True
@@ -150,16 +135,15 @@ class SMAL(nn.Module):
             self.left_inds = np.array([])
             self.right_inds = np.array([])
             self.center_inds = np.array([])
-        elif config.ignore_hardcoded_body:
-            v_sym, self.left_inds, self.right_inds, self.center_inds = align_smal_template_to_symmetry_axis(
-                v_template, sym_file=None, I=symmetry_axis_vertices
-            )
-            # symmetry file
         else:
+            if "sym_verts" not in dd:
+                raise ValueError(
+                    f"{config.SMAL_FILE} has no 'sym_verts' (symmetry-axis vertex indices); "
+                    "re-export the model with them or set config.ignore_sym = True."
+                )
             v_sym, self.left_inds, self.right_inds, self.center_inds = align_smal_template_to_symmetry_axis(
-                v_template, sym_file=config.SMAL_SYM_FILE, I=symmetry_axis_vertices
+                v_template, I=dd["sym_verts"]
             )
-            # symmetry file
 
         # Mean template vertices
         self.v_template = Variable(torch.Tensor(v_sym), requires_grad=False).to(device)
@@ -214,7 +198,6 @@ class SMAL(nn.Module):
         # comment out line, once blend shapes are included
         # nBetas = 0
 
-        # v_template = self.v_template.unsqueeze(0).expand(beta.shape[0], 3889, 3)
         if v_template is None:
             v_template = self.v_template
 
@@ -264,9 +247,9 @@ class SMAL(nn.Module):
             J = torch.stack([Jx, Jy, Jz], dim=2)
 
         # 3. Add pose blend shapes
-        # N x 24 x 3 x 3
+        # N x J x 3 x 3
 
-        # reformat pose library if needed/home/fabi/SMAL/SMALify/fit3d_results_ALL_ANTS_ALL_METHODS/Stage3.npz
+        # reformat pose library if needed
 
         if self.posedirs.shape[1] != 3 * v_template.shape[0]:
             self.posedirs = torch.reshape(self.posedirs, [1, 3 * v_template.shape[0]])
@@ -311,7 +294,6 @@ class SMAL(nn.Module):
             betas_logscale=betas_logscale,
             betas_trans=betas_trans,
             propagate_scaling=propagate_scaling,
-            num_joints=NUM_JOINTS,
         )
 
         # 5. Do skinning:
@@ -349,20 +331,6 @@ class SMAL(nn.Module):
             joint_y = torch.matmul(verts[:, :, 1], self.J_regressor)
             joint_z = torch.matmul(verts[:, :, 2], self.J_regressor)
             joints = torch.stack([joint_x, joint_y, joint_z], dim=2)
-
-        if NUM_JOINTS == 35 and not config.ignore_hardcoded_body:  # assuming configuration of WLDO and SMAL is used:
-            joints = torch.cat(
-                [
-                    joints,
-                    verts[:, None, 1863],  # end_of_nose
-                    verts[:, None, 26],  # chin
-                    verts[:, None, 2124],  # right ear tip
-                    verts[:, None, 150],  # left ear tip
-                    verts[:, None, 3055],  # left eye
-                    verts[:, None, 1097],  # right eye
-                ],
-                dim=1,
-            )
 
         if get_skin:
             return verts, joints, Rs, v_shaped

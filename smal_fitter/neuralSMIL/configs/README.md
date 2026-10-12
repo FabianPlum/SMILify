@@ -8,7 +8,7 @@ This package provides a single, type-safe configuration system for both **single
 2. **JSON config file** (when using `--config path/to/config.json`)
 3. **Mode-specific defaults** (`SingleViewConfig` / `MultiViewConfig`)
 4. **Base defaults** (`BaseTrainingConfig` in `base_config.py`)
-5. **Legacy `config.py`** (only for SMAL model paths, `SHAPE_FAMILY`, `N_BETAS`, `N_POSE`, etc.—unchanged for fitter_3d compatibility)
+5. **Legacy `config.py`** (only for the model file `SMAL_FILE` and the globals derived from it (`dd`, `N_POSE`, `N_BETAS`, …), plus `SHAPE_FAMILY`; kept for fitter_3d compatibility)
 
 ## Quick start
 
@@ -58,7 +58,7 @@ If you omit `--config`, the scripts fall back to the previous behavior (e.g. `Tr
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `smal_file` | string or null | `null` | Path to the SMAL/SMIL model `.pkl` file. Overrides `config.SMAL_FILE` at runtime; derived globals (`dd`, `N_POSE`, `N_BETAS`, joints) are reloaded automatically. |
-| `shape_family` | int or null | `null` | Shape family index passed into SMAL/SMIL code. |
+| `shape_family` | int or null | `null` | Legacy SMAL shape family index. Leave `null` (SMIL models use -1; any other value raises). |
 
 ### `dataset` — Data paths and splits
 
@@ -97,7 +97,7 @@ If you omit `--config`, the scripts fall back to the previous behavior (e.g. `Tr
 | `hidden_dim` | int | `1024` | Decoder hidden dimension. Auto-adjusted per backbone if not set explicitly (see table below). |
 | `head_type` | string | `"transformer_decoder"` | Prediction head type: `"mlp"` or `"transformer_decoder"`. |
 | `input_resolution` | int or null | `null` | Input image size. `null` = auto-detect from backbone (224 for ViT, 512 for ResNet/UNet). |
-| `use_unity_prior` | bool | `false` | Use legacy Unity quadruped body prior. |
+| `use_unity_prior` | bool | `false` | Unsupported: the legacy Unity quadruped prior was removed in #110, and `true` raises `ValueError`. Leave `false`. |
 | `rgb_only` | bool | `false` | Use only RGB channels (ignore alpha/mask channel if present). |
 | `backbone_unfreeze_epoch` | int or null | `null` | When set, the backbone is frozen at init and unfrozen at this epoch (overrides `freeze_backbone`). |
 | `backbone_lr_multiplier` | float | `0.1` | After unfreeze, backbone LR = curriculum LR × this multiplier. |
@@ -399,7 +399,7 @@ Copy an example to your project and edit; keep the `mode` field and the structur
 | `load_from_json(path)` | Load raw dict from JSON (with epoch key conversion). |
 | `save_config_json(config, path)` | Serialize a config dataclass to JSON. |
 | `validate_json_mode(path)` | Check that the JSON has a valid `mode` field. |
-| `apply_smal_file_override(smal_file, shape_family=None)` | Reload `config.dd` / `N_POSE` / `N_BETAS` to match an overridden SMAL/SMIL model file. |
+| `apply_smal_file_override(smal_file, shape_family=None)` | Re-derive the model globals in `config.py` (`dd`, `N_POSE`, `N_BETAS`, joint names, …) for an overridden SMIL model file, via `config.set_model`. |
 | `SingleViewConfig` | Default config for single-view training. |
 | `MultiViewConfig` | Default config for multi-view training (adds cross-attention and multi-view output paths). |
 | `BaseTrainingConfig` | Shared base; use mode-specific classes in practice. |
@@ -416,6 +416,6 @@ Copy an example to your project and edit; keep the `mode` field and the structur
 ## Backward compatibility
 
 - **Legacy scripts**: `train_smil_regressor.py` and `train_multiview_regressor.py` convert the new config to the dict format expected by their existing `main()` via `to_legacy_dict()` and `to_multiview_legacy_dict()`. No change to the rest of the training loop is required.
-- **`config.py`**: Unchanged; still used for SMAL file paths, shape family, joint counts, and GPU settings by `fitter_3d` and `optimize_to_joints`.
+- **`config.py`**: Still provides the model file (`SMAL_FILE`) and the globals `config.set_model` derives from it, plus shape family and GPU settings, for `fitter_3d` and `optimize_to_joints`.
 - **`training_config.py`**: Deprecated; new setups should use this package and JSON configs.
 - **New fields** (`use_mixed_precision`, `backbone_chunk_size`) default to `false`/`null`, so existing configs and scripts work without changes.

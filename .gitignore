@@ -48,9 +48,9 @@ fitter_3d/pointcloud2smil/
 # Third-party licensed models — NEVER commit these (see issue #84)
 # ============================================================
 # The SMPL body model (MPI) and the SMAL/SMALST priors derived from it are
-# distributed under research licences that do not permit redistribution. This
-# repo is MIT-licensed, so these must be obtained by each user directly from
-# the upstream sources. See docs/THIRD_PARTY_MODELS.md.
+# distributed under research licences that do not permit redistribution. No code
+# uses them since #110; the patterns stay so stale local copies can't be
+# committed. See docs/THIRD_PARTY_MODELS.md.
 #
 # NOTE: these patterns are deliberately specific. Our own parametric models
 # (3D_model_prep/SMPL_fit*.pkl, smpl_ATTA.pkl, SMPL_STICK.pkl, SMIL*/SMILy*)
@@ -69,10 +69,12 @@ fitter_3d/MOUSE_BOY/
 fitter_3d/STICK_TESTS/
 
 # datasets
+LOCAL_TEST/
+# Legacy quadruped datasets, unused since #110; kept so stale local copies of
+# licensed/legacy data can't be committed.
 data/BADJA/
 data/SMALST/
 data/StanfordExtra/
-LOCAL_TEST/
 
 #scraped data
 custom_processing/antscan_data/

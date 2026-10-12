@@ -1,30 +1,12 @@
 # Legacy functionality
 
-This directory documents the **optimization-based** fitting workflow that SMILify inherited from [SMALify](https://github.com/benjiebob/SMALify). It is kept for compatibility, but fitting is now done primarily through the neural single-/multi-view pipeline — see the [root README](../README.md) and [smal_fitter/neuralSMIL/README.md](../smal_fitter/neuralSMIL/README.md). Use this path if you specifically need the gradient-descent `SMALFitter` (e.g. quadruped BADJA/StanfordExtra fitting, or building quadruped shape priors).
+This directory documents the **optimization-based** fitting workflow that SMILify inherited from [SMALify](https://github.com/benjiebob/SMALify). It is kept for compatibility, but fitting is now done primarily through the neural single-/multi-view pipeline — see the [root README](../README.md) and [smal_fitter/neuralSMIL/README.md](../smal_fitter/neuralSMIL/README.md). Use this path if you specifically need the gradient-descent `SMALFitter`, e.g. to fit a SMIL model to a single annotated image.
 
-> The default config (`SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_09_synth.jpg"`, `ignore_hardcoded_body = True`) runs the fitter on a synthetic replicAnt ant image with an arbitrary rigged model. The BADJA/StanfordExtra/`SHAPE_FAMILY` instructions below apply only to the original SMAL **quadruped** pipeline (`ignore_hardcoded_body = False`).
+> The fitter works with any rigged SMIL model `.pkl` set as `config.SMAL_FILE`: joint names, hierarchy, root joint, `N_POSE`, `N_BETAS` and joint limits are all read from the model file. The original SMAL quadruped path (hard-coded dog skeleton, BADJA / StanfordExtra loaders, `generate_video.py`) was removed in [#110](https://github.com/FabianPlum/SMILify/issues/110); the last commit containing it is `ef17be6`.
 
 ## Installation
 
 The optimization path uses the same conda environment as the rest of the repo — see [Installation](../README.md#installation) (`conda env create -f environment.yml`).
-
-The legacy quadruped datasets (BADJA / StanfordExtra / SMALST) used to be git submodules and are no longer bundled. If you need them, clone them into `data/` (the paths [config.py](../config.py) expects; already git-ignored), pinned to the commits the submodules used:
-
-```bash
-git clone https://github.com/benjiebob/BADJA data/BADJA
-git -C data/BADJA checkout e96f94da975e512e707462c2b5c1412b4c10b555
-git clone https://github.com/benjiebob/StanfordExtra data/StanfordExtra
-git -C data/StanfordExtra checkout d8411ba02f25460fad8453e92d25407f572dee5c
-git clone https://github.com/silviazuffi/smalst data/SMALST
-git -C data/SMALST checkout ba4b898a23699b642f95d30a3a911bb463515893
-```
-
-Each repo comes under its own licence; the SMAL model files in SMALST are MPI-licensed (see [docs/THIRD_PARTY_MODELS.md](../docs/THIRD_PARTY_MODELS.md)).
-
-For the original SMAL quadruped data:
-
-1. Download [BADJA videos](https://drive.google.com/file/d/1ad1BLmzyOp_g3BfpE2yklNI-E1b8y4gy/view?usp=sharing) and unzip.
-2. Inspect the directory paths in [config.py](../config.py) and make sure they match your system.
 
 ## QuickStart: Running the Fitter
 
@@ -36,7 +18,7 @@ Run on the default synthetic sample image generated with _[replicAnt](https://gi
 python -m smal_fitter.optimize_to_joints
 ```
 
-Outputs are written to a timestamped directory `checkpoints/<YYYYMMDD-HHMMSS>/` (`config.OUTPUT_DIR`). Files named `stX_epY` mean stage X, iteration Y of the fitter; the final output is `st10_ep0` (`config.EPOCH_NAME`).
+Outputs are written to a timestamped directory `checkpoints/<YYYYMMDD-HHMMSS>/` (`config.OUTPUT_DIR`). Files named `stX_epY` mean stage X, iteration Y of the fitter; the final output is `st10_ep0`.
 
 | Extension | Meaning |
 | --- | --- |
@@ -44,64 +26,21 @@ Outputs are written to a timestamped directory `checkpoints/<YYYYMMDD-HHMMSS>/` 
 | `.ply` | Mesh file (view in e.g. [MeshLab](https://www.meshlab.net/)) |
 | `.pkl` | Latest model/camera parameters |
 
-### Create a video of the final fits
-
-`smal_fitter/generate_video.py` loads the exported `.pkl` files and renders a video. This is useful if your `.pkl` files were created by alternative methods or your own research.
-
-> **Current limitation:** `generate_video.py` reads `config.CHECKPOINT_NAME`, but `config.py` does **not** define `CHECKPOINT_NAME` by default — so the script raises `AttributeError` as shipped. Until this is fixed, add `CHECKPOINT_NAME = "<YYYYMMDD-HHMMSS>"` to `config.py` (the timestamped directory name under `checkpoints/` from your run). `EPOCH_NAME` defaults to `"st10_ep0"` (the final stage); set it to another `stX_epY` to render an intermediate result.
-
-```
-python -m smal_fitter.generate_video
-```
-
-The video is exported to `exported/`. Assemble the frames with e.g. [FFMPEG](https://ffmpeg.org/):
-
-```
-cd exported/<CHECKPOINT_NAME>/<EPOCH_NAME>
-ffmpeg -framerate 2 -pattern_type glob -i '*.png' -pix_fmt yuv420p results.mp4
-```
-
-### Fit to a StanfordExtra image (quadruped)
-
-<img src="../docs/stanfordextra_opt.gif">
-
-Edit [config.py](../config.py) to load a [StanfordExtra](https://github.com/benjiebob/StanfordExtra) image instead of the default:
-
-```
-# SEQUENCE_OR_IMAGE_NAME = "replicAnt:SMIL_09_synth.jpg"
-SEQUENCE_OR_IMAGE_NAME = "stanfordextra:n02099601-golden_retriever/n02099601_176.jpg"
-```
-
-```
-python -m smal_fitter.optimize_to_joints
-```
-
 ## Running on alternative data
 
-### BADJA / StanfordExtra sequences (quadruped)
+### Choosing the input image
 
-Follow the instructions for [BADJA](https://github.com/benjiebob/BADJA) or [StanfordExtra](https://github.com/benjiebob/StanfordExtra), then edit [config.py](../config.py):
+Edit [config.py](../config.py):
 
 | Config Setting | Explanation | Example |
 | --- | --- | --- |
-| `SEQUENCE_OR_IMAGE_NAME` | The sequence/image to fit | `badja:rs_dog` |
-| `SHAPE_FAMILY` | Quadruped family — 0: Cat, 1: Canine (Dog), 2: Equine (Horse), 3: Bovine (Cow), 4: Hippo. **Only used when `ignore_hardcoded_body = False`**; the default config sets `SHAPE_FAMILY = -1` and ignores it. | `1` |
-| `IMAGE_RANGE` | Frames to process from the sequence (ignored for StanfordExtra) | `[1,2,3]` or `range(0, 10)` |
-| `WINDOW_SIZE` | Frames per batch for video sequences (tune to GPU capacity) | `10` |
+| `SEQUENCE_OR_IMAGE_NAME` | `replicAnt:<file name>` of an image listed in `REPLICANT_PATH/labels.json`. `replicAnt` is the only supported prefix. | `replicAnt:SMIL_09_synth.jpg` |
+| `REPLICANT_PATH` | COCO-style folder: `labels.json` (keypoints named after the model's joints) plus the images under `data/`. Silhouettes are read from the replicAnt ID passes (`<name>_ID.png`) in the sibling `SMIL/` folder. | `data/replicAnt_trials/SMIL_COCO` |
+| `SMAL_FILE` | The SMIL model `.pkl` to fit | `3D_model_prep/SMIL_OmniAnt.pkl` |
 
-### Running on your own data
+### Building your own deformable model
 
-Generate keypoint/silhouette annotations with [LabelMe](https://github.com/wkentaro/labelme):
-
-```
-labelme --labels data/LABELME/labels.txt --nosortlabels
-```
-
-> **Incomplete:** the legacy LabelMe → fitter import path was never finished — silhouette generation and a LabelMe-loading script remain TODOs carried over from upstream SMALify. For new data, prefer the neural pipeline's SLEAP preprocessing (see the [root README](../README.md)).
-
-### Building your own quadruped deformable model
-
-To represent a quadruped category not covered by SMAL (e.g. rodents/squirrels), use the [fitter_3d](../fitter_3d/) tool: fit the existing SMAL model to a collection of 3D artist meshes to learn a new shape space. See the [fitter_3d README](../fitter_3d/README.md).
+To learn a new shape space (e.g. for a species group not covered by the bundled models), register a template SMIL model to a collection of 3D meshes with [fitter_3d](../fitter_3d/) (see the [fitter_3d README](../fitter_3d/README.md)), then build the model in Blender as described under [Adding new parametric models](../README.md#adding-new-parametric-models).
 
 ## Improving performance — the loss weights (`OPT_WEIGHTS`)
 
@@ -113,7 +52,7 @@ To represent a quadruped category not covered by SMAL (e.g. rodents/squirrels), 
 | `Sil Reproj` | 2D silhouette overlap | Increase if the reconstructed shape doesn't match (e.g. too thin). |
 | `Betas` | 3D shape prior | Increase if reconstructions don't look animal-like. |
 | `Pose` | 3D pose prior | Increase if limb configurations are implausible (legs in strange places). |
-| `Joint limits` | Joint-limit prior | Suppressed in the original SMALify code. |
+| `Joint limits` | Hinge loss on the per-joint limits authored in the model `.pkl` (`joint_limits`) | Joints left free are unconstrained; see the [Joint Limits User Guide](../docs/joint_limits_user_guide.md). |
 | `Splay` | Limb-splay regularizer | |
 | `Temporal` | Inter-frame smoothness (videos only) | Adjust if limbs jitter between video frames. |
 | `Num iterations` | Iterations per stage | Can usually be reduced for efficiency (defaults err on the cautious side). |

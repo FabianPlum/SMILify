@@ -15,8 +15,8 @@
 #
 # Only the core deep-learning stack is pinned (PyTorch3D must match the torch/CUDA build);
 # the scientific/IO packages float to whatever recent build conda resolves. Optional tooling
-# (dataset viewer, AntScan scraper, SDF tests, legacy quadruped pose-prior viz) is listed
-# commented-out at the bottom — install only if needed.
+# (dataset viewer, AntScan scraper, SDF tests) is listed commented-out at the bottom —
+# install only if needed.
 
 name: pytorch3d
 
@@ -54,7 +54,6 @@ dependencies:
     - timm
     - opencv-python
     - nibabel
-    - pycocotools
     - toml
 
 # --- optional extras (uncomment what you need) ------------------------------
@@ -68,5 +67,3 @@ dependencies:
 #     - webdriver-manager        # (pip)
 #   SDF registration test harness (fitter_3d/SDF_tests.py):
 #     - gputil                   # (pip: GPUtil)
-#   Legacy quadruped pose-prior visualization (smal_fitter/priors/pose_prior_35.py):
-#     # requires psbody-mesh, which has no conda/pip wheel — build from source if needed.

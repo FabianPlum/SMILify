@@ -49,6 +49,8 @@ SMILify fits the same `smal_model` (SMAL/SMIL parametric model) in two ways:
 1. **Neural inference** ([`smal_fitter/neuralSMIL/`](smal_fitter/neuralSMIL/)) — learned regressors predict SMIL parameters (pose, shape, translation, cameras) directly from RGB images, single- or multi-view. This is the primary, actively-developed path; everything from *Dataset preprocessing* onward in this README describes it. See [smal_fitter/neuralSMIL/README.md](smal_fitter/neuralSMIL/README.md).
 2. **Optimization-based fitting** ([`smal_fitter/fitter.py`](smal_fitter/fitter.py), class `SMALFitter`) — an `nn.Module` that optimizes per-frame pose, shape (betas), translation and FOV by gradient descent against 2D-joint reprojection, silhouette and prior losses. Driven by the root [`config.py`](config.py); see [legacy/README.md](legacy/README.md). The related 3D **mesh registration** in [`fitter_3d/`](fitter_3d/) is the optimization pipeline used to author new parametric models.
 
+Both paths read the skeleton (joint names, hierarchy, root joint), `N_POSE`, `N_BETAS` and joint limits from the model `.pkl` (`config.SMAL_FILE`, loaded by `config.set_model`), so any rigged SMIL model works and there is no hard-coded body plan.
+
 New parametric models are authored in Blender via the SMIL addon — see *Adding new parametric models* below.
 
 
@@ -60,7 +62,6 @@ The conda environment is defined in [environment.yml](environment.yml). The reco
    git clone https://github.com/FabianPlum/SMILify
    cd SMILify
    ```
-   (The legacy quadruped sample data — BADJA / StanfordExtra / SMALST — is no longer bundled; see [legacy/README.md](legacy/README.md#installation) if you need it.)
 
 2. **Create the environment** (recommended):
    ```bash
@@ -74,10 +75,9 @@ The conda environment is defined in [environment.yml](environment.yml). The reco
    ```
    (See [tests/README.md](tests/README.md).)
 
-> **Legacy quadruped path only:** the SMPL/SMAL models and priors are licensed by
-> MPI and are *not* redistributable, so they are not included in this repository.
-> Download them yourself — see [docs/THIRD_PARTY_MODELS.md](docs/THIRD_PARTY_MODELS.md).
-> The SMIL/insect models and the neural-inference pipeline need none of them.
+> SMILify ships and uses only its own SMIL models; it does not need the MPI-licensed
+> SMPL/SMAL models or priors. If your clone predates the July 2026 history purge, see
+> [docs/THIRD_PARTY_MODELS.md](docs/THIRD_PARTY_MODELS.md).
 
 > On an HPC cluster you can instead run [`hpc_files/install.sh`](hpc_files/install.sh), which performs the same conda setup end-to-end (supports `--skip-tests` and a configurable `ENV_NAME`).
 
@@ -93,7 +93,7 @@ conda activate pytorch3d
 conda install pytorch=2.3.1 torchvision pytorch-cuda=11.8 -c pytorch -c nvidia
 conda install -c conda-forge -c fvcore iopath ninja imageio scikit-image
 conda install pytorch3d -c pytorch3d          # Linux; on Windows build pytorch3d from source
-pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psutil pandas toml pycocotools
+pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psutil pandas toml
 ```
 (`pandas` and `toml` are needed by `smal_fitter/sleap_data/` for the multi-view scripts.)
 </details>
@@ -389,6 +389,7 @@ ____________________________________
 - [X] Move all legcay funcitonality and documentation to it's own sub-directory to clean up the repo and make its purpose more apparent.
 - [X] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules. ([#51](https://github.com/FabianPlum/SMILify/issues/51))
 - [X] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable. ([#52](https://github.com/FabianPlum/SMILify/issues/52)) — none were needed by maintained code; all three were dropped.
+- [X] Remove the hard-coded SMAL quadruped body path; every code path derives the skeleton from the model `.pkl`. ([#110](https://github.com/FabianPlum/SMILify/issues/110))
 - ~~At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.~~ ([#53](https://github.com/FabianPlum/SMILify/issues/53)) — won't do: the SMAL files are MPI-licensed and can't be redistributed (see [docs/THIRD_PARTY_MODELS.md](docs/THIRD_PARTY_MODELS.md)), so a consolidated file could never ship. SMIL models are already single-file and can carry their joint limits in the same `.pkl` (see the [Joint Limits User Guide](docs/joint_limits_user_guide.md)).
 - [X] Get rid of the numpy/chumpy dependency mess.
 - [X] Allow importing legacy SMAL models with chumpy variables WITHOUT requiring chumpy to be installed through custom unpickler.

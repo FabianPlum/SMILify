@@ -32,10 +32,10 @@ utilities/                         # legacy utilities, ignore.
 
 Two fitting approaches share the same `smal_model` (SMAL/SMIL parametric model):
 
-- **Optimization-based** (`smal_fitter/fitter.py`): `SMALFitter` is an `nn.Module` that optimizes per-frame pose, shape (betas), translation, and FOV via gradient descent. Losses: 2D joint reprojection, silhouette, beta prior, pose prior, joint limits, splay. Supports both legacy quadruped priors (`use_unity_prior`) and arbitrary rigged models (`config.ignore_hardcoded_body`) with per-joint scaling.
+- **Optimization-based** (`smal_fitter/fitter.py`): `SMALFitter` is an `nn.Module` that optimizes per-frame pose, shape (betas), translation, and FOV via gradient descent. Losses: 2D joint reprojection, silhouette, beta prior, pose prior, joint limits, splay. Works with any rigged model (with per-joint scaling): the skeleton (`J_names`, `kintree_table`, root joint), `N_POSE`, `N_BETAS` and authored `joint_limits` all come from the model `.pkl`. There is no hard-coded body plan (the SMAL quadruped path, incl. `use_unity_prior=True`, was removed in #110), so don't reintroduce per-species joint tables.
 - **Neural inference** (`smal_fitter/neuralSMIL/`): Learned regressors that predict SMIL parameters from images (single-view or multi-view).
 
-Key globals from `config.py` used throughout: `N_BETAS`, `N_POSE`, `CANONICAL_MODEL_JOINTS`, `ignore_hardcoded_body`, `dd` (model dict), `DEBUG`.
+Key globals from `config.py` used throughout: `SMAL_FILE`, `dd` (model dict), `N_BETAS`, `N_POSE`, `CANONICAL_MODEL_JOINTS`, `joint_names`, `ROOT_JOINT`, `STATIC_JOINT_LOCATIONS`, `DEBUG`. The model-derived ones are set by `config.set_model(smal_file)`, called for `SMAL_FILE` at import; to switch models at runtime use `config.set_model` or `apply_smal_file_override` (`smal_fitter/neuralSMIL/configs/config_utils.py`) — assigning `config.SMAL_FILE` alone does not update `dd`/`N_POSE`/`N_BETAS`.
 
 ## Config System (config-refactor branch)
 

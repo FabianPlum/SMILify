@@ -1,7 +1,7 @@
 3D SMAL Fitter
 ------
 
-This directory contains code for optimising the SMAL/SMBLD model to provided 3D models.
+This directory contains code for registering a SMIL model (the `.pkl` set as `config.SMAL_FILE`) to provided 3D meshes.
 
 It optimises shape, pose, scale to allow for the production of new shape & pose priors based on the set of animal models provided.
 
@@ -14,7 +14,7 @@ It optimises shape, pose, scale to allow for the production of new shape & pose 
 
 Currently, this only supports .obj files.
 
-To avoid errors in initialisation, you may need to manually align your model so that it faces the same direction as the SMAL model. This alignment is with tail to head going in the positive x direction, and z denoting vertical height.
+To avoid errors in initialisation, you may need to manually align your model so that it faces the same direction as the template model (`config.SMAL_FILE`). This alignment is with tail to head going in the positive x direction, and z denoting vertical height.
 
 ## Quickstart
 
