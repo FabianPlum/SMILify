@@ -60,6 +60,7 @@ import imageio
 
 from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
 from smal_fitter.neuralSMIL.smil_datasets import UnifiedSMILDataset
+from smal_fitter.neuralSMIL.data_splits import split_dataset
 from smal_fitter.fitter import SMALFitter
 from smal_fitter.Unreal2Pytorch3D import return_placeholder_data
 import config
@@ -1452,6 +1453,13 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
 
     # Single-view-from-multiview / camera-centric options
     dataset_cfg = training_config.get("dataset", {})
+    # Split ratios: the JSON config's dataset block, else the legacy
+    # TrainingConfig.SPLIT_CONFIG. Used for the split and persisted as-is, so
+    # the benchmark rebuilds exactly this split.
+    _legacy_split = training_config.get("split_config", {})
+    val_ratio = float(dataset_cfg.get("val_ratio", _legacy_split.get("val_size", 0.05)))
+    test_ratio = float(dataset_cfg.get("test_ratio", _legacy_split.get("test_size", 0.1)))
+    train_ratio = float(dataset_cfg.get("train_ratio", 1.0 - val_ratio - test_ratio))
     from_multiview = bool(dataset_cfg.get("from_multiview", False))
     frame_convention = dataset_cfg.get("frame_convention", "model_centric")
     camera_centric = frame_convention == "camera_centric"
@@ -1482,8 +1490,11 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             # Persist split determinants so the benchmark can reproduce the exact
             # sample-grouped test split (SV test set == MV test set).
             "seed": training_params.get("seed"),
-            "train_ratio": float(dataset_cfg.get("train_ratio", 0.85)),
-            "val_ratio": float(dataset_cfg.get("val_ratio", 0.05)),
+            "train_ratio": train_ratio,
+            "val_ratio": val_ratio,
+            "test_ratio": test_ratio,
+            "split_method": dataset_cfg.get("split_method", "random"),
+            "holdout_fold": dataset_cfg.get("holdout_fold"),
         },
         "scale_trans_mode": TrainingConfig.get_scale_trans_mode(),
         "scale_trans_config": TrainingConfig.get_scale_trans_config(),
@@ -1654,48 +1665,24 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             print(f"Original resolution: {dataset.get_input_resolution()}")
             print(f"Target resolution: {dataset.get_target_resolution()}")
 
-        # Split dataset.
-        if from_multiview and expand_all_views and getattr(dataset, "item_sample_indices", None) is not None:
-            # Split at the SAMPLE level (mirroring train_multiview_regressor.py's
-            # seeded random_split over samples), then expand each split's samples
-            # into their view-items. This yields the SAME test specimens as the
-            # multi-view run (given the same seed + ratios) and guarantees no
-            # camera view of a sample leaks across train/val/test.
-            from torch.utils.data import Subset
-
-            n_samples = int(dataset.num_samples)
-            train_ratio = float(dataset_cfg.get("train_ratio", 0.85))
-            val_ratio = float(dataset_cfg.get("val_ratio", 0.05))
-            n_train = int(n_samples * train_ratio)
-            n_val = int(n_samples * val_ratio)
-            n_test = n_samples - n_train - n_val
-            sample_train, sample_val, sample_test = torch.utils.data.random_split(
-                range(n_samples),
-                [n_train, n_val, n_test],
-                generator=torch.Generator().manual_seed(seed),
-            )
-            train_samples = set(int(s) for s in sample_train)
-            val_samples = set(int(s) for s in sample_val)
-            test_samples = set(int(s) for s in sample_test)
-
-            isi = dataset.item_sample_indices
-            train_idx = [i for i, s in enumerate(isi) if int(s) in train_samples]
-            val_idx = [i for i, s in enumerate(isi) if int(s) in val_samples]
-            test_idx = [i for i, s in enumerate(isi) if int(s) in test_samples]
-            train_set = Subset(dataset, train_idx)
-            val_set = Subset(dataset, val_idx)
-            test_set = Subset(dataset, test_idx)
-            if not is_distributed or rank == 0:
-                print(
-                    f"Single-view-from-multiview split (sample-grouped, seed={seed}): "
-                    f"{n_train}/{n_val}/{n_test} samples -> "
-                    f"{len(train_idx)}/{len(val_idx)}/{len(test_idx)} view-items"
-                )
-        else:
-            train_amount, val_amount, test_amount = TrainingConfig.get_train_val_test_sizes(len(dataset))
-            train_set, val_set, test_set = torch.utils.data.random_split(
-                dataset, [train_amount, val_amount, test_amount]
-            )
+        # Split at the SAMPLE level with an explicit seed (same call as
+        # train_multiview_regressor.py and the benchmark). Single-view-from-
+        # multiview view-items follow their sample, so the test frames match the
+        # multi-view run (given the same split settings) and no camera view of a
+        # sample leaks across train/val/test.
+        (train_set, val_set, test_set), sample_split = split_dataset(
+            dataset,
+            split_method=dataset_cfg.get("split_method", "random"),
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
+            holdout_fold=dataset_cfg.get("holdout_fold"),
+        )
+        if not is_distributed or rank == 0:
+            print("Dataset split:")
+            for line in sample_split.log_lines():
+                print(f"  {line}")
 
         train_sampler_weighted = None  # No weighted sampler for single dataset
 
@@ -2351,7 +2338,25 @@ if __name__ == "__main__":
         choices=["ignore", "separate", "entangled_with_betas"],
         help="Scale/translation beta mode (overrides config default)",
     )
+    parser.add_argument(
+        "--split_method",
+        type=str,
+        default=None,
+        choices=["random", "blocked"],
+        help="Train/val/test assignment: 'random' (seeded random split over frames) or 'blocked' "
+        "(blocked k-fold cross-validation: contiguous blocks along time within each session, "
+        "K = 1 / (val_ratio + test_ratio)). Default: from config (random).",
+    )
+    parser.add_argument(
+        "--holdout_fold",
+        type=int,
+        default=None,
+        help="Which held-out split to use. blocked: index of the held-out block, 0 = start of each "
+        "session (default: last block). random: split seed (default: --seed).",
+    )
     args = parser.parse_args()
+    if args.config is None and (args.split_method is not None or args.holdout_fold is not None):
+        parser.error("--split_method / --holdout_fold need --config (a JSON config with a dataset block)")
 
     # ---------------------------------------------------------------
     # Configuration loading: new JSON config system or legacy CLI args
@@ -2382,6 +2387,12 @@ if __name__ == "__main__":
         if args.data_path is not None:
             cli_overrides["dataset"] = cli_overrides.get("dataset", {})
             cli_overrides["dataset"]["data_path"] = args.data_path
+        if args.split_method is not None:
+            cli_overrides["dataset"] = cli_overrides.get("dataset", {})
+            cli_overrides["dataset"]["split_method"] = args.split_method
+        if args.holdout_fold is not None:
+            cli_overrides["dataset"] = cli_overrides.get("dataset", {})
+            cli_overrides["dataset"]["holdout_fold"] = args.holdout_fold
         if args.scale_trans_mode is not None:
             cli_overrides["scale_trans_beta"] = cli_overrides.get("scale_trans_beta", {})
             cli_overrides["scale_trans_beta"]["mode"] = args.scale_trans_mode

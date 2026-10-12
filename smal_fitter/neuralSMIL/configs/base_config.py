@@ -29,6 +29,16 @@ class DatasetConfig:
     val_ratio: float = 0.05
     test_ratio: float = 0.1
     dataset_fraction: float = 0.5  # Fraction of training data used per epoch
+    # How samples are assigned to train/val/test (see neuralSMIL/data_splits.py).
+    # "random": seeded random split over samples.
+    # "blocked": blocked k-fold cross-validation along time within each session;
+    #   needs val_ratio + test_ratio to tile a session (0.05 + 0.15 -> 5 folds)
+    #   and train_ratio = 1 - val_ratio - test_ratio.
+    split_method: str = "random"
+    # Which held-out split to use. "blocked": index of the held-out block
+    # (0 = start of each session, null = last block). "random": split seed
+    # (null = training.seed).
+    holdout_fold: Optional[int] = None
 
     # ── Single-view-from-multiview sampling ──────────────────────────────
     # Draw single-view training items from a multi-view HDF5. When enabled the
@@ -52,6 +62,9 @@ class DatasetConfig:
         total = self.train_ratio + self.val_ratio + self.test_ratio
         if total > 1.0 + 1e-9:
             raise ValueError(f"Split ratios sum to {total}, must be <= 1.0")
+        from smal_fitter.neuralSMIL.data_splits import validate_split_settings
+
+        validate_split_settings(self.split_method, self.train_ratio, self.val_ratio, self.test_ratio, self.holdout_fold)
         if self.frame_convention not in ("model_centric", "camera_centric"):
             raise ValueError(
                 f"frame_convention must be 'model_centric' or 'camera_centric', got {self.frame_convention!r}"
@@ -633,6 +646,9 @@ class BaseTrainingConfig:
                 "use_ue_scaling": self.dataset.use_ue_scaling,
                 "train_ratio": self.dataset.train_ratio,
                 "val_ratio": self.dataset.val_ratio,
+                "test_ratio": self.dataset.test_ratio,
+                "split_method": self.dataset.split_method,
+                "holdout_fold": self.dataset.holdout_fold,
             },
             "training_params": {
                 "batch_size": self.training.batch_size,
