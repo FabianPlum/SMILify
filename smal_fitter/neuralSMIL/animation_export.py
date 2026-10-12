@@ -3,7 +3,7 @@
 Used by run_singleview_inference.py and run_multiview_inference.py to persist the
 full parametric output of the neural regressors (pose, trans, betas, per-joint
 scale/trans, cameras) alongside the existing MP4 previews. The on-disk schema is
-documented in .claude/plans/iterative-kindling-swan.md (Phase 1).
+documented in docs/design/animation_export_plan.md.
 """
 
 from __future__ import annotations
@@ -16,7 +16,10 @@ import numpy as np
 import torch
 
 
-SCHEMA_VERSION = "1.1"
+# Sidecar schema history: 1.0 initial; 1.1 adds optional per-frame mesh_scale (.npz);
+# 1.2 drops the informational "ignore_hardcoded_body" key (#110). Older sidecars may
+# still contain it; readers must ignore unknown keys.
+SCHEMA_VERSION = "1.2"
 
 
 def rotation_6d_to_axis_angle(d6: torch.Tensor) -> torch.Tensor:
@@ -56,7 +59,6 @@ class AnimationRecorder:
         parents: List[int],
         fps: float,
         static_joint_locs: bool,
-        ignore_hardcoded_body: bool,
         source_checkpoint: Optional[str] = None,
         source_input: Optional[str] = None,
         model_id: Optional[str] = None,
@@ -71,7 +73,6 @@ class AnimationRecorder:
         self.parents = [int(p) for p in parents]
         self.fps = float(fps)
         self.static_joint_locs = bool(static_joint_locs)
-        self.ignore_hardcoded_body = bool(ignore_hardcoded_body)
         self.source_checkpoint = source_checkpoint
         self.source_input = source_input
         self.model_id = model_id
@@ -207,7 +208,6 @@ class AnimationRecorder:
             "rotation_representation": "axis_angle",
             "root_joint_index": 0,
             "static_joint_locs": self.static_joint_locs,
-            "ignore_hardcoded_body": self.ignore_hardcoded_body,
             "fps": self.fps,
             "cameras": cameras,
         }
@@ -293,8 +293,7 @@ def build_recorder_from_config(
         joint_names=joint_names,
         parents=parents,
         fps=fps,
-        static_joint_locs=bool(getattr(smil_config, "STATIC_JOINT_LOCATIONS", False)),
-        ignore_hardcoded_body=bool(getattr(smil_config, "ignore_hardcoded_body", False)),
+        static_joint_locs=bool(smil_config.STATIC_JOINT_LOCATIONS),
         source_checkpoint=source_checkpoint,
         source_input=source_input,
         model_id=model_id,

@@ -231,21 +231,13 @@ class SMILImageRegressor(SMALFitter):
         construction.
 
         Raises:
-            RuntimeError: if the penalty cannot do anything useful — legacy
-                hardcoded-body mode (no per-model limits), a model ``.pkl``
-                without an authored ``'joint_limits'`` key (the wide-open
-                fallback would make the penalty a silent no-op despite a
-                positive weight), missing parent bound tensors, or an authored
+            RuntimeError: if the penalty cannot do anything useful — a model
+                ``.pkl`` without an authored ``'joint_limits'`` key (the
+                wide-open fallback would make the penalty a silent no-op despite
+                a positive weight), missing parent bound tensors, or an authored
                 limit set that is wide open on every joint/axis while the model
                 predicts 6D rotations (see :meth:`_check_bounds_can_bite`).
         """
-        if not config.ignore_hardcoded_body:
-            raise RuntimeError(
-                "joint_limit_regularization is enabled (weight > 0) but "
-                "config.ignore_hardcoded_body is False: legacy hardcoded-body "
-                "mode carries no per-model joint limits, so the penalty cannot "
-                "be evaluated. Set the weight to 0 or use a rigged model .pkl."
-            )
         if "joint_limits" not in config.dd:
             raise RuntimeError(
                 "joint_limit_regularization is enabled (weight > 0) but the model "

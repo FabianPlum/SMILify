@@ -270,13 +270,15 @@ class TestSmalModelDownstreamOverwrite:
         # etc. into whichever test runs next in the same pytest process.
         mutated_attrs = [
             "SMAL_FILE",
-            "ignore_hardcoded_body",
             "dd",
             "joint_names",
             "N_POSE",
             "ROOT_JOINT",
             "STATIC_JOINT_LOCATIONS",
             "CANONICAL_MODEL_JOINTS",
+            "TORSO_JOINTS",
+            "MARKER_TYPE",
+            "MARKER_COLORS",
             "N_BETAS",
             "SHAPE_FAMILY",
         ]
@@ -294,6 +296,7 @@ class TestSmalModelDownstreamOverwrite:
             apply_smal_file_override(smal_path, shape_family=42)
             assert project_config.SMAL_FILE == smal_path
             assert project_config.SHAPE_FAMILY == 42
+            assert len(project_config.MARKER_COLORS) == len(project_config.joint_names)
         finally:
             for attr, value in originals.items():
                 if value is _MISSING:

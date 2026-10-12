@@ -113,9 +113,9 @@ conda install -n "$ENV_NAME" -y \
     -c conda-forge -c fvcore \
     iopath ninja imageio scikit-image
 
-# 2c. yacs + pycocotools, then upgrade iopath
-echo "==> Installing yacs, pycocotools (pip)"
-pip install yacs pycocotools
+# 2c. yacs, then upgrade iopath
+echo "==> Installing yacs (pip)"
+pip install yacs
 pip install --upgrade iopath
 
 # 3. PyTorch3D (Linux: conda channel)

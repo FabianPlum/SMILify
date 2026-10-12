@@ -84,30 +84,16 @@ class SMAL3DFitter(nn.Module):
             u.encoding = "latin1"
             dd = u.load()
 
-        if config.ignore_hardcoded_body:
-            try:
-                model_covs = dd["shape_cov"]
-                self.mean_betas = torch.FloatTensor(dd["shape_mean_betas"]).to(device)
-            except KeyError:
-                print(
-                    "No shape_cov or shape_mean_betas found in SMAL_FILE; "
-                    "falling back to identity-covariance prior sized to config.N_BETAS"
-                )
-                self.mean_betas = torch.zeros(config.N_BETAS).to(device)
-                model_covs = np.eye(config.N_BETAS)
-
-        else:
-            with open(config.SMAL_DATA_FILE, "rb") as f:
-                u = pkl._Unpickler(f)
-                u.encoding = "latin1"
-                smal_data = u.load()
-
-                self.shape_family_list = np.array(shape_family)
-
-                model_covs = np.array(smal_data["cluster_cov"])[[shape_family]][0]
-                self.mean_betas = torch.FloatTensor(smal_data["cluster_means"][[shape_family]][0])[: config.N_BETAS].to(
-                    device
-                )
+        try:
+            model_covs = dd["shape_cov"]
+            self.mean_betas = torch.FloatTensor(dd["shape_mean_betas"]).to(device)
+        except KeyError:
+            print(
+                "No shape_cov or shape_mean_betas found in SMAL_FILE; "
+                "falling back to identity-covariance prior sized to config.N_BETAS"
+            )
+            self.mean_betas = torch.zeros(config.N_BETAS).to(device)
+            model_covs = np.eye(config.N_BETAS)
 
         if config.DEBUG:
             print("MODEL COVS", model_covs)
@@ -159,17 +145,7 @@ class SMAL3DFitter(nn.Module):
         # any stage's loss_weights are even looked at - see optimise.py). So we defer
         # the error to the first forward pass with w_limit > 0 (Stage.forward()) and
         # fall back to wide-open ranges meanwhile.
-        if config.ignore_hardcoded_body:
-            self.min_limits, self.max_limits, self._joint_limits_error = _joint_limit_tensors_from_dd(dd, device)
-        else:
-            # Legacy hardcoded-body mode: joint_limits/N_POSE-per-name mapping doesn't
-            # apply here. Keep the attributes present (None) so Stage.forward()'s
-            # _joint_limits_error check never hits AttributeError; max_limits/
-            # min_limits are also None, so w_limit > 0 in this mode raises a clear
-            # error at first use rather than silently doing nothing.
-            self._joint_limits_error = None
-            self.max_limits = None
-            self.min_limits = None
+        self.min_limits, self.max_limits, self._joint_limits_error = _joint_limit_tensors_from_dd(dd, device)
 
         # Use this to restrict global rotation if necessary
         self.global_mask = torch.ones(1, 3).to(device)
@@ -491,11 +467,6 @@ class Stage:
                 raise ValueError(
                     "Limit loss is enabled (w_limit > 0) but the model's 'joint_limits' "
                     f"is invalid: {self.smal_3d_fitter._joint_limits_error}"
-                )
-            if self.smal_3d_fitter.max_limits is None or self.smal_3d_fitter.min_limits is None:
-                raise ValueError(
-                    "Limit loss is enabled (w_limit > 0) but no joint limits are available "
-                    "for this model (legacy hardcoded-body mode does not support joint_limits)."
                 )
             joint_rot = self.smal_3d_fitter.joint_rot
             max_limits = self.smal_3d_fitter.max_limits

@@ -50,28 +50,6 @@ def batch_rodrigues(theta, opts=None):
     return R
 
 
-def batch_lrotmin(theta):
-    """
-    Output of this is used to compute joint-to-pose blend shape mapping.
-    Equation 9 in SMPL paper.
-
-
-    Args:
-      pose: `Tensor`, N x 72 vector holding the axis-angle rep of K joints.
-            This includes the global rotation so K=24
-
-    Returns
-      diff_vec : `Tensor`: N x 207 rotation matrix of 23=(K-1) joints with identity subtracted.,
-    """
-    # Ignore global rotation
-    theta = theta[:, 3:]
-
-    Rs = batch_rodrigues(torch.reshape(theta, [-1, 3]))
-    lrotmin = torch.reshape(Rs - torch.eye(3), [-1, 207])
-
-    return lrotmin
-
-
 def batch_global_rigid_transformation(
     Rs,
     Js,
@@ -81,7 +59,6 @@ def batch_global_rigid_transformation(
     betas_trans=None,
     propagate_scaling=False,
     opts=None,
-    num_joints=35,
 ):
     """
     Computes absolute joint locations given pose and scaling.
@@ -189,7 +166,7 @@ def batch_global_rigid_transformation(
     # how much the bone moved (not the final location of the bone)
     # but (final_bone - init_bone)
     # ---
-    Js_w0 = torch.cat([Js_orig, torch.zeros([N, num_joints, 1, 1]).to(Rs.device)], 2)
+    Js_w0 = torch.cat([Js_orig, torch.zeros([N, Js_orig.shape[1], 1, 1]).to(Rs.device)], 2)
     init_bone = torch.matmul(results, Js_w0)
     init_bone = torch.nn.functional.pad(init_bone, (3, 0, 0, 0, 0, 0, 0, 0))
     A = results - init_bone
