@@ -35,9 +35,10 @@ class SMALJointDrawer:
         scale_factor = image_size / 512.0
 
         # Scale marker size and thickness
-        # Base values: marker_size=8, thickness=3 (optimized for 512x512)
-        marker_size = max(2, int(8 * scale_factor))
-        thickness = max(2, int(3 * scale_factor))
+        # Base values at 512x512: marker_size=4, thickness=1.5 (halved from 8 / 3, which
+        # covered thin limbs and made it hard to judge the fit)
+        marker_size = max(2, round(4 * scale_factor))
+        thickness = max(1, round(1.5 * scale_factor))
 
         return_images = []
         for image_sgl, landmarks_sgl, visible_sgl in zip(image_np, landmarks_np, visible_np):

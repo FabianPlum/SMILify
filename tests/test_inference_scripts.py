@@ -27,7 +27,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from smal_fitter.neuralSMIL import configs  # noqa: E402
 from smal_fitter.neuralSMIL.configs import config_utils, resolve_smal_file_for_checkpoint  # noqa: E402
 from smal_fitter.neuralSMIL import run_singleview_inference as svi  # noqa: E402
-from smal_fitter.neuralSMIL.inference_utils import PredictionSmoother, pad_or_resize  # noqa: E402
+from smal_fitter.neuralSMIL.inference_utils import (  # noqa: E402
+    RENDER_RESOLUTION_CAP,
+    PredictionSmoother,
+    crop_to_network_view,
+    pad_or_resize,
+    resolve_render_resolution,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -250,3 +256,54 @@ def test_pad_or_resize():
 
     large = np.zeros((10, 10, 3), dtype=np.uint8)
     assert pad_or_resize(large, (4, 4)).shape == (4, 4, 3)
+
+
+def _frame(h, w):
+    """Frame whose pixel value encodes its column, so crops are easy to check."""
+    return np.tile(np.arange(w, dtype=np.uint16)[None, :, None], (h, 1, 3))
+
+
+def test_centred_crop_matches_preprocess_frame():
+    # 2272x1530 like the STICKS side cameras: the network sees the centre 1530x1530 square
+    frame = _frame(1530, 2272)
+    _, transform_info = svi.preprocess_frame(frame.astype(np.uint8), 224, crop_mode="centred")
+    view = crop_to_network_view(frame, transform_info)
+    assert view.shape == (1530, 1530, 3)
+    assert view[0, 0, 0] == (2272 - 1530) // 2  # starts at the centre-crop x offset
+
+
+def test_default_mode_and_missing_info_return_whole_frame():
+    frame = _frame(10, 20)
+    assert crop_to_network_view(frame, None) is frame
+    assert crop_to_network_view(frame, {"mode": "default", "crop_offset": (0, 0), "crop_size": (10, 20)}) is frame
+
+
+def test_bbox_past_frame_edge_is_zero_padded():
+    frame = _frame(10, 10) + 1  # no zeros inside the frame
+    view = crop_to_network_view(frame, {"mode": "bbox_crop", "crop_offset": (-2, 6), "crop_size": (6, 6)})
+    assert view.shape == (6, 6, 3)
+    assert (view[:2] == 0).all()  # above the frame
+    assert (view[:, 4:] == 0).all()  # right of the frame
+    assert (view[2:, :4, 0] == np.array([7, 8, 9, 10])).all()  # columns 6..9 of the frame
+
+
+def test_render_resolution_defaults_to_capped_crop_size():
+    assert resolve_render_resolution(None, (1530, 1530)) == RENDER_RESOLUTION_CAP
+    assert resolve_render_resolution(None, (512, 512)) == 512
+    assert resolve_render_resolution(1530, (1530, 1530)) == 1530  # explicit values are not capped
+
+
+def test_render_oom_returns_frame_and_warns_once(monkeypatch, capsys):
+    def out_of_memory(*a, **k):
+        raise torch.cuda.OutOfMemoryError("CUDA out of memory")
+
+    monkeypatch.setattr(svi, "SMALFitter", out_of_memory)
+    monkeypatch.setattr(svi, "_WARNED_RENDER_OOM", set())
+    model = SimpleNamespace(rotation_representation="axis_angle")
+    params = {"global_rot": torch.zeros(1, 3), "joint_rot": torch.zeros(1, 2, 3)}
+    frame = np.full((40, 60, 3), 7, dtype=np.uint8)
+
+    for _ in range(2):
+        out = svi.render_prediction_on_frame(model, params, frame, "cpu", render_resolution=32)
+        assert out is frame  # written without the overlay
+    assert capsys.readouterr().out.count("GPU out of memory") == 1

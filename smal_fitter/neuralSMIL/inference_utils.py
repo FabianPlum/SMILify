@@ -5,11 +5,43 @@ Kept free of model / pytorch3d imports so the helpers can be imported and
 tested on their own.
 """
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 import torch
+
+# Default upper bound for render_resolution in video / image-folder inference.
+# An explicit --render_resolution is used as given.
+RENDER_RESOLUTION_CAP = 1024
+
+
+def crop_to_network_view(frame: np.ndarray, transform_info: Optional[Dict[str, Any]]) -> np.ndarray:
+    """Return the part of *frame* the network saw, before it was resized.
+
+    ``centred`` and ``bbox_crop`` cut out ``crop_size`` (h, w) at ``crop_offset``
+    (y, x), zero-padded where a box runs past the frame edge. ``default`` mode
+    resizes the whole frame, so it (and a missing *transform_info*) returns the
+    frame unchanged.
+    """
+    if not transform_info or transform_info.get("mode") not in ("centred", "bbox_crop"):
+        return frame
+    crop_h, crop_w = (int(round(v)) for v in transform_info["crop_size"])
+    y0, x0 = (int(round(v)) for v in transform_info["crop_offset"])
+
+    view = np.zeros((crop_h, crop_w) + frame.shape[2:], dtype=frame.dtype)
+    fy0, fx0 = max(y0, 0), max(x0, 0)
+    fy1, fx1 = min(y0 + crop_h, frame.shape[0]), min(x0 + crop_w, frame.shape[1])
+    if fy1 > fy0 and fx1 > fx0:
+        view[fy0 - y0 : fy1 - y0, fx0 - x0 : fx1 - x0] = frame[fy0:fy1, fx0:fx1]
+    return view
+
+
+def resolve_render_resolution(requested: Optional[int], view_hw: Tuple[int, int]) -> int:
+    """Square render size: *requested* if given, else the view size capped at RENDER_RESOLUTION_CAP."""
+    if requested:
+        return int(requested)
+    return min(min(view_hw), RENDER_RESOLUTION_CAP)
 
 
 class PredictionSmoother:
