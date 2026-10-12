@@ -6,7 +6,20 @@ This directory documents the **optimization-based** fitting workflow that SMILif
 
 ## Installation
 
-The optimization path uses the same conda environment as the rest of the repo — see [Installation](../README.md#installation) (`conda env create -f environment.yml`). The legacy quadruped datasets (BADJA / StanfordExtra / SMALST) come in as git submodules, so clone with `--recurse-submodules`.
+The optimization path uses the same conda environment as the rest of the repo — see [Installation](../README.md#installation) (`conda env create -f environment.yml`).
+
+The legacy quadruped datasets (BADJA / StanfordExtra / SMALST) used to be git submodules and are no longer bundled. If you need them, clone them into `data/` (the paths [config.py](../config.py) expects; already git-ignored), pinned to the commits the submodules used:
+
+```bash
+git clone https://github.com/benjiebob/BADJA data/BADJA
+git -C data/BADJA checkout e96f94da975e512e707462c2b5c1412b4c10b555
+git clone https://github.com/benjiebob/StanfordExtra data/StanfordExtra
+git -C data/StanfordExtra checkout d8411ba02f25460fad8453e92d25407f572dee5c
+git clone https://github.com/silviazuffi/smalst data/SMALST
+git -C data/SMALST checkout ba4b898a23699b642f95d30a3a911bb463515893
+```
+
+Each repo comes under its own licence; the SMAL model files in SMALST are MPI-licensed (see [docs/THIRD_PARTY_MODELS.md](../docs/THIRD_PARTY_MODELS.md)).
 
 For the original SMAL quadruped data:
 

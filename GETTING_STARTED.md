@@ -14,8 +14,8 @@ The rest of the [README](README.md) is the full reference — this is the fast p
 ## 1. Install
 
 ```bash
-# Clone (submodules are only needed for the legacy quadruped datasets — fine to skip for this guide)
-git clone --recurse-submodules https://github.com/FabianPlum/SMILify
+# Clone
+git clone https://github.com/FabianPlum/SMILify
 cd SMILify
 
 # Create and activate the conda environment (named "pytorch3d", defined in environment.yml)

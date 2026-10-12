@@ -20,7 +20,7 @@ any of these files.
 | `basicModel_f_lbs_10_207_0_v1.0.0.pkl`<br>`basicmodel_m_lbs_10_207_0_v1.0.0.pkl` | `smal_model/smpl/models/` | [SMPL](https://smpl.is.tue.mpg.de/) — register, then download "SMPL for Python users" |
 | `walking_toy_symmetric_pose_prior_with_cov_35parts.pkl` | `data/priors/` | [SMAL](https://smal.is.tue.mpg.de/) / [SMALify](https://github.com/benjiebob/SMALify) |
 | `zebra_walking_symmetric_pose_prior_with_cov_35parts.pkl` | `data/priors/` | [SMALST](https://github.com/silviazuffi/smalst) (Zuffi et al.) |
-| `my_smpl_data_00781_4_all.pkl`, `symIdx.pkl`, … | `smal/` | [SMAL](https://smal.is.tue.mpg.de/) — already git-ignored |
+| `my_smpl_data_00781_4_all.pkl`, `symIdx.pkl`, … | `data/SMALST/smpl_models/` | [SMAL](https://smal.is.tue.mpg.de/), or clone [SMALST](https://github.com/silviazuffi/smalst) into `data/SMALST` as in [legacy/README.md](../legacy/README.md#installation) — already git-ignored |
 
 On Windows, the SMAL pickles need converting to a Windows-compatible encoding:
 
