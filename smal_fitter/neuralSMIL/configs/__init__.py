@@ -46,6 +46,7 @@ from .config_utils import (
     save_config_json,
     validate_json_mode,
     apply_smal_file_override,
+    resolve_smal_file_for_checkpoint,
     ConfigurationError,
 )
 
@@ -74,5 +75,6 @@ __all__ = [
     "save_config_json",
     "validate_json_mode",
     "apply_smal_file_override",
+    "resolve_smal_file_for_checkpoint",
     "ConfigurationError",
 ]
