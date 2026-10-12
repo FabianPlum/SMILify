@@ -5,8 +5,8 @@ Splits are made at the *sample* (frame) level, so every camera view of a frame
 lands in the same split. Two methods:
 
 - ``"random"``: seeded random permutation of samples (the original behaviour).
-  The split seed is ``holdout_fold`` when set, otherwise the training seed, so
-  existing checkpoints reproduce their split unchanged.
+  The split seed is the training seed, so existing checkpoints reproduce their
+  split unchanged. ``holdout_fold`` is blocked-only and must be null here.
 - ``"blocked"``: blocked k-fold cross-validation (Roberts et al. 2017,
   Ecography 40:913-929). Each recording session is ordered by ``frame_idx`` and
   cut into ``K = 1 / (val_ratio + test_ratio)`` contiguous blocks. Fold ``k``
@@ -15,8 +15,10 @@ lands in the same split. Two methods:
   trains. With ratios 0.80 / 0.05 / 0.15 there are 5 folds, and fold 4 (the
   default) trains on the first 80% of each session, validates on the next 5%
   and tests on the last 15%. Neighbouring video frames are near-duplicates, so
-  unlike random sampling this keeps them out of different splits. The split
-  does not depend on the training seed, so runs with different seeds share it.
+  unlike random sampling this keeps them in the same split, except at the block
+  edges: blocks are adjacent (no buffer gap), so the frames on either side of an
+  edge fall in different splits. The split does not depend on the training
+  seed, so runs with different seeds share it.
 
 The trainers and the benchmark all go through :func:`split_dataset`, and the
 trainers persist ``split_method`` / ``holdout_fold`` / ratios in the
@@ -85,16 +87,53 @@ def validate_split_settings(
         raise ValueError(f"split_method must be one of {SPLIT_METHODS}, got {split_method!r}")
     if holdout_fold is not None and (not isinstance(holdout_fold, (int, np.integer)) or isinstance(holdout_fold, bool)):
         raise ValueError(f"holdout_fold must be an integer or null, got {holdout_fold!r}")
+    if split_method == "random" and holdout_fold is not None:
+        raise ValueError(
+            f"holdout_fold selects a blocked fold and needs split_method='blocked'; random splits use "
+            f"training.seed (got holdout_fold={holdout_fold!r})"
+        )
+    total = train_ratio + val_ratio + test_ratio
+    if abs(total - 1.0) > 1e-6:
+        raise ValueError(
+            f"train_ratio + val_ratio + test_ratio must sum to 1, got "
+            f"{train_ratio} + {val_ratio} + {test_ratio} = {total:.6g}"
+        )
     if split_method == "blocked":
         k = num_blocked_folds(val_ratio, test_ratio)
-        total = train_ratio + val_ratio + test_ratio
-        if abs(total - 1.0) > 1e-6:
-            raise ValueError(
-                f"Blocked split trains on everything outside the held-out block, so train_ratio must be "
-                f"1 - val_ratio - test_ratio = {1.0 - val_ratio - test_ratio:.6g}; got {train_ratio}"
-            )
         if holdout_fold is not None and not 0 <= int(holdout_fold) < k:
             raise ValueError(f"holdout_fold must be in [0, {k - 1}] for {k} blocked folds, got {holdout_fold}")
+
+
+def add_split_args(parser) -> None:
+    """Add --split_method / --holdout_fold to a trainer's argument parser."""
+    parser.add_argument(
+        "--split_method",
+        type=str,
+        default=None,
+        choices=list(SPLIT_METHODS),
+        help="Train/val/test assignment: 'random' (seeded random split over frames) or 'blocked' "
+        "(blocked k-fold cross-validation: contiguous blocks along time within each session, "
+        "K = 1 / (val_ratio + test_ratio)). Default: from config (random).",
+    )
+    parser.add_argument(
+        "--holdout_fold",
+        type=int,
+        default=None,
+        help="Blocked split only: index of the held-out block, 0 = start of each session "
+        "(default: last block). Not allowed with split_method random, which uses --seed.",
+    )
+
+
+def split_args_to_overrides(parser, args) -> dict:
+    """Dataset-block overrides from --split_method / --holdout_fold.
+
+    Exits via parser.error when they are given without --config: blocked
+    setups must come from a JSON config alongside their ratios.
+    """
+    overrides = {k: getattr(args, k) for k in ("split_method", "holdout_fold") if getattr(args, k) is not None}
+    if overrides and args.config is None:
+        parser.error("--split_method / --holdout_fold need --config (a JSON config with a dataset block)")
+    return overrides
 
 
 def random_sample_split(n_samples: int, train_ratio: float, val_ratio: float, seed: int) -> SampleSplit:
@@ -151,6 +190,10 @@ def blocked_sample_split(
     for name in dict.fromkeys(sessions.tolist()):  # first-appearance order
         rows = np.flatnonzero(sessions == name)
         rows = rows[np.argsort(frames[rows], kind="stable")]
+        if np.any(np.diff(frames[rows]) == 0):
+            raise ValueError(
+                f"Session {name!r} repeats frame_idx values; the blocked split needs one row per (session, frame_idx)"
+            )
         n = len(rows)
         start, end = fold * n // k, (fold + 1) * n // k
         n_val = int(round((end - start) * val_share))
@@ -208,8 +251,7 @@ def split_samples(
     """Split ``range(n_samples)`` with the configured method."""
     validate_split_settings(split_method, train_ratio, val_ratio, test_ratio, holdout_fold)
     if split_method == "random":
-        split_seed = seed if holdout_fold is None else holdout_fold
-        return random_sample_split(n_samples, train_ratio, val_ratio, split_seed)
+        return random_sample_split(n_samples, train_ratio, val_ratio, seed)
     if hdf5_path is None:
         raise ValueError("Blocked split needs a multi-view HDF5 dataset (session_name / frame_idx per sample)")
     names, frames = read_session_frame_index(hdf5_path)

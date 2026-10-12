@@ -85,6 +85,9 @@ def test_blocked_folds_rotate_one_contiguous_block_per_session():
     # Default fold is the last block: train on the start, test on the end of each session.
     default = blocked_sample_split(names, frames, 0.05, 0.15)
     assert sorted(default.test) == sorted(split.test)
+    # A frame repeated within a session could straddle a block edge.
+    with pytest.raises(ValueError, match="repeats frame_idx"):
+        blocked_sample_split(["a"] * 10, [0, 1, 2, 3, 3, 5, 6, 7, 8, 9], 0.05, 0.15)
 
 
 def test_blocked_split_from_hdf5_keeps_views_together(tmp_path):
@@ -113,6 +116,8 @@ def test_validate_split_settings_rejects_bad_settings():
         (("blocked", 0.85, 0.05, 0.1, None), "whole folds"),
         (("blocked", 0.7, 0.05, 0.15, None), "train_ratio"),
         (("blocked", 0.8, 0.05, 0.15, 5), r"\[0, 4\]"),
+        (("random", 0.85, 0.05, 0.1, 0), "needs split_method='blocked'"),
+        (("random", 0.85, 0.005, 0.1, None), "sum to 1"),
     ):
         with pytest.raises(ValueError, match=match):
             validate_split_settings(*args)

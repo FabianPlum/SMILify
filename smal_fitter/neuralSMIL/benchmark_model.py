@@ -796,12 +796,17 @@ def _run_singleview_benchmark(
     # Split (same call as the training script, from the settings it persisted).
     # Camera-centric datasets are split over samples and expanded to view-items,
     # so the benchmark TEST set == the training / multi-view test set.
-    test_ratio = sv_config["test_ratio"]
-    if test_ratio is None:
+    # random: test is the remainder (a stored test_ratio may predate the sum
+    # check); blocked: the stored value, which sets the val/test cut exactly as
+    # in training (an inferred 1 - train - val can round it differently).
+    split_method = sv_config["split_method"]
+    if split_method == "blocked":
+        test_ratio = sv_config["test_ratio"]
+    else:
         test_ratio = 1.0 - sv_config["train_ratio"] - sv_config["val_ratio"]
     (train_set, val_set, test_set), sample_split = split_dataset(
         dataset,
-        split_method=sv_config["split_method"],
+        split_method=split_method,
         train_ratio=sv_config["train_ratio"],
         val_ratio=sv_config["val_ratio"],
         test_ratio=test_ratio,
@@ -1231,15 +1236,20 @@ def _run_multiview_benchmark(
     _log_keypoint_rescaling_info(log_fn, dataset, override_size)
 
     # Data splits (same call as train_multiview_regressor.py; checkpoints that
-    # predate split_method were random)
+    # predate split_method were random). random: test is the remainder (a stored
+    # test_ratio may predate the sum check); blocked: the stored value, which
+    # sets the val/test cut exactly as in training.
+    split_method = config_from_ckpt.get("split_method", "random")
+    if split_method == "blocked":
+        test_ratio = config_from_ckpt["test_ratio"]
+    else:
+        test_ratio = 1.0 - config_from_ckpt["train_ratio"] - config_from_ckpt["val_ratio"]
     (train_set, val_set, test_set), sample_split = split_dataset(
         dataset,
-        split_method=config_from_ckpt.get("split_method", "random"),
+        split_method=split_method,
         train_ratio=config_from_ckpt["train_ratio"],
         val_ratio=config_from_ckpt["val_ratio"],
-        test_ratio=config_from_ckpt.get(
-            "test_ratio", 1.0 - config_from_ckpt["train_ratio"] - config_from_ckpt["val_ratio"]
-        ),
+        test_ratio=test_ratio,
         seed=config_from_ckpt["seed"],
         holdout_fold=config_from_ckpt.get("holdout_fold"),
     )

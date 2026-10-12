@@ -35,9 +35,8 @@ class DatasetConfig:
     #   needs val_ratio + test_ratio to tile a session (0.05 + 0.15 -> 5 folds)
     #   and train_ratio = 1 - val_ratio - test_ratio.
     split_method: str = "random"
-    # Which held-out split to use. "blocked": index of the held-out block
-    # (0 = start of each session, null = last block). "random": split seed
-    # (null = training.seed).
+    # Blocked only: index of the held-out block (0 = start of each session,
+    # null = last block). Must be null for "random", which uses training.seed.
     holdout_fold: Optional[int] = None
 
     # ── Single-view-from-multiview sampling ──────────────────────────────
@@ -59,9 +58,6 @@ class DatasetConfig:
     use_ue_scaling: bool = True
 
     def validate(self):
-        total = self.train_ratio + self.val_ratio + self.test_ratio
-        if total > 1.0 + 1e-9:
-            raise ValueError(f"Split ratios sum to {total}, must be <= 1.0")
         from smal_fitter.neuralSMIL.data_splits import validate_split_settings
 
         validate_split_settings(self.split_method, self.train_ratio, self.val_ratio, self.test_ratio, self.holdout_fold)

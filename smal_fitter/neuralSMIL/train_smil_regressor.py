@@ -60,7 +60,7 @@ import imageio
 
 from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
 from smal_fitter.neuralSMIL.smil_datasets import UnifiedSMILDataset
-from smal_fitter.neuralSMIL.data_splits import split_dataset
+from smal_fitter.neuralSMIL.data_splits import add_split_args, split_args_to_overrides, split_dataset
 from smal_fitter.fitter import SMALFitter
 from smal_fitter.Unreal2Pytorch3D import return_placeholder_data
 import config
@@ -1564,6 +1564,11 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
 
     if use_multi_dataset:
         # Multi-dataset training mode
+        if dataset_cfg.get("split_method", "random") != "random":
+            raise ValueError(
+                "split_method='blocked' is not supported in multi-dataset mode "
+                "(CombinedSMILDataset.split_datasets makes its own per-dataset random split)"
+            )
         if not is_distributed or rank == 0:
             print("\n" + "=" * 70)
             print("MULTI-DATASET TRAINING MODE ENABLED")
@@ -2338,25 +2343,9 @@ if __name__ == "__main__":
         choices=["ignore", "separate", "entangled_with_betas"],
         help="Scale/translation beta mode (overrides config default)",
     )
-    parser.add_argument(
-        "--split_method",
-        type=str,
-        default=None,
-        choices=["random", "blocked"],
-        help="Train/val/test assignment: 'random' (seeded random split over frames) or 'blocked' "
-        "(blocked k-fold cross-validation: contiguous blocks along time within each session, "
-        "K = 1 / (val_ratio + test_ratio)). Default: from config (random).",
-    )
-    parser.add_argument(
-        "--holdout_fold",
-        type=int,
-        default=None,
-        help="Which held-out split to use. blocked: index of the held-out block, 0 = start of each "
-        "session (default: last block). random: split seed (default: --seed).",
-    )
+    add_split_args(parser)
     args = parser.parse_args()
-    if args.config is None and (args.split_method is not None or args.holdout_fold is not None):
-        parser.error("--split_method / --holdout_fold need --config (a JSON config with a dataset block)")
+    split_overrides = split_args_to_overrides(parser, args)
 
     # ---------------------------------------------------------------
     # Configuration loading: new JSON config system or legacy CLI args
@@ -2387,12 +2376,8 @@ if __name__ == "__main__":
         if args.data_path is not None:
             cli_overrides["dataset"] = cli_overrides.get("dataset", {})
             cli_overrides["dataset"]["data_path"] = args.data_path
-        if args.split_method is not None:
-            cli_overrides["dataset"] = cli_overrides.get("dataset", {})
-            cli_overrides["dataset"]["split_method"] = args.split_method
-        if args.holdout_fold is not None:
-            cli_overrides["dataset"] = cli_overrides.get("dataset", {})
-            cli_overrides["dataset"]["holdout_fold"] = args.holdout_fold
+        if split_overrides:
+            cli_overrides.setdefault("dataset", {}).update(split_overrides)
         if args.scale_trans_mode is not None:
             cli_overrides["scale_trans_beta"] = cli_overrides.get("scale_trans_beta", {})
             cli_overrides["scale_trans_beta"]["mode"] = args.scale_trans_mode

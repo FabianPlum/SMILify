@@ -72,7 +72,7 @@ from typing import Optional
 from smal_fitter.neuralSMIL.multiview_smil_regressor import MultiViewSMILImageRegressor, create_multiview_regressor
 from smal_fitter.neuralSMIL.smil_image_regressor import rotation_6d_to_axis_angle
 from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
-from smal_fitter.neuralSMIL.data_splits import split_dataset
+from smal_fitter.neuralSMIL.data_splits import add_split_args, split_args_to_overrides, split_dataset
 from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
@@ -2395,7 +2395,7 @@ def main(config: dict):
         split_method=config.get("split_method", "random"),
         train_ratio=config["train_ratio"],
         val_ratio=config["val_ratio"],
-        test_ratio=config.get("test_ratio", 1.0 - config["train_ratio"] - config["val_ratio"]),
+        test_ratio=config["test_ratio"],
         seed=config["seed"],
         holdout_fold=config.get("holdout_fold"),
     )
@@ -2921,22 +2921,7 @@ if __name__ == "__main__":
         help="Fraction of training data to use per epoch (0-1, default: from config). "
         "Useful for large datasets - samples different subset each epoch.",
     )
-    parser.add_argument(
-        "--split_method",
-        type=str,
-        default=None,
-        choices=["random", "blocked"],
-        help="Train/val/test assignment: 'random' (seeded random split over frames) or 'blocked' "
-        "(blocked k-fold cross-validation: contiguous blocks along time within each session, "
-        "K = 1 / (val_ratio + test_ratio)). Default: from config (random).",
-    )
-    parser.add_argument(
-        "--holdout_fold",
-        type=int,
-        default=None,
-        help="Which held-out split to use. blocked: index of the held-out block, 0 = start of each "
-        "session (default: last block). random: split seed (default: --seed).",
-    )
+    add_split_args(parser)
 
     # Multi-view specific
     parser.add_argument("--num_views_to_use", type=int, default=None, help="Max views to use per sample (None = all)")
@@ -3006,6 +2991,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    split_overrides = split_args_to_overrides(parser, args)
 
     # ---------------------------------------------------------------
     # Configuration loading: new JSON config system or legacy CLI args
@@ -3041,12 +3027,8 @@ if __name__ == "__main__":
             if args.dataset_path is not None:
                 cli_overrides["dataset"] = cli_overrides.get("dataset", {})
                 cli_overrides["dataset"]["data_path"] = args.dataset_path
-            if args.split_method is not None:
-                cli_overrides["dataset"] = cli_overrides.get("dataset", {})
-                cli_overrides["dataset"]["split_method"] = args.split_method
-            if args.holdout_fold is not None:
-                cli_overrides["dataset"] = cli_overrides.get("dataset", {})
-                cli_overrides["dataset"]["holdout_fold"] = args.holdout_fold
+            if split_overrides:
+                cli_overrides.setdefault("dataset", {}).update(split_overrides)
             if args.backbone_name is not None:
                 cli_overrides["model"] = cli_overrides.get("model", {})
                 cli_overrides["model"]["backbone_name"] = args.backbone_name
