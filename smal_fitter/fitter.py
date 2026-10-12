@@ -3,7 +3,6 @@ from smal_fitter.draw_smal_joints import SMALJointDrawer
 import numpy as np
 import pickle as pkl
 import os
-from scipy.spatial.transform import Rotation as R
 
 import torch
 import torch.nn.functional as F
@@ -408,8 +407,6 @@ class SMALFitter(nn.Module):
                        allow_mesh_scaling is enabled.
             epoch: Current epoch number for naming visualization images
         """
-        # rotation matrix here only used to produce alternative rotated view
-        rot_matrix = torch.from_numpy(R.from_euler("y", 180.0, degrees=True).as_matrix()).float().to(self.device)
         for j in range(0, self.num_images, self.batch_size):
             batch_range = list(range(j, min(self.num_images, j + self.batch_size)))
             batch_params = {
@@ -490,13 +487,13 @@ class SMALFitter(nn.Module):
                     render_texture=True,
                 )
 
-                verts_mean = verts - torch.mean(verts, dim=1, keepdim=True)
-                joints_mean = canonical_joints - torch.mean(verts, dim=1, keepdim=True)
-
-                # render image with camera rotated 180 degrees to provide a separate view
+                # Second view: the camera orbiting the subject by 90 degrees about its x axis,
+                # framed to fill the panel. Placed in camera space, so it works for both
+                # camera-centric and model-centric checkpoints (see Renderer.orbit_view).
+                orbit_verts, orbit_joints = self.renderer.orbit_view(verts, canonical_joints)
                 _, rev_joints, rev_images = self.renderer(
-                    (rot_matrix @ verts_mean.unsqueeze(-1)).squeeze(-1).float(),
-                    (rot_matrix @ joints_mean.unsqueeze(-1)).squeeze(-1).float(),
+                    orbit_verts,
+                    orbit_joints,
                     self.smal_model.faces.unsqueeze(0).expand(verts.shape[0], -1, -1),
                     render_texture=True,
                 )
