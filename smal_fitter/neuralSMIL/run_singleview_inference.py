@@ -67,7 +67,14 @@ from smal_fitter.neuralSMIL.training_config import TrainingConfig
 from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.animation_export import AnimationRecorder, build_recorder_from_config
-from smal_fitter.neuralSMIL.configs import apply_smal_file_override
+from smal_fitter.neuralSMIL.configs import resolve_smal_file_for_checkpoint
+from smal_fitter.neuralSMIL.inference_utils import (
+    InMemoryImageExporter,
+    PredictionSmoother,
+    pad_or_resize,
+    params_to_cpu,
+    params_to_device,
+)
 from sleap_data_loader import SLEAPDataLoader
 import importlib.util
 import importlib
@@ -375,13 +382,20 @@ class InferenceImageExporter:
         print(f"  Parameters (PKL): {pkl_path}")
 
 
-def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILImageRegressor, Dict[str, Any]]:
+def load_model_from_checkpoint(
+    checkpoint_path: str,
+    device: str,
+    cli_smal_file: Optional[str] = None,
+    cli_shape_family: Optional[int] = None,
+) -> Tuple[SMILImageRegressor, Dict[str, Any]]:
     """
     Load a trained SMILImageRegressor model from checkpoint.
 
     Args:
         checkpoint_path: Path to the checkpoint file
         device: PyTorch device ('cuda' or 'cpu')
+        cli_smal_file: --smal_file; overrides the checkpoint's recorded smal_file
+        cli_shape_family: --shape_family; overrides the checkpoint's shape_family
 
     Returns:
         Tuple of (loaded_model, model_config)
@@ -412,13 +426,11 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
                 "rotation_representation"
             ) or fallback_params.get("rotation_representation", "6d")
             scale_trans_mode = ckpt_config.get("scale_trans_mode") or TrainingConfig.get_scale_trans_mode()
-            shape_family = ckpt_config.get("shape_family", config.SHAPE_FAMILY)
             config_source = "checkpoint (fallback: training_config for missing keys)"
         else:
             model_config = fallback_model
             rotation_representation = fallback_params["rotation_representation"]
             scale_trans_mode = TrainingConfig.get_scale_trans_mode()
-            shape_family = config.SHAPE_FAMILY
             config_source = "training_config.py (no config in checkpoint)"
 
         # Frame convention + camera flags (persisted at the TOP level of
@@ -440,10 +452,10 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
         model_config["allow_mesh_scaling"] = allow_mesh_scaling
         model_config["rotation_representation"] = rotation_representation
         model_config["scale_trans_mode"] = scale_trans_mode
-        # Whether the checkpoint's single-view items were drawn from a
-        # multi-view HDF5 (dataset.from_multiview). Determines how --dataset is
-        # opened, and is required for camera_centric.
-        model_config["from_multiview"] = bool(ckpt_config.get("from_multiview", frame_convention == "camera_centric"))
+
+        # SMAL/SMIL model: --smal_file > checkpoint's smal_file > config.py default.
+        # Must run before the model is built: head widths follow config.N_BETAS / N_POSE.
+        shape_family = resolve_smal_file_for_checkpoint(ckpt_config or {}, cli_smal_file, cli_shape_family)
 
         print(f"Configuration from {config_source}:")
         print(f"  frame_convention: {frame_convention} (fixed_camera={fixed_camera}, use_ue_scaling={use_ue_scaling})")
@@ -452,16 +464,6 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str) -> Tuple[SMILI
         print(f"  rotation_representation: {rotation_representation}")
         print(f"  scale_trans_mode: {scale_trans_mode}")
         print(f"  shape_family: {shape_family}")
-
-        # If the checkpoint specifies a SMAL/SMIL model file, re-derive
-        # config.dd, N_POSE, N_BETAS, joint_names, etc. from that file.
-        if ckpt_config and ckpt_config.get("smal_file"):
-            from smal_fitter.neuralSMIL.configs import apply_smal_file_override
-
-            apply_smal_file_override(
-                ckpt_config["smal_file"],
-                shape_family=shape_family,
-            )
 
         # Verify this matches the checkpoint by checking state dict keys
         state_dict = checkpoint["model_state_dict"]
@@ -1711,76 +1713,6 @@ def process_video(
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-class PredictionSmoother:
-    """Temporal moving average over predicted parameters.
-
-    Keeps a ring buffer of the last ``window_size`` predictions and returns
-    their element-wise mean. Non-tensor values pass through from the latest
-    frame. Mirrors the smoother in run_multiview_inference.py (minus the
-    per-view keys, which do not exist in single-view predictions).
-    """
-
-    _METADATA_KEYS = {"num_views", "view_mask", "camera_indices"}
-
-    def __init__(self, window_size: int):
-        self.window_size = window_size
-        self._buffer: List[Dict[str, Any]] = []
-
-    def __call__(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        if self.window_size <= 0:
-            return params
-
-        self._buffer.append(params)
-        if len(self._buffer) > self.window_size:
-            self._buffer.pop(0)
-
-        if len(self._buffer) == 1:
-            return params
-
-        smoothed: Dict[str, Any] = {}
-        for key in params:
-            if key in self._METADATA_KEYS or not isinstance(params[key], torch.Tensor):
-                smoothed[key] = params[key]
-            else:
-                tensors = [buf[key] for buf in self._buffer if key in buf]
-                smoothed[key] = torch.stack(tensors).mean(dim=0)
-        return smoothed
-
-
-def _params_to_cpu(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Detach and move all tensors in a predicted_params dict to CPU."""
-    return {k: (v.detach().cpu() if isinstance(v, torch.Tensor) else v) for k, v in params.items()}
-
-
-def _params_to_device(params: Dict[str, Any], device: str) -> Dict[str, Any]:
-    """Move all tensors in a predicted_params dict to *device*."""
-    return {k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in params.items()}
-
-
-def _pad_or_resize(frame: np.ndarray, target_size: Tuple[int, int]) -> np.ndarray:
-    """Force *frame* to ``(width, height)`` so every video frame matches."""
-    target_w, target_h = target_size
-    if frame.shape[1] == target_w and frame.shape[0] == target_h:
-        return frame
-    if frame.shape[1] > target_w or frame.shape[0] > target_h:
-        return cv2.resize(frame, (target_w, target_h))
-    padded = np.ones((target_h, target_w, 3), dtype=np.uint8) * 40
-    h = min(target_h, frame.shape[0])
-    w = min(target_w, frame.shape[1])
-    padded[:h, :w] = frame[:h, :w]
-    return padded
-
-
-class _InMemoryImageExporter:
-    """Capture SMALFitter's collage instead of writing it to disk."""
-
-    def __init__(self):
-        self.image = None
-
-    def export(self, collage_np, batch_id, global_id, img_parameters, vertices, faces, img_idx=0, epoch=None):
-        self.image = collage_np
-
-
 def build_singleview_dataset(
     dataset_path: str,
     model: SMILImageRegressor,
@@ -1886,6 +1818,10 @@ def compute_subclip_ranges(
         (i * num_items // num_subclips, min(i * num_items // num_subclips + max_frames, num_items))
         for i in range(num_subclips)
     ]
+
+
+# Non-square calibrated aspects already warned about (see render_dataset_sample_collage).
+_WARNED_NONSQUARE_ASPECTS: set = set()
 
 
 def render_dataset_sample_collage(
@@ -2016,10 +1952,8 @@ def render_dataset_sample_collage(
         if dataset_aspect is not None:
             if use_calibrated_aspect:
                 aspect = dataset_aspect
-            elif abs(dataset_aspect - 1.0) > 0.01 and not getattr(
-                render_dataset_sample_collage, "_warned_aspect", False
-            ):
-                render_dataset_sample_collage._warned_aspect = True
+            elif abs(dataset_aspect - 1.0) > 0.01 and round(dataset_aspect, 3) not in _WARNED_NONSQUARE_ASPECTS:
+                _WARNED_NONSQUARE_ASPECTS.add(round(dataset_aspect, 3))
                 print(
                     f"WARNING: this view's calibrated aspect ratio is {dataset_aspect:.4f}, not 1.0, but the "
                     f"single-view regressor is trained with aspect_ratio=1.0 (it never reads cam_aspect). "
@@ -2030,7 +1964,7 @@ def render_dataset_sample_collage(
 
     apply_camera_to_fitter(model, temp_fitter, predicted_params, device, aspect_ratio=aspect)
 
-    exporter = _InMemoryImageExporter()
+    exporter = InMemoryImageExporter()
     temp_fitter.generate_visualization(
         exporter,
         # MUST match the model setting — this is the mesh placement convention.
@@ -2069,7 +2003,7 @@ def run_dataset_inference_phase(
                 gt_fov = float(np.asarray(gt_fov).reshape(-1)[0])
 
             predicted_params = run_inference_on_image(model, image_tensor, device, gt_fov=gt_fov)
-            raw_predictions.append((item_idx, _params_to_cpu(predicted_params)))
+            raw_predictions.append((item_idx, params_to_cpu(predicted_params)))
         except Exception as e:
             print(f"Warning: inference failed for item {item_idx}: {e}")
             continue
@@ -2214,7 +2148,7 @@ def process_dataset(
                         continue
                     try:
                         x_data, y_data = dataset[item_idx]
-                        params = _params_to_device(smoothed[item_idx], device)
+                        params = params_to_device(smoothed[item_idx], device)
                         collage = render_dataset_sample_collage(
                             model,
                             x_data,
@@ -2236,7 +2170,7 @@ def process_dataset(
                             if not writer.isOpened():
                                 raise RuntimeError(f"Failed to open VideoWriter for {out_path} at {frame_size}")
 
-                        writer.write(cv2.cvtColor(_pad_or_resize(collage, frame_size), cv2.COLOR_RGB2BGR))
+                        writer.write(cv2.cvtColor(pad_or_resize(collage, frame_size), cv2.COLOR_RGB2BGR))
                         frames_written += 1
 
                         if frame_exporter is not None and i % 10 == 0:
@@ -2301,6 +2235,21 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
 
     parser.add_argument(
         "-c", "--checkpoint", type=str, required=True, help="Path to the trained model checkpoint (.pth file)"
+    )
+    parser.add_argument(
+        "--smal_file",
+        type=str,
+        default=None,
+        help="Path to a SMAL/SMIL model file overriding config.SMAL_FILE. Normally unnecessary: "
+        "the checkpoint's own smal_file is applied automatically. Use this only to override it, "
+        "or when the recorded path does not resolve on this machine.",
+    )
+    parser.add_argument(
+        "--shape_family",
+        type=int,
+        default=None,
+        help="Shape family override (legacy SMAL setting). Default: the checkpoint's recorded "
+        "shape_family, else config.SHAPE_FAMILY.",
     )
 
     # Input options (mutually exclusive)
@@ -2462,19 +2411,6 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         "reads cam_aspect — so the default reproduces the checkpoint's own projection. Enable only to "
         "compare against the multi-view pipeline, which does use the calibrated value.",
     )
-    dataset_group.add_argument(
-        "--smal_file",
-        type=str,
-        default=None,
-        help="Path to a SMAL/SMIL model file overriding config.SMAL_FILE. Normally unnecessary: "
-        "the checkpoint's own smal_file is applied automatically. Use only to override it.",
-    )
-    dataset_group.add_argument(
-        "--shape_family",
-        type=int,
-        default=None,
-        help="Shape family to use with --smal_file (defaults to config.SHAPE_FAMILY).",
-    )
 
     args = parser.parse_args()
 
@@ -2524,22 +2460,15 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         print("Error: bbox_crop mode requires --sleap-project to supply keypoints.")
         return 1
 
-    # Explicit SMAL/SMIL model override. Applied BEFORE the checkpoint is loaded
-    # so config.dd / N_POSE / N_BETAS are correct at model-construction time.
-    # Without it the checkpoint's own `smal_file` is applied inside
-    # load_model_from_checkpoint, which is the normal path.
-    if args.smal_file:
-        shape_family = args.shape_family if args.shape_family is not None else config.SHAPE_FAMILY
-        print(f"Applying SMAL file override: {args.smal_file} (shape_family={shape_family})")
-        apply_smal_file_override(args.smal_file, shape_family=shape_family)
-        print(f"  N_POSE: {config.N_POSE}  N_BETAS: {config.N_BETAS}")
-
     sleap_helper = None
     try:
-        # Load model from checkpoint
+        # Load model from checkpoint (applies --smal_file, else the checkpoint's
+        # own smal_file, before the model is built)
         print("\n" + "=" * 40)
         print("Loading model...")
-        model, model_config = load_model_from_checkpoint(args.checkpoint, device)
+        model, model_config = load_model_from_checkpoint(
+            args.checkpoint, device, cli_smal_file=args.smal_file, cli_shape_family=args.shape_family
+        )
 
         # Resolve the inference FOV for camera-centric checkpoints. A raw image
         # carries no GT calibration, so the fallback chain is: --fov -> 60.0
