@@ -12,16 +12,15 @@ would actually have:
     multiview_keypoints/keypoint_confidence_raw  (N, V, J)     SLEAP score, 0 = no detection / unmapped
 
 New datasets built by preprocess_sleap_multiview_dataset.py already contain
-them; both go through SLEAPMultiViewPreprocessor.raw_view_keypoints. No
-existing dataset is modified. Two steps, so the labels can be checked before
-the large file is touched:
+them; both go through SLEAPMultiViewPreprocessor.raw_view_keypoints. Two
+steps, so the labels can be checked before the large file is touched:
 
     # 1. Build a sidecar HDF5 from the SLEAP sessions the dataset was made from
-    python smal_fitter/sleap_data/add_raw_keypoints.py build DATASET.h5 SESSIONS_DIR \\
+    python -m smal_fitter.sleap_data.add_raw_keypoints build DATASET.h5 SESSIONS_DIR \\
         --joint_lookup_table LOOKUP.csv --smal_file MODEL.pkl [--confidence_threshold 0.5]
 
-    # 2. Append the sidecar to the dataset
-    python smal_fitter/sleap_data/add_raw_keypoints.py append DATASET.h5 DATASET_raw_keypoints.h5
+    # 2. Append the sidecar to the dataset (in place: run it on a copy)
+    python -m smal_fitter.sleap_data.add_raw_keypoints append DATASET.h5 DATASET_raw_keypoints.h5
 
 ``build`` needs the same lookup table and model as the original preprocessing,
 and checks that the crop rebuilt from each camera's calibration reproduces the
