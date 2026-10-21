@@ -34,7 +34,7 @@ os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", config.GPU_IDS)
 
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import h5py
 import numpy as np
@@ -174,6 +174,40 @@ def _collect_aspect_ratio_tensor(
     return torch.tensor(aspects, device=device, dtype=torch.float32).unsqueeze(1)
 
 
+# 2D label sets the benchmark scores against, whatever the model was trained on:
+# the stored keypoints_2d (the reprojected triangulated 3D for datasets built with
+# --use_reprojections: clean and consistent across views) and, when the HDF5 has
+# them, the raw SLEAP labels (keypoints_2d_raw, see sleap_data/add_raw_keypoints.py).
+LABEL_SETS = {
+    "reprojected": ("keypoints_2d", "keypoint_visibility"),
+    "raw": ("keypoints_2d_raw", "keypoint_visibility_raw"),
+}
+
+
+def _label_sets(dataset) -> List[str]:
+    """Label sets available in *dataset* (built with include_raw_keypoints=True)."""
+    return list(LABEL_SETS) if getattr(dataset, "include_raw_keypoints", False) else ["reprojected"]
+
+
+def _pixel_errors(pred, gt, vis, H, W, input_resolution) -> Tuple[List[float], List[float]]:
+    """Per-joint errors of normalised [y, x] *pred* vs *gt*, scaled to (H, W) and to the
+    square input resolution. Joints that are invisible, non-finite or at (0, 0) are skipped."""
+    gt = np.asarray(gt, dtype=np.float32)
+    vis = np.asarray(vis, dtype=np.float32)
+    J = min(gt.shape[0], pred.shape[0])
+    gt, pred, vis = gt[:J], pred[:J], vis[:J]
+    gt_y, gt_x = gt[:, 0] * H, gt[:, 1] * W
+    gt_zero_mask = (np.abs(gt_y) < 1e-6) & (np.abs(gt_x) < 1e-6)
+    valid = np.isfinite(gt_y) & np.isfinite(gt_x) & (vis > 0.5) & (~gt_zero_mask)
+    if not np.any(valid):
+        return [], []
+    dy = pred[:, 0][valid] * H - gt_y[valid]
+    dx = pred[:, 1][valid] * W - gt_x[valid]
+    dy_in = (pred[:, 0][valid] - gt[:, 0][valid]) * input_resolution
+    dx_in = (pred[:, 1][valid] - gt[:, 1][valid]) * input_resolution
+    return np.sqrt(dy * dy + dx * dx).tolist(), np.sqrt(dy_in * dy_in + dx_in * dx_in).tolist()
+
+
 def _compute_pck_errors(
     model,
     predicted_params: Dict[str, torch.Tensor],
@@ -182,18 +216,19 @@ def _compute_pck_errors(
     override_size: Optional[Tuple[int, int]],
     input_resolution: int,
     device: torch.device,
-) -> Tuple[List[float], List[float]]:
-    """Per-joint 2D pixel errors at two scales.
+    label_sets: Sequence[str] = ("reprojected",),
+) -> Dict[str, Tuple[List[float], List[float]]]:
+    """Per-joint 2D pixel errors at two scales, for each label set.
 
-    Returns ``(errors_native, errors_input)``:
+    Returns ``{label_set: (errors_native, errors_input)}``:
       - ``errors_native``: normalized joints scaled to the native/original image
         size (per-view ``image_sizes``, or ``override_size`` if provided).
       - ``errors_input``: normalized joints scaled to the model's square input
         resolution (``input_resolution`` x ``input_resolution``).
-    The valid-joint set is identical for both, so the two PCKs are comparable.
+    The valid-joint set is identical for both scales, so the two PCKs are comparable.
+    Each view is rendered once and scored against every label set.
     """
-    errors_native = []
-    errors_input = []
+    errors = {name: ([], []) for name in label_sets}
     num_views = len(predicted_params.get("fov_per_view", []))
     for v in range(num_views):
         fov_v = predicted_params["fov_per_view"][v]
@@ -211,42 +246,19 @@ def _compute_pck_errors(
             view_valid = y_data.get("view_valid")
             if view_valid is not None and v < len(view_valid) and not bool(view_valid[v]):
                 continue
-            kp_2d = y_data.get("keypoints_2d")
-            kp_vis = y_data.get("keypoint_visibility")
-            if kp_2d is None or kp_vis is None or v >= kp_2d.shape[0]:
-                continue
-            gt = kp_2d[v]
-            vis = kp_vis[v]
-            if gt is None or vis is None:
-                continue
-
             H, W = _get_original_image_size(
                 y_data, v, default_resolution=default_resolution, override_size=override_size
             )
+            for name in label_sets:
+                kp_key, vis_key = LABEL_SETS[name]
+                kp_2d, kp_vis = y_data.get(kp_key), y_data.get(vis_key)
+                if kp_2d is None or kp_vis is None or v >= kp_2d.shape[0]:
+                    continue
+                native, inp = _pixel_errors(rendered_np[b_idx], kp_2d[v], kp_vis[v], H, W, input_resolution)
+                errors[name][0].extend(native)
+                errors[name][1].extend(inp)
 
-            pred = rendered_np[b_idx]
-            # Convert normalized [y, x] -> pixels using original size
-            pred_y = pred[:, 0] * H
-            pred_x = pred[:, 1] * W
-            gt_y = gt[:, 0] * H
-            gt_x = gt[:, 1] * W
-
-            gt_zero_mask = (np.abs(gt_y) < 1e-6) & (np.abs(gt_x) < 1e-6)
-            valid = np.isfinite(gt_y) & np.isfinite(gt_x) & (vis > 0.5) & (~gt_zero_mask)
-            if not np.any(valid):
-                continue
-
-            # Native-resolution error (per-view original size)
-            dy = pred_y[valid] - gt_y[valid]
-            dx = pred_x[valid] - gt_x[valid]
-            errors_native.extend(np.sqrt(dy * dy + dx * dx).tolist())
-
-            # Input-resolution error (square input_resolution)
-            dy_in = (pred[:, 0][valid] - gt[:, 0][valid]) * input_resolution
-            dx_in = (pred[:, 1][valid] - gt[:, 1][valid]) * input_resolution
-            errors_input.extend(np.sqrt(dy_in * dy_in + dx_in * dx_in).tolist())
-
-    return errors_native, errors_input
+    return errors
 
 
 def _accumulate_mpjpe_mm(
@@ -671,17 +683,17 @@ def _compute_pck_errors_singleview(
     default_resolution: int,
     override_size: Optional[Tuple[int, int]],
     input_resolution: int,
-) -> Tuple[List[float], List[float]]:
-    """Compute per-joint 2D pixel errors for a single-view batch, at two scales.
+    label_sets: Sequence[str] = ("reprojected",),
+) -> Dict[str, Tuple[List[float], List[float]]]:
+    """Per-joint 2D pixel errors for a single-view batch, at two scales, for each label set.
 
-    Renders the (already predicted) ``predicted_params`` via
-    ``_compute_rendered_outputs`` to obtain normalised predicted joint positions,
-    then compares against the ground-truth ``keypoints_2d`` and
-    ``keypoint_visibility`` stored in *y_data_batch*.
+    Renders the (already predicted) ``predicted_params`` once via
+    ``_compute_rendered_outputs`` and compares against each label set in
+    *y_data_batch* (see ``LABEL_SETS``).
 
-    Returns ``(errors_native, errors_input)``: native uses ``override_size`` if
-    given, else the square ``default_resolution``; input uses the model's square
-    ``input_resolution``. The valid-joint set is identical for both.
+    Returns ``{label_set: (errors_native, errors_input)}``: native uses
+    ``override_size`` if given, else the square ``default_resolution``; input uses
+    the model's square ``input_resolution``. The valid-joint set is identical for both.
     """
 
     # Render predicted 2D joints (normalised [0, 1] in [y, x] order)
@@ -691,58 +703,23 @@ def _compute_pck_errors_singleview(
         compute_silhouette=False,
         compute_joints_3d=False,
     )
+    errors = {name: ([], []) for name in label_sets}
     if rendered_joints is None:
-        return [], []
+        return errors
 
     rendered_np = rendered_joints.detach().cpu().numpy()  # (B, J, 2)
-
-    errors_native: List[float] = []
-    errors_input: List[float] = []
+    H, W = override_size if override_size is not None else (default_resolution, default_resolution)
     for b_idx, y_data in enumerate(y_data_batch):
-        gt = y_data.get("keypoints_2d")
-        vis = y_data.get("keypoint_visibility")
-        if gt is None or vis is None:
-            continue
+        for name in label_sets:
+            kp_key, vis_key = LABEL_SETS[name]
+            gt, vis = y_data.get(kp_key), y_data.get(vis_key)
+            if gt is None or vis is None:
+                continue
+            native, inp = _pixel_errors(rendered_np[b_idx], gt, vis, H, W, input_resolution)
+            errors[name][0].extend(native)
+            errors[name][1].extend(inp)
 
-        gt = np.asarray(gt, dtype=np.float32)
-        vis = np.asarray(vis, dtype=np.float32)
-        pred = rendered_np[b_idx]
-
-        J = min(gt.shape[0], pred.shape[0])
-        if J == 0:
-            continue
-
-        gt = gt[:J]
-        pred = pred[:J]
-        vis = vis[:J]
-
-        if override_size is not None:
-            H, W = override_size
-        else:
-            H = W = default_resolution
-
-        # Both are normalised [0, 1]; scale to pixel space
-        pred_y = pred[:, 0] * H
-        pred_x = pred[:, 1] * W
-        gt_y = gt[:, 0] * H
-        gt_x = gt[:, 1] * W
-
-        gt_zero_mask = (np.abs(gt_y) < 1e-6) & (np.abs(gt_x) < 1e-6)
-        valid = np.isfinite(gt_y) & np.isfinite(gt_x) & (vis > 0.5) & (~gt_zero_mask)
-        if not np.any(valid):
-            continue
-
-        # Native-resolution error (override or square default_resolution)
-        dy = pred_y[valid] - gt_y[valid]
-        dx = pred_x[valid] - gt_x[valid]
-        errors_native.extend(np.sqrt(dy * dy + dx * dx).tolist())
-
-        # Input-resolution error (square input_resolution)
-        dy_in = (pred[:, 0][valid] - gt[:, 0][valid]) * input_resolution
-        dx_in = (pred[:, 1][valid] - gt[:, 1][valid]) * input_resolution
-        errors_input.extend(np.sqrt(dy_in * dy_in + dx_in * dx_in).tolist())
-
-    return errors_native, errors_input
+    return errors
 
 
 def _run_singleview_benchmark(
@@ -779,7 +756,9 @@ def _run_singleview_benchmark(
     # multi-view HDF5, in the same camera-centric frame they were trained in.
     camera_centric = bool(sv_config.get("camera_centric", False)) and bool(sv_config.get("from_multiview", False))
     sv_from_mv_kwargs = (
-        dict(return_single_view=True, camera_centric=True, expand_all_views=True) if camera_centric else {}
+        dict(return_single_view=True, camera_centric=True, expand_all_views=True, include_raw_keypoints=True)
+        if camera_centric
+        else {}
     )
     dataset = UnifiedSMILDataset.from_path(
         args.dataset_path,
@@ -840,10 +819,10 @@ def _run_singleview_benchmark(
         "PCK@Npx is resolution-dependent, so both are shown."
     )
 
-    # Benchmark loop. One forward pass per batch feeds both the 2D PCK (at two
-    # scales) and, when 3D GT is available (camera-centric), the 3D MPJPE.
-    all_errors_native: List[float] = []
-    all_errors_input: List[float] = []
+    # Benchmark loop. One forward pass per batch feeds the 2D PCK (at two scales,
+    # against each label set) and, when 3D GT is available (camera-centric), the 3D MPJPE.
+    label_sets = _label_sets(dataset)
+    all_errors = {name: ([], []) for name in label_sets}
     all_3d_errors_mm: List[float] = []
     samples_with_3d = 0
     samples_3d_for_plot: List[Dict] = []
@@ -857,16 +836,18 @@ def _run_singleview_benchmark(
                 continue
             predicted_params, _, _ = result
 
-            batch_native, batch_input = _compute_pck_errors_singleview(
+            batch_errors = _compute_pck_errors_singleview(
                 model,
                 predicted_params,
                 y_data_batch,
                 default_resolution=target_resolution,
                 override_size=override_size,
                 input_resolution=input_resolution,
+                label_sets=label_sets,
             )
-            all_errors_native.extend(batch_native)
-            all_errors_input.extend(batch_input)
+            for name, (native_e, input_e) in batch_errors.items():
+                all_errors[name][0].extend(native_e)
+                all_errors[name][1].extend(input_e)
 
             # 3D MPJPE (camera-centric frame). No-op for samples without 3D GT.
             batch_errors_mm, batch_samples_with_3d = _compute_mpjpe_mm_singleview(
@@ -879,13 +860,8 @@ def _run_singleview_benchmark(
             all_3d_errors_mm.extend(batch_errors_mm)
             samples_with_3d += batch_samples_with_3d
 
-    # Compute PCK metrics at both resolutions
-    native = _summarize_pck(all_errors_native)
-    inp = _summarize_pck(all_errors_input)
-
     log_fn("\n==== BENCHMARK RESULTS (TEST SPLIT) ====")
-    _log_pck_block(log_fn, native_label, native)
-    _log_pck_block(log_fn, input_label, inp)
+    summaries = _report_2d_errors(log_fn, output_dir, all_errors, native_label, input_label, dataset)
 
     # MPJPE stats + 3D outputs (percentile scatter plots, histogram, errors_3d_mm.npy).
     # Shared with the multi-view benchmark for identical 3D reporting.
@@ -893,36 +869,8 @@ def _run_singleview_benchmark(
         log_fn, all_3d_errors_mm, samples_with_3d, samples_3d_for_plot, output_dir
     )
 
-    # Separate plot per resolution (single curve each) + per-resolution histograms
-    _save_pck_plot(
-        native["pck_values"],
-        output_dir,
-        filename="pck_curve_native.png",
-        title=f"PCK vs Pixel Threshold ({native_label})",
-    )
-    _save_pck_plot(
-        inp["pck_values"], output_dir, filename="pck_curve_input.png", title=f"PCK vs Pixel Threshold ({input_label})"
-    )
-    _save_error_histogram(
-        native["errors_px"],
-        output_dir,
-        filename="error_histogram_native.png",
-        title=f"2D Keypoint Error Histogram ({native_label})",
-    )
-    _save_error_histogram(
-        inp["errors_px"],
-        output_dir,
-        filename="error_histogram_input.png",
-        title=f"2D Keypoint Error Histogram ({input_label})",
-    )
-
-    # Save raw 2D error arrays (errors_3d_mm.npy is saved by _report_mpjpe_mm)
-    np.save(os.path.join(output_dir, "errors_2d_px_native.npy"), native["errors_px"])
-    np.save(os.path.join(output_dir, "errors_2d_px_input.npy"), inp["errors_px"])
-
     log_fn(f"\nSaved outputs to: {output_dir}")
-    log_fn("  PCK plots: pck_curve_native.png, pck_curve_input.png")
-    log_fn("  Error histograms: error_histogram_native.png, error_histogram_input.png")
+    _log_2d_outputs(log_fn, label_sets)
     if errors_mm.size > 0:
         log_fn(f"  MPJPE histogram: {mpjpe_hist_path}")
         if samples_3d_for_plot:
@@ -930,7 +878,7 @@ def _run_singleview_benchmark(
                 f"  3D percentile plots: {os.path.join(output_dir, 'sample_00_3d_keypoints_percentiles.png')} (and next 4)"
             )
 
-    return native["errors_px"]
+    return summaries["reprojected"][0]["errors_px"]
 
 
 def _log_keypoint_rescaling_info_sv(log_fn, target_resolution: int, override_size: Optional[Tuple[int, int]]):
@@ -1021,6 +969,55 @@ def _save_error_histogram(
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.savefig(hist_plot_path, dpi=150, bbox_inches="tight")
     plt.close()
+
+
+def _label_set_title(name: str, dataset) -> str:
+    if name == "raw":
+        thr = getattr(dataset, "raw_keypoint_confidence_threshold", None)
+        return f"raw SLEAP labels (keypoints_2d_raw{f', confidence >= {thr:g}' if thr is not None else ''})"
+    reproj = bool(getattr(dataset, "used_reprojections", True))
+    return f"stored labels (keypoints_2d{', reprojected triangulated 3D' if reproj else ''})"
+
+
+def _report_2d_errors(log_fn, output_dir: str, all_errors: dict, native_label: str, input_label: str, dataset):
+    """Log the PCK blocks and save plots / histograms / error arrays for every label set.
+
+    The stored labels keep the original file names; other sets get a ``_<name>`` suffix
+    (pck_curve_native_raw.png, errors_2d_px_native_raw.npy, ...).
+    Returns ``{label_set: (native_summary, input_summary)}``.
+    """
+    summaries = {}
+    for name, (errors_native, errors_input) in all_errors.items():
+        suffix = "" if name == "reprojected" else f"_{name}"
+        native, inp = _summarize_pck(errors_native), _summarize_pck(errors_input)
+        summaries[name] = (native, inp)
+        log_fn(f"\n## 2D vs {_label_set_title(name, dataset)}")
+        _log_pck_block(log_fn, native_label, native)
+        _log_pck_block(log_fn, input_label, inp)
+        for res_tag, label, summary in (("native", native_label, native), ("input", input_label, inp)):
+            _save_pck_plot(
+                summary["pck_values"],
+                output_dir,
+                filename=f"pck_curve_{res_tag}{suffix}.png",
+                title=f"PCK vs Pixel Threshold ({label}, {name} labels)",
+            )
+            _save_error_histogram(
+                summary["errors_px"],
+                output_dir,
+                filename=f"error_histogram_{res_tag}{suffix}.png",
+                title=f"2D Keypoint Error Histogram ({label}, {name} labels)",
+            )
+            np.save(os.path.join(output_dir, f"errors_2d_px_{res_tag}{suffix}.npy"), summary["errors_px"])
+    if "raw" not in all_errors:
+        log_fn("\n(No raw SLEAP labels in this HDF5; add them with smal_fitter/sleap_data/add_raw_keypoints.py)")
+    return summaries
+
+
+def _log_2d_outputs(log_fn, label_sets):
+    for name in label_sets:
+        suffix = "" if name == "reprojected" else f"_{name}"
+        log_fn(f"  PCK plots ({name}): pck_curve_native{suffix}.png, pck_curve_input{suffix}.png")
+        log_fn(f"  Error histograms ({name}): error_histogram_native{suffix}.png, error_histogram_input{suffix}.png")
 
 
 # ---------------------------------------------------------------------------
@@ -1169,6 +1166,7 @@ def _run_multiview_benchmark(
         rotation_representation=config_from_ckpt["rotation_representation"],
         num_views_to_use=config_from_ckpt.get("num_views_to_use"),
         random_view_sampling=random_view_sampling,
+        include_raw_keypoints=True,
     )
 
     log_fn("\nDATASET SUMMARY:")
@@ -1322,9 +1320,9 @@ def _run_multiview_benchmark(
     _ = load_checkpoint(args.checkpoint, model, optimizer=None, scheduler=None, device=device)
     model.eval()
 
-    # Benchmark loop
-    all_errors_native = []
-    all_errors_input = []
+    # Benchmark loop (2D scored against every label set in the HDF5)
+    label_sets = _label_sets(dataset)
+    all_errors = {name: ([], []) for name in label_sets}
     all_3d_errors_mm = []
     samples_with_3d = 0
     samples_3d_for_plot = []
@@ -1336,7 +1334,7 @@ def _run_multiview_benchmark(
 
             predicted_params, _, _ = model.predict_from_multiview_batch(x_data_batch, y_data_batch)
 
-            batch_native, batch_input = _compute_pck_errors(
+            batch_errors = _compute_pck_errors(
                 model=model,
                 predicted_params=predicted_params,
                 y_data_batch=y_data_batch,
@@ -1344,9 +1342,11 @@ def _run_multiview_benchmark(
                 override_size=override_size,
                 input_resolution=input_resolution,
                 device=device,
+                label_sets=label_sets,
             )
-            all_errors_native.extend(batch_native)
-            all_errors_input.extend(batch_input)
+            for name, (native_e, input_e) in batch_errors.items():
+                all_errors[name][0].extend(native_e)
+                all_errors[name][1].extend(input_e)
 
             batch_errors_mm, batch_samples_with_3d = _compute_mpjpe_mm(
                 model=model,
@@ -1358,49 +1358,16 @@ def _run_multiview_benchmark(
             all_3d_errors_mm.extend(batch_errors_mm)
             samples_with_3d += batch_samples_with_3d
 
-    # Compute PCK metrics at both resolutions
-    native = _summarize_pck(all_errors_native)
-    inp = _summarize_pck(all_errors_input)
-
     log_fn("\n==== BENCHMARK RESULTS (TEST SPLIT) ====")
-    _log_pck_block(log_fn, native_label, native)
-    _log_pck_block(log_fn, input_label, inp)
+    _report_2d_errors(log_fn, output_dir, all_errors, native_label, input_label, dataset)
 
     # MPJPE stats + 3D outputs (percentile scatter plots, histogram, errors_3d_mm.npy)
     errors_mm, mpjpe_hist_path = _report_mpjpe_mm(
         log_fn, all_3d_errors_mm, samples_with_3d, samples_3d_for_plot, output_dir
     )
 
-    # Separate plot per resolution (single curve each) + per-resolution histograms
-    _save_pck_plot(
-        native["pck_values"],
-        output_dir,
-        filename="pck_curve_native.png",
-        title=f"PCK vs Pixel Threshold ({native_label})",
-    )
-    _save_pck_plot(
-        inp["pck_values"], output_dir, filename="pck_curve_input.png", title=f"PCK vs Pixel Threshold ({input_label})"
-    )
-    _save_error_histogram(
-        native["errors_px"],
-        output_dir,
-        filename="error_histogram_native.png",
-        title=f"2D Keypoint Error Histogram ({native_label})",
-    )
-    _save_error_histogram(
-        inp["errors_px"],
-        output_dir,
-        filename="error_histogram_input.png",
-        title=f"2D Keypoint Error Histogram ({input_label})",
-    )
-
-    # Save raw 2D error arrays (the 3D errors_3d_mm.npy is saved by _report_mpjpe_mm)
-    np.save(os.path.join(output_dir, "errors_2d_px_native.npy"), native["errors_px"])
-    np.save(os.path.join(output_dir, "errors_2d_px_input.npy"), inp["errors_px"])
-
     log_fn(f"\nSaved outputs to: {output_dir}")
-    log_fn("  PCK plots: pck_curve_native.png, pck_curve_input.png")
-    log_fn("  Error histograms: error_histogram_native.png, error_histogram_input.png")
+    _log_2d_outputs(log_fn, label_sets)
     log_fn(f"  MPJPE histogram: {mpjpe_hist_path}")
     if errors_mm.size > 0 and samples_3d_for_plot:
         log_fn(

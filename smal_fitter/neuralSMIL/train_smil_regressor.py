@@ -1671,6 +1671,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         )
         if not is_distributed or rank == 0:
             print(f"Dataset size: {len(dataset)}")
+            print(f"2D labels: {getattr(dataset, 'keypoint_source', 'reprojected')}")
             print(f"Original resolution: {dataset.get_input_resolution()}")
             print(f"Target resolution: {dataset.get_target_resolution()}")
 
