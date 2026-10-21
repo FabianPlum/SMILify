@@ -109,6 +109,8 @@ class MultiViewConfig(BaseTrainingConfig):
             "test_ratio": self.dataset.test_ratio,
             "split_method": self.dataset.split_method,
             "holdout_fold": self.dataset.holdout_fold,
+            "keypoint_source": self.dataset.keypoint_source,
+            "raw_keypoint_min_confidence": self.dataset.raw_keypoint_min_confidence,
             # Scale/trans
             "scale_trans_mode": self.scale_trans_beta.mode,
             "allow_mesh_scaling": self.mesh_scaling.allow_mesh_scaling,
