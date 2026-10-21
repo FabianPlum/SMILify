@@ -42,8 +42,8 @@ class DatasetConfig:
     # "reprojected": keypoints_2d (the reprojected triangulated 3D when the HDF5
     #   was built with --use_reprojections). "raw": keypoints_2d_raw, the SLEAP
     #   predictions filtered by confidence only (smal_fitter/sleap_data/
-    #   add_raw_keypoints.py adds them to an existing HDF5). Benchmark and
-    #   inference always score against keypoints_2d.
+    #   add_raw_keypoints.py adds them to an existing HDF5). The benchmark
+    #   scores against both, whatever the model trained on.
     keypoint_source: str = "reprojected"
     # "raw" only: recompute visibility as keypoint_confidence_raw >= this value
     # (null keeps the threshold the raw labels were stored with).

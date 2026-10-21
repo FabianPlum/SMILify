@@ -516,13 +516,11 @@ class SLEAPDataLoader:
         Like :meth:`extract_2d_keypoints`, plus the per-keypoint SLEAP confidence.
 
         Returns:
-            Tuple of (keypoints_2d, visibility, confidence) where ``confidence``
-            is a (N,) float32 array: the SLEAP point score where the keypoint is
-            a detection (finite score and coordinates, not at (0, 0), visible
-            flag set), else 0. Labels without scores (user-labelled points)
-            count as 1. ``visibility`` is unchanged: confidence above
-            ``confidence_threshold`` plus the same detection checks, minus the
-            finite-coordinate check.
+            Tuple of (keypoints_2d, visibility, confidence). ``confidence`` (N,)
+            float32 is the SLEAP point score where the keypoint is a detection
+            (finite score and coordinates, not at (0, 0), visible flag set) and 0
+            elsewhere; user-labelled points without a score count as 1.
+            ``visibility`` is exactly what extract_2d_keypoints returns.
         """
         # Check if data was loaded from .slp fallback (uses camera_dirs format)
         if camera_data.get("_data_source") == "slp":

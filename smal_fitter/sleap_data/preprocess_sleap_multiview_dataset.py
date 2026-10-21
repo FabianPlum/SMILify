@@ -1566,13 +1566,9 @@ class SLEAPMultiViewPreprocessor:
             keypoints_2d_data = np.zeros((num_samples, max_views, n_joints, 2), dtype=np.float32)
             keypoint_visibility_data = np.zeros((num_samples, max_views, n_joints), dtype=np.float32)
             raw_data = {
-                name: np.zeros(
-                    (num_samples, max_views, n_joints, 2)
-                    if name == "keypoints_2d_raw"
-                    else (num_samples, max_views, n_joints),
-                    dtype=np.float32,
-                )
-                for name in RAW_KEYPOINT_DATASETS
+                "keypoints_2d_raw": np.zeros_like(keypoints_2d_data),
+                "keypoint_visibility_raw": np.zeros_like(keypoint_visibility_data),
+                "keypoint_confidence_raw": np.zeros_like(keypoint_visibility_data),
             }
 
             # Camera indices

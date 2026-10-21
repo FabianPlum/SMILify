@@ -441,10 +441,15 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         camera_indices_all = f["multiview_keypoints/camera_indices"][idx]  # (max_views,)
 
         keypoints_2d = keypoints_2d_all[selected_indices]
-        if self.include_raw_keypoints:
-            raw_keypoints_all, raw_visibility_all = self._read_2d_labels(f, idx, source="raw")
         keypoint_visibility = keypoint_visibility_all[selected_indices]
         camera_indices = camera_indices_all[selected_indices]
+        raw_labels = {}
+        if self.include_raw_keypoints:
+            raw_kp, raw_vis = self._read_2d_labels(f, idx, source="raw")
+            raw_labels = {
+                "keypoints_2d_raw": raw_kp[selected_indices],
+                "keypoint_visibility_raw": raw_vis[selected_indices],
+            }
 
         # Load shared body parameters
         betas = f["parameters/betas"][idx]
@@ -505,14 +510,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             # Per-view keypoint data
             "keypoints_2d": keypoints_2d,  # (num_views, n_joints, 2)
             "keypoint_visibility": keypoint_visibility,  # (num_views, n_joints)
-            **(
-                {
-                    "keypoints_2d_raw": raw_keypoints_all[selected_indices],
-                    "keypoint_visibility_raw": raw_visibility_all[selected_indices],
-                }
-                if self.include_raw_keypoints
-                else {}
-            ),
+            **raw_labels,
             "view_valid": view_valid,  # (num_views,)
             # Shared body parameters
             "shape_betas": betas if has_ground_truth_betas else None,
