@@ -150,6 +150,7 @@ python -m smal_fitter.neuralSMIL.run_multiview_inference \
 
 # Useful flags: --view_indices 0,4,11  --smoothing_window 5  --render_resolution 512
 #               --max_frames 100  --export_animation path/to/clip   (writes <clip>.npz / .json)
+#               --split test   (only the checkpoint's held-out test frames, in time order)
 ```
 
 **Single-view** — one of three mutually exclusive inputs: a folder of images
@@ -374,7 +375,8 @@ Checkpoints include a `config` key with all parameters needed for inference:
 checkpoint = torch.load('best_model.pth')
 # checkpoint['config'] contains:
 #   model_config, rotation_representation, scale_trans_mode/config,
-#   shape_family, smal_file
+#   shape_family, smal_file, and the split settings (seed, train/val/test_ratio,
+#   split_method, holdout_fold) the benchmark and inference --split rebuild the split from
 ```
 
 `run_multiview_inference.py` and `run_singleview_inference.py` prefer `checkpoint['config']` and fall back to `training_config.py` defaults for older checkpoints.

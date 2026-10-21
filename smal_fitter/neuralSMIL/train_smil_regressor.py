@@ -60,7 +60,15 @@ import imageio
 
 from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor, rotation_6d_to_axis_angle
 from smal_fitter.neuralSMIL.smil_datasets import UnifiedSMILDataset
-from smal_fitter.neuralSMIL.data_splits import add_split_args, split_args_to_overrides, split_dataset
+from smal_fitter.neuralSMIL.data_splits import (
+    SplitMismatchError,
+    add_split_args,
+    check_resume_split,
+    fold_tag,
+    split_args_to_overrides,
+    split_dataset,
+    tag_output_dir,
+)
 from smal_fitter.fitter import SMALFitter
 from smal_fitter.Unreal2Pytorch3D import return_placeholder_data
 import config
@@ -1088,7 +1096,16 @@ def plot_parameter_errors(train_param_errors, val_param_errors, save_path="param
     plt.close()
 
 
-def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=False, rank=0):
+def load_checkpoint(
+    checkpoint_path,
+    model,
+    optimizer,
+    device,
+    is_distributed=False,
+    rank=0,
+    split_settings=None,
+    allow_split_change=False,
+):
     """
     Load checkpoint and restore model, optimizer state and training history.
 
@@ -1099,6 +1116,9 @@ def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=Fa
         device: PyTorch device
         is_distributed: Whether running in distributed mode
         rank: Current process rank (for print gating)
+        split_settings: The current run's split settings (seed, ratios, split_method,
+            holdout_fold). If given, resuming a checkpoint trained on a different split
+            raises SplitMismatchError unless allow_split_change.
 
     Returns:
         Tuple of (start_epoch, train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss)
@@ -1120,6 +1140,9 @@ def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=Fa
 
     try:
         checkpoint = torch.load(checkpoint_path, map_location=device)
+        if split_settings is not None:
+            stored = (checkpoint.get("config") or {}).get("training_params")
+            check_resume_split(stored, split_settings, checkpoint_path, allow_change=allow_split_change, log=log)
 
         # Load model state (handle DDP compatibility)
         model_state_dict = checkpoint["model_state_dict"]
@@ -1313,6 +1336,8 @@ def load_checkpoint(checkpoint_path, model, optimizer, device, is_distributed=Fa
 
         return start_epoch, train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss
 
+    except SplitMismatchError:
+        raise  # never fall back to training from scratch on a split mismatch
     except Exception as e:
         log(f"Error loading checkpoint: {e}")
         log("Starting training from scratch...")
@@ -2035,6 +2060,14 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             total_params = sum(p.numel() for p in group["params"])
             print(f"  Group {i}: {num_params} tensors, {total_params:,} total parameters, lr={group['lr']}")
 
+    # Blocked cross-validation: each fold writes to its own *_fold{k} directories
+    tag = fold_tag(dataset_cfg.get("split_method", "random"), dataset_cfg.get("holdout_fold"), val_ratio, test_ratio)
+    for key in ("checkpoint_dir", "plots_dir", "visualizations_dir", "train_visualizations_dir"):
+        if output_config.get(key):
+            output_config[key] = tag_output_dir(output_config[key], tag)
+    if tag and (not is_distributed or rank == 0):
+        print(f"Blocked split: outputs go to {output_config['checkpoint_dir']} (and the other *{tag} dirs)")
+
     # Create output directories
     os.makedirs(output_config["checkpoint_dir"], exist_ok=True)
     os.makedirs(output_config["plots_dir"], exist_ok=True)
@@ -2051,7 +2084,14 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     # Load checkpoint if provided
     if checkpoint_path is not None:
         start_epoch, train_losses, val_losses, train_param_errors, val_param_errors, best_val_loss = load_checkpoint(
-            checkpoint_path, model, optimizer, device, is_distributed=is_distributed, rank=rank
+            checkpoint_path,
+            model,
+            optimizer,
+            device,
+            is_distributed=is_distributed,
+            rank=rank,
+            split_settings=checkpoint_config["training_params"],
+            allow_split_change=bool(dataset_cfg.get("allow_split_change", False)),
         )
 
     if not is_distributed or rank == 0:
@@ -2435,12 +2475,17 @@ if __name__ == "__main__":
         # Convert to legacy dict format for existing main()
         config_override = new_config.to_legacy_dict()
 
-        # Save resolved config for reproducibility
-        os.makedirs(new_config.output.checkpoint_dir, exist_ok=True)
-        save_config_json(new_config, os.path.join(new_config.output.checkpoint_dir, "config.json"))
+        # Save resolved config for reproducibility, in the fold's own checkpoint dir
+        split_cfg = new_config.dataset
+        config_dir = tag_output_dir(
+            new_config.output.checkpoint_dir,
+            fold_tag(split_cfg.split_method, split_cfg.holdout_fold, split_cfg.val_ratio, split_cfg.test_ratio),
+        )
+        os.makedirs(config_dir, exist_ok=True)
+        save_config_json(new_config, os.path.join(config_dir, "config.json"))
 
         print(f"Loaded config from: {args.config}")
-        print(f"Resolved config saved to: {os.path.join(new_config.output.checkpoint_dir, 'config.json')}")
+        print(f"Resolved config saved to: {os.path.join(config_dir, 'config.json')}")
 
     else:
         # Legacy config flow: build config_override from CLI args

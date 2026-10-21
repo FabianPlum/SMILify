@@ -28,6 +28,8 @@ checkpoint, so the benchmark rebuilds the exact training split.
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
+import math
+
 import h5py
 import numpy as np
 import torch
@@ -122,18 +124,123 @@ def add_split_args(parser) -> None:
         help="Blocked split only: index of the held-out block, 0 = start of each session "
         "(default: last block). Not allowed with split_method random, which uses --seed.",
     )
+    parser.add_argument(
+        "--allow_split_change",
+        action="store_true",
+        default=None,
+        help="When resuming, continue even though the current split settings differ from the checkpoint's "
+        "(a deliberate fine-tune on a new split). Without it such a resume stops with an error.",
+    )
 
 
 def split_args_to_overrides(parser, args) -> dict:
-    """Dataset-block overrides from --split_method / --holdout_fold.
+    """Dataset-block overrides from --split_method / --holdout_fold / --allow_split_change.
 
     Exits via parser.error when they are given without --config: blocked
     setups must come from a JSON config alongside their ratios.
     """
-    overrides = {k: getattr(args, k) for k in ("split_method", "holdout_fold") if getattr(args, k) is not None}
+    keys = ("split_method", "holdout_fold", "allow_split_change")
+    overrides = {k: getattr(args, k) for k in keys if getattr(args, k, None) is not None}
     if overrides and args.config is None:
-        parser.error("--split_method / --holdout_fold need --config (a JSON config with a dataset block)")
+        parser.error(
+            "--split_method / --holdout_fold / --allow_split_change need --config (a JSON config with a dataset block)"
+        )
     return overrides
+
+
+class SplitMismatchError(ValueError):
+    """Resuming a checkpoint with split settings that differ from the ones it was trained with."""
+
+
+def split_signature(settings: dict) -> dict:
+    """The settings that decide a split, normalised so that equal splits compare equal.
+
+    *settings* holds split_method / holdout_fold / train_ratio / val_ratio /
+    test_ratio / seed as trainers save them in checkpoints (a missing
+    split_method is "random", as for checkpoints that predate it). Blocked: the
+    fold (null = last fold) and the val/test shares; the seed does not matter.
+    Random: the seed and the train/val shares; test is the remainder.
+    """
+    method = settings.get("split_method") or "random"
+    if method == "blocked":
+        k = num_blocked_folds(float(settings["val_ratio"]), float(settings["test_ratio"]))
+        fold = settings.get("holdout_fold")
+        return {
+            "split_method": "blocked",
+            "folds": k,
+            "holdout_fold": k - 1 if fold is None else int(fold),
+            "val_ratio": float(settings["val_ratio"]),
+            "test_ratio": float(settings["test_ratio"]),
+        }
+    return {
+        "split_method": "random",
+        "seed": settings.get("seed"),
+        "train_ratio": float(settings["train_ratio"]),
+        "val_ratio": float(settings["val_ratio"]),
+    }
+
+
+def check_resume_split(
+    stored: Optional[dict], current: dict, checkpoint_path: str, allow_change: bool = False, log=print
+) -> None:
+    """Refuse to resume a checkpoint on a different split than it was trained on.
+
+    A resumed run that splits differently trains on frames the checkpoint held
+    out, and its new checkpoint records the new split, so the benchmark would
+    then score it on frames it has seen. Raises ValueError listing the
+    differences (SplitMismatchError), unless *allow_change* (dataset.allow_split_change /
+    --allow_split_change), in which case it only warns. Checkpoints without
+    split settings cannot be checked and only get a warning.
+    """
+    try:
+        old = split_signature(stored or {})
+        new = split_signature(current)
+    except (KeyError, TypeError, ValueError) as e:
+        log(f"WARNING: cannot check that resuming {checkpoint_path} keeps its train/val/test split ({e!r})")
+        return
+
+    def same(a, b):
+        if isinstance(a, float) or isinstance(b, float):
+            return a is not None and b is not None and math.isclose(a, b, abs_tol=1e-9)
+        return a == b
+
+    diffs = [
+        f"{k}: {old.get(k)!r} -> {new.get(k)!r}"
+        for k in dict.fromkeys([*old, *new])
+        if not same(old.get(k), new.get(k))
+    ]
+    if not diffs:
+        return
+    msg = (
+        f"Resuming {checkpoint_path} with a different train/val/test split than it was trained on "
+        f"({'; '.join(diffs)}). Frames it held out would be trained on. Use the checkpoint's split settings, "
+        "train from scratch, or set dataset.allow_split_change / --allow_split_change to fine-tune on the new "
+        "split on purpose."
+    )
+    if allow_change:
+        log(f"WARNING: {msg} Continuing because allow_split_change is set.")
+        return
+    raise SplitMismatchError(msg)
+
+
+def fold_tag(split_method: str, holdout_fold: Optional[int], val_ratio: float, test_ratio: float) -> str:
+    """``"_fold{k}"`` for a blocked split (null holdout_fold = the last fold), ``""`` for random.
+
+    Appended to every output directory of a run, so the K folds of a
+    cross-validation sweep never write into each other's checkpoints and plots.
+    """
+    if (split_method or "random") != "blocked":
+        return ""
+    k = num_blocked_folds(val_ratio, test_ratio)
+    return f"_fold{k - 1 if holdout_fold is None else int(holdout_fold)}"
+
+
+def tag_output_dir(path: str, tag: str) -> str:
+    """*path* with *tag* appended to its last component (unchanged if it already ends with it)."""
+    if not tag or not path:
+        return path
+    trimmed = path.rstrip("/\\")
+    return trimmed if trimmed.endswith(tag) else trimmed + tag
 
 
 def random_sample_split(n_samples: int, train_ratio: float, val_ratio: float, seed: int) -> SampleSplit:
@@ -318,3 +425,42 @@ def split_dataset(
         parts = tuple(expand_to_items(p, item_sample_indices) for p in parts)
     subsets = tuple(Subset(dataset, list(p)) for p in parts)
     return subsets, split
+
+
+SPLIT_PARTS = ("train", "val", "test")
+
+
+def split_dataset_from_settings(dataset, settings: dict) -> Tuple[Tuple[Subset, Subset, Subset], SampleSplit]:
+    """:func:`split_dataset` with the settings a trainer stored in a checkpoint.
+
+    For the benchmark and inference, which must reproduce the training split.
+    Checkpoints that predate split_method were random. Random: test is the
+    remainder (a stored test_ratio may predate the sum check, e.g. 0.85 / 0.005 / 0.1).
+    Blocked: the stored test_ratio, which sets the val/test cut exactly as in
+    training (an inferred 1 - train - val can round it differently).
+    """
+    method = settings.get("split_method") or "random"
+    train_ratio, val_ratio = settings["train_ratio"], settings["val_ratio"]
+    test_ratio = settings["test_ratio"] if method == "blocked" else 1.0 - train_ratio - val_ratio
+    return split_dataset(
+        dataset,
+        split_method=method,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        seed=settings["seed"],
+        holdout_fold=settings.get("holdout_fold"),
+    )
+
+
+def add_inference_split_arg(parser) -> None:
+    """--split for the inference scripts: restrict frames to one part of the checkpoint's split."""
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="all",
+        choices=["all", *SPLIT_PARTS],
+        help="Run only on the frames of this part of the train/val/test split the checkpoint was trained "
+        "with (rebuilt from its stored settings, as in the benchmark), in time order; --max_frames then "
+        "counts within it. Default: all frames. Use 'test' for held-out overlays and videos.",
+    )

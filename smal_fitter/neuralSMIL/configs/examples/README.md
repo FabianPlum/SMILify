@@ -16,6 +16,9 @@ The loader uses `mode` to choose the config class and to validate the file.
 | File | Mode | Description |
 |------|------|-------------|
 | `getting_started.json` | multiview | **Start here** — the config used by the repo-root Getting Started guide: multi-view stick insect, `resume_checkpoint: null` so it trains from scratch cleanly. |
+| `getting_started_singleview.json` | singleview | Single-view from the multi-view stick HDF5 (`from_multiview`, `camera_centric`), `resume_checkpoint: null`. |
+| `getting_started_blocked.json` / `getting_started_singleview_blocked.json` | multiview / singleview | The two above with the blocked 5-fold split (0.80 / 0.05 / 0.15); pick the fold with `--holdout_fold k` (see the cross-validation recipe in [../README.md](../README.md)). |
+| `multiview_mouse_blocked.json` | multiview | ViT-Large mouse on the Falkner 12-camera HDF5 with the blocked 5-fold split, `resume_checkpoint: null`. |
 | `singleview_baseline.json` | singleview | Full single-view config with ViT backbone, transformer decoder, and loss/LR curriculum. |
 | `multiview_baseline.json` | multiview | Multi-view config with cross-attention and multi-view output directories. |
 | `multiview_sticks.json` | multiview | Stick insect with UNet EfficientNet-B3 backbone (the dataset `STICKS_full_512_3D.h5` is 512px — resolution comes from the dataset, not a config key). |
@@ -38,9 +41,11 @@ python -m smal_fitter.neuralSMIL.train_smil_regressor --config smal_fitter/neura
 # Multi-view (often override dataset path)
 python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/multiview_baseline.json --dataset_path /path/to/multiview.h5
 
-# Multi-view with mixed precision (CLI override)
-python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/multiview_sticks.json --use_mixed_precision
+# Blocked 5-fold cross-validation: one run per fold, outputs go to *_fold{k}
+python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/getting_started_blocked.json --holdout_fold 0
 ```
+
+With `--config`, the multi-view trainer applies only these CLI flags on top of the JSON: `--dataset_path`, `--checkpoint_dir`, `--resume_checkpoint`, `--batch_size`, `--learning_rate`, `--weight_decay`, `--num_epochs`, `--gradient_accumulation_steps`, `--seed`, `--num_views_to_use`, `--backbone_name`, `--cross_attention_layers` / `--cross_attention_heads`, `--use_gt_camera_init`, `--reset_ief_token_embedding` and the split flags. Others, such as `--use_mixed_precision`, are ignored; set them in the JSON instead (e.g. `"training": {"use_mixed_precision": true}`).
 
 Copy an example to your project and edit; keep the `mode` field so the loader and legacy bridge continue to work.
 

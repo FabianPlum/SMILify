@@ -326,7 +326,9 @@ python -m smal_fitter.neuralSMIL.benchmark_model \
 | MPJPE (mm) | — | yes (when 3D GT available) |
 | MPJPE percentiles (P50–P99) | — | yes |
 
-**Output files** are written to `benchmark_{model_type}_{checkpoint}_on_{dataset}/`:
+**The test split is the one the model was trained with.** The benchmark rebuilds it from the split settings stored in the checkpoint (random with its seed, or the blocked fold), so it takes no split arguments; the report logs it (`Split: blocked, fold 2 of 5 ...`). See the [cross-validation recipe](smal_fitter/neuralSMIL/configs/README.md#dataset--data-paths-and-splits).
+
+**Output files** are written to `benchmark_{model_type}_{checkpoint}_on_{dataset}/` (with `_fold{k}` appended for a checkpoint trained on a blocked split):
 
 | File | Description |
 |---|---|

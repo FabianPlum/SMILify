@@ -72,7 +72,14 @@ from typing import Optional
 from smal_fitter.neuralSMIL.multiview_smil_regressor import MultiViewSMILImageRegressor, create_multiview_regressor
 from smal_fitter.neuralSMIL.smil_image_regressor import rotation_6d_to_axis_angle
 from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
-from smal_fitter.neuralSMIL.data_splits import add_split_args, split_args_to_overrides, split_dataset
+from smal_fitter.neuralSMIL.data_splits import (
+    add_split_args,
+    check_resume_split,
+    fold_tag,
+    split_args_to_overrides,
+    split_dataset,
+    tag_output_dir,
+)
 from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
@@ -389,6 +396,7 @@ class MultiViewTrainingConfig:
         "test_ratio": 0.1,
         "split_method": "random",
         "holdout_fold": None,
+        "allow_split_change": False,
         # Mesh scaling - allows network to predict global mesh scale
         # (useful when 3D ground truth has different scale than model)
         "allow_mesh_scaling": False,
@@ -2305,10 +2313,22 @@ def main(config: dict):
         print(f"Cross-attention layers: {config['cross_attention_layers']}")
         print(f"{'=' * 60}\n")
 
+    # Blocked cross-validation: each fold writes to its own *_fold{k} directories
+    tag = fold_tag(
+        config.get("split_method", "random"), config.get("holdout_fold"), config["val_ratio"], config["test_ratio"]
+    )
+    config["plots_dir"] = config.get("plots_dir", "plots")
+    for key in ("checkpoint_dir", "visualizations_dir", "plots_dir"):
+        config[key] = tag_output_dir(config[key], tag)
+    if tag and rank == 0:
+        print(
+            f"Blocked split: outputs go to {config['checkpoint_dir']}, {config['visualizations_dir']}, {config['plots_dir']}"
+        )
+
     # Create output directories
     os.makedirs(config["checkpoint_dir"], exist_ok=True)
     os.makedirs(config["visualizations_dir"], exist_ok=True)
-    os.makedirs(config.get("plots_dir", "plots"), exist_ok=True)
+    os.makedirs(config["plots_dir"], exist_ok=True)
 
     # Load dataset
     if rank == 0:
@@ -2345,6 +2365,14 @@ def main(config: dict):
             print("\nResuming from checkpoint - inferring model architecture from checkpoint...")
         checkpoint = torch.load(resume_checkpoint_path, map_location="cpu")  # Load on CPU first
         ckpt_config = checkpoint.get("config", {})
+        # Before splitting: a resume must not move the checkpoint's held-out frames into training
+        check_resume_split(
+            ckpt_config,
+            config,
+            resume_checkpoint_path,
+            allow_change=bool(config.get("allow_split_change", False)),
+            log=print if rank == 0 else (lambda *_: None),
+        )
         state_dict = checkpoint.get("model_state_dict", checkpoint)
 
         # Infer max_views from checkpoint state dict
@@ -3119,12 +3147,17 @@ if __name__ == "__main__":
             )
             training_config["scale_trans_config"] = TrainingConfig.get_scale_trans_config()
 
-            # Save resolved config for reproducibility
-            os.makedirs(new_config.output.checkpoint_dir, exist_ok=True)
-            save_config_json(new_config, os.path.join(new_config.output.checkpoint_dir, "config.json"))
+            # Save resolved config for reproducibility, in the fold's own checkpoint dir
+            split_cfg = new_config.dataset
+            config_dir = tag_output_dir(
+                new_config.output.checkpoint_dir,
+                fold_tag(split_cfg.split_method, split_cfg.holdout_fold, split_cfg.val_ratio, split_cfg.test_ratio),
+            )
+            os.makedirs(config_dir, exist_ok=True)
+            save_config_json(new_config, os.path.join(config_dir, "config.json"))
 
             print(f"Loaded config from: {args.config}")
-            print(f"Resolved config saved to: {os.path.join(new_config.output.checkpoint_dir, 'config.json')}")
+            print(f"Resolved config saved to: {os.path.join(config_dir, 'config.json')}")
         else:
             # Legacy JSON config (no "mode" field)
             training_config = MultiViewTrainingConfig.from_file(args.config)

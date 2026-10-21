@@ -54,6 +54,7 @@ from smal_fitter.neuralSMIL.smil_image_regressor import rotation_6d_to_axis_angl
 from smal_fitter.fitter import SMALFitter
 from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset
 from smal_fitter.neuralSMIL.configs import resolve_smal_file_for_checkpoint
+from smal_fitter.neuralSMIL.data_splits import add_inference_split_arg, split_dataset_from_settings
 from smal_fitter.neuralSMIL.inference_utils import (
     InMemoryImageExporter,
     PredictionSmoother,
@@ -1137,6 +1138,14 @@ def main_inference(
         print(f"Dataset canonical camera order: {dataset_canonical_camera_order}")
         print("Note: Samples may have fewer views than dataset max_views\n")
 
+    # --split: only the frames of one part of the checkpoint's train/val/test split, in time order
+    frame_ids = None
+    if args.split != "all":
+        _, sample_split = split_dataset_from_settings(dataset, ckpt_config)
+        frame_ids = sorted(getattr(sample_split, args.split))
+        if rank == 0:
+            print(f"Frames: {args.split} split only, {len(frame_ids)} of {len(dataset)} ({sample_split.description})")
+
     # Load model
     # CRITICAL: max_views and canonical_camera_order are inferred from the checkpoint,
     # not from the dataset. The model architecture must match what was used during training.
@@ -1232,14 +1241,14 @@ def main_inference(
 
     # Determine subclip ranges (single full-dataset clip by default).
     subclip_ranges = _compute_subclip_ranges(
-        dataset_size=len(dataset),
+        dataset_size=len(dataset) if frame_ids is None else len(frame_ids),
         max_frames=args.max_frames,
         num_subclips=args.generate_num_subclips,
         rank=rank,
     )
     multi_subclip = len(subclip_ranges) > 1
 
-    dataset_name = dataset_path.stem
+    dataset_name = dataset_path.stem if args.split == "all" else f"{dataset_path.stem}_{args.split}"
     smoothing_window = args.smoothing_window
     export_animation_path = getattr(args, "export_animation", None)
 
@@ -1263,6 +1272,8 @@ def main_inference(
             start_idx=start_idx,
             end_idx=end_idx,
         )
+        if frame_ids is not None:  # positions within the split -> dataset indices
+            assigned_indices = [frame_ids[i] for i in assigned_indices]
 
         # ── Phase 1: Inference (all ranks in parallel) ──────────────────────
         if rank == 0:
@@ -1481,6 +1492,7 @@ def main():
         default=None,
         help="Maximum number of frames to process (default: all frames). Useful for quick testing. With --generate_num_subclips > 1, this is the length of each subclip.",
     )
+    add_inference_split_arg(parser)
     parser.add_argument(
         "--generate_num_subclips",
         type=int,

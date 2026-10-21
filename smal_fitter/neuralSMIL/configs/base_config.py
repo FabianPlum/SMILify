@@ -38,6 +38,9 @@ class DatasetConfig:
     # Blocked only: index of the held-out block (0 = start of each session,
     # null = last block). Must be null for "random", which uses training.seed.
     holdout_fold: Optional[int] = None
+    # Resume only: continue when the split settings differ from the resumed
+    # checkpoint's (a deliberate fine-tune on a new split). Off: such a resume stops.
+    allow_split_change: bool = False
 
     # ── Single-view-from-multiview sampling ──────────────────────────────
     # Draw single-view training items from a multi-view HDF5. When enabled the
@@ -645,6 +648,7 @@ class BaseTrainingConfig:
                 "test_ratio": self.dataset.test_ratio,
                 "split_method": self.dataset.split_method,
                 "holdout_fold": self.dataset.holdout_fold,
+                "allow_split_change": self.dataset.allow_split_change,
             },
             "training_params": {
                 "batch_size": self.training.batch_size,
