@@ -23,6 +23,10 @@ import config  # noqa: F401
 from smal_fitter.multiview_common.canonical_frame import recanonicalize_single_view, RZ_180
 
 
+# 2D label sources a multi-view HDF5 can provide (see SLEAPMultiViewDataset).
+KEYPOINT_SOURCES = ("reprojected", "raw")
+
+
 class SLEAPMultiViewDataset(torch.utils.data.Dataset):
     """
     PyTorch dataset class for loading preprocessed multi-view SLEAP datasets.
@@ -50,6 +54,9 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         backbone_name: str = None,
         augment: bool = False,
         augmentation_config: Optional[Dict[str, Any]] = None,
+        keypoint_source: str = "reprojected",
+        raw_keypoint_min_confidence: Optional[float] = None,
+        include_raw_keypoints: bool = False,
         **kwargs,
     ):
         """
@@ -77,6 +84,20 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                               via `item_sample_indices` so no view leaks across
                               splits.
             backbone_name: Backbone name (for compatibility)
+            keypoint_source: 2D labels to return. "reprojected" (default) reads
+                            keypoints_2d / keypoint_visibility, the preprocessed
+                            labels (reprojected 3D when the HDF5 was built with
+                            --use_reprojections). "raw" reads keypoints_2d_raw /
+                            keypoint_visibility_raw: the SLEAP predictions,
+                            filtered by confidence only (add them to an existing
+                            HDF5 with smal_fitter/sleap_data/add_raw_keypoints.py).
+            raw_keypoint_min_confidence: "raw" only. If set, visibility is
+                            recomputed as keypoint_confidence_raw >= this value
+                            instead of the threshold stored with the HDF5.
+            include_raw_keypoints: Evaluation only. Also return the raw labels as
+                            y_data["keypoints_2d_raw"] / ["keypoint_visibility_raw"]
+                            when the HDF5 has them (not augmented), so a benchmark
+                            can score against both label sets.
             **kwargs: Additional keyword arguments (for compatibility)
         """
         self.hdf5_path = hdf5_path
@@ -88,6 +109,13 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         self.camera_centric = camera_centric
         self.expand_all_views = expand_all_views
         self.augment = augment
+        if keypoint_source not in KEYPOINT_SOURCES:
+            raise ValueError(f"keypoint_source must be one of {KEYPOINT_SOURCES}, got {keypoint_source!r}")
+        if raw_keypoint_min_confidence is not None and keypoint_source != "raw":
+            raise ValueError("raw_keypoint_min_confidence needs keypoint_source='raw'")
+        self.keypoint_source = keypoint_source
+        self.raw_keypoint_min_confidence = raw_keypoint_min_confidence
+        self.include_raw_keypoints = include_raw_keypoints
 
         # Augmentation defaults (overridden by augmentation_config)
         aug = augmentation_config or {}
@@ -111,6 +139,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
 
         # Validate dataset
         self._validate_dataset()
+        self.include_raw_keypoints = self.include_raw_keypoints and self.has_raw_keypoints
 
         # Single-view "all views as items" flat index (sample, view_slot).
         self._sv_items: Optional[List[Tuple[int, int]]] = None
@@ -134,6 +163,8 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             self.n_betas = metadata.attrs["n_betas"]
             self.min_views_per_sample = metadata.attrs.get("min_views_per_sample", 2)
             self.crop_mode = metadata.attrs.get("crop_mode", "bbox_crop")
+            # True when keypoints_2d are reprojections of the triangulated 3D
+            self.used_reprojections = bool(metadata.attrs.get("used_reprojections", False))
 
             # Optional 3D + camera supervision flags (added by preprocess_sleap_multiview_dataset.py)
             self.has_camera_parameters = bool(metadata.attrs.get("has_camera_parameters", False))
@@ -250,6 +281,32 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             # Verify keypoints exist
             if "keypoints_2d" not in f["multiview_keypoints"]:
                 raise ValueError("Missing keypoints_2d in multiview_keypoints group")
+            self.has_raw_keypoints = all(
+                k in f["multiview_keypoints"] for k in ("keypoints_2d_raw", "keypoint_visibility_raw")
+            )
+            self.raw_keypoint_confidence_threshold = f["metadata"].attrs.get("raw_keypoint_confidence_threshold")
+            if self.keypoint_source == "raw":
+                needed = ["keypoints_2d_raw", "keypoint_visibility_raw"]
+                if self.raw_keypoint_min_confidence is not None:
+                    needed.append("keypoint_confidence_raw")
+                missing = [k for k in needed if k not in f["multiview_keypoints"]]
+                if missing:
+                    raise ValueError(
+                        f"keypoint_source='raw' needs multiview_keypoints/{missing} in {self.hdf5_path}; "
+                        "add them with smal_fitter/sleap_data/add_raw_keypoints.py"
+                    )
+
+    def _read_2d_labels(self, f: h5py.File, index, source: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """2D keypoints and visibility at ``index`` (an HDF5 selection) from ``source``
+        (default: ``keypoint_source``)."""
+        if (source or self.keypoint_source) == "reprojected":
+            return f["multiview_keypoints/keypoints_2d"][index], f["multiview_keypoints/keypoint_visibility"][index]
+        keypoints = f["multiview_keypoints/keypoints_2d_raw"][index]
+        if self.raw_keypoint_min_confidence is None:
+            return keypoints, f["multiview_keypoints/keypoint_visibility_raw"][index]
+        confidence = f["multiview_keypoints/keypoint_confidence_raw"][index]
+        visibility = (confidence > 0) & (confidence >= self.raw_keypoint_min_confidence)
+        return keypoints, visibility.astype(np.float32)
 
     def _ensure_file_open(self):
         """Ensure HDF5 file is open in current process."""
@@ -379,13 +436,20 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             images.append(image)
 
         # Load keypoints for selected views
-        keypoints_2d_all = f["multiview_keypoints/keypoints_2d"][idx]  # (max_views, n_joints, 2)
-        keypoint_visibility_all = f["multiview_keypoints/keypoint_visibility"][idx]  # (max_views, n_joints)
+        # (max_views, n_joints, 2), (max_views, n_joints)
+        keypoints_2d_all, keypoint_visibility_all = self._read_2d_labels(f, idx)
         camera_indices_all = f["multiview_keypoints/camera_indices"][idx]  # (max_views,)
 
         keypoints_2d = keypoints_2d_all[selected_indices]
         keypoint_visibility = keypoint_visibility_all[selected_indices]
         camera_indices = camera_indices_all[selected_indices]
+        raw_labels = {}
+        if self.include_raw_keypoints:
+            raw_kp, raw_vis = self._read_2d_labels(f, idx, source="raw")
+            raw_labels = {
+                "keypoints_2d_raw": raw_kp[selected_indices],
+                "keypoint_visibility_raw": raw_vis[selected_indices],
+            }
 
         # Load shared body parameters
         betas = f["parameters/betas"][idx]
@@ -446,6 +510,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             # Per-view keypoint data
             "keypoints_2d": keypoints_2d,  # (num_views, n_joints, 2)
             "keypoint_visibility": keypoint_visibility,  # (num_views, n_joints)
+            **raw_labels,
             "view_valid": view_valid,  # (num_views,)
             # Shared body parameters
             "shape_betas": betas if has_ground_truth_betas else None,
@@ -614,8 +679,11 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         image = self._decode_jpeg_image(image_jpeg_bytes)
 
         # Load keypoints
-        keypoints_2d = f["multiview_keypoints/keypoints_2d"][idx, selected_view]
-        keypoint_visibility = f["multiview_keypoints/keypoint_visibility"][idx, selected_view]
+        keypoints_2d, keypoint_visibility = self._read_2d_labels(f, (idx, selected_view))
+        raw_labels = {}
+        if self.include_raw_keypoints:
+            raw_kp, raw_vis = self._read_2d_labels(f, (idx, selected_view), source="raw")
+            raw_labels = {"keypoints_2d_raw": raw_kp, "keypoint_visibility_raw": raw_vis}
 
         # Load shared parameters
         betas = f["parameters/betas"][idx]
@@ -662,6 +730,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         y_data = {
             "keypoints_2d": keypoints_2d,
             "keypoint_visibility": keypoint_visibility,
+            **raw_labels,
             "shape_betas": betas if has_ground_truth_betas else None,
             # No GT PCA scale/trans weights for triangulated real data → the
             # model falls back to zero targets (masked). Keys must exist for the

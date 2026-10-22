@@ -21,3 +21,8 @@ class SingleViewConfig(BaseTrainingConfig):
                 "split_method='blocked' needs per-sample session_name / frame_idx, which only "
                 "multi-view HDF5s carry; set dataset.from_multiview=true"
             )
+        if self.dataset.keypoint_source != "reprojected" and not self.dataset.from_multiview:
+            raise ValueError(
+                "keypoint_source='raw' reads the raw-label columns of a multi-view HDF5; "
+                "set dataset.from_multiview=true"
+            )

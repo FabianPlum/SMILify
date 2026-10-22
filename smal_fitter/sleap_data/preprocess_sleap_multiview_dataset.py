@@ -36,6 +36,17 @@ from smal_fitter.sleap_data.sleap_3d_loader import SLEAP3DDataLoader
 import config
 from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override
 
+# Raw SLEAP 2D labels, stored under multiview_keypoints/ beside keypoints_2d and
+# keypoint_visibility (which are reprojections of the triangulated 3D when
+# --use_reprojections is set). See SLEAPMultiViewPreprocessor.raw_view_keypoints.
+RAW_KEYPOINT_DATASETS = ("keypoints_2d_raw", "keypoint_visibility_raw", "keypoint_confidence_raw")
+
+
+def set_raw_keypoint_attrs(metadata_group, confidence_threshold: float) -> None:
+    """Mark the raw-label datasets as present and record the threshold behind keypoint_visibility_raw."""
+    metadata_group.attrs["has_raw_keypoints"] = True
+    metadata_group.attrs["raw_keypoint_confidence_threshold"] = float(confidence_threshold)
+
 
 class SLEAPMultiViewPreprocessor:
     """
@@ -577,6 +588,9 @@ class SLEAPMultiViewPreprocessor:
         view_images = []
         view_keypoints = []
         view_visibility = []
+        view_keypoints_raw = []  # raw SLEAP labels, see raw_view_keypoints
+        view_visibility_raw = []
+        view_confidence_raw = []
         view_camera_names = []
         view_camera_indices = []
         view_camera_intrinsics = []  # K matrices
@@ -709,6 +723,7 @@ class SLEAPMultiViewPreprocessor:
 
                 # Undistort image (and keypoints if they came from SLEAP, not reprojections)
                 # Reprojected keypoints are already in undistorted/ideal pinhole space
+                raw_K, raw_distortion = None, None  # set when the image gets undistorted
                 if self.undistort_images and has_3d_data and loader_3d is not None:
                     try:
                         cam_params = loader_3d.get_camera_parameters(camera_name)
@@ -728,6 +743,7 @@ class SLEAPMultiViewPreprocessor:
                                 frame_rgb, keypoints_2d = self._undistort_image_and_keypoints(
                                     frame_rgb, keypoints_2d, K, distortion_coeffs
                                 )
+                            raw_K, raw_distortion = K, distortion_coeffs
                             self.stats["views_undistorted"] += 1
                     except Exception as e:
                         if self.debug:
@@ -735,6 +751,12 @@ class SLEAPMultiViewPreprocessor:
 
                 # Preprocess image
                 processed_image, transform_info = self._preprocess_image(frame_rgb, keypoints_2d)
+
+                # Raw SLEAP labels (confidence-filtered only) in the same crop, stored
+                # beside keypoints_2d (which may be reprojected) for 2D-only training
+                raw_keypoints, raw_visibility, raw_confidence = self.raw_view_keypoints(
+                    loader, camera_data, frame_idx, transform_info, raw_K, raw_distortion
+                )
 
                 # Adjust keypoints
                 adjusted_keypoints = self._adjust_keypoints_for_transform(keypoints_2d, transform_info)
@@ -765,6 +787,9 @@ class SLEAPMultiViewPreprocessor:
                 view_images.append(jpeg_image)
                 view_keypoints.append(smal_keypoints.astype(np.float32))
                 view_visibility.append(smal_visibility.astype(np.float32))
+                view_keypoints_raw.append(raw_keypoints)
+                view_visibility_raw.append(raw_visibility)
+                view_confidence_raw.append(raw_confidence)
                 view_camera_names.append(camera_name)
                 view_camera_indices.append(cam_idx)
                 self.stats["total_views_included"] += 1
@@ -822,6 +847,9 @@ class SLEAPMultiViewPreprocessor:
             "images_jpeg": view_images,  # List of JPEG bytes
             "keypoints_2d": np.stack(view_keypoints, axis=0),  # (num_views, N_joints, 2)
             "keypoint_visibility": np.stack(view_visibility, axis=0),  # (num_views, N_joints)
+            "keypoints_2d_raw": np.stack(view_keypoints_raw, axis=0),  # (num_views, N_joints, 2)
+            "keypoint_visibility_raw": np.stack(view_visibility_raw, axis=0),  # (num_views, N_joints)
+            "keypoint_confidence_raw": np.stack(view_confidence_raw, axis=0),  # (num_views, N_joints)
             "camera_names": view_camera_names,  # List of camera names
             "camera_indices": np.array(view_camera_indices, dtype=np.int32),  # (num_views,)
             "num_views": len(view_images),
@@ -1006,26 +1034,28 @@ class SLEAPMultiViewPreprocessor:
         # This keeps the principal point and focal length the same
         undistorted_image = cv2.undistort(image, K_float, dist_coeffs, newCameraMatrix=K_float)
 
-        # Undistort the keypoints
-        if keypoints_2d is not None and len(keypoints_2d) > 0:
-            # cv2.undistortPoints expects input shape (N, 1, 2)
-            keypoints_reshaped = keypoints_2d.reshape(-1, 1, 2).astype(np.float64)
+        return undistorted_image, self._undistort_keypoints(keypoints_2d, K, distortion_coeffs)
 
-            # Undistort points
-            # When P=K, the output is in pixel coordinates (same as input)
-            undistorted_keypoints = cv2.undistortPoints(
-                keypoints_reshaped,
-                K_float,
-                dist_coeffs,
-                P=K_float,  # Project back to pixel coordinates using same K
-            )
+    def _undistort_keypoints(
+        self, keypoints_2d: np.ndarray, K: np.ndarray, distortion_coeffs: Optional[np.ndarray]
+    ) -> np.ndarray:
+        """Undistort (N, 2) pixel keypoints into the ideal pinhole image with the same K
+        (the image :meth:`_undistort_image_and_keypoints` produces)."""
+        if distortion_coeffs is None or len(distortion_coeffs) == 0 or np.allclose(distortion_coeffs, 0):
+            return keypoints_2d
+        if keypoints_2d is None or len(keypoints_2d) == 0:
+            return keypoints_2d
 
-            # Reshape back to (N, 2)
-            undistorted_keypoints = undistorted_keypoints.reshape(-1, 2).astype(np.float32)
-        else:
-            undistorted_keypoints = keypoints_2d
-
-        return undistorted_image, undistorted_keypoints
+        K_float = K.astype(np.float64)
+        # cv2.undistortPoints expects input shape (N, 1, 2). With P=K the output
+        # is in pixel coordinates of the undistorted image.
+        undistorted_keypoints = cv2.undistortPoints(
+            keypoints_2d.reshape(-1, 1, 2).astype(np.float64),
+            K_float,
+            np.array(distortion_coeffs).flatten().astype(np.float64),
+            P=K_float,
+        )
+        return undistorted_keypoints.reshape(-1, 2).astype(np.float32)
 
     def _resolve_reprojection_dataset(
         self, reproj_handle: h5py.File, camera_name: str, warn: bool = True
@@ -1214,14 +1244,10 @@ class SLEAPMultiViewPreprocessor:
         }
 
         if self.crop_mode == "centred":
-            crop_size = min(original_h, original_w)
-            y_offset = (original_h - crop_size) // 2
-            x_offset = (original_w - crop_size) // 2
+            transform_info = self._size_transform_info(original_h, original_w)
+            y_offset, x_offset = transform_info["crop_offset"]
+            crop_size = transform_info["crop_size"][0]
             image = image[y_offset : y_offset + crop_size, x_offset : x_offset + crop_size]
-            transform_info["crop_offset"] = (y_offset, x_offset)
-            transform_info["crop_size"] = (crop_size, crop_size)
-            scale_factor = self.target_resolution / crop_size
-            transform_info["scale_factor"] = scale_factor
             image = cv2.resize(image, (self.target_resolution, self.target_resolution))
 
         elif self.crop_mode == "bbox_crop":
@@ -1278,13 +1304,36 @@ class SLEAPMultiViewPreprocessor:
                     image = cv2.resize(image, (self.target_resolution, self.target_resolution))
 
         else:  # 'default' mode
-            scale_y = self.target_resolution / original_h
-            scale_x = self.target_resolution / original_w
-            transform_info["scale_factor"] = (scale_y, scale_x)
+            transform_info = self._size_transform_info(original_h, original_w)
             image = cv2.resize(image, (self.target_resolution, self.target_resolution))
 
         image = image.astype(np.float32) / 255.0
         return image, transform_info
+
+    def _size_transform_info(self, original_h: int, original_w: int) -> Dict[str, Any]:
+        """``transform_info`` of :meth:`_preprocess_image` for the crop modes that
+        depend only on the image size ('centred', 'default'), without an image.
+
+        'bbox_crop' depends on the keypoints of each view, so it has no
+        size-only transform.
+        """
+        transform_info = {
+            "original_size": (original_h, original_w),
+            "crop_offset": (0, 0),
+            "crop_size": (original_h, original_w),
+            "scale_factor": 1.0,
+            "mode": self.crop_mode,
+        }
+        if self.crop_mode == "centred":
+            crop_size = min(original_h, original_w)
+            transform_info["crop_offset"] = ((original_h - crop_size) // 2, (original_w - crop_size) // 2)
+            transform_info["crop_size"] = (crop_size, crop_size)
+            transform_info["scale_factor"] = self.target_resolution / crop_size
+        elif self.crop_mode == "default":
+            transform_info["scale_factor"] = (self.target_resolution / original_h, self.target_resolution / original_w)
+        else:
+            raise ValueError(f"crop_mode {self.crop_mode!r} has no size-only transform (it depends on the keypoints)")
+        return transform_info
 
     def _adjust_keypoints_for_transform(self, keypoints_2d: np.ndarray, transform_info: Dict[str, Any]) -> np.ndarray:
         """Adjust 2D keypoints based on image preprocessing transformations."""
@@ -1306,6 +1355,48 @@ class SLEAPMultiViewPreprocessor:
             adjusted_keypoints[:, 1] *= scale_y
 
         return adjusted_keypoints
+
+    def raw_view_keypoints(
+        self,
+        loader: SLEAPDataLoader,
+        camera_data: Dict[str, Any],
+        frame_idx: int,
+        transform_info: Dict[str, Any],
+        K: Optional[np.ndarray] = None,
+        distortion_coeffs: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Raw SLEAP 2D labels of one view, in the stored ``keypoints_2d`` convention.
+
+        The SLEAP predictions are filtered by confidence only: no reprojection and
+        no 3D outlier mask. They are undistorted with ``(K, distortion_coeffs)``
+        when K is given (pass the calibration K whenever the view's image was
+        undistorted), moved through the view's crop/resize, mapped to SMAL joint
+        order and normalised to ``[y, x]`` in [0, 1].
+
+        Returns:
+            ``(keypoints_2d_raw (J, 2), keypoint_visibility_raw (J,),
+            keypoint_confidence_raw (J,))``. Confidence is the SLEAP score, 0
+            where there is no detection or the joint is unmapped; visibility is
+            ``confidence >= self.confidence_threshold``.
+        """
+        n_joints = loader.smal_n_joints
+        keypoints_2d, _, confidence = loader.extract_2d_keypoints_with_confidence(camera_data, frame_idx)
+        if len(keypoints_2d) == 0:
+            zeros = np.zeros(n_joints, dtype=np.float32)
+            return np.zeros((n_joints, 2), dtype=np.float32), zeros, zeros.copy()
+        if K is not None:
+            keypoints_2d = self._undistort_keypoints(keypoints_2d, K, distortion_coeffs)
+        keypoints_2d = self._adjust_keypoints_for_transform(keypoints_2d, transform_info)
+        preprocessed_size = (self.target_resolution, self.target_resolution)
+        # map_keypoints_to_smal_model carries any per-keypoint value in its
+        # visibility slot, so it maps the confidences too (0 for unmapped joints).
+        smal_keypoints, smal_confidence = loader.map_keypoints_to_smal_model(
+            keypoints_2d, confidence, preprocessed_size
+        )
+        smal_keypoints = self._sanitize_array(smal_keypoints).astype(np.float32)
+        smal_confidence = self._sanitize_array(smal_confidence).astype(np.float32)
+        smal_visibility = ((smal_confidence > 0) & (smal_confidence >= self.confidence_threshold)).astype(np.float32)
+        return smal_keypoints, smal_visibility, smal_confidence
 
     def _adjust_intrinsics_for_transform(self, K: np.ndarray, transform_info: Dict[str, Any]) -> np.ndarray:
         """
@@ -1474,6 +1565,11 @@ class SLEAPMultiViewPreprocessor:
             # Keypoints: (num_samples, max_views, n_joints, 2)
             keypoints_2d_data = np.zeros((num_samples, max_views, n_joints, 2), dtype=np.float32)
             keypoint_visibility_data = np.zeros((num_samples, max_views, n_joints), dtype=np.float32)
+            raw_data = {
+                "keypoints_2d_raw": np.zeros_like(keypoints_2d_data),
+                "keypoint_visibility_raw": np.zeros_like(keypoint_visibility_data),
+                "keypoint_confidence_raw": np.zeros_like(keypoint_visibility_data),
+            }
 
             # Camera indices
             camera_indices_data = np.full((num_samples, max_views), -1, dtype=np.int32)
@@ -1515,6 +1611,8 @@ class SLEAPMultiViewPreprocessor:
                     # Keypoints
                     keypoints_2d_data[i, v] = sample["keypoints_2d"][v]
                     keypoint_visibility_data[i, v] = sample["keypoint_visibility"][v]
+                    for name in RAW_KEYPOINT_DATASETS:
+                        raw_data[name][i, v] = sample[name][v]
                     camera_indices_data[i, v] = sample["camera_indices"][v]
 
                     # Camera parameters
@@ -1567,6 +1665,10 @@ class SLEAPMultiViewPreprocessor:
                 compression=self.compression,
                 compression_opts=self.compression_level,
             )
+            for name, data in raw_data.items():
+                keypoints_group.create_dataset(
+                    name, data=data, compression=self.compression, compression_opts=self.compression_level
+                )
             keypoints_group.create_dataset(
                 "camera_indices",
                 data=camera_indices_data,
@@ -1693,6 +1795,7 @@ class SLEAPMultiViewPreprocessor:
             metadata_group.attrs["load_3d_data"] = self.load_3d_data
             metadata_group.attrs["undistort_images"] = self.undistort_images
             metadata_group.attrs["used_reprojections"] = self.use_reprojections
+            set_raw_keypoint_attrs(metadata_group, self.confidence_threshold)
             # Store mapping info for downstream consumers/debugging
             try:
                 metadata_group.attrs["keypoints_3d_joint_order"] = "smal"

@@ -506,6 +506,22 @@ class SLEAPDataLoader:
             - keypoints_2d: (N, 2) array of 2D coordinates
             - visibility: (N,) boolean array indicating keypoint visibility
         """
+        keypoints_2d, visibility, _ = self.extract_2d_keypoints_with_confidence(camera_data, frame_idx)
+        return keypoints_2d, visibility
+
+    def extract_2d_keypoints_with_confidence(
+        self, camera_data: Dict[str, Any], frame_idx: int = 0
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Like :meth:`extract_2d_keypoints`, plus the per-keypoint SLEAP confidence.
+
+        Returns:
+            Tuple of (keypoints_2d, visibility, confidence). ``confidence`` (N,)
+            float32 is the SLEAP point score where the keypoint is a detection
+            (finite score and coordinates, not at (0, 0), visible flag set) and 0
+            elsewhere; user-labelled points without a score count as 1.
+            ``visibility`` is exactly what extract_2d_keypoints returns.
+        """
         # Check if data was loaded from .slp fallback (uses camera_dirs format)
         if camera_data.get("_data_source") == "slp":
             return self._extract_2d_keypoints_camera_dirs(camera_data, frame_idx)
@@ -515,11 +531,11 @@ class SLEAPDataLoader:
             return self._extract_2d_keypoints_session_dirs(camera_data, frame_idx)
         else:
             print("Unknown data structure type")
-            return np.array([]), np.array([])
+            return np.array([]), np.array([]), np.array([])
 
     def _extract_2d_keypoints_camera_dirs(
         self, camera_data: Dict[str, Any], frame_idx: int
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Extract 2D keypoints for camera_dirs structure."""
         instances = camera_data["instances"]
         camera_data["frames"]
@@ -531,14 +547,14 @@ class SLEAPDataLoader:
             points = camera_data["points"]
         else:
             print("Warning: No point data available")
-            return np.array([]), np.array([])
+            return np.array([]), np.array([]), np.array([])
 
         # Find instances for the specified frame
         frame_instances = instances[instances["frame_id"] == frame_idx]
 
         if len(frame_instances) == 0:
             print(f"Warning: No instances found for frame {frame_idx}")
-            return np.array([]), np.array([])
+            return np.array([]), np.array([]), np.array([])
 
         # Get the first instance (assuming single animal tracking)
         instance = frame_instances[0]
@@ -549,7 +565,7 @@ class SLEAPDataLoader:
 
         if point_end > len(points):
             print(f"Warning: Point indices out of range: {point_start}-{point_end} (max: {len(points)})")
-            return np.array([]), np.array([])
+            return np.array([]), np.array([]), np.array([])
 
         instance_points = points[point_start:point_end]
 
@@ -575,6 +591,8 @@ class SLEAPDataLoader:
             )
             # Keypoint is visible if: has valid confidence, above threshold, originally marked visible, and has non-zero coordinates
             visibility = valid_confidence & above_threshold & original_visible & non_zero_coords
+            detected = valid_confidence & original_visible & non_zero_coords
+            scores = confidence_scores
         else:
             # Fallback: check original visibility flag and non-zero coordinates
             original_visible = (
@@ -583,23 +601,27 @@ class SLEAPDataLoader:
                 else np.ones(len(instance_points), dtype=bool)
             )
             visibility = original_visible & non_zero_coords
+            detected = visibility
+            scores = np.ones(len(instance_points), dtype=np.float32)  # user labels carry no score
 
-        return keypoints_2d, visibility
+        detected = detected & np.isfinite(keypoints_2d).all(axis=1)
+        confidence = np.where(detected, scores, 0.0).astype(np.float32)
+        return keypoints_2d, visibility, confidence
 
     def _extract_2d_keypoints_session_dirs(
         self, camera_data: Dict[str, Any], frame_idx: int
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Extract 2D keypoints for session_dirs structure."""
         if "tracks" not in camera_data:
             print("Warning: No tracks data available")
-            return np.array([]), np.array([])
+            return np.array([]), np.array([]), np.array([])
 
         tracks = camera_data["tracks"]  # Shape: (n_tracks, n_instances, n_keypoints, n_frames)
         # Where instance 0 = x coordinates, instance 1 = y coordinates
 
         if frame_idx >= tracks.shape[3]:
             print(f"Warning: Frame index {frame_idx} out of range (max: {tracks.shape[3] - 1})")
-            return np.array([]), np.array([])
+            return np.array([]), np.array([]), np.array([])
 
         # Get x and y coordinates from the first track
         x_coords = tracks[0, 0, :, frame_idx]  # x coordinates for all keypoints
@@ -620,13 +642,19 @@ class SLEAPDataLoader:
             non_zero_coords = (keypoints_2d[:, 0] != 0) | (keypoints_2d[:, 1] != 0)
             # Keypoint is visible if: has valid confidence, above threshold, and has non-zero coordinates
             visibility = valid_confidence & above_threshold & non_zero_coords
+            detected = valid_confidence & non_zero_coords
+            scores = frame_scores
         else:
             # Fallback: assume keypoints are visible if they have non-NaN, non-zero coordinates
             valid_coords = ~np.isnan(keypoints_2d).any(axis=1)
             non_zero_coords = (keypoints_2d[:, 0] != 0) | (keypoints_2d[:, 1] != 0)
             visibility = valid_coords & non_zero_coords
+            detected = visibility
+            scores = np.ones(len(keypoints_2d), dtype=np.float32)  # no scores stored
 
-        return keypoints_2d, visibility
+        detected = detected & np.isfinite(keypoints_2d).all(axis=1)
+        confidence = np.where(detected, scores, 0.0).astype(np.float32)
+        return keypoints_2d, visibility, confidence
 
     def load_3d_keypoints(self, frame_idx: int = 0) -> np.ndarray:
         """

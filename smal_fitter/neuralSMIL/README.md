@@ -222,7 +222,7 @@ Configuration is managed through JSON files backed by Python dataclasses. See `c
 2. JSON config file (`--config path/to/config.json`)
 3. Mode-specific defaults (`SingleViewConfig` / `MultiViewConfig`)
 4. Base defaults (`BaseTrainingConfig`)
-5. Legacy `config.py` (SMAL paths, `SHAPE_FAMILY`, `N_BETAS`, `N_POSE` — unchanged)
+5. Legacy `config.py` (`SMAL_FILE` and the globals derived from it — `dd`, `N_POSE`, `N_BETAS` — plus `SHAPE_FAMILY`)
 
 ### JSON Config Structure
 

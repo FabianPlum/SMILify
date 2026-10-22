@@ -235,24 +235,17 @@ def test_neural_penalty_real_method_integration():
 
 def test_neural_penalty_fail_fast_validation():
     """Issue #56 review C1: the real _init_joint_limit_bounds raises RuntimeError
-    when the penalty is enabled but unusable (missing 'joint_limits' key, or
-    legacy hardcoded-body mode), rather than silently no-op'ing."""
+    when the penalty is enabled but unusable (missing 'joint_limits' key), rather
+    than silently no-op'ing."""
     import types
 
     from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
 
-    prev_flag = config.ignore_hardcoded_body
     had = "joint_limits" in config.dd
     prev = config.dd.get("joint_limits", None)
     try:
-        # Legacy mode guard fires first.
-        config.ignore_hardcoded_body = False
-        with pytest.raises(RuntimeError, match="ignore_hardcoded_body"):
-            SMILImageRegressor._init_joint_limit_bounds(types.SimpleNamespace())
-
-        # Rigged mode but no authored limits in the .pkl -> wide-open fallback
-        # would be a guaranteed no-op, so it must raise.
-        config.ignore_hardcoded_body = True
+        # No authored limits in the .pkl -> wide-open fallback would be a
+        # guaranteed no-op, so it must raise.
         config.dd.pop("joint_limits", None)
         with pytest.raises(RuntimeError, match="joint_limits"):
             SMILImageRegressor._init_joint_limit_bounds(types.SimpleNamespace())
@@ -267,7 +260,6 @@ def test_neural_penalty_fail_fast_validation():
         SMILImageRegressor._init_joint_limit_bounds(stub)
         assert stub._joint_limit_bounds == (min_l, max_l)
     finally:
-        config.ignore_hardcoded_body = prev_flag
         if had:
             config.dd["joint_limits"] = prev
         else:
@@ -334,10 +326,8 @@ def test_prior_module_import_survives_malformed_joint_limits():
     try:
         config.dd["joint_limits"] = np.zeros((2, 2))  # garbage shape
         importlib.reload(jlp)  # would have raised ValueError pre-fix
-        if config.ignore_hardcoded_body:
-            assert jlp.Ranges is None  # deferred, not built at import
-            with pytest.raises(ValueError):
-                jlp.LimitPrior()  # validation still happens at construction
+        with pytest.raises(ValueError):
+            jlp.LimitPrior()  # validation still happens at construction
     finally:
         if had:
             config.dd["joint_limits"] = prev

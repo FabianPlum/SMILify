@@ -38,7 +38,6 @@ dependencies:
   - timm
   - opencv          # conda-forge package; provides the cv2 module
   - nibabel
-  - pycocotools
   - toml
   - pytest
   - pytest-timeout      # per-test wall-clock cap so a hang fails fast in CI

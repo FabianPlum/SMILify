@@ -52,7 +52,6 @@ def _make_recorder(tmp_path, rotation_representation="axis_angle"):
         parents=[-1] + list(range(N_JOINTS - 1)),
         fps=30.0,
         static_joint_locs=True,
-        ignore_hardcoded_body=False,
         source_checkpoint="ckpt.pth",
         source_input="input.mp4",
         model_id="test_model",
@@ -94,6 +93,7 @@ def test_round_trip_axis_angle(tmp_path):
     assert sidecar["rotation_representation"] == "axis_angle"
     assert sidecar["root_joint_index"] == 0
     assert sidecar["static_joint_locs"] is True
+    assert "ignore_hardcoded_body" not in sidecar  # dropped in schema 1.2 (#110)
     assert sidecar["n_frames"] == 5
     assert sidecar["n_joints"] == N_JOINTS
     assert sidecar["n_betas"] == N_BETAS
@@ -158,5 +158,4 @@ def test_invalid_rotation_representation_raises(tmp_path):
             parents=[-1] + list(range(N_JOINTS - 1)),
             fps=30.0,
             static_joint_locs=True,
-            ignore_hardcoded_body=False,
         )

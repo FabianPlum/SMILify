@@ -63,6 +63,7 @@ betas            (N_BETAS,)         float32  clip-averaged shape vector (AMASS b
 betas_per_frame  (F, N_BETAS)       float32  per-frame shape vector (drives Blender morph animation)
 log_beta_scales  (F, N_JOINTS, 3)   float32  per-joint log scale (when model predicts)
 betas_trans      (F, N_JOINTS, 3)   float32  per-joint trans (when model predicts)
+mesh_scale       (F,)               float32  isotropic scale about the root joint (when recorded; since 1.1)
 fps              scalar             float32
 ```
 
@@ -76,7 +77,7 @@ choose.
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.2",
   "model_id": "...",
   "source_checkpoint": "...",
   "source_input": "...",
@@ -88,33 +89,35 @@ choose.
   "rotation_representation": "axis_angle",
   "root_joint_index": 0,
   "static_joint_locs": true | false,
-  "ignore_hardcoded_body": true | false,
   "fps": 30,
   "cameras": [{"view_name": "...", "R": 3x3, "t": 3, "fov": ...}, ...]
 }
 ```
 
+Schema versions (`SCHEMA_VERSION` in `animation_export.py`): `1.0` initial; `1.1`
+adds the optional `mesh_scale` array; `1.2` drops the sidecar key
+`ignore_hardcoded_body` together with the flag
+([#110](https://github.com/FabianPlum/SMILify/issues/110)). Readers must ignore
+unknown keys, so older sidecars that still carry it import unchanged.
+
 ### Field sourcing (verified against code)
 
 - `rotation_representation`: always the string `"axis_angle"` on output. The
   regressor may internally use `"6d"` or `"axis_angle"`
-  ([smil_image_regressor.py:103,119,143](../../smal_fitter/neuralSMIL/smil_image_regressor.py));
+  (`SMILImageRegressor` in [smil_image_regressor.py](../../smal_fitter/neuralSMIL/smil_image_regressor.py));
   exporter normalises via the `rotation_6d_to_axis_angle` path
   (`pytorch3d.transforms.rotation_6d_to_matrix` → `matrix_to_axis_angle`)
   inside `animation_export.py` to avoid pulling the full regressor import
   chain.
 - `root_joint_index`: fixed at 0; root identified as the entry where
   `dd["kintree_table"][0] == -1`
-  ([config.py:96](../../config.py), [smal_torch.py:205](../../smal_model/smal_torch.py)).
+  (`config.set_model` in [config.py](../../config.py), `SMAL.__init__` in [smal_torch.py](../../smal_model/smal_torch.py)).
 - `static_joint_locs`: real flag (not invented). Derived from the pkl key
   `dd["static_joint_locs"]` and exposed as `config.STATIC_JOINT_LOCATIONS`
-  ([config.py:82-89](../../config.py)). Controls joint computation inside
-  `SMAL.__call__` ([smal_torch.py:254-263, 342-350](../../smal_model/smal_torch.py)):
+  (`config.set_model` in [config.py](../../config.py)). Controls joint computation inside
+  `SMAL.__call__` ([smal_torch.py](../../smal_model/smal_torch.py)):
   - `True`  → use stored `self.J` directly.
   - `False` → always recompute `J = J_regressor @ v_shaped` each forward pass.
-- `ignore_hardcoded_body`: recorded for informational parity with
-  [config.py:49](../../config.py); controls symmetry / joint-name loading, not
-  joint recomputation.
 
 ### Correctness implication of `static_joint_locs`
 
@@ -128,7 +131,7 @@ choose.
   1. Use the clip-averaged `betas` only (ignore `betas_per_frame`).
   2. Apply those betas to the shape keys once (static for the clip).
   3. Invoke the existing `SMPL_OT_RecomputeJointPositions` operator
-     ([SMIL_processing_addon.py:3356](../../3D_model_prep/legacy/SMIL_processing_addon.py))
+     ([SMIL_processing_addon.py](../../3D_model_prep/legacy/SMIL_processing_addon.py))
      once to re-regress the armature's rest pose to the averaged shape.
   4. Then keyframe rotation / bone scale / root trans as normal.
   Importer emits an INFO message explaining per-frame shape animation is
@@ -144,7 +147,7 @@ choose.
   that pulls joint metadata from the global `config`;
   `build_multiview_cameras` that averages `cam_{rot,trans,fov}_per_view` across
   frames into a static sidecar block; local `rotation_6d_to_axis_angle` with
-  lazy pytorch3d import. Schema version `"1.0"`.
+  lazy pytorch3d import. Schema version `"1.0"` (current: see *Schema versions*).
 
 - **MODIFIED** [smal_fitter/neuralSMIL/run_singleview_inference.py](../../smal_fitter/neuralSMIL/run_singleview_inference.py)
   — added `--export_animation PATH` CLI flag; added `animation_recorder`
@@ -244,8 +247,8 @@ Items surfaced from end-to-end testing in Blender; deferred for follow-up:
 
 ### Out of scope for Phase 2
 
-- Posedir correctives application (existing logic at
-  [SMIL_processing_addon.py:705-760](../../3D_model_prep/legacy/SMIL_processing_addon.py)
+- Posedir correctives application (existing `apply_pose_correctives` in
+  [SMIL_processing_addon.py](../../3D_model_prep/legacy/SMIL_processing_addon.py)
   can be wired in later).
 - Drivers-based live evaluation.
 - Animated cameras.
@@ -305,8 +308,8 @@ Items surfaced from end-to-end testing in Blender; deferred for follow-up:
 
 ### Inference run needs an HF-weight cache
 
-`timm.create_model(..., pretrained=True)` at
-[backbone_factory.py:325](../../smal_fitter/neuralSMIL/backbone_factory.py#L325)
+`timm.create_model(..., pretrained=True)` in the backbone constructors of
+[backbone_factory.py](../../smal_fitter/neuralSMIL/backbone_factory.py)
 pulls ImageNet weights from HuggingFace. On machines without internet (or
 where HF is unreachable — WSL2 networking frequently is), the backbone
 constructor fails with `LocalEntryNotFoundError`.

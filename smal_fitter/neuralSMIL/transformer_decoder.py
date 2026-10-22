@@ -261,11 +261,10 @@ class SMILTransformerDecoderHead(nn.Module):
             self.scales_dim = 0
             self.joint_trans_dim = 0
         else:
-            # Fallback for legacy code - check config.ignore_hardcoded_body
-            if config.ignore_hardcoded_body:
-                n_joints = config.N_POSE + 1
-                self.scales_dim = n_joints * 3
-                self.joint_trans_dim = n_joints * 3
+            # Unrecognised scale_trans_mode: fall back to per-joint scales/trans.
+            n_joints = config.N_POSE + 1
+            self.scales_dim = n_joints * 3
+            self.joint_trans_dim = n_joints * 3
 
     def _initialize_parameters(self):
         """Initialize transformer decoder parameters."""

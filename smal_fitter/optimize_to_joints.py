@@ -20,7 +20,7 @@ import pickle as pkl
 import torch
 import imageio
 
-from smal_fitter.data_loader import load_badja_sequence, load_stanford_sequence, load_SMIL_sequence
+from smal_fitter.data_loader import load_SMIL_sequence
 import trimesh
 
 from tqdm import trange
@@ -81,33 +81,19 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     dataset, name = config.SEQUENCE_OR_IMAGE_NAME.split(":")
-
-    if dataset == "badja":
-        data, filenames = load_badja_sequence(config.BADJA_PATH, name, config.CROP_SIZE, image_range=config.IMAGE_RANGE)
-    elif dataset == "stanfordextra":
-        data, filenames = load_stanford_sequence(config.STANFORD_EXTRA_PATH, name, config.CROP_SIZE)
-    else:
-        data, filenames = load_SMIL_sequence(config.REPLICANT_PATH, name, config.CROP_SIZE)
+    if dataset.lower() != "replicant":
+        raise ValueError(
+            f"Unsupported dataset {dataset!r} in SEQUENCE_OR_IMAGE_NAME: only 'replicAnt:<image>' is supported "
+            "(the BADJA/StanfordExtra quadruped loaders were removed in #110)."
+        )
+    data, filenames = load_SMIL_sequence(config.REPLICANT_PATH, name, config.CROP_SIZE)
 
     dataset_size = len(filenames)
     print("Dataset size: {0}".format(dataset_size))
 
-    if not config.ignore_hardcoded_body:
-        assert config.SHAPE_FAMILY >= 0, "Shape family should be greater than 0"
-
-        use_unity_prior = config.SHAPE_FAMILY == 1 and not config.FORCE_SMAL_PRIOR
-    else:
-        use_unity_prior = False
-
-    if not use_unity_prior and not config.ALLOW_LIMB_SCALING:
-        print(
-            "WARNING: Limb scaling is only recommended for the new Unity prior. TODO: add a regularizer to constrain scale parameters."
-        )
-        config.ALLOW_LIMB_SCALING = False
-
     image_exporter = ImageExporter(config.OUTPUT_DIR, filenames)
 
-    model = SMALFitter(device, data, config.WINDOW_SIZE, config.SHAPE_FAMILY, use_unity_prior)
+    model = SMALFitter(device, data, config.WINDOW_SIZE, config.SHAPE_FAMILY, use_unity_prior=False)
     for stage_id, weights in enumerate(np.array(config.OPT_WEIGHTS).T):
         opt_weight = weights[:6]
         w_temp = weights[6]
