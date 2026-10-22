@@ -68,6 +68,7 @@ from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.animation_export import AnimationRecorder, build_recorder_from_config
 from smal_fitter.neuralSMIL.configs import resolve_smal_file_for_checkpoint
+from smal_fitter.neuralSMIL.data_splits import add_inference_split_arg, split_dataset_from_settings
 from smal_fitter.neuralSMIL.inference_utils import (
     RENDER_RESOLUTION_CAP,
     InMemoryImageExporter,
@@ -455,6 +456,8 @@ def load_model_from_checkpoint(
         model_config["allow_mesh_scaling"] = allow_mesh_scaling
         model_config["rotation_representation"] = rotation_representation
         model_config["scale_trans_mode"] = scale_trans_mode
+        # Split settings the trainer stored (seed, ratios, split_method, holdout_fold), for --split
+        model_config["split_settings"] = (ckpt_config.get("training_params") or {}) if ckpt_config else {}
 
         # SMAL/SMIL model: --smal_file > checkpoint's smal_file > config.py default.
         # Must run before the model is built: head widths follow config.N_BETAS / N_POSE.
@@ -2099,8 +2102,13 @@ def process_dataset(
     checkpoint_path: Optional[str] = None,
     save_frames: bool = False,
     use_calibrated_aspect: bool = False,
+    split: str = "all",
 ) -> None:
-    """Run inference over a preprocessed dataset and write one video per view."""
+    """Run inference over a preprocessed dataset and write one video per view.
+
+    ``split`` other than "all" keeps only the frames of that part of the
+    checkpoint's train/val/test split (see data_splits.add_inference_split_arg).
+    """
     os.makedirs(output_folder, exist_ok=True)
 
     dataset, is_multiview_h5 = build_singleview_dataset(dataset_path, model, model_config)
@@ -2130,6 +2138,13 @@ def process_dataset(
         print(f"  World scale (baked into dataset 3D/camera units): {dataset.world_scale}")
 
     per_view_items = compute_view_item_indices(dataset, view_indices)
+    if split != "all":
+        _, sample_split = split_dataset_from_settings(dataset, model_config["split_settings"])
+        keep = set(getattr(sample_split, split))
+        item_samples = getattr(dataset, "item_sample_indices", None)
+        sample_of = (lambda i: int(item_samples[i])) if item_samples is not None else (lambda i: i)
+        per_view_items = {v: [i for i in idxs if sample_of(i) in keep] for v, idxs in per_view_items.items()}
+        print(f"  Frames: {split} split only ({sample_split.description})")
     available = {v: idxs for v, idxs in per_view_items.items() if idxs}
     if not available:
         raise ValueError(
@@ -2140,7 +2155,7 @@ def process_dataset(
         if v not in available:
             print(f"WARNING: view index {v} has no items in this dataset; skipping.")
 
-    dataset_name = Path(dataset_path).stem
+    dataset_name = Path(dataset_path).stem if split == "all" else f"{Path(dataset_path).stem}_{split}"
     multi_view_out = len(available) > 1
 
     for view_idx, item_indices in available.items():
@@ -2458,6 +2473,7 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
         "Each slot yields its own temporally-ordered output video. Multi-view HDF5s only; "
         "single-view HDF5s have one implicit slot.",
     )
+    add_inference_split_arg(dataset_group)
     dataset_group.add_argument(
         "--generate_num_subclips",
         type=int,
@@ -2592,6 +2608,7 @@ Supported video formats: mp4, avi, mov, mkv (anything supported by OpenCV)
                 checkpoint_path=args.checkpoint,
                 save_frames=args.save_frames,
                 use_calibrated_aspect=args.use_calibrated_aspect,
+                split=args.split,
             )
 
         elif args.input_folder:

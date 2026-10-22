@@ -48,6 +48,9 @@ class DatasetConfig:
     # "raw" only: recompute visibility as keypoint_confidence_raw >= this value
     # (null keeps the threshold the raw labels were stored with).
     raw_keypoint_min_confidence: Optional[float] = None
+    # Resume only: continue when the split settings differ from the resumed
+    # checkpoint's (a deliberate fine-tune on a new split). Off: such a resume stops.
+    allow_split_change: bool = False
 
     # ── Single-view-from-multiview sampling ──────────────────────────────
     # Draw single-view training items from a multi-view HDF5. When enabled the
@@ -666,6 +669,7 @@ class BaseTrainingConfig:
                 "holdout_fold": self.dataset.holdout_fold,
                 "keypoint_source": self.dataset.keypoint_source,
                 "raw_keypoint_min_confidence": self.dataset.raw_keypoint_min_confidence,
+                "allow_split_change": self.dataset.allow_split_change,
             },
             "training_params": {
                 "batch_size": self.training.batch_size,

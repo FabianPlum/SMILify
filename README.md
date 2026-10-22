@@ -342,7 +342,9 @@ python -m smal_fitter.neuralSMIL.benchmark_model \
 
 When the HDF5 has [raw 2D labels](#raw-2d-labels), every 2D metric is reported twice, against `keypoints_2d` and against `keypoints_2d_raw`, whichever the model trained on. The raw-label files carry a `_raw` suffix (e.g. `pck_curve_native_raw.png`, `errors_2d_px_native_raw.npy`).
 
-**Output files** are written to `benchmark_{model_type}_{checkpoint}_on_{dataset}/`:
+**The test split is the one the model was trained with.** The benchmark rebuilds it from the split settings stored in the checkpoint (random with its seed, or the blocked fold), so it takes no split arguments; the report logs it (`Split: blocked, fold 2 of 5 ...`). See the [cross-validation recipe](smal_fitter/neuralSMIL/configs/README.md#dataset--data-paths-and-splits).
+
+**Output files** are written to `benchmark_{model_type}_{checkpoint}_on_{dataset}/` (with `_fold{k}` appended for a checkpoint trained on a blocked split):
 
 | File | Description |
 |---|---|

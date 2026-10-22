@@ -15,7 +15,16 @@ import pytest
 import torch
 
 from smal_fitter.neuralSMIL.configs import SingleViewConfig, load_config
-from smal_fitter.neuralSMIL.data_splits import blocked_sample_split, split_dataset, validate_split_settings
+from smal_fitter.neuralSMIL.data_splits import (
+    SplitMismatchError,
+    blocked_sample_split,
+    check_resume_split,
+    fold_tag,
+    split_dataset,
+    split_dataset_from_settings,
+    tag_output_dir,
+    validate_split_settings,
+)
 
 
 class _FakeDataset:
@@ -139,3 +148,34 @@ def test_split_settings_reach_the_trainers(tmp_path):
     sv.dataset.from_multiview = True
     sv.validate()
     assert sv.to_legacy_dict()["dataset"]["split_method"] == "blocked"
+
+
+def test_resume_refuses_a_different_split():
+    blocked = {
+        "split_method": "blocked",
+        "holdout_fold": None,
+        "train_ratio": 0.8,
+        "val_ratio": 0.05,
+        "test_ratio": 0.15,
+    }
+    check_resume_split(blocked, {**blocked, "holdout_fold": 4, "seed": 7}, "ckpt.pth")  # same split
+    with pytest.raises(SplitMismatchError, match="holdout_fold: 4 -> 2"):
+        check_resume_split(blocked, {**blocked, "holdout_fold": 2}, "ckpt.pth")
+    random = {"train_ratio": 0.85, "val_ratio": 0.05, "test_ratio": 0.1, "seed": 42}  # predates split_method
+    with pytest.raises(SplitMismatchError, match="split_method: 'random' -> 'blocked'"):
+        check_resume_split(random, blocked, "ckpt.pth")
+    logged = []
+    check_resume_split(random, {**random, "seed": 0}, "ckpt.pth", allow_change=True, log=logged.append)
+    assert "seed: 42 -> 0" in logged[0]
+    check_resume_split(None, blocked, "ckpt.pth", log=logged.append)  # nothing stored: warn only
+    assert "cannot check" in logged[1]
+
+
+def test_fold_tags_and_stored_split_rebuild():
+    assert fold_tag("random", None, 0.05, 0.1) == ""
+    assert fold_tag("blocked", None, 0.05, 0.15) == "_fold4"
+    assert tag_output_dir("ckpt/", "_fold2") == "ckpt_fold2" == tag_output_dir("ckpt_fold2", "_fold2")
+    # Random checkpoints rebuild with test = remainder, even if their stored ratios don't sum to 1.
+    ds = _FakeDataset(1000)
+    _, split = split_dataset_from_settings(ds, {"train_ratio": 0.85, "val_ratio": 0.005, "test_ratio": 0.1, "seed": 42})
+    assert (len(split.train), len(split.val), len(split.test)) == (850, 5, 145)

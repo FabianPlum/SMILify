@@ -50,7 +50,7 @@ from smal_fitter.neuralSMIL.configs import apply_smal_file_override
 from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
 from smal_fitter.neuralSMIL.multiview_smil_regressor import create_multiview_regressor
 from smal_fitter.neuralSMIL.train_multiview_regressor import MultiViewTrainingConfig, load_checkpoint, set_random_seeds
-from smal_fitter.neuralSMIL.data_splits import split_dataset
+from smal_fitter.neuralSMIL.data_splits import fold_tag, split_dataset_from_settings
 
 # Single-view imports
 from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
@@ -69,6 +69,18 @@ def _detect_model_type(checkpoint: dict) -> str:
     if "view_embeddings.weight" in state_dict:
         return "multiview"
     return "singleview"
+
+
+def _fold_tag_from_checkpoint(checkpoint: dict, model_type: str) -> str:
+    """``"_fold{k}"`` for a checkpoint trained on a blocked split (see data_splits.fold_tag), else ``""``."""
+    cfg = checkpoint.get("config") or {}
+    settings = (cfg.get("training_params") or {}) if model_type == "singleview" else cfg
+    return fold_tag(
+        settings.get("split_method"),
+        settings.get("holdout_fold"),
+        settings.get("val_ratio"),
+        settings.get("test_ratio"),
+    )
 
 
 def _safe_stem(path: str) -> str:
@@ -775,23 +787,7 @@ def _run_singleview_benchmark(
     # Split (same call as the training script, from the settings it persisted).
     # Camera-centric datasets are split over samples and expanded to view-items,
     # so the benchmark TEST set == the training / multi-view test set.
-    # random: test is the remainder (a stored test_ratio may predate the sum
-    # check); blocked: the stored value, which sets the val/test cut exactly as
-    # in training (an inferred 1 - train - val can round it differently).
-    split_method = sv_config["split_method"]
-    if split_method == "blocked":
-        test_ratio = sv_config["test_ratio"]
-    else:
-        test_ratio = 1.0 - sv_config["train_ratio"] - sv_config["val_ratio"]
-    (train_set, val_set, test_set), sample_split = split_dataset(
-        dataset,
-        split_method=split_method,
-        train_ratio=sv_config["train_ratio"],
-        val_ratio=sv_config["val_ratio"],
-        test_ratio=test_ratio,
-        seed=sv_config["seed"],
-        holdout_fold=sv_config["holdout_fold"],
-    )
+    (train_set, val_set, test_set), sample_split = split_dataset_from_settings(dataset, sv_config)
     log_fn("\nDataset split:")
     for line in sample_split.log_lines():
         log_fn(f"  {line}")
@@ -1070,7 +1066,9 @@ def main():
     # Output directory (includes model type for clarity)
     ckpt_stem = _safe_stem(args.checkpoint)
     dataset_stem = _safe_stem(args.dataset_path)
-    output_dir = os.path.join(os.getcwd(), f"benchmark_{model_type}_{ckpt_stem}_on_{dataset_stem}")
+    # One folder per fold, so the folds of a cross-validation sweep (all best_model.pth) never collide
+    fold = _fold_tag_from_checkpoint(checkpoint, model_type)
+    output_dir = os.path.join(os.getcwd(), f"benchmark_{model_type}_{ckpt_stem}_on_{dataset_stem}{fold}")
     os.makedirs(output_dir, exist_ok=True)
 
     log_lines = []
@@ -1233,24 +1231,8 @@ def _run_multiview_benchmark(
 
     _log_keypoint_rescaling_info(log_fn, dataset, override_size)
 
-    # Data splits (same call as train_multiview_regressor.py; checkpoints that
-    # predate split_method were random). random: test is the remainder (a stored
-    # test_ratio may predate the sum check); blocked: the stored value, which
-    # sets the val/test cut exactly as in training.
-    split_method = config_from_ckpt.get("split_method", "random")
-    if split_method == "blocked":
-        test_ratio = config_from_ckpt["test_ratio"]
-    else:
-        test_ratio = 1.0 - config_from_ckpt["train_ratio"] - config_from_ckpt["val_ratio"]
-    (train_set, val_set, test_set), sample_split = split_dataset(
-        dataset,
-        split_method=split_method,
-        train_ratio=config_from_ckpt["train_ratio"],
-        val_ratio=config_from_ckpt["val_ratio"],
-        test_ratio=test_ratio,
-        seed=config_from_ckpt["seed"],
-        holdout_fold=config_from_ckpt.get("holdout_fold"),
-    )
+    # Data splits (same call as train_multiview_regressor.py, from the settings it persisted)
+    (train_set, val_set, test_set), sample_split = split_dataset_from_settings(dataset, config_from_ckpt)
 
     log_fn("\nDataset split:")
     for line in sample_split.log_lines():

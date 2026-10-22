@@ -70,23 +70,36 @@ If you omit `--config`, the scripts fall back to the previous behavior (e.g. `Tr
 | `test_ratio` | float | `0.1` | Fraction of data used for testing. `train_ratio + val_ratio + test_ratio` must sum to 1. |
 | `split_method` | string | `"random"` | How frames are assigned to train/val/test: `"random"` (seeded random split) or `"blocked"` (blocked k-fold cross-validation along time within each session, see below). |
 | `holdout_fold` | int or null | `null` | `"blocked"` only: index of the held-out block, `0` = start of each session, `null` = last block. Must be `null` for `"random"`, which splits with `training.seed`. |
+| `allow_split_change` | bool | `false` | Resume only. A resume whose split settings differ from the checkpoint's stops with an error (it would train on the checkpoint's held-out frames); `true` (or `--allow_split_change`) continues for a deliberate fine-tune on a new split. |
+| `from_multiview` | bool | `false` | Single-view only: draw single-view items from a multi-view HDF5. Needed for `"blocked"` (only multi-view HDF5s carry session and frame per sample). |
+| `frame_convention` | string | `"model_centric"` | Single-view from multi-view: `"camera_centric"` re-anchors each sampled camera at the origin (fixed identity camera, known FOV); `"model_centric"` is the legacy SMALify convention. Saved in the checkpoint. |
+| `expand_all_views` | bool | `true` | Single-view from multi-view: every valid view of every sample is its own item. |
+| `use_ue_scaling` | bool | `true` | 10x UE mesh scaling for legacy single-view replicAnt data; must be `false` for multi-view HDF5s. |
 | `dataset_fraction` | float | `0.5` | Fraction of training split sampled per epoch (a different random subset is drawn each epoch for diversity). |
 | `keypoint_source` | string | `"reprojected"` | 2D training labels of a multi-view HDF5: `"reprojected"` (`keypoints_2d`) or `"raw"` (`keypoints_2d_raw`, the SLEAP predictions filtered by confidence only, see [Raw 2D labels](../../../README.md#raw-2d-labels)). Single-view `"raw"` needs `from_multiview: true`. The benchmark scores against both, whichever the model trained on. |
 | `raw_keypoint_min_confidence` | float or null | `null` | `"raw"` only: a raw label is visible when its SLEAP confidence is at least this value. `null` keeps the threshold the labels were stored with. |
 
-**Blocked split:** neighbouring video frames are near-duplicates, so a random split puts almost the same frame in train and test. `"blocked"` orders each session by `frame_idx` and cuts it into `K = 1 / (val_ratio + test_ratio)` contiguous blocks. Fold `k` holds out block `k` of every session: its first `val_ratio` share is validation, the rest is test, and the remainder of the session trains. Blocks are adjacent with no buffer gap, so only the frames at each block edge have a near-duplicate neighbour in another split. The ratios must tile a session (`train_ratio = 1 - val_ratio - test_ratio`, `K` a whole number), and the dataset must be a multi-view HDF5 (single-view needs `from_multiview: true`). The split does not depend on `training.seed`, so runs with different seeds share it. Trainers save the split settings in the checkpoint and `benchmark_model.py` rebuilds the same test set from them. For 5-fold cross-validation, run `--holdout_fold 0` to `4` with:
+**Blocked split:** neighbouring video frames are near-duplicates, so a random split puts almost the same frame in train and test. `"blocked"` orders each session by `frame_idx` and cuts it into `K = 1 / (val_ratio + test_ratio)` contiguous blocks. Fold `k` holds out block `k` of every session: its first `val_ratio` share is validation, the rest is test, and the remainder of the session trains. Blocks are adjacent with no buffer gap, so only the frames at each block edge have a near-duplicate neighbour in another split. The ratios must tile a session (`train_ratio = 1 - val_ratio - test_ratio`, `K` a whole number), and the dataset must be a multi-view HDF5 (single-view needs `from_multiview: true`). The split does not depend on `training.seed`, so runs with different seeds share it. With ratios 0.80 / 0.05 / 0.15 there are 5 folds; `holdout_fold: null` (fold 4) trains on the first 80% of each session, validates on the next 5% and tests on the last 15%.
 
-```json
-"dataset": {
-  "train_ratio": 0.80,
-  "val_ratio": 0.05,
-  "test_ratio": 0.15,
-  "split_method": "blocked",
-  "holdout_fold": null
-}
+**5-fold cross-validation recipe.** Start from [`getting_started_blocked.json`](examples/getting_started_blocked.json) (multi-view), [`getting_started_singleview_blocked.json`](examples/getting_started_singleview_blocked.json) (single-view from multi-view) or [`multiview_mouse_blocked.json`](examples/multiview_mouse_blocked.json), which hold the ratios above, and run one job per fold:
+
+```bash
+for k in 0 1 2 3 4; do
+  python -m smal_fitter.neuralSMIL.train_multiview_regressor \
+      --config smal_fitter/neuralSMIL/configs/examples/getting_started_blocked.json --holdout_fold $k
+  python -m smal_fitter.neuralSMIL.train_smil_regressor \
+      --config smal_fitter/neuralSMIL/configs/examples/getting_started_singleview_blocked.json --holdout_fold $k
+done
+# then, per fold (no split arguments: the benchmark rebuilds the split stored in the checkpoint)
+python -m smal_fitter.neuralSMIL.benchmark_model --checkpoint getting_started_blocked_checkpoints_fold2/best_model.pth \
+    --dataset_path SMILySTICKS_centred_reprojected_FIXED.h5 --smal-file 3D_model_prep/SMILy_STICK.pkl \
+    --orig_width 1530 --orig_height 1530
 ```
 
-`holdout_fold: null` (fold 4) trains on the first 80% of each session, validates on the next 5% and tests on the last 15%.
+- **One set of outputs per fold.** With `"blocked"`, both trainers append `_fold{k}` to every `output.*` directory (`getting_started_blocked_checkpoints_fold2/`, ...) and the benchmark writes to `benchmark_..._fold{k}/`, so the folds never overwrite each other. Each report logs the split it rebuilt (`Split: blocked, fold 2 of 5 (6 sessions) -> ...`).
+- **Resuming keeps the split.** A resume whose split settings differ from the checkpoint's stops with an error; set `dataset.allow_split_change` (or pass `--allow_split_change`) only to fine-tune on a new split on purpose.
+- **Held-out videos.** `run_multiview_inference.py` / `run_singleview_inference.py --split test` restrict inference to the checkpoint's test frames (in time order); without it, `--max_frames N` takes the first N frames, which for fold 4 are training frames.
+- **Constraints:** the ratios must tile a session (`train_ratio = 1 - val_ratio - test_ratio`, `1 / (val_ratio + test_ratio)` a whole number); single-view needs `from_multiview: true`; `--split_method` / `--holdout_fold` / `--allow_split_change` need `--config`; the legacy multi-dataset single-view mode rejects `"blocked"`.
 
 **Undistortion:** All input images and 2D keypoints must be in undistorted (ideal pinhole) space. PyTorch3D's `FoVPerspectiveCameras` does not model lens distortion, so raw barrel-distorted images would cause a mismatch between rendered projections and ground truth keypoints. Undistort images with `cv2.undistort()` and use `reprojections.h5` (ideal pinhole projections of triangulated 3D points) as 2D keypoint ground truth.
 
