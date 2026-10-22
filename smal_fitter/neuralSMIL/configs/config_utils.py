@@ -250,40 +250,21 @@ def apply_smal_file_override(smal_file: str, shape_family: Optional[int] = None)
     Override config.SMAL_FILE and re-derive all dependent globals.
 
     config.py derives ``dd``, ``N_POSE``, ``N_BETAS``, ``joint_names``,
-    ``ROOT_JOINT``, ``STATIC_JOINT_LOCATIONS``, and ``CANONICAL_MODEL_JOINTS``
-    from the SMAL pickle at import time.  Simply assigning
-    ``config.SMAL_FILE = "..."`` does NOT update those.
+    ``ROOT_JOINT``, ``STATIC_JOINT_LOCATIONS``, ``CANONICAL_MODEL_JOINTS``,
+    ``TORSO_JOINTS``, ``MARKER_TYPE`` and ``MARKER_COLORS`` from the SMAL
+    pickle at import time.  Simply assigning ``config.SMAL_FILE = "..."``
+    does NOT update those.
 
-    This function re-reads the pickle and patches every global that the
-    training scripts depend on.
+    This function re-reads the pickle via ``config.set_model`` and patches
+    every global that the training scripts depend on.
 
     Args:
         smal_file:    Path to the SMAL/SMIL model pickle.
         shape_family: If not None, also override ``config.SHAPE_FAMILY``.
     """
-    import pickle as pkl
-    import numpy as np
     import config  # top-level config.py (must be on sys.path)
 
-    config.SMAL_FILE = smal_file
-    config.ignore_hardcoded_body = True
-
-    with open(smal_file, "rb") as f:
-        u = pkl._Unpickler(f)
-        u.encoding = "latin1"
-        dd = u.load()
-
-    config.dd = dd
-    config.joint_names = dd["J_names"]
-    config.N_POSE = len(config.joint_names) - 1
-    config.ROOT_JOINT = dd["J_names"][np.where(dd["kintree_table"][0] == -1)[0][0]]
-    config.STATIC_JOINT_LOCATIONS = bool(dd.get("static_joint_locs", False))
-    config.CANONICAL_MODEL_JOINTS = list(range(len(config.joint_names)))
-
-    try:
-        config.N_BETAS = dd["shapedirs"].shape[2]
-    except (IndexError, KeyError):
-        config.N_BETAS = 20
+    config.set_model(smal_file)
 
     if shape_family is not None:
         config.SHAPE_FAMILY = int(shape_family)

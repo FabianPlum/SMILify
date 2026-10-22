@@ -65,7 +65,7 @@ PURGE_PATHS=(
 # development. Listed here so nobody "helpfully" adds them later:
 #   3D_model_prep/SMPL_fit*.pkl  SMPL_STICK.pkl  smpl_ATTA.pkl
 #   3D_model_prep/SMIL_*.pkl  SMILy_*.pkl
-#   data/priors/unity_*
+#   data/priors/unity_*  (ours; removed from HEAD in #110, still in history)
 
 EXECUTE=0
 [[ "${1:-}" == "--execute" ]] && EXECUTE=1
@@ -133,8 +133,7 @@ done
 echo
 echo "--- Confirming our own models survived ---"
 for p in 3D_model_prep/SMPL_fit_new.pkl 3D_model_prep/smpl_ATTA.pkl \
-         3D_model_prep/SMPL_STICK.pkl 3D_model_prep/SMILy_STICK.pkl \
-         data/priors/unity_pose_prior_with_cov_35parts.pkl; do
+         3D_model_prep/SMPL_STICK.pkl 3D_model_prep/SMILy_STICK.pkl; do
   if git -C "$MIRROR" cat-file -e "HEAD:$p" 2>/dev/null; then
     echo "  intact: $p"
   else

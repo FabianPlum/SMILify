@@ -1787,18 +1787,7 @@ def Render_SMAL_Model_from_Unreal_data(x, y, device, verbose=False):
         silhouette=x["input_image_mask"],
     )
 
-    # Some code from the original SMALFitter to set up the model
-    if not config.ignore_hardcoded_body:
-        assert config.SHAPE_FAMILY >= 0, "Shape family should be greater than 0"
-
-        use_unity_prior = config.SHAPE_FAMILY == 1 and not config.FORCE_SMAL_PRIOR
-    else:
-        use_unity_prior = False
-
-    if not use_unity_prior and not config.ALLOW_LIMB_SCALING:
-        config.ALLOW_LIMB_SCALING = False
-
-    model = SMALFitter(device, data_json, config.WINDOW_SIZE, config.SHAPE_FAMILY, use_unity_prior)
+    model = SMALFitter(device, data_json, config.WINDOW_SIZE, config.SHAPE_FAMILY, use_unity_prior=False)
 
     # model parameters
     model.betas = torch.nn.Parameter(torch.Tensor(y["shape_betas"]).to(device))

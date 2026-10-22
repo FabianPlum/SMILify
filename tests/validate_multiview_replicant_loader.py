@@ -537,20 +537,7 @@ def _compute_posed_smal_joints(x_mv, y_mv, device):
     model.global_rotation = torch.nn.Parameter(torch.from_numpy(y_mv["root_rot"]).float().to(device).unsqueeze(0))
     model.trans = torch.nn.Parameter(torch.Tensor(np.array([y_mv["root_loc"]])).to(device))
 
-    batch_params = {
-        "global_rotation": model.global_rotation * model.global_mask,
-        "joint_rotations": model.joint_rotations * model.rotation_mask,
-        "betas": model.betas.expand(1, model.n_betas),
-        "trans": model.trans,
-    }
-    if config.ignore_hardcoded_body:
-        batch_params["log_betascale"] = model.log_beta_scales.expand(1, model.joint_rotations.shape[1] + 1, 3).to(
-            device
-        )
-        if hasattr(model, "betas_trans"):
-            batch_params["betas_trans"] = model.betas_trans.expand(1, model.joint_rotations.shape[1] + 1, 3).to(device)
-    else:
-        batch_params["log_betascale"] = model.log_beta_scales.expand(1, 6)
+    batch_params = model._batch_params([0])
 
     with torch.no_grad():
         _, joints, _, _ = model.smal_model(

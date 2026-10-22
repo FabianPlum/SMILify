@@ -1,8 +1,6 @@
 from smal_fitter.draw_smal_joints import SMALJointDrawer
 
 import numpy as np
-import pickle as pkl
-import os
 
 import torch
 import torch.nn.functional as F
@@ -18,44 +16,38 @@ from smal_fitter.priors.joint_limits_prior import LimitPrior
 
 import config
 
-# outside of specific quadruped meshes, dynamically generate these instead of using the hard-coded files
-if config.ignore_hardcoded_body:
 
-    class Prior(object):
-        def __init__(self, device):
-            pose_len = len(config.dd["J_names"]) * 3
+class Prior(object):
+    """Pose prior sized from the model's J_names: zero mean (the rest pose), identity
+    precision (independent angles), root rotation ignored."""
 
-            # for now, assume the mean pose is equivalent to the default pose so set the angles to zero
-            self.mean_ch = np.zeros(pose_len)
-            # the shape of 'pic' in the prior dict is 105 x 105 , which is 35 (joints) x 3 (angles)
-            # I reckon, this is a covariance matrix of the joint angles to explain how they influence one another
-            # As a starting point, I'll assume that the angles are independent of one another and use an identity matrix
-            self.precs_ch = np.identity(pose_len)
+    def __init__(self, device):
+        pose_len = len(config.dd["J_names"]) * 3
 
-            self.precs = torch.from_numpy(np.identity(pose_len).copy()).float().to(device)
-            self.mean = torch.from_numpy(np.zeros(pose_len)).float().to(device)
+        self.precs = torch.from_numpy(np.identity(pose_len).copy()).float().to(device)
+        self.mean = torch.from_numpy(np.zeros(pose_len)).float().to(device)
 
-            name2id = {}
-            for j, joint in enumerate(config.dd["J_names"]):
-                name2id[joint] = j
+        self.use_ind = np.ones(pose_len, dtype=bool)
+        self.use_ind[:3] = False  # ignore rotation of base joint
 
-            self.use_ind = np.ones(pose_len, dtype=bool)
-            self.use_ind[:3] = False  # ignore rotation of base joint
+        self.use_ind_tch = torch.from_numpy(self.use_ind).float().to(device)
 
-            self.use_ind_tch = torch.from_numpy(self.use_ind).float().to(device)
+    def __call__(self, x):
+        mean_sub = x.reshape(-1, len(config.dd["J_names"]) * 3) - self.mean.unsqueeze(0)
+        res = torch.tensordot(mean_sub, self.precs, dims=([1], [0])) * self.use_ind_tch
 
-        def __call__(self, x):
-            mean_sub = x.reshape(-1, len(config.dd["J_names"]) * 3) - self.mean.unsqueeze(0)
-            res = torch.tensordot(mean_sub, self.precs, dims=([1], [0])) * self.use_ind_tch
-
-            return res**2
-else:
-    from smal_fitter.priors.pose_prior_35 import Prior
+        return res**2
 
 
 class SMALFitter(nn.Module):
     def __init__(self, device, data_batch, batch_size, shape_family, use_unity_prior, rgb_only=False):
         super(SMALFitter, self).__init__()
+
+        if use_unity_prior:
+            raise ValueError(
+                "use_unity_prior=True is not supported: the legacy Unity/WLDO quadruped prior was removed "
+                "in #110. Pass use_unity_prior=False."
+            )
 
         # for neuralSMIL we will only provide rgb images, no silhouettes or 2D keypoint data
         self.rgb_only = rgb_only
@@ -73,7 +65,6 @@ class SMALFitter(nn.Module):
         self.device = device
         self.num_images = self.rgb_imgs.shape[0]
         self.image_size = self.rgb_imgs.shape[2]
-        self.use_unity_prior = use_unity_prior
 
         self.batch_size = batch_size
         self.n_betas = config.N_BETAS
@@ -82,144 +73,70 @@ class SMALFitter(nn.Module):
 
         self.propagate_scaling = False
 
-        if use_unity_prior:
-            with open(config.SMAL_DATA_FILE, "rb") as f:
-                u = pkl._Unpickler(f)
-                u.encoding = "latin1"
-                smal_data = u.load()
-
-            unity_data = np.load(config.UNITY_SHAPE_PRIOR)
-            model_covs = unity_data["cov"][:-1, :-1]
-            mean_betas = torch.from_numpy(unity_data["mean"][:-1]).float().to(device)
-            self.mean_betas = mean_betas.clone()
-
-            invcov = np.linalg.inv(model_covs + 1e-5 * np.eye(model_covs.shape[0]))
-            prec = np.linalg.cholesky(invcov)
-
-            self.betas_prec = torch.FloatTensor(prec).to(device)
-            self.betas = nn.Parameter(
-                self.mean_betas[:20].clone()
-            )  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
-            # TODO: edit self.betas here according to N_BETAS.
-            # Either pad with zeros or restrict to less than 20
-            self.log_beta_scales = torch.nn.Parameter(self.mean_betas[20:].clone())
-            self.pose_prior = Prior(config.WALKING_PRIOR_FILE, device)
-
-            # Remove this part once the pose prior (or lack thereof) is verified to work correctly.
+        if config.DEBUG:
+            print("Using shape prior learned from 3D scanned models")
+        try:
+            model_covs = config.dd["shape_cov"]
+            self.mean_betas = torch.FloatTensor(config.dd["shape_mean_betas"])[: config.N_BETAS].to(device)
+        except KeyError:
             if config.DEBUG:
-                print("\nPOSE PRIOR INFO: LOADED FROM PROVIDED DATA FILE, NOT THE SMIL MODEL!")
-                with open(config.WALKING_PRIOR_FILE, "rb") as f:
-                    res = pkl.load(f, encoding="latin1")
-                for key in res.keys():
-                    print(key)
-                    print(res[key].shape)
-                    print(res[key])
-                    print("\n")
-
-        else:
-            if config.ignore_hardcoded_body:
-                if config.DEBUG:
-                    print("Using shape prior learned from 3D scanned models")
-                try:
-                    model_covs = config.dd["shape_cov"]
-                    self.mean_betas = torch.FloatTensor(config.dd["shape_mean_betas"])[: config.N_BETAS].to(device)
-                    self.pose_prior = Prior(device)
-                except KeyError:
-                    if config.DEBUG:
-                        print(
-                            "WARNING: shape_cov or shape_mean_betas not found in config.dd; "
-                            "falling back to identity-covariance prior sized to config.N_BETAS"
-                        )
-                    model_covs = np.eye(config.N_BETAS)
-                    self.mean_betas = torch.zeros(config.N_BETAS).to(device)
-                    self.pose_prior = Prior(device)
-            else:
-                with open(config.SMAL_DATA_FILE, "rb") as f:
-                    u = pkl._Unpickler(f)
-                    u.encoding = "latin1"
-                    smal_data = u.load()
-
-                model_covs = np.array(smal_data["cluster_cov"])[[shape_family]][0]
-                self.mean_betas = torch.FloatTensor(smal_data["cluster_means"][[shape_family]][0])[: config.N_BETAS].to(
-                    device
+                print(
+                    "WARNING: shape_cov or shape_mean_betas not found in config.dd; "
+                    "falling back to identity-covariance prior sized to config.N_BETAS"
                 )
-                self.mean_betas = torch.FloatTensor(smal_data["cluster_means"][[shape_family]][0])[: config.N_BETAS].to(
-                    device
-                )
+            model_covs = np.eye(config.N_BETAS)
+            self.mean_betas = torch.zeros(config.N_BETAS).to(device)
+        self.pose_prior = Prior(device)
 
-                self.pose_prior = Prior(config.WALKING_PRIOR_FILE, device)
+        if config.DEBUG:
+            print("\nShape covariance matrix")
+            print(model_covs)
+            print("\nShape mean betas")
+            print(self.mean_betas, "\n")
 
-                # Remove this part once the pose prior (or lack thereof) is verified to work correctly.
-                if config.DEBUG:
-                    print("\nPOSE PRIOR INFO: LOADED FROM PROVIDED DATA FILE, NOT THE SMIL MODEL!")
-                    with open(config.WALKING_PRIOR_FILE, "rb") as f:
-                        res = pkl.load(f, encoding="latin1")
-                    for key in res.keys():
-                        print(key)
-                        print(res[key].shape)
-                        print(res[key])
-                        print("\n")
+        invcov = np.linalg.inv(model_covs + 1e-5 * np.eye(model_covs.shape[0]))  # why the addition? Avoiding zeroes?
+        prec = np.linalg.cholesky(invcov)
 
-            if config.DEBUG:
-                print("\nShape covariance matrix")
-                print(model_covs)
-                print("\nShape mean betas")
-                print(self.mean_betas, "\n")
+        self.betas_prec = torch.FloatTensor(prec)[: config.N_BETAS, : config.N_BETAS].to(device)
 
-            invcov = np.linalg.inv(
-                model_covs + 1e-5 * np.eye(model_covs.shape[0])
-            )  # why the addition? Avoiding zeroes?
-            prec = np.linalg.cholesky(invcov)
+        self.betas = nn.Parameter(
+            self.mean_betas.clone()
+        )  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
 
-            self.betas_prec = torch.FloatTensor(prec)[: config.N_BETAS, : config.N_BETAS].to(device)
+        # All bones/joints may scale independently
+        self.log_beta_scales = torch.nn.Parameter(
+            torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False
+        )
+        # Per-joint translation parameters (disabled by default)
+        self.betas_trans = torch.nn.Parameter(
+            torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False
+        )
 
-            self.betas = nn.Parameter(
-                self.mean_betas.clone()
-            )  # Shape parameters (1 for the entire sequence... note expand rather than repeat)
-
-            if config.ignore_hardcoded_body:
-                # In the SMIL implementation, we allow all bones/joints to scale independently
-                self.log_beta_scales = torch.nn.Parameter(
-                    torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False
-                )
-                # Per-joint translation parameters (disabled by default)
-                self.betas_trans = torch.nn.Parameter(
-                    torch.zeros(self.num_images, config.N_POSE + 1, 3).to(device), requires_grad=False
-                )
-            else:
-                # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters
-                # for coupled variation in legs, tail, and ear joints.
-                # (See: https://github.com/benjiebob/SMALify/blob/7f6f06f9e3080c32bb286cde1185de401c7b46e8/smal_model/batch_lbs.py#L106-L129)
-                self.log_beta_scales = torch.nn.Parameter(
-                    torch.zeros(self.num_images, 6).to(device), requires_grad=False
-                )
-
-        # In the original SMALify code, the joint limits are not used.
-        if config.ignore_hardcoded_body:
-            # treating everything as ball joints for now, see priors/joint_limits_prior.py
+        # Per-joint rotation limits from the model .pkl ('joint_limits'), wide-open fallback;
+        # treating everything as ball joints, see priors/joint_limits_prior.py
+        try:
+            limit_prior = LimitPrior()
+            self._joint_limits_error = None
+        except ValueError as e:
+            # A malformed 'joint_limits' in the model file must not take
+            # down consumers that never use the limit loss (e.g. neural
+            # inference constructs a SMALFitter purely for rendering).
+            # Defer the error to the first forward pass with w_limit > 0
+            # and fall back to wide-open ranges meanwhile.
+            self._joint_limits_error = e
+            print(
+                f"WARNING: invalid 'joint_limits' in the model file: {e} "
+                "Using wide-open ranges; the limit loss (w_limit > 0) will raise."
+            )
+            _dd_orig = config.dd
+            config.dd = {k: v for k, v in _dd_orig.items() if k != "joint_limits"}
             try:
                 limit_prior = LimitPrior()
-                self._joint_limits_error = None
-            except ValueError as e:
-                # A malformed 'joint_limits' in the model file must not take
-                # down consumers that never use the limit loss (e.g. neural
-                # inference constructs a SMALFitter purely for rendering).
-                # Defer the error to the first forward pass with w_limit > 0
-                # and fall back to wide-open ranges meanwhile.
-                self._joint_limits_error = e
-                print(
-                    f"WARNING: invalid 'joint_limits' in the model file: {e} "
-                    "Using wide-open ranges; the limit loss (w_limit > 0) will raise."
-                )
-                _dd_orig = config.dd
-                config.dd = {k: v for k, v in _dd_orig.items() if k != "joint_limits"}
-                try:
-                    limit_prior = LimitPrior()
-                finally:
-                    config.dd = _dd_orig
-            # exclude root joint
-            self.max_limits = torch.FloatTensor(limit_prior.max_values[3:]).view(config.N_POSE, 3).to(device)
-            self.min_limits = torch.FloatTensor(limit_prior.min_values[3:]).view(config.N_POSE, 3).to(device)
+            finally:
+                config.dd = _dd_orig
+        # exclude root joint
+        self.max_limits = torch.FloatTensor(limit_prior.max_values[3:]).view(config.N_POSE, 3).to(device)
+        self.min_limits = torch.FloatTensor(limit_prior.min_values[3:]).view(config.N_POSE, 3).to(device)
 
         global_rotation_np = eul_to_axis(np.array([-np.pi / 2, 0, -np.pi / 2]))
         global_rotation = (
@@ -251,32 +168,27 @@ class SMALFitter(nn.Module):
     def print_grads(self, grad_output):
         print(grad_output)
 
-    def forward(self, batch_range, weights, stage_id):
-        # weights, here, correspond to the optimisation weighting set in the config file
-        w_j2d, w_reproj, w_betas, w_pose, w_limit, w_splay = weights
-
-        # these parameters are then the ones written out at each saved stage to the respective .pkl file
+    def _batch_params(self, batch_range):
+        """Model parameters for the frames in batch_range; generate_visualization writes these
+        out to the per-frame .pkl files."""
+        n_joints = self.joint_rotations.shape[1] + 1
         batch_params = {
             "global_rotation": self.global_rotation[batch_range] * self.global_mask,
             "joint_rotations": self.joint_rotations[batch_range] * self.rotation_mask,
             "betas": self.betas.expand(len(batch_range), self.n_betas),
             "trans": self.trans[batch_range],
             "fov": self.fov[batch_range],
+            "log_betascale": self.log_beta_scales.expand(len(batch_range), n_joints, 3).to(self.device),
         }
+        if hasattr(self, "betas_trans"):
+            batch_params["betas_trans"] = self.betas_trans.expand(len(batch_range), n_joints, 3).to(self.device)
+        return batch_params
 
-        if config.ignore_hardcoded_body:
-            batch_params["log_betascale"] = self.log_beta_scales.expand(
-                len(batch_range), self.joint_rotations.shape[1] + 1, 3
-            ).to(self.device)
-            if hasattr(self, "betas_trans"):
-                batch_params["betas_trans"] = self.betas_trans.expand(
-                    len(batch_range), self.joint_rotations.shape[1] + 1, 3
-                ).to(self.device)
-        else:
-            # LEGACY CODE! The original code in the WLDO implementation 6 scale parameters
-            # for coupled variation in legs, tail, and ear joints.
-            # (See: https://github.com/benjiebob/SMALify/blob/7f6f06f9e3080c32bb286cde1185de401c7b46e8/smal_model/batch_lbs.py#L106-L129)
-            batch_params["log_betascale"] = self.log_beta_scales.expand(len(batch_range), 6)
+    def forward(self, batch_range, weights, stage_id):
+        # weights, here, correspond to the optimisation weighting set in the config file
+        w_j2d, w_reproj, w_betas, w_pose, w_limit, w_splay = weights
+
+        batch_params = self._batch_params(batch_range)
 
         target_joints = self.target_joints[batch_range].to(self.device)
         target_visibility = self.target_visibility[batch_range].to(self.device)
@@ -313,21 +225,18 @@ class SMALFitter(nn.Module):
 
             objs["joint"] = w_j2d * F.mse_loss(rendered_joints, target_joints)
 
-        # TODO
-        # In the original SMALify code, the joint limits are not used.
-        # We're re-introducing them here (temporarily)
-        if config.ignore_hardcoded_body:
-            if w_limit > 0:
-                if self._joint_limits_error is not None:
-                    raise ValueError(
-                        "Limit loss is enabled (w_limit > 0) but the model's 'joint_limits' "
-                        f"is invalid: {self._joint_limits_error}"
-                    )
-                zeros = torch.zeros_like(batch_params["joint_rotations"])
-                objs["limit"] = w_limit * torch.mean(
-                    torch.max(batch_params["joint_rotations"] - self.max_limits, zeros)
-                    + torch.max(self.min_limits - batch_params["joint_rotations"], zeros)
+        # Joint-limit hinge loss: flat inside [min, max], linear outside
+        if w_limit > 0:
+            if self._joint_limits_error is not None:
+                raise ValueError(
+                    "Limit loss is enabled (w_limit > 0) but the model's 'joint_limits' "
+                    f"is invalid: {self._joint_limits_error}"
                 )
+            zeros = torch.zeros_like(batch_params["joint_rotations"])
+            objs["limit"] = w_limit * torch.mean(
+                torch.max(batch_params["joint_rotations"] - self.max_limits, zeros)
+                + torch.max(self.min_limits - batch_params["joint_rotations"], zeros)
+            )
 
         if w_pose > 0:
             objs["pose"] = (
@@ -341,14 +250,8 @@ class SMALFitter(nn.Module):
             objs["splay"] = w_splay * torch.sum(batch_params["joint_rotations"][:, :, [0, 2]] ** 2)
 
         if w_betas > 0:
-            if self.use_unity_prior:
-                all_betas = torch.cat([batch_params["betas"], batch_params["log_betascale"]], dim=1)
-            else:
-                # TODO: Add a simple regularizer to penalize log_betascale for this case.
-                # Right now, only when using the unity prior (WLDO) we take joint length scaling into consideration
-                all_betas = batch_params["betas"]
-
-            diff_betas = all_betas - self.mean_betas.unsqueeze(0)  # N, B
+            # TODO: add a regularizer on log_betascale; joint length scaling is currently unconstrained.
+            diff_betas = batch_params["betas"] - self.mean_betas.unsqueeze(0)  # N, B
             res = torch.tensordot(diff_betas, self.betas_prec, dims=([1], [0]))
             objs["betas"] = w_betas * (res**2).mean()
 
@@ -372,27 +275,6 @@ class SMALFitter(nn.Module):
 
         return joint_loss, global_loss, trans_loss
 
-    def load_checkpoint(self, checkpoint_path, epoch):
-        beta_list = []
-        scale_list = []
-
-        for frame_id in range(self.num_images):
-            param_file = os.path.join(checkpoint_path, "{0:04}".format(frame_id), "{0}.pkl".format(epoch))
-            with open(param_file, "rb") as f:
-                img_parameters = pkl.load(f)
-                self.global_rotation[frame_id] = (
-                    torch.from_numpy(img_parameters["global_rotation"]).float().to(self.device)
-                )
-                self.joint_rotations[frame_id] = (
-                    torch.from_numpy(img_parameters["joint_rotations"]).float().to(self.device).view(config.N_POSE, 3)
-                )
-                self.trans[frame_id] = torch.from_numpy(img_parameters["trans"]).float().to(self.device)
-                beta_list.append(img_parameters["betas"][: self.n_betas])
-                scale_list.append(img_parameters["log_betascale"])
-
-        self.betas = torch.nn.Parameter(torch.from_numpy(np.mean(beta_list, axis=0)).float().to(self.device))
-        self.log_beta_scales = torch.nn.Parameter(torch.from_numpy(np.mean(scale_list, axis=0)).float().to(self.device))
-
     def generate_visualization(self, image_exporter, apply_UE_transform=False, img_idx=0, mesh_scale=None, epoch=None):
         """
         Generate visualization images with rendered mesh overlay.
@@ -409,27 +291,7 @@ class SMALFitter(nn.Module):
         """
         for j in range(0, self.num_images, self.batch_size):
             batch_range = list(range(j, min(self.num_images, j + self.batch_size)))
-            batch_params = {
-                "global_rotation": self.global_rotation[batch_range] * self.global_mask,
-                "joint_rotations": self.joint_rotations[batch_range] * self.rotation_mask,
-                "betas": self.betas.expand(len(batch_range), self.n_betas),
-                "trans": self.trans[batch_range],
-                "fov": self.fov[batch_range],
-            }
-
-            if config.ignore_hardcoded_body:
-                batch_params["log_betascale"] = self.log_beta_scales.expand(
-                    len(batch_range), self.joint_rotations.shape[1] + 1, 3
-                ).to(self.device)
-                if hasattr(self, "betas_trans"):
-                    batch_params["betas_trans"] = self.betas_trans.expand(
-                        len(batch_range), self.joint_rotations.shape[1] + 1, 3
-                    ).to(self.device)
-            else:
-                # LEGACY CODE! The original code in the WLDO implementation has 6 scale parameters
-                # for coupled variation in legs, tail, and ear joints.
-                # (See: https://github.com/benjiebob/SMALify/blob/7f6f06f9e3080c32bb286cde1185de401c7b46e8/smal_model/batch_lbs.py#L106-L129)
-                batch_params["log_betascale"] = self.log_beta_scales.expand(len(batch_range), 6)
+            batch_params = self._batch_params(batch_range)
 
             target_joints = self.target_joints[batch_range]
             target_visibility = self.target_visibility[batch_range]

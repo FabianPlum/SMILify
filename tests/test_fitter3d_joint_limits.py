@@ -30,11 +30,6 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SMAL_FILE = os.path.join(REPO_ROOT, "3D_model_prep", "SMIL_OmniAnt.pkl")
 TARGET_OBJ = os.path.join(REPO_ROOT, "fitter_3d", "ATTA_BOI", "Atta_vollenweideri_1_mg_worker.obj")
 
-pytestmark = pytest.mark.skipif(
-    not config.ignore_hardcoded_body,
-    reason="joint_limits / fitter_3d path is only defined in rigged (ignore_hardcoded_body) mode",
-)
-
 
 def _load_dd(smal_file=SMAL_FILE):
     import pickle as pkl
