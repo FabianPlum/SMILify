@@ -1495,6 +1495,8 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             "test_ratio": test_ratio,
             "split_method": dataset_cfg.get("split_method", "random"),
             "holdout_fold": dataset_cfg.get("holdout_fold"),
+            "keypoint_source": dataset_cfg.get("keypoint_source", "reprojected"),
+            "raw_keypoint_min_confidence": dataset_cfg.get("raw_keypoint_min_confidence"),
         },
         "scale_trans_mode": TrainingConfig.get_scale_trans_mode(),
         "scale_trans_config": TrainingConfig.get_scale_trans_config(),
@@ -1658,6 +1660,8 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
                 # per train/val phase in the epoch loop below.
                 augment=False,
                 augmentation_config=aug_cfg if aug_enabled else None,
+                keypoint_source=dataset_cfg.get("keypoint_source", "reprojected"),
+                raw_keypoint_min_confidence=dataset_cfg.get("raw_keypoint_min_confidence"),
             )
         dataset = UnifiedSMILDataset.from_path(
             data_path,
@@ -1667,6 +1671,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         )
         if not is_distributed or rank == 0:
             print(f"Dataset size: {len(dataset)}")
+            print(f"2D labels: {getattr(dataset, 'keypoint_source', 'reprojected')}")
             print(f"Original resolution: {dataset.get_input_resolution()}")
             print(f"Target resolution: {dataset.get_target_resolution()}")
 

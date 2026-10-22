@@ -389,6 +389,8 @@ class MultiViewTrainingConfig:
         "test_ratio": 0.1,
         "split_method": "random",
         "holdout_fold": None,
+        "keypoint_source": "reprojected",
+        "raw_keypoint_min_confidence": None,
         # Mesh scaling - allows network to predict global mesh scale
         # (useful when 3D ground truth has different scale than model)
         "allow_mesh_scaling": False,
@@ -2323,10 +2325,13 @@ def main(config: dict):
         random_view_sampling=True,
         augment=False,  # Toggled on/off around train vs val; see training loop
         augmentation_config=aug_config if aug_enabled else None,
+        keypoint_source=config.get("keypoint_source", "reprojected"),
+        raw_keypoint_min_confidence=config.get("raw_keypoint_min_confidence"),
     )
 
     if rank == 0:
         dataset.print_dataset_summary()
+        print(f"2D labels: {dataset.keypoint_source}")
 
     # Get canonical camera order and max_views from dataset
     dataset_canonical_camera_order = dataset.get_canonical_camera_order()

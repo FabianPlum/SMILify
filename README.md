@@ -186,9 +186,23 @@ python -m smal_fitter.sleap_data.preprocess_sleap_multiview_dataset \
 | `--resolution` | _(backbone)_ | Output image resolution; overrides the backbone's default (e.g. 224 for ViT). `--target_resolution` is a deprecated alias. |
 | `--no_3d_data` | False | Skip loading 3D keypoints and camera parameters |
 | `--no_undistort` | False | Skip lens-distortion correction |
+| `--use_reprojections` | False | Store each session's `reprojections.h5` (the triangulated 3D re-projected into every view) as `keypoints_2d` instead of the SLEAP predictions |
 | `--confidence_threshold` | 0.5 | Minimum SLEAP keypoint confidence to mark as visible |
 
 For the **single-view** case use `preprocess_sleap_dataset.py` with the same `sessions_dir` / `output_path` positional arguments; it accepts `--num_workers` for parallel processing and `--use_reprojections` to substitute raw SLEAP predictions with reprojected 2D coordinates from a `reprojections.h5` file.
+
+### Raw 2D labels
+
+Besides `keypoints_2d`, the multi-view preprocessor stores the SLEAP predictions themselves, filtered by confidence only: `keypoints_2d_raw`, `keypoint_visibility_raw` (confidence ≥ `--confidence_threshold`) and `keypoint_confidence_raw`. With `--use_reprojections` the two label sets differ: the reprojected labels agree across views, the raw ones are what a 2D-only user would have. Train on the raw labels with `"keypoint_source": "raw"` in the [`dataset` config](smal_fitter/neuralSMIL/configs/README.md#dataset--data-paths-and-splits).
+
+To add raw labels to an HDF5 built before they existed, build a sidecar from the same SLEAP sessions, lookup table and model, then append it. `append` adds three datasets to the HDF5 in place, so run it on a copy:
+
+```bash
+python -m smal_fitter.sleap_data.add_raw_keypoints build DATASET.h5 /path/to/sessions \
+    --joint_lookup_table /path/to/sessions/joint_lookup.csv \
+    --smal_file          3D_model_prep/SMILy_STICK.pkl
+python -m smal_fitter.sleap_data.add_raw_keypoints append DATASET.h5 DATASET_raw_keypoints.h5
+```
 
 ## Training
 
@@ -325,6 +339,8 @@ python -m smal_fitter.neuralSMIL.benchmark_model \
 | PCK curve (1–50 px, native + input res) | yes | yes |
 | MPJPE (mm) | — | yes (when 3D GT available) |
 | MPJPE percentiles (P50–P99) | — | yes |
+
+When the HDF5 has [raw 2D labels](#raw-2d-labels), every 2D metric is reported twice, against `keypoints_2d` and against `keypoints_2d_raw`, whichever the model trained on. The raw-label files carry a `_raw` suffix (e.g. `pck_curve_native_raw.png`, `errors_2d_px_native_raw.npy`).
 
 **Output files** are written to `benchmark_{model_type}_{checkpoint}_on_{dataset}/`:
 

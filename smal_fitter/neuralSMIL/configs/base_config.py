@@ -38,6 +38,16 @@ class DatasetConfig:
     # Blocked only: index of the held-out block (0 = start of each session,
     # null = last block). Must be null for "random", which uses training.seed.
     holdout_fold: Optional[int] = None
+    # 2D training labels from a multi-view HDF5 (see SLEAPMultiViewDataset).
+    # "reprojected": keypoints_2d (the reprojected triangulated 3D when the HDF5
+    #   was built with --use_reprojections). "raw": keypoints_2d_raw, the SLEAP
+    #   predictions filtered by confidence only (smal_fitter/sleap_data/
+    #   add_raw_keypoints.py adds them to an existing HDF5). The benchmark
+    #   scores against both, whatever the model trained on.
+    keypoint_source: str = "reprojected"
+    # "raw" only: recompute visibility as keypoint_confidence_raw >= this value
+    # (null keeps the threshold the raw labels were stored with).
+    raw_keypoint_min_confidence: Optional[float] = None
 
     # ── Single-view-from-multiview sampling ──────────────────────────────
     # Draw single-view training items from a multi-view HDF5. When enabled the
@@ -61,6 +71,15 @@ class DatasetConfig:
         from smal_fitter.neuralSMIL.data_splits import validate_split_settings
 
         validate_split_settings(self.split_method, self.train_ratio, self.val_ratio, self.test_ratio, self.holdout_fold)
+        if self.keypoint_source not in ("reprojected", "raw"):
+            raise ValueError(f"keypoint_source must be 'reprojected' or 'raw', got {self.keypoint_source!r}")
+        if self.raw_keypoint_min_confidence is not None:
+            if self.keypoint_source != "raw":
+                raise ValueError("raw_keypoint_min_confidence needs keypoint_source='raw'")
+            if not 0.0 <= self.raw_keypoint_min_confidence <= 1.0:
+                raise ValueError(
+                    f"raw_keypoint_min_confidence must be in [0, 1], got {self.raw_keypoint_min_confidence}"
+                )
         if self.frame_convention not in ("model_centric", "camera_centric"):
             raise ValueError(
                 f"frame_convention must be 'model_centric' or 'camera_centric', got {self.frame_convention!r}"
@@ -645,6 +664,8 @@ class BaseTrainingConfig:
                 "test_ratio": self.dataset.test_ratio,
                 "split_method": self.dataset.split_method,
                 "holdout_fold": self.dataset.holdout_fold,
+                "keypoint_source": self.dataset.keypoint_source,
+                "raw_keypoint_min_confidence": self.dataset.raw_keypoint_min_confidence,
             },
             "training_params": {
                 "batch_size": self.training.batch_size,
