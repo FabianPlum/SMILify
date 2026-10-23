@@ -44,7 +44,7 @@ To display bone axes: select the armature → **Object Data Properties** (green 
    ```
 
    In Blender: **Edit → Preferences → Add-ons → Install…**, pick `smil_importer.zip`, enable it.
-2. Open your rigged model (or import a `.pkl` model via the add-on), then **save the `.blend` file to a normal, writable folder**. An unsaved file makes the exporter fail with "Permission denied" (pitfall #1).
+2. Open your rigged model (or import a `.pkl` model via the add-on), then **save the `.blend` file to a normal, writable folder**. An unsaved file makes the exporter fail with "Permission denied" (pitfall #1). Importing a `.pkl` that already has `joint_limits` recreates them as Limit Rotation constraints (**Import Joint Limits**, on by default), so you edit the existing limits rather than starting from scratch.
 
 ![SCREENSHOT 03 — Add-on enabled](design/images/03_addon_enabled.png)
 > 📷 **SCREENSHOT 03**: Preferences → Add-ons with the **SMIL Model Importer** entry expanded and its checkbox **ticked**. The ⚠ triangle next to the name is normal — it's the permanent "Requires scipy and scikit-learn" note, not an error. What matters is the **"All dependencies installed."** check mark under Preferences at the bottom; if you see an install button there instead, click it and restart Blender.

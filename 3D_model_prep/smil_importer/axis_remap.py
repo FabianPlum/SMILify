@@ -94,3 +94,42 @@ def remap_bounds_to_model_frame(B, lo, hi, bone_name="", authored=True, log=prin
         else:
             mlo[m], mhi[m] = -hi[k], -lo[k]
     return mlo, mhi
+
+
+def remap_bounds_to_bone_frame(B, lo, hi):
+    """Inverse of :func:`remap_bounds_to_model_frame`: model-frame bounds -> bone-local bounds.
+
+    Exact for identity / signed-permutation ``B``; a mixed-axis ``B`` returns the
+    bounds verbatim, mirroring the exporter, so ``local -> model -> local`` is the
+    identity in every case. Used on import to turn a pkl's ``joint_limits`` back
+    into Limit Rotation constraints (issue #116).
+    """
+    B = np.asarray(B, dtype=np.float64)
+    if np.allclose(B, np.eye(3), atol=1e-3) or not is_signed_permutation(B):
+        return list(lo), list(hi)
+    blo = [0.0, 0.0, 0.0]
+    bhi = [0.0, 0.0, 0.0]
+    for m in range(3):
+        k = int(np.argmax(np.abs(B[m])))
+        if B[m, k] >= 0:
+            blo[k], bhi[k] = lo[m], hi[m]
+        else:
+            blo[k], bhi[k] = -hi[m], -lo[m]
+    return blo, bhi
+
+
+def limit_constraint_spec(B, lo, hi, wide_open, atol=1e-4):
+    """Bone-local Limit Rotation settings for model-frame bounds ``lo``/``hi`` (issue #116).
+
+    Returns ``(use, blo, bhi)`` - per bone-local axis: whether to tick ``use_limit``,
+    and its min/max - or ``None`` when every axis is wide open (``[-wide_open,
+    +wide_open]``, what the exporter writes for unauthored axes), so no constraint is
+    needed and a re-export with the same default range reproduces the bounds.
+    """
+    blo, bhi = remap_bounds_to_bone_frame(B, lo, hi)
+    use = [
+        not (np.isclose(blo[k], -wide_open, atol=atol) and np.isclose(bhi[k], wide_open, atol=atol)) for k in range(3)
+    ]
+    if not any(use):
+        return None
+    return use, blo, bhi

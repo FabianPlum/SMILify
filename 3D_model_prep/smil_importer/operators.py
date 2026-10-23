@@ -22,6 +22,7 @@ from .measurements import (
 from .model_build import (
     apply_pose_correctives,
     create_armature_and_weights,
+    create_limit_constraints_from_data,
     create_mesh_from_pkl,
     create_shapekeys,
     create_shapekeys_from_pkl_shapedirs,
@@ -61,7 +62,11 @@ class SMPL_OT_ImportModel(bpy.types.Operator):
                     # Store SMPL data in the object
                     store_smpl_data(context, data, obj=obj)
 
-                    create_armature_and_weights(data, obj, base_name=base_name)
+                    armature = create_armature_and_weights(data, obj, base_name=base_name)
+                    if armature is not None and smpl_tool.import_joint_limits:
+                        create_limit_constraints_from_data(
+                            armature, data, wide_open=smpl_tool.joint_limit_default_range
+                        )
 
                     # Check if npz file is provided and exists
                     npz_filepath = bpy.path.abspath(smpl_tool.npz_filepath) if smpl_tool.npz_filepath else None
@@ -1155,6 +1160,23 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
         if armature is None:
             self.report({"ERROR"}, "Select a SMIL mesh or its armature before importing.")
             return {"CANCELLED"}
+
+        # Issue #116: Limit Rotation constraints (recreated on model import) would clamp
+        # the keyed rotations, so playback would no longer show what the network
+        # predicted. Mute them; the exporter reports muted constraints if the model
+        # is exported from this scene later.
+        muted = 0
+        for pb in armature.pose.bones:
+            for con in pb.constraints:
+                if con.type == "LIMIT_ROTATION" and not con.mute:
+                    con.mute = True
+                    muted += 1
+        if muted:
+            self.report(
+                {"INFO"},
+                f"Muted {muted} Limit Rotation constraint(s) so the animation shows the predicted "
+                "rotations unclamped; unmute them before exporting the model from this scene.",
+            )
 
         poses = npz_data["poses"]  # (F, N_JOINTS, 3)
         trans = npz_data["trans"]  # (F, 3)

@@ -102,6 +102,19 @@ class SMPLProperties(bpy.types.PropertyGroup):
         default=False,
     )
 
+    # Issue #116: the exporter rebuilds 'joint_limits' from constraints, so import
+    # has to recreate them or an unchanged round trip opens every joint.
+    import_joint_limits: bpy.props.BoolProperty(
+        name="Import Joint Limits",
+        description=(
+            "Recreate the .pkl's 'joint_limits' as local-space 'Limit Rotation' bone "
+            "constraints, so the panel, the viewport overlay and a re-export match the "
+            "file. Axes at the wide-open default range below are left unconstrained. "
+            "Untick to import the rig without constraints"
+        ),
+        default=True,
+    )
+
     # Issue #56: export user-defined per-joint rotation limits.
     # Deliberately opt-out (default=True): authored constraints always land in
     # the .pkl, and unconstrained rigs get the wide-open default range, which
