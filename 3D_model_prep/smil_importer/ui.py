@@ -27,6 +27,7 @@ class SMIL_PT_Panel(bpy.types.Panel):
         layout.prop(smpl_tool, "regress_joints")
         layout.prop(smpl_tool, "symmetrise")
         layout.prop(smpl_tool, "force_static_joint_locs")
+        layout.prop(smpl_tool, "import_joint_limits")
 
         layout.operator("smpl.import_model", text="Direct Import SMIL Model")
 

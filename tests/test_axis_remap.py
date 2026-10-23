@@ -7,6 +7,7 @@ neither Blender nor the rest of the add-on (whose package ``__init__`` imports
 """
 
 import importlib.util
+import itertools
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,8 @@ _spec.loader.exec_module(axis_remap)
 
 is_signed_permutation = axis_remap.is_signed_permutation
 remap_bounds_to_model_frame = axis_remap.remap_bounds_to_model_frame
+remap_bounds_to_bone_frame = axis_remap.remap_bounds_to_bone_frame
+limit_constraint_spec = axis_remap.limit_constraint_spec
 rot3 = axis_remap.rot3
 
 # B shared by the two hand-analysed bones (l_3_tr_r, b_a_1): local x->+x, y->+z,
@@ -138,3 +141,42 @@ def test_remapped_bounds_stay_ordered():
         hi = lo + rng.uniform(0.0, 2.0, 3)
         mlo, mhi = remap_bounds_to_model_frame(B, lo.tolist(), hi.tolist(), "ord")
         assert np.all(np.asarray(mlo) <= np.asarray(mhi) + 1e-12)
+
+
+def _all_signed_permutations():
+    for perm in itertools.permutations(range(3)):
+        for signs in itertools.product([-1.0, 1.0], repeat=3):
+            B = np.zeros((3, 3))
+            for row, col in enumerate(perm):
+                B[row, col] = signs[row]
+            yield B
+
+
+def test_bone_frame_inverse_round_trips_all_signed_permutations():
+    """Issue #116: import recreates constraints with the inverse remap, so
+    model -> bone-local -> model must be the identity for every clean-axis bone."""
+    rng = np.random.default_rng(2)
+    perms = list(_all_signed_permutations())
+    assert len(perms) == 48
+    for B in perms:
+        lo = rng.uniform(-1.5, 1.5, 3)
+        hi = lo + rng.uniform(0.0, 2.0, 3)
+        blo, bhi = remap_bounds_to_bone_frame(B, lo.tolist(), hi.tolist())
+        mlo, mhi = remap_bounds_to_model_frame(B, blo, bhi, "rt")
+        assert np.allclose(mlo, lo) and np.allclose(mhi, hi)
+    # Mixed-axis B: both directions keep the bounds verbatim, so the round trip still holds.
+    c = np.cos(np.pi / 4)
+    R = np.array([[c, -c, 0.0], [c, c, 0.0], [0.0, 0.0, 1.0]])
+    lo, hi = [-0.1, -0.2, -0.3], [0.4, 0.5, 0.6]
+    assert remap_bounds_to_bone_frame(R, lo, hi) == (lo, hi)
+
+
+def test_limit_constraint_spec_leaves_wide_open_axes_unticked():
+    # Model z wide open; under B_TILT model z = local y, so local y stays unticked.
+    lo, hi = [-0.52, -0.5236, -np.pi], [0.79, 0.0, np.pi]
+    use, blo, bhi = limit_constraint_spec(B_TILT, lo, hi, wide_open=np.pi)
+    assert use == [True, False, True]
+    mlo, mhi = remap_bounds_to_model_frame(B_TILT, blo, bhi, "spec")
+    assert np.allclose(mlo, lo) and np.allclose(mhi, hi)
+    # Every axis wide open -> no constraint at all.
+    assert limit_constraint_spec(B_TILT, [-np.pi] * 3, [np.pi] * 3, wide_open=np.pi) is None

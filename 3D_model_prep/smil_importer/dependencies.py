@@ -17,6 +17,7 @@ Installation notes (Windows/macOS/Linux):
 """
 
 import importlib
+import importlib.util
 import os
 import subprocess
 import sys

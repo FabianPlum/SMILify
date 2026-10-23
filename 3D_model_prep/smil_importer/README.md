@@ -48,6 +48,17 @@ it finishes. The panel shows a green check once both packages are importable.
 Open the 3D viewport sidebar (press **N**) and use the **SMIL** and
 **Morphometry** tabs.
 
+## Import options
+
+- **Import Joint Limits** (default: on) — recreates a `.pkl`'s `joint_limits`
+  as local-space **Limit Rotation** constraints (the exact inverse of the
+  export remap), so the constraint panel, the overlay and a re-export match the
+  file. Without it, an unchanged import → export opens every joint to ±180°
+  (issue #116). Axes at the wide-open **Default Joint Limit Range** stay
+  unticked. **Import Inference Animation** mutes these constraints on the rig
+  so playback shows the predicted rotations unclamped; unmute them before
+  exporting the model from that scene.
+
 ## Export options
 
 The export section of the **SMIL** panel exposes, among others:

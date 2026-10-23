@@ -6,6 +6,7 @@ import pickle
 import bpy
 import numpy as np
 
+from .axis_remap import limit_constraint_spec, rot3
 from .core_mesh import (
     export_J_regressor_to_npy,
     export_faces_to_npy,
@@ -280,6 +281,45 @@ def create_armature_and_weights(data, obj, base_name="SMPL"):
                 vertex_group.add([i], weight, "ADD")
 
     return armature
+
+
+def create_limit_constraints_from_data(armature, data, wide_open=np.pi):
+    """Recreate ``data['joint_limits']`` as LOCAL Limit Rotation constraints (issue #116).
+
+    The exporter reads limits back from these constraints with the bone-local -> model
+    remap, so applying the exact inverse here makes import -> export reproduce the
+    pkl's limits. The root is skipped (the exporter pins it to [0, 0]); axes at
+    ``[-wide_open, +wide_open]`` stay unticked and bones without a limited axis get no
+    constraint. Returns the number of constraints created.
+    """
+    limits = data.get("joint_limits")
+    names = list(data.get("J_names", []))
+    if limits is None:
+        return 0
+    limits = np.asarray(limits, dtype=np.float64)
+    if limits.shape != (len(names), 3, 2):
+        print(f"Joint-limit import: 'joint_limits' has shape {limits.shape}, expected {(len(names), 3, 2)}; skipped.")
+        return 0
+    created = 0
+    for i, name in enumerate(names):
+        if i == 0:
+            continue
+        bone = armature.data.bones.get(name)
+        pbone = armature.pose.bones.get(name)
+        if bone is None or pbone is None:
+            continue
+        spec = limit_constraint_spec(rot3(bone.matrix_local), limits[i, :, 0], limits[i, :, 1], wide_open)
+        if spec is None:
+            continue
+        use, lo, hi = spec
+        con = pbone.constraints.new("LIMIT_ROTATION")
+        con.owner_space = "LOCAL"
+        con.use_limit_x, con.use_limit_y, con.use_limit_z = use
+        con.min_x, con.min_y, con.min_z = lo
+        con.max_x, con.max_y, con.max_z = hi
+        created += 1
+    print(f"Joint-limit import: recreated 'joint_limits' as Limit Rotation constraints on {created} bones.")
+    return created
 
 
 def create_shapekeys(data, obj):
