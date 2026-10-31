@@ -1436,6 +1436,55 @@ class SMILImageRegressor(SMALFitter):
         zeros = torch.zeros_like(joint_rot_aa)
         return torch.mean(torch.maximum(joint_rot_aa - max_lim, zeros) + torch.maximum(min_lim - joint_rot_aa, zeros))
 
+    # Axial twist (deg) a bone may take before the twist penalty starts.
+    _TWIST_FREE_DEG = 45.0
+
+    def _init_twist_axes(self):
+        """Rest bone direction per joint for :meth:`_joint_twist_penalty`: joint -> its single chain child, where
+        children locked by the model's joint limits (all zero: label proxies) do not count. Joints with no or several
+        chain children (root, hips, skull, ...) get no axis: their twist moves the other children."""
+        J = np.asarray(config.dd["J"], np.float64)
+        parents = np.asarray(config.dd["kintree_table"][0])
+        locked = np.zeros(len(J), bool)
+        if "joint_limits" in config.dd:
+            locked = np.abs(np.asarray(config.dd["joint_limits"], np.float64)).reshape(len(J), -1).max(1) == 0
+        idx, axes = [], []
+        for j in range(1, len(J)):
+            chain = [c for c in range(1, len(J)) if parents[c] == j and not locked[c]]
+            if len(chain) == 1 and not locked[j]:
+                u = J[chain[0]] - J[j]
+                if np.linalg.norm(u) > 1e-9:
+                    idx.append(j - 1)  # joint_rot holds joints 1..J-1
+                    axes.append(u / np.linalg.norm(u))
+        self._twist_idx = torch.tensor(idx, dtype=torch.long, device=self.device)
+        self._twist_axes = torch.tensor(np.array(axes).reshape(-1, 3), dtype=torch.float32, device=self.device)
+
+    def _joint_twist_penalty(self, joint_rot_pred):
+        """Hinge on each bone's axial twist beyond ``_TWIST_FREE_DEG``.
+
+        A local rotation acts on rest-frame offsets, so its twist about the rest bone direction (swing-twist
+        decomposition) leaves the child joint where it is: keypoints cannot see it, and a network can twist a femur by
+        90 deg and bend the knee sideways to compensate. Per-axis limit boxes cannot bound it for tilted bones.
+        twist = 2 atan2(vee(R - R^T) . u, 1 + tr R), the quaternion form 2 atan2(q_xyz . u, q_w).
+
+        Args:
+            joint_rot_pred: ``(N, N_POSE, 6 or 3)`` predicted rotations.
+
+        Returns:
+            Scalar tensor: mean over the twist joints of the overshoot in radians.
+        """
+        if not hasattr(self, "_twist_idx"):
+            self._init_twist_axes()
+        if self.rotation_representation == "6d":
+            R = rotation_6d_to_matrix(joint_rot_pred)
+        else:
+            R = axis_angle_to_matrix(joint_rot_pred)
+        R = R[:, self._twist_idx]
+        s = torch.stack([R[..., 2, 1] - R[..., 1, 2], R[..., 0, 2] - R[..., 2, 0], R[..., 1, 0] - R[..., 0, 1]], -1)
+        tr = R[..., 0, 0] + R[..., 1, 1] + R[..., 2, 2]
+        twist = 2 * torch.atan2((s * self._twist_axes).sum(-1), 1 + tr + 1e-6)  # 1 + tr >= 0
+        return torch.relu(twist.abs() - float(np.deg2rad(self._TWIST_FREE_DEG))).mean()
+
     def compute_batch_loss(
         self,
         predicted_params: Dict[str, torch.Tensor],

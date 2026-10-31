@@ -240,6 +240,8 @@ class LossCurriculumConfig:
             "joint_angle_regularization": 0.001,
             "limb_scale_regularization": 0.01,
             "limb_trans_regularization": 1,
+            # Hinge on each bone's axial twist about its rest direction beyond 45 deg (keypoints cannot see twist).
+            "joint_twist_regularization": 0.0,
             # Hinge penalty against authored per-joint rotation limits from the
             # model's 'joint_limits' (issue #56). Off by default; enabling it
             # requires a model file with usable (non-wide-open) limits.
