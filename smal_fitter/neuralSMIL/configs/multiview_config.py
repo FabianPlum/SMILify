@@ -32,8 +32,8 @@ class SilhouetteConfig:
 
     render_size: int = 128  # square render resolution; targets are area-resampled to it
     # Soft-rasterizer edge width. The soft edge makes the render slightly larger than the hard silhouette, so the
-    # IoU optimum sits ~1-2% below the true mesh scale at 1e-5 (~2-3% at 3e-5); 1e-5 still renders the dense
-    # mouse mesh without holes at faces_per_pixel 64.
+    # IoU optimum sits about 2-3% (up to 4% in some views) below the true mesh scale at 1e-5, about 3% at 3e-5;
+    # 1e-5 still renders the dense mouse mesh without holes at faces_per_pixel 64.
     sigma: float = 1e-5
     faces_per_pixel: int = 64
     camera: str = (
