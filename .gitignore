@@ -40,6 +40,9 @@ fitter_3d/pointcloud2smil/
 
 # unless specifically added, ignore videos
 *.mp4
+# run_multiview_inference writes <dataset>_multiview_inference.avi into the
+# working directory.
+*_inference.avi
 
 # ignore partial SMPL file contens
 *.npy
