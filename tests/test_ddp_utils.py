@@ -8,6 +8,7 @@ drift apart; routing it through ``ddp_forward`` must give every rank the average
 import os
 from contextlib import nullcontext
 from datetime import timedelta
+from functools import partial
 
 import pytest
 import torch
@@ -22,6 +23,8 @@ WORLD = 2
 
 
 class _Net(nn.Module):
+    head_type = "mlp"  # read by the single-view train_epoch
+
     def __init__(self):
         super().__init__()
         torch.manual_seed(0)
@@ -46,8 +49,10 @@ class _Net(nn.Module):
         eps = torch.tensor(1e-8, requires_grad=True)
         return eps if kind == "leaf" else torch.zeros((), requires_grad=True) + 0.5 * eps
 
-    # The trainers' model interface; the targets name the kind of loss
+    # The trainers' model interface; the targets name the kind of loss, and "none" gives no prediction
     def predict_from_batch(self, x_data_batch, y_data_batch):
+        if y_data_batch == "none":
+            return None, None, None
         return {"x": x_data_batch}, y_data_batch, None
 
     def compute_batch_loss(self, predicted_params, targets, auxiliary_data, return_components=False, loss_weights=None):
@@ -55,7 +60,7 @@ class _Net(nn.Module):
         return loss, {"total": loss}
 
     def predict_from_multiview_batch(self, x_data_batch, y_data_batch):
-        return {"x": x_data_batch}, None, None
+        return (None if y_data_batch == "none" else {"x": x_data_batch}), None, None
 
     def compute_multiview_batch_loss(self, predicted_params, y_data_batch, loss_weights=None, return_components=False):
         return self.compute_batch_loss(predicted_params, y_data_batch, None)
@@ -69,6 +74,14 @@ def _gather(t):
     out = [torch.empty_like(t) for _ in range(WORLD)]
     dist.all_gather(out, t)
     return out
+
+
+class _Loader(list):
+    """One epoch's (x, y) batches for a trainer's train_epoch; ``batch_idx`` is the batch being trained on."""
+
+    def __iter__(self):
+        for self.batch_idx, batch in enumerate(list.__iter__(self)):
+            yield batch
 
 
 def _worker(rank, store_uri, queue, exit_barrier):
@@ -182,6 +195,29 @@ def _worker(rank, store_uri, queue, exit_barrier):
                 and (components is None) == (rank == 0)
             )
             guarded.zero_grad(set_to_none=True)
+
+    # 9. Both trainers' train_epoch over 5 batches whose kinds differ per rank. A rank without a prediction, or whose
+    # loss reaches no parameter, still joins every all-reduce, and any_rank gives both ranks the same optimizer steps:
+    # single-view after each batch with a real loss on some rank, multi-view (2 accumulation steps, clipping) after
+    # each window with one.
+    kinds = [["none", "leaf", "real", "graph", "real"], ["graph", "none", "leaf", "leaf", "real"]][rank]
+    common = {"device": "cpu", "epoch": 0, "is_distributed": True, "rank": rank}
+    mv_config = {"gradient_accumulation_steps": 2, "gradient_clip_norm": 0.5}
+    train_epochs = {  # trainer: (train_epoch(model, loader, optimizer), the batches after which both ranks step)
+        "singleview": (partial(train_smil_regressor.train_epoch, criterion=None, loss_weights={}, **common), [2, 4]),
+        "multiview": (partial(train_multiview_regressor.train_epoch, training_config=mv_config, **common), [3, 4]),
+    }
+    for trainer, (train_epoch, expected_steps) in train_epochs.items():
+        model = DDP(_Net(), find_unused_parameters=True)
+        opt = torch.optim.AdamW(model.parameters(), lr=1e-2)
+        loader = _Loader((batch, kind) for kind in kinds)
+        steps = []  # the batch after which each optimizer step was taken
+        opt.register_step_post_hook(lambda *_: steps.append(loader.batch_idx))
+        train_epoch(model, loader, opt)
+        all_steps = [None] * WORLD
+        dist.all_gather_object(all_steps, steps)
+        res[f"{trainer}_train_epoch_steps"] = all_steps == [expected_steps] * WORLD
+        res[f"{trainer}_train_epoch_replicas_identical"] = replica_divergence(model) == (0.0, [])
 
     results = [None] * WORLD
     dist.all_gather_object(results, res)
