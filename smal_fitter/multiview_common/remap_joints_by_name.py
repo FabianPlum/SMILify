@@ -11,17 +11,21 @@ Modifies the HDF5 IN PLACE, so run it on a copy:
 
     python -m smal_fitter.multiview_common.remap_joints_by_name DATASET_COPY.h5 SOURCE.pkl TARGET.pkl CONVENTION
 
-- A target joint that also exists in the source model keeps its data, unless the convention moves it.
+- Labels (LABEL_DATASETS: 2D and 3D keypoints, visibility, confidence): a target joint that also exists in the source
+  model keeps its labels, unless the convention moves them.
 - CONVENTION selects one table of label moves (MOVES): the labels of each listed source joint go to a proxy joint of
   the target model, and the source joint's own slot becomes unlabelled. "none" moves nothing: a plain reorder by
   name. A target model that lacks a proxy joint the convention moves labels to is refused before the HDF5 is opened.
 - Every other target joint is unlabelled: all zeros (keypoints, visibility, confidence), which is how the HDF5 stores
   joints that were never labelled.
+- Joint rotations (POSE_DATASETS: parameters/joint_rot, root at index 0) are pose parameters, not labels. They follow
+  the joint name only, whatever the convention: every joint keeps its own rotation, and a target joint that the
+  source model lacks (a proxy joint, for example) gets zero rotation.
 - Only the per-joint datasets (JOINT_DATASETS, which must all exist) are rewritten, keeping their dtype, chunking and
   compression. Images, cameras and all other datasets are left untouched, so sidecars built on the source still pair
   with the copy. The metadata gets n_joints, n_pose and joint_names in the target order, plus proxy_remap: the
-  convention, the moves, both model paths ("v5_pkl" = source, "v6_pkl" = target) and the source slot of every target
-  joint (-1 = unlabelled).
+  convention, the moves, both model paths ("v5_pkl" = source, "v6_pkl" = target) and the source slot of the labels
+  of every target joint (-1 = unlabelled).
 """
 
 import argparse
@@ -50,16 +54,18 @@ MOVES = {
     },
     "none": {},  # plain reorder by joint name
 }
-# Datasets with a joint axis: (name, axis).
-JOINT_DATASETS = [
+# Datasets with a joint axis: (name, axis). Labels follow the convention's moves.
+LABEL_DATASETS = [
     ("multiview_keypoints/keypoints_2d", 2),
     ("multiview_keypoints/keypoints_2d_raw", 2),
     ("multiview_keypoints/keypoint_visibility", 2),
     ("multiview_keypoints/keypoint_visibility_raw", 2),
     ("multiview_keypoints/keypoint_confidence_raw", 2),
     ("multiview_keypoints/keypoints_3d", 1),
-    ("parameters/joint_rot", 1),
 ]
+# Pose parameters follow the joint name only: joint_rot is (N, n_joints, 3) axis-angle, n_joints = n_pose + 1.
+POSE_DATASETS = [("parameters/joint_rot", 1)]
+JOINT_DATASETS = LABEL_DATASETS + POSE_DATASETS
 
 
 def _joint_names(pkl_path):
@@ -89,7 +95,8 @@ def remap_joints_by_name(path, source_pkl, target_pkl, convention):
     missing = sorted(p for s, p in moves.items() if s in n_src and p not in n_dst)
     if missing:
         raise ValueError(f"{target_pkl} has no proxy joints {missing} for convention {convention!r}")
-    src = source_slots(n_src, n_dst, moves)
+    label_src = source_slots(n_src, n_dst, moves)
+    pose_src = source_slots(n_src, n_dst, {})  # no label moves: a joint keeps its rotation
     with h5py.File(path, "r+") as f:
         md = f["metadata"].attrs
         if int(md["n_joints"]) != len(n_src):
@@ -97,6 +104,7 @@ def remap_joints_by_name(path, source_pkl, target_pkl, convention):
         if "joint_names" in md and json.loads(md["joint_names"]) != n_src:
             raise ValueError(f"the HDF5's joint_names differ from the J_names of {source_pkl}")
         for name, ax in JOINT_DATASETS:
+            src = pose_src if (name, ax) in POSE_DATASETS else label_src
             d = f[name]
             if d.shape[ax] != len(n_src):
                 raise ValueError(f"{name} has shape {d.shape}, expected {len(n_src)} joints on axis {ax}")
@@ -121,7 +129,7 @@ def remap_joints_by_name(path, source_pkl, target_pkl, convention):
                 "moves": moves,
                 "v5_pkl": source_pkl,
                 "v6_pkl": target_pkl,
-                "source_slot_per_joint": src.tolist(),
+                "source_slot_per_joint": label_src.tolist(),
             }
         )
     print("[remap] done:", path)

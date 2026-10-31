@@ -15,8 +15,8 @@ SRC = ["Lumbar-Vertebrae", "skull", "Ear_L", "tibia_L", "Foot_L", "Tail_00"]
 # Target as the add-on exports it: each new leaf joint lands after its parent's subtree, so Tail_00 moves from 5 to 8.
 DST = ["Lumbar-Vertebrae", "skull", "Ear_L", "head_falkner", "tibia_L", "Foot_L", "knee_L_falkner", "heel_L_falkner"]
 DST += ["Tail_00", "hip_center_m103"]  # hip_center_m103 belongs to another convention: stays unlabelled
-# Independent oracle for the "falkner" convention: target joint -> source joint whose labels it gets. skull, tibia_L
-# and Foot_L hand their labels to their proxies and become unlabelled themselves.
+# Independent oracle for the labels under the "falkner" convention: target joint -> source joint whose labels it gets.
+# skull, tibia_L and Foot_L hand their labels to their proxies and become unlabelled themselves.
 FROM = {
     "Lumbar-Vertebrae": "Lumbar-Vertebrae",
     "Ear_L": "Ear_L",
@@ -25,7 +25,8 @@ FROM = {
     "heel_L_falkner": "Foot_L",
     "Tail_00": "Tail_00",
 }
-BY_NAME = {n: n for n in DST if n in SRC}  # oracle for a plain reorder by name
+BY_NAME = {n: n for n in DST if n in SRC}  # oracle for a plain reorder by name, and for the joint rotations
+POSE = "parameters/joint_rot"
 
 
 def _shape(name, axis, n_joints):
@@ -65,7 +66,7 @@ def _assert_joints_follow(out, source, ax, oracle, name):
         got = np.take(out, j, axis=ax)
         if joint in oracle:
             assert np.array_equal(got, np.take(source, SRC.index(oracle[joint]), axis=ax)), (name, joint)
-        else:  # unlabelled: zero keypoints, visibility and confidence
+        else:  # unlabelled (zero keypoints, visibility and confidence) or zero rotation
             assert not got.any(), (name, joint)
 
 
@@ -84,7 +85,12 @@ def test_remap_reorders_by_name_and_leaves_new_joints_unlabelled(tmp_path, layou
                 assert (d.chunks, d.compression, d.compression_opts) == ((1,) + data[name].shape[1:], "gzip", 4), name
             else:
                 assert d.chunks is None and d.compression is None, name
-            _assert_joints_follow(out, data[name], ax, FROM, name)
+            _assert_joints_follow(out, data[name], ax, BY_NAME if name == POSE else FROM, name)
+        # Rotations are pose, not labels: skull keeps its own non-zero rotation and its proxy gets none.
+        rot, rot_src = f[POSE][()], data[POSE]
+        assert rot_src.all()
+        np.testing.assert_array_equal(rot[:, DST.index("skull")], rot_src[:, SRC.index("skull")])
+        assert not rot[:, DST.index("head_falkner")].any()
         np.testing.assert_array_equal(f["multiview_keypoints/camera_intrinsics"][()], K)
         assert [s.decode() for s in f["auxiliary/session_name"][()]] == ["s"] * N
         md = f["metadata"].attrs
