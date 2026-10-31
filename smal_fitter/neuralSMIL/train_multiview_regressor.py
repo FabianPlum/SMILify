@@ -2655,12 +2655,20 @@ def main(config: dict):
             collate_fn=multiview_collate_fn,
         )
 
-        # Staged backbone unfreeze
+        # Staged backbone unfreeze (">=": a run resumed after the unfreeze epoch must unfreeze too)
         unfreeze_epoch = config.get("backbone_unfreeze_epoch")
-        if unfreeze_epoch is not None and epoch == unfreeze_epoch:
-            _backbone = model.module.backbone if hasattr(model, "module") else model.backbone
+        _backbone = (model.module if hasattr(model, "module") else model).backbone
+        if (
+            unfreeze_epoch is not None
+            and epoch >= unfreeze_epoch
+            and not all(p.requires_grad for p in _backbone.parameters())
+        ):
             for param in _backbone.parameters():
                 param.requires_grad = True
+            if is_distributed:
+                # DDP registers only the parameters that require grad when it is built: wrap again, or the
+                # backbone's gradients would never be all-reduced
+                model = DDP(model.module, device_ids=[gpu_idx], find_unused_parameters=True)
             if rank == 0:
                 trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
                 print(
