@@ -2,9 +2,9 @@
 """
 Generate per-view mouse silhouette targets for a multi-view SLEAP HDF5 with SAM 2.1, as an aligned sidecar HDF5.
 
-Runs in an environment with ``sam2`` (torch >= 2.5.1), e.g. the ``cell_seg`` conda env. Training never imports this
-file, and the training HDF5 is only read. The stored views (already undistorted and cropped) are segmented, so the
-targets align with the training inputs by construction.
+Runs in an environment with ``sam2`` (torch >= 2.5.1). Training never imports this file, and the training HDF5 is
+only read. The stored views (already undistorted and cropped) are segmented, so the targets align with the training
+inputs by construction.
 
 Per view, prompts come from the stored 2D labels: the raw SLEAP detection of that view where available (the image
 evidence), else the reprojected label. A padded box around the body/limb/head keypoints, positive points on chosen
