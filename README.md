@@ -204,6 +204,35 @@ python -m smal_fitter.sleap_data.add_raw_keypoints build DATASET.h5 /path/to/ses
 python -m smal_fitter.sleap_data.add_raw_keypoints append DATASET.h5 DATASET_raw_keypoints.h5
 ```
 
+### Sessions on a shared timeline
+
+Some pipelines store a session's 3D and its per-camera `*.analysis.h5` on a common timeline with interpolated frames inserted, while each camera's video and `.predictions.slp` keep their own frame numbers. Timeline index and video frame then differ, and by a different amount per camera. [stage_timeline_session.py](smal_fitter/sleap_data/stage_timeline_session.py) stages such a session into the camera-folder layout above: symlinks to the original `.slp`, videos and calibration, plus generated files.
+
+```bash
+python -m smal_fitter.sleap_data.stage_timeline_session \
+    --session_dir      /path/to/session \
+    --calibration      /path/to/session/calibration.toml \
+    --points3d         /path/to/session/pose_estimation_combined.h5 \
+    --static_keypoints /path/to/static_keypoints.json \
+    --out_dir          /path/to/staged_sessions/session_001
+```
+
+`--session_dir` holds a `*_pose_estimation/` folder with one sub-folder per camera, named as in the calibration (`*.predictions.slp` and `*.analysis.h5`), and a `*_cameras/` folder with the videos. `--points3d` is an HDF5 with the timeline 3D, shape (T, 1, K, 3), in the dataset `points3d` (`--points3d_dataset` to change it). `--static_keypoints` is optional, and the name of `--out_dir` becomes the session name. The staged session gets:
+
+| File | Content |
+|---|---|
+| `frame_map.npz` | Per camera: timeline index → video frame. Each timeline row of `analysis.h5` is matched to the `.slp` frame with exactly the same predictions; interpolated frames, and rows without an unambiguous match, get -1. |
+| `points3d.h5` | The timeline 3D as anipose-style `tracks`, with the static keypoints appended as extra nodes |
+| `reprojections.h5` | Pinhole reprojections of `points3d.h5` into every camera |
+| `extra_keypoints.json` | Names of the static keypoints (only with `--static_keypoints`) |
+| `staging_provenance.json` | Inputs, per-camera match counts and the git commit |
+
+Then run the multi-view preprocessor on the staged sessions folder as usual, typically with `--use_reprojections`. When a session has a `frame_map.npz`, `frame_idx` stays the timeline index, and the 3D and reprojections are read there. Images and SLEAP 2D labels (the raw labels, and `keypoints_2d` without `--use_reprojections`) come from each camera's mapped video frame; views without one are skipped. The HDF5 then also has `auxiliary/video_frame_idx` (N, max_views), the video frame read for each view (-1 in empty slots), and the `metadata` attributes `frame_map_used` and `views_excluded_no_video_frame`. `add_raw_keypoints build` reads the raw labels at `auxiliary/video_frame_idx` when the HDF5 has it.
+
+**Static extra keypoints** are fixed 3D points with no SLEAP label, e.g. landmarks on a head-fixed animal. The JSON gives `names`, `points` (world xyz per name) and `visible_cameras` (the cameras that see each point). They are appended to every frame of `points3d.h5`, and in `reprojections.h5` they are NaN in the cameras not listed. `SLEAPDataLoader` appends the names from `extra_keypoints.json` after the SLEAP keypoint names, so the joint lookup table can map model joints to them. They exist only in the 3D and the reprojections, so they reach `keypoints_2d` only with `--use_reprojections`, and never the raw labels. The names are stored in the `metadata` attribute `extra_keypoints`.
+
+Both files are opt-in: sessions without `frame_map.npz` or `extra_keypoints.json` are processed as before, and the HDF5 is unchanged.
+
 ## Training
 
 Training is driven by [smal_fitter/neuralSMIL/train_multiview_regressor.py](smal_fitter/neuralSMIL/train_multiview_regressor.py).
