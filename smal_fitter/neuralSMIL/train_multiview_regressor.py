@@ -2405,10 +2405,20 @@ def main(config: dict):
         augmentation_config=aug_config if aug_enabled else None,
         keypoint_source=config.get("keypoint_source", "reprojected"),
         raw_keypoint_min_confidence=config.get("raw_keypoint_min_confidence"),
+        silhouette_path=config.get("silhouette_path"),
+        silhouette_exclude_label_flag=config.get("silhouette_exclude_label_flag", True),
+        silhouette_min_score=config.get("silhouette_min_score", 0.0),
     )
 
     if rank == 0:
         dataset.print_dataset_summary()
+        if dataset.has_silhouettes:
+            used, masked, views = dataset.silhouette_view_counts
+            print(
+                f"Silhouette targets: {config['silhouette_path']} ({dataset.silhouette_resolution} px), "
+                f"{used} of {views} views used ({views - masked} without a mask, "
+                f"{masked - used} left out by the label-flag/score filters)"
+            )
         print(f"2D labels: {dataset.keypoint_source}")
 
     # Get canonical camera order and max_views from dataset
@@ -2567,8 +2577,18 @@ def main(config: dict):
         )
 
     joint_limit_reg_weight = _max_curriculum_weight("joint_limit_regularization")
-    # Same for the shape terms: a positive weight anywhere needs per-joint scales, otherwise every batch would
-    # silently train without them.
+    # Same for the silhouette and shape terms: a positive weight anywhere needs their inputs, otherwise every batch
+    # would silently train without them.
+    if _max_curriculum_weight("silhouette") > 0:
+        if not dataset.has_silhouettes:
+            raise ValueError(
+                "loss weight 'silhouette' > 0 but no silhouette targets: set dataset.silhouette_path "
+                "(see smal_fitter/sleap_data/generate_silhouettes_sam2.py)"
+            )
+        if (config.get("silhouette_config") or {}).get("camera", "gt") == "gt" and not dataset.has_camera_parameters:
+            raise ValueError(
+                "silhouette.camera 'gt' needs calibrated cameras, but the dataset has none; use 'pred' for this dataset"
+            )
     scale_symmetry_weight = _max_curriculum_weight("scale_symmetry")
     if max(_max_curriculum_weight("scale_consistency"), scale_symmetry_weight) > 0:
         use_pca = TrainingConfig.get_scale_trans_config().get("separate", {}).get("use_pca_transformation", True)
@@ -2607,6 +2627,7 @@ def main(config: dict):
     )
 
     model = model.to(device)
+    model.silhouette_config = dict(config.get("silhouette_config") or {})  # render settings, see _silhouette_settings
     if scale_symmetry_weight > 0 and not model._lr_joint_pairs():
         raise ValueError("loss weight 'scale_symmetry' > 0 but the model has no left/right joint pairs ('_L'/'_R')")
 

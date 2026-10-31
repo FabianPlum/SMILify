@@ -78,6 +78,9 @@ If you omit `--config`, the scripts fall back to the previous behavior (e.g. `Tr
 | `dataset_fraction` | float | `0.5` | Fraction of training split sampled per epoch (a different random subset is drawn each epoch for diversity). |
 | `keypoint_source` | string | `"reprojected"` | 2D training labels of a multi-view HDF5: `"reprojected"` (`keypoints_2d`) or `"raw"` (`keypoints_2d_raw`, the SLEAP predictions filtered by confidence only, see [Raw 2D labels](../../../README.md#raw-2d-labels)). Single-view `"raw"` needs `from_multiview: true`. The benchmark scores against both, whichever the model trained on. |
 | `raw_keypoint_min_confidence` | float or null | `null` | `"raw"` only: a raw label is visible when its SLEAP confidence is at least this value. `null` keeps the threshold the labels were stored with. |
+| `silhouette_path` | string or null | `null` | Multi-view only: sidecar HDF5 with per-view silhouette targets aligned to `data_path` (built with `smal_fitter/sleap_data/generate_silhouettes_sam2.py`; values 0 background, 1 animal, 255 ignore). Needed when the `silhouette` loss weight is > 0; training stops at start-up otherwise. |
+| `silhouette_exclude_label_flag` | bool | `true` | Views whose stored labels disagree with the raw SLEAP detections (the sidecar's `label_flag`) get no silhouette target. |
+| `silhouette_min_score` | float | `0.0` | Views whose SAM score is below this get no silhouette target. |
 
 **Blocked split:** neighbouring video frames are near-duplicates, so a random split puts almost the same frame in train and test. `"blocked"` orders each session by `frame_idx` and cuts it into `K = 1 / (val_ratio + test_ratio)` contiguous blocks. Fold `k` holds out block `k` of every session: its first `val_ratio` share is validation, the rest is test, and the remainder of the session trains. Blocks are adjacent with no buffer gap, so only the frames at each block edge have a near-duplicate neighbour in another split. The ratios must tile a session (`train_ratio = 1 - val_ratio - test_ratio`, `K` a whole number), and the dataset must be a multi-view HDF5 (single-view needs `from_multiview: true`). The split does not depend on `training.seed`, so runs with different seeds share it. With ratios 0.80 / 0.05 / 0.15 there are 5 folds; `holdout_fold: null` (fold 4) trains on the first 80% of each session, validates on the next 5% and tests on the last 15%.
 
@@ -202,7 +205,7 @@ Example:
 | `betas_trans` | Per-limb translation parameter error | 0.0005 |
 | `keypoint_2d` | 2D keypoint reprojection error | 0.1 |
 | `keypoint_3d` | 3D keypoint error | 0.25 |
-| `silhouette` | Silhouette overlap loss | 0.0 |
+| `silhouette` | Silhouette overlap loss. Multi-view: masked soft IoU between the rendered mesh and the `dataset.silhouette_path` targets in every valid view (ignore pixels excluded; rendering set by the `silhouette` section) | 0.0 |
 | `joint_angle_regularization` | Joint angle prior/regularization | 0.001 |
 | `limb_scale_regularization` | Limb scale regularization | 0.01 |
 | `limb_trans_regularization` | Limb translation regularization | 1.0 |
@@ -352,6 +355,18 @@ These fields are set at the **top level** of the JSON (not inside a section) for
 | `cross_attention_layers` | int | `2` | Number of cross-view attention layers for multi-view feature fusion. |
 | `cross_attention_heads` | int | `8` | Number of attention heads in cross-view attention. |
 | `cross_attention_dropout` | float | `0.1` | Dropout in cross-view attention layers. |
+
+### `silhouette` — Silhouette loss rendering (multi-view)
+
+Used when the `silhouette` loss weight is > 0. All valid views of a batch are rendered in one call with a soft silhouette shader.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `render_size` | int | `128` | Square render resolution; targets are area-resampled to it (ignore pixels max-pooled). |
+| `sigma` | float | `1e-5` | Soft-rasterizer edge width. Lower is sharper; with `faces_per_pixel` 64 the dense mouse mesh renders without holes. The soft edge makes the render a little larger than the hard silhouette, so the IoU optimum sits about 1–2% below the true mesh scale (2–3% at `3e-5`); a larger `render_size` does not change this. |
+| `faces_per_pixel` | int | `64` | Faces blended per pixel. Fewer punch holes into dense meshes. |
+| `camera` | string | `"gt"` | `"gt"`: calibrated cameras, so the camera heads get no silhouette gradient (training stops at start-up if the dataset has none). `"pred"`: the predicted cameras, detached. |
+| `cull_backfaces` | bool | `false` | Rasterizer back-face culling. |
 
 ## Memory optimization for multi-view training
 
