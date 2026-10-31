@@ -363,7 +363,7 @@ Used when the `silhouette` loss weight is > 0. All valid views of a batch are re
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `render_size` | int | `128` | Square render resolution; targets are area-resampled to it (ignore pixels max-pooled). |
-| `sigma` | float | `1e-5` | Soft-rasterizer edge width. Lower is sharper; with `faces_per_pixel` 64 the dense mouse mesh renders without holes. The soft edge makes the render a little larger than the hard silhouette, so the IoU optimum sits about 2–3% (up to 4% in some views) below the true mesh scale at `1e-5`, and about 3% at `3e-5`; a larger `render_size` does not change this. |
+| `sigma` | float | `1e-5` | Soft-rasterizer edge width. Lower is sharper; with `faces_per_pixel` 64 the dense mouse mesh renders without holes. The soft edge makes the render a little larger than the hard silhouette, so the IoU optimum sits about 2–3% (up to 4% in some views) below the true mesh scale at `1e-5`, and about 3% at `3e-5`; a larger `render_size` does not change this. Even a perfect mouse mesh reaches a soft IoU of only about 0.85 at `1e-5`, so the logged `silhouette_iou` tops out there. |
 | `faces_per_pixel` | int | `64` | Faces blended per pixel. Fewer punch holes into dense meshes. |
 | `camera` | string | `"gt"` | `"gt"`: calibrated cameras, so the camera heads get no silhouette gradient (training stops at start-up if the dataset has none). `"pred"`: the predicted cameras, detached. |
 | `cull_backfaces` | bool | `false` | Rasterizer back-face culling. |
