@@ -123,3 +123,32 @@ def test_remap_convention_none_reorders_by_name(tmp_path):
             _assert_joints_follow(f[name][()], data[name], ax, BY_NAME, name)
         remap = json.loads(f["metadata"].attrs["proxy_remap"])
         assert (remap["moves"], remap["source_slot_per_joint"]) == ({}, [0, 1, 2, -1, 3, 4, -1, -1, 5, -1])
+
+
+def test_remap_refuses_a_second_run_with_the_target_as_source(tmp_path):
+    path, _, _ = _write_inputs(tmp_path)
+    src, dst = str(tmp_path / "src.pkl"), str(tmp_path / "dst.pkl")
+    remap_joints_by_name(str(path), src, dst, "falkner")
+    before = path.read_bytes()
+
+    # The file is in the target's joint order now, so only this refusal keeps a second falkner run from giving the
+    # proxies the emptied slots of the moved joints.
+    proxies = r"\['head_falkner', 'heel_L_falkner', 'knee_L_falkner'\]"
+    with pytest.raises(ValueError, match=r"already has the proxy joints " + proxies):
+        remap_joints_by_name(str(path), dst, dst, "falkner")
+
+    assert path.read_bytes() == before
+
+
+def test_remap_refuses_a_target_that_lacks_source_joints(tmp_path):
+    path, _, _ = _write_inputs(tmp_path)
+    src, dst = str(tmp_path / "src.pkl"), str(tmp_path / "dst.pkl")
+    remap_joints_by_name(str(path), src, dst, "falkner")  # labelled proxies, as in a remapped v6 file
+    before = path.read_bytes()
+
+    # Back to the smaller model with no moves (v6 -> v5 with "none"): the proxies' labels would be deleted.
+    dropped = r"\['head_falkner', 'knee_L_falkner', 'heel_L_falkner', 'hip_center_m103'\]"
+    with pytest.raises(ValueError, match=r"lacks the source joints " + dropped):
+        remap_joints_by_name(str(path), dst, src, "none")
+
+    assert path.read_bytes() == before

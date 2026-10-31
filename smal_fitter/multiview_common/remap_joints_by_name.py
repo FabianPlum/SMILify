@@ -14,10 +14,13 @@ Modifies the HDF5 IN PLACE, so run it on a copy:
 - Labels (LABEL_DATASETS: 2D and 3D keypoints, visibility, confidence): a target joint that also exists in the source
   model keeps its labels, unless the convention moves them.
 - CONVENTION selects one table of label moves (MOVES): the labels of each listed source joint go to a proxy joint of
-  the target model, and the source joint's own slot becomes unlabelled. "none" moves nothing: a plain reorder by
-  name. A target model that lacks a proxy joint the convention moves labels to is refused before the HDF5 is opened.
+  the target model, and the source joint's own slot becomes unlabelled. A move whose joint the source model lacks is
+  skipped. "none" moves nothing: a plain reorder by name.
 - Every other target joint is unlabelled: all zeros (keypoints, visibility, confidence), which is how the HDF5 stores
   joints that were never labelled.
+- A remap that would delete or overwrite labels is refused before the HDF5 is opened: a target model that lacks a
+  proxy joint the convention moves labels to, a source model that already has one (a second run on a remapped file,
+  for example), and source joints that the target model lacks and no move covers (v6 -> v5 with "none", for example).
 - Joint rotations (POSE_DATASETS: parameters/joint_rot, root at index 0) are pose parameters, not labels. They follow
   the joint name only, whatever the convention: every joint keeps its own rotation, and a target joint that the
   source model lacks (a proxy joint, for example) gets zero rotation.
@@ -74,10 +77,13 @@ def _joint_names(pkl_path):
 
 
 def source_slots(source_names, target_names, moves):
-    """Source joint index for every target joint, matched by name (-1 = unlabelled)."""
+    """Source joint index for every target joint, matched by name (-1 = unlabelled).
+
+    A move whose source joint is not in `source_names` is skipped, so its proxy joint gets -1.
+    """
     src = []
     for n in target_names:
-        moved_from = [k for k, v in moves.items() if v == n]
+        moved_from = [k for k, v in moves.items() if v == n and k in source_names]
         if moved_from:
             src.append(source_names.index(moved_from[0]))
         elif n in source_names and n not in moves:
@@ -91,10 +97,16 @@ def remap_joints_by_name(path, source_pkl, target_pkl, convention):
     """Rewrite the per-joint datasets of the HDF5 at `path` IN PLACE in the joint order of `target_pkl`."""
     n_src, n_dst = _joint_names(source_pkl), _joint_names(target_pkl)
     moves = MOVES[convention]
-    # Labels moved to a proxy joint the target model lacks would be deleted: refuse before opening the file.
+    # Refuse every remap that would delete or overwrite labels, before opening the file.
     missing = sorted(p for s, p in moves.items() if s in n_src and p not in n_dst)
-    if missing:
+    if missing:  # the moved labels would have no slot
         raise ValueError(f"{target_pkl} has no proxy joints {missing} for convention {convention!r}")
+    present = sorted(p for p in moves.values() if p in n_src)
+    if present:  # e.g. a second run on a remapped file: the proxies would get the emptied slots of the moved joints
+        raise ValueError(f"{source_pkl} already has the proxy joints {present}: their labels would be overwritten")
+    dropped = [n for n in n_src if n not in n_dst and n not in moves]
+    if dropped:  # e.g. v6 -> v5 with "none"
+        raise ValueError(f"{target_pkl} lacks the source joints {dropped}: their labels would be deleted")
     label_src = source_slots(n_src, n_dst, moves)
     pose_src = source_slots(n_src, n_dst, {})  # no label moves: a joint keeps its rotation
     with h5py.File(path, "r+") as f:
