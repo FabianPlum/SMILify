@@ -204,6 +204,7 @@ Example:
 | `keypoint_3d` | 3D keypoint error | 0.25 |
 | `silhouette` | Silhouette overlap loss | 0.0 |
 | `joint_angle_regularization` | Joint angle prior/regularization | 0.001 |
+| `joint_twist_regularization` | Multi-view: hinge on each bone's axial twist about its rest direction beyond 45° (keypoints cannot see twist); locked proxy leaves are skipped. Single-view: not used. | 0.0 |
 | `limb_scale_regularization` | Limb scale regularization | 0.01 |
 | `limb_trans_regularization` | Limb translation regularization | 1.0 |
 | `triangulation_consistency` | Cross-view triangulation consistency (multi-view). **Disabled by default — see note below.** | 0.0 |
