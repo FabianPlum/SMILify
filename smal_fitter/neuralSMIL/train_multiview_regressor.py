@@ -2053,7 +2053,7 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
     }
 
     filtered_state = {}
-    skipped = []
+    skipped = {}  # key -> report line
     resized = []
     for key, param in saved_state.items():
         if key in current_state and param.shape != current_state[key].shape:
@@ -2070,7 +2070,7 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
                 filtered_state[key] = adapted
                 resized.append(f"  {key}: {param.shape} -> {adapted.shape} (batch dim adapted)")
             else:
-                skipped.append(f"  {key}: checkpoint {param.shape} vs model {cur_shape}")
+                skipped[key] = f"  {key}: checkpoint {param.shape} vs model {cur_shape}"
         else:
             filtered_state[key] = param
 
@@ -2080,14 +2080,16 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
             print(r)
     if skipped:
         print(f"Skipped {len(skipped)} mismatched keys (will use fresh init):")
-        for s in skipped:
+        for s in skipped.values():
             print(s)
 
     incompatible = current_model.load_state_dict(filtered_state, strict=False)
-    if incompatible.missing_keys or incompatible.unexpected_keys:
+    fresh = [k for k in incompatible.missing_keys if k not in skipped]
+    if skipped or fresh or incompatible.unexpected_keys:
         print(
-            f"Loaded {len(filtered_state)} checkpoint tensors; {len(incompatible.missing_keys)} model keys not in the "
-            f"checkpoint (fresh init), {len(incompatible.unexpected_keys)} checkpoint keys unused"
+            f"Loaded {len(filtered_state) - len(incompatible.unexpected_keys)} checkpoint tensors; {len(skipped)} "
+            f"shape-skipped and {len(fresh)} model keys not in the checkpoint keep their fresh init; "
+            f"{len(incompatible.unexpected_keys)} checkpoint keys unused"
         )
 
     if optimizer and "optimizer_state_dict" in checkpoint:
