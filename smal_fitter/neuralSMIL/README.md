@@ -325,7 +325,7 @@ Both trainers run each training step (prediction and loss) as the DDP forward pa
 
 After every epoch rank 0 logs `DDP replicas after epoch N: identical`. `DIFFERENT`, followed by the most different parameters, means the replicas have drifted apart, i.e. the gradients were not synchronised. Under DDP an exception in a training batch stops the run, because skipping the batch on one rank would desynchronise the all-reduces; relaunch to resume from the last checkpoint. Single-GPU runs still skip the batch.
 
-Multi-GPU checkpoints from before `ddp_utils.py` existed hold a single rank's replica: the trainers called their methods on `model.module`, which bypasses `DistributedDataParallel.forward`, so no gradient was all-reduced and every rank trained its own replica on its share of each epoch. Rank 0 saved its own.
+Multi-GPU checkpoints trained before 2026-10-31, with code that predates `ddp_utils.py`, hold a single rank's replica: the trainers called their methods on `model.module`, which bypasses `DistributedDataParallel.forward`, so no gradient was all-reduced and every rank trained its own replica on its share of each epoch. Rank 0 saved its own.
 
 ## Dataset Formats
 
