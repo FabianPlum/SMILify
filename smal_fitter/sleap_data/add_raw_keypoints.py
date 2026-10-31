@@ -97,6 +97,9 @@ def build_sidecar(
         n_joints = int(md["n_joints"])
         sessions = np.asarray(_decode(f["auxiliary/session_name"][:]), dtype=object)
         frames = f["auxiliary/frame_idx"][:].astype(np.int64)
+        # With a frame map, frame_idx is a timeline index; the preprocessor then records the video frame it read per
+        # view, and the raw labels must come from that frame (as in the preprocessor's raw_view_keypoints call).
+        video_frames = f["auxiliary/video_frame_idx"][:] if "auxiliary/video_frame_idx" in f else None
         camera_names = [s.split(",") for s in _decode(f["auxiliary/camera_names"][:])]
         view_mask = f["multiview_images/view_mask"][:]
         K_stored = f["multiview_keypoints/camera_intrinsics"][:]
@@ -157,9 +160,8 @@ def build_sidecar(
             for r in tqdm(rows, desc=session, leave=False):
                 for v, cam in enumerate(camera_names[r]):
                     camera_data, transform_info, K, distortion = cameras[cam]
-                    kp, vis, conf = pre.raw_view_keypoints(
-                        loader, camera_data, int(frames[r]), transform_info, K, distortion
-                    )
+                    frame = int(frames[r]) if video_frames is None else int(video_frames[r, v])
+                    kp, vis, conf = pre.raw_view_keypoints(loader, camera_data, frame, transform_info, K, distortion)
                     out["keypoints_2d_raw"][r, v] = kp
                     out["keypoint_visibility_raw"][r, v] = vis
                     out["keypoint_confidence_raw"][r, v] = conf
