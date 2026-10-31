@@ -76,6 +76,7 @@ If you omit `--config`, the scripts fall back to the previous behavior (e.g. `Tr
 | `expand_all_views` | bool | `true` | Single-view from multi-view: every valid view of every sample is its own item. |
 | `use_ue_scaling` | bool | `true` | 10x UE mesh scaling for legacy single-view replicAnt data; must be `false` for multi-view HDF5s. |
 | `dataset_fraction` | float | `0.5` | Fraction of training split sampled per epoch (a different random subset is drawn each epoch for diversity). |
+| `dataset_fraction_by_session` | dict | `{}` | Multi-view only: per-source fractions for a merged dataset, `{substring of the session name: fraction}`. The first matching key wins; unmatched sessions use `dataset_fraction`. Each source gets its own random subset each epoch, e.g. `{"rig_a": 0.2}` with `dataset_fraction: 1.0` trains on 20% of a source recorded at every video frame and on all of the others. |
 | `keypoint_source` | string | `"reprojected"` | 2D training labels of a multi-view HDF5: `"reprojected"` (`keypoints_2d`) or `"raw"` (`keypoints_2d_raw`, the SLEAP predictions filtered by confidence only, see [Raw 2D labels](../../../README.md#raw-2d-labels)). Single-view `"raw"` needs `from_multiview: true`. The benchmark scores against both, whichever the model trained on. |
 | `raw_keypoint_min_confidence` | float or null | `null` | `"raw"` only: a raw label is visible when its SLEAP confidence is at least this value. `null` keeps the threshold the labels were stored with. |
 
