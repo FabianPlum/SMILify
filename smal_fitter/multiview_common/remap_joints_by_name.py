@@ -74,10 +74,9 @@ with h5py.File(path, "r+") as f:
                 idx_o, idx_s = list(idx), list(idx)
                 idx_o[ax], idx_s[ax] = j, s
                 out[tuple(idx_o)] = a[tuple(idx_s)]
-        chunks = list(d.chunks)
-        comp, opts = d.compression, d.compression_opts
+        chunks, comp, opts = d.chunks, d.compression, d.compression_opts  # chunks is None for contiguous datasets
         del f[name]
-        f.create_dataset(name, data=out, chunks=tuple(chunks), compression=comp, compression_opts=opts)
+        f.create_dataset(name, data=out, chunks=chunks, compression=comp, compression_opts=opts)
         print(f"[remap] {name}: {a.shape} -> {out.shape}", flush=True)
     md["n_joints"] = str(len(n6)) if isinstance(md["n_joints"], str) else len(n6)
     md["n_pose"] = str(len(n6) - 1) if isinstance(md["n_pose"], str) else len(n6) - 1
