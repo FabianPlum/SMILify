@@ -69,6 +69,7 @@ from smal_fitter.neuralSMIL.data_splits import (
     split_dataset,
     tag_output_dir,
 )
+from smal_fitter.neuralSMIL.ddp_utils import any_rank, check_replicas, ddp_forward, zero_loss
 from smal_fitter.fitter import SMALFitter
 from smal_fitter.Unreal2Pytorch3D import return_placeholder_data
 import config
@@ -471,6 +472,21 @@ def create_fractional_train_loader_sv(
     return DataLoader(epoch_subset, shuffle=True, **loader_kwargs)
 
 
+def _training_step(model, x_data_batch, y_data_batch, loss_weights):
+    """One batch's forward pass and loss, run as DDP's forward pass under DDP (``ddp_forward``).
+
+    Returns ``(loss, loss components (detached))``, or ``(zero loss, None)`` for a batch without valid samples. Only
+    the loss carries gradients (see ``ddp_forward``).
+    """
+    predicted_params, target_params_batch, auxiliary_data = model.predict_from_batch(x_data_batch, y_data_batch)
+    if predicted_params is None:
+        return zero_loss(model), None
+    loss, loss_components = model.compute_batch_loss(
+        predicted_params, target_params_batch, auxiliary_data, return_components=True, loss_weights=loss_weights
+    )
+    return loss, {k: v.detach() if torch.is_tensor(v) else v for k, v in loss_components.items()}
+
+
 def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_weights, is_distributed=False, rank=0):
     """
     Train the model for one epoch using batch processing.
@@ -500,40 +516,32 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
     else:
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
 
+    base_model = model.module if is_distributed else model
+    param_device = next(model.parameters()).device
     for batch_idx, (x_data_batch, y_data_batch) in enumerate(pbar):
         try:
             # Zero gradients at the start of each batch
             optimizer.zero_grad()
 
-            # Process batch (handle DDP model)
-            base_model = model.module if is_distributed else model
-            result = base_model.predict_from_batch(x_data_batch, y_data_batch)
-
-            if result[0] is None:  # No valid samples in batch
-                continue
-
-            # Extract results from batch
-            predicted_params, target_params_batch, auxiliary_data = result
-
-            # Compute batch loss (handle DDP model)
-            loss, loss_components = base_model.compute_batch_loss(
-                predicted_params, target_params_batch, auxiliary_data, return_components=True, loss_weights=loss_weights
-            )
-
-            # Backward pass
+            # Forward pass and loss, as DDP's forward under DDP so the backward pass all-reduces gradients. A batch
+            # without valid samples backpropagates a zero loss, so every rank takes part in the same all-reduce.
+            loss, loss_components = ddp_forward(model, _training_step, x_data_batch, y_data_batch, loss_weights)
             loss.backward()
+
+            # Step only if the batch had valid samples (on any rank: the replicas must take the same steps)
+            has_data = loss_components is not None
+            if not (any_rank(has_data, param_device) if is_distributed else has_data):
+                continue
 
             # Gradient clipping to prevent instability
             # Use very aggressive clipping for transformer decoder to prevent gradient explosion
-            head_type = base_model.head_type if is_distributed else model.head_type
-            max_norm = 0.1 if head_type == "transformer_decoder" else 1.0
+            max_norm = 0.1 if base_model.head_type == "transformer_decoder" else 1.0
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
 
             # Update parameters
             optimizer.step()
-
-            # Note: DDP automatically synchronizes gradients during backward pass
-            # No need for manual barrier here - it would severely slow down training
+            if not has_data:
+                continue
 
             # Record loss and parameter errors
             batch_loss = loss.item()
@@ -555,11 +563,19 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
             import traceback
 
             traceback.print_exc()
+            if is_distributed:
+                # Skipping the batch on this rank only would leave the other ranks waiting in (or pair them with the
+                # wrong) gradient all-reduce. Stop instead; training resumes from the last checkpoint.
+                raise
             # Clean up GPU memory after OOM to prevent cascading failures.
             if isinstance(e, torch.cuda.OutOfMemoryError):
                 gc.collect()
                 torch.cuda.empty_cache()
             continue
+
+    # The replicas must be identical after synchronised updates; a difference means the gradients were not all-reduced
+    if is_distributed:
+        check_replicas(model, epoch, rank)
 
     # Average parameter errors over all batches
     avg_param_errors = {}
