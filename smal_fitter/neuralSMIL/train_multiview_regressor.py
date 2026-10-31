@@ -2114,7 +2114,7 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
     epoch = 0 if skipped else checkpoint.get("epoch", 0)
-    if skipped:
+    if skipped and optimizer is not None:  # only a resume passes the optimizer and uses the returned epoch
         print(f"Epoch counter reset to 0 (was {checkpoint.get('epoch', 0)}) so LR warmup applies to new layers.")
     return epoch, checkpoint.get("metrics", {})
 
