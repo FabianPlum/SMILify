@@ -212,7 +212,7 @@ Some pipelines store a session's 3D and its per-camera `*.analysis.h5` on a comm
 python -m smal_fitter.sleap_data.stage_timeline_session \
     --session_dir      /path/to/session \
     --calibration      /path/to/session/calibration.toml \
-    --points3d         /path/to/session/pose_estimation_combined.h5 \
+    --points3d         /path/to/session/points3d_timeline.h5 \
     --static_keypoints /path/to/static_keypoints.json \
     --out_dir          /path/to/staged_sessions/session_001
 ```

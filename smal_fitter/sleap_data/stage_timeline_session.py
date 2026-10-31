@@ -22,7 +22,7 @@ Usage:
     python -m smal_fitter.sleap_data.stage_timeline_session \\
         --session_dir /data/rig/session_01 \\
         --calibration /data/rig/session_01/calibration.toml \\
-        --points3d /data/rig/session_01/pose_estimation_combined.h5 \\
+        --points3d /data/rig/session_01/points3d_timeline.h5 \\
         --static_keypoints /data/rig/static_keypoints.json \\
         --out_dir /data/rig/staged/session_01
 """
