@@ -34,7 +34,8 @@ and cameras are names from the dataset's canonical_camera_order. Required keys:
     max_tail_frac          float            tail QC: largest fraction of the image
     label_flag_px          float            label_flag is set when label_disagree_px is larger
 Optional keys (default):
-    static_positive        {cam: [[x, y]]}  fixed positive points per camera; the box is widened to include them
+    static_positive        {cam: [[x, y]]}  fixed positive points per camera; the box's left, top and right sides
+                                            are widened to include them
     static_box_margin      [int, int]       x and y margin of the box around those points ([60, 40])
     hardware_points        {cam: [[x, y]]}  negative points on static rig hardware, for the body and the tail
     ignore_masks           str              .npz beside the prompt file: one bool mask per camera, at the dataset's
