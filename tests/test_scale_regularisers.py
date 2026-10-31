@@ -24,7 +24,10 @@ def test_left_right_pairs_and_symmetry(monkeypatch):
 
     def symmetry(log_scales):
         pred = {"global_rot": torch.zeros(2, 6), "num_views": 0, "log_beta_scales": log_scales}
-        _, components = m.compute_multiview_batch_loss(pred, [{}, {}], {"scale_symmetry": 1.0}, return_components=True)
+        total, components = m.compute_multiview_batch_loss(
+            pred, [{}, {}], {"scale_symmetry": 1.0}, return_components=True
+        )
+        assert total.item() == components["scale_symmetry"].item()  # the term reaches the total loss
         return components["scale_symmetry"].item()
 
     scales = torch.randn(2, 6, 3)
