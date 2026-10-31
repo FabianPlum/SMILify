@@ -2518,12 +2518,12 @@ def main(config: dict):
             fr, _ = _per_sample_fractions(train_set, config["dataset_fraction_by_session"], dataset_fraction)
             names, _ = read_session_frame_index(train_set.dataset.hdf5_path)
             names = np.asarray(names, dtype=object)[np.asarray(train_set.indices)]
-            print(f"\n  Dataset fraction by session (default {dataset_fraction:.0%}):")
+            print(f"\n  Dataset fraction by session (default {dataset_fraction:.1%}):")
             for n in dict.fromkeys(names.tolist()):
                 m = names == n
                 f = float(fr[m][0])
                 print(
-                    f"    {n}: {f:.0%} of {int(m.sum())} -> {int(m.sum()) if f >= 1 else max(1, int(m.sum() * f))} per epoch"
+                    f"    {n}: {f:.1%} of {int(m.sum())} -> {int(m.sum()) if f >= 1 else max(1, int(m.sum() * f))} per epoch"
                 )
         elif dataset_fraction < 1.0:
             samples_per_epoch = max(1, int(len(train_set) * dataset_fraction))
