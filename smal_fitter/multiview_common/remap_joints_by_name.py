@@ -22,10 +22,21 @@ path, v5p, v6p, conv = sys.argv[1:5]
 n5 = list(pickle.load(open(v5p, "rb"), encoding="latin1")["J_names"])
 n6 = list(pickle.load(open(v6p, "rb"), encoding="latin1")["J_names"])
 MOVES = {
-    "m103": {"Lumbar-Vertebrae": "hip_center_m103", "humerus_L": "shoulder_L_m103", "humerus_R": "shoulder_R_m103",
-             "tibia_L": "knee_L_m103", "tibia_R": "knee_R_m103"},
-    "falkner": {"skull": "head_falkner", "Tail_06": "Tail_06_falkner", "tibia_L": "knee_L_falkner",
-                "tibia_R": "knee_R_falkner", "Foot_L": "heel_L_falkner", "Foot_R": "heel_R_falkner"},
+    "m103": {
+        "Lumbar-Vertebrae": "hip_center_m103",
+        "humerus_L": "shoulder_L_m103",
+        "humerus_R": "shoulder_R_m103",
+        "tibia_L": "knee_L_m103",
+        "tibia_R": "knee_R_m103",
+    },
+    "falkner": {
+        "skull": "head_falkner",
+        "Tail_06": "Tail_06_falkner",
+        "tibia_L": "knee_L_falkner",
+        "tibia_R": "knee_R_falkner",
+        "Foot_L": "heel_L_falkner",
+        "Foot_R": "heel_R_falkner",
+    },
 }[conv]
 # source slot (v5 index) for each v6 slot, -1 = unlabelled
 src = []
@@ -39,10 +50,15 @@ for n in n6:
         src.append(-1)
 src = np.array(src)
 # datasets with a joint axis: (name, axis)
-JOINT_DS = [("multiview_keypoints/keypoints_2d", 2), ("multiview_keypoints/keypoints_2d_raw", 2),
-            ("multiview_keypoints/keypoint_visibility", 2), ("multiview_keypoints/keypoint_visibility_raw", 2),
-            ("multiview_keypoints/keypoint_confidence_raw", 2), ("multiview_keypoints/keypoints_3d", 1),
-            ("parameters/joint_rot", 1)]
+JOINT_DS = [
+    ("multiview_keypoints/keypoints_2d", 2),
+    ("multiview_keypoints/keypoints_2d_raw", 2),
+    ("multiview_keypoints/keypoint_visibility", 2),
+    ("multiview_keypoints/keypoint_visibility_raw", 2),
+    ("multiview_keypoints/keypoint_confidence_raw", 2),
+    ("multiview_keypoints/keypoints_3d", 1),
+    ("parameters/joint_rot", 1),
+]
 with h5py.File(path, "r+") as f:
     md = f["metadata"].attrs
     assert int(md["n_joints"]) == len(n5), f"source has {md['n_joints']} joints, v5 has {len(n5)}"
@@ -66,6 +82,7 @@ with h5py.File(path, "r+") as f:
     md["n_joints"] = str(len(n6)) if isinstance(md["n_joints"], str) else len(n6)
     md["n_pose"] = str(len(n6) - 1) if isinstance(md["n_pose"], str) else len(n6) - 1
     md["joint_names"] = json.dumps(n6)
-    md["proxy_remap"] = json.dumps({"convention": conv, "moves": MOVES, "v5_pkl": v5p, "v6_pkl": v6p,
-                                    "source_slot_per_joint": src.tolist()})
+    md["proxy_remap"] = json.dumps(
+        {"convention": conv, "moves": MOVES, "v5_pkl": v5p, "v6_pkl": v6p, "source_slot_per_joint": src.tolist()}
+    )
 print("[remap] done:", path)
