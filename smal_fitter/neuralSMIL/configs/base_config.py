@@ -29,6 +29,10 @@ class DatasetConfig:
     val_ratio: float = 0.05
     test_ratio: float = 0.1
     dataset_fraction: float = 0.5  # Fraction of training data used per epoch
+    # Per-source fractions for merged datasets: {substring of the sample's session name: fraction}. A densely sampled
+    # source (every video frame) can take a fresh fraction per epoch while an already subsampled one is used in full.
+    # The first matching key wins; unmatched sessions use dataset_fraction. Empty = dataset_fraction for all.
+    dataset_fraction_by_session: Dict[str, float] = field(default_factory=dict)
     # How samples are assigned to train/val/test (see neuralSMIL/data_splits.py).
     # "random": seeded random split over samples.
     # "blocked": blocked k-fold cross-validation along time within each session;

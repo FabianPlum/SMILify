@@ -76,6 +76,7 @@ from smal_fitter.neuralSMIL.data_splits import (
     add_split_args,
     check_resume_split,
     fold_tag,
+    read_session_frame_index,
     split_args_to_overrides,
     split_dataset,
     tag_output_dir,
@@ -261,6 +262,26 @@ def cleanup_ddp():
         dist.destroy_process_group()
 
 
+def _per_sample_fractions(train_set, by_session, default):
+    """(fraction, group) per training-set position from each sample's session name (first matching key wins;
+    group = that key, or "" for unmatched sessions, which take `default`)."""
+    from smal_fitter.neuralSMIL.data_splits import read_session_frame_index
+
+    base, idx = train_set, None
+    if isinstance(train_set, torch.utils.data.Subset):
+        base, idx = train_set.dataset, np.asarray(train_set.indices)
+    names, _ = read_session_frame_index(base.hdf5_path)
+    names = np.asarray(names, dtype=object) if idx is None else np.asarray(names, dtype=object)[idx]
+    out = np.full(len(names), float(default))
+    group = np.full(len(names), "", dtype=object)
+    for i, n in enumerate(names):
+        for key, f in by_session.items():
+            if key in str(n):
+                out[i], group[i] = float(f), key
+                break
+    return out, group
+
+
 def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distributed: bool, collate_fn) -> DataLoader:
     """
     Create a DataLoader that samples a fraction of the training dataset.
@@ -285,6 +306,38 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
         DataLoader configured with the fractional subset for this epoch
     """
     dataset_fraction = config.get("dataset_fraction", 1.0)
+    by_session = config.get("dataset_fraction_by_session") or {}
+
+    if by_session:
+        # Per-source fractions: a fresh deterministic subset of each source per epoch (same seed on every DDP rank).
+        fractions, groups = _per_sample_fractions(train_set, by_session, dataset_fraction)
+        rng = torch.Generator()
+        rng.manual_seed(config["seed"] + epoch)
+        all_indices = []
+        for g in [""] + list(by_session):  # each source drawn on its own, in a fixed order
+            members = np.flatnonzero(groups == g)
+            if not len(members):
+                continue
+            f = float(fractions[members[0]])
+            if f >= 1.0:
+                all_indices.extend(members.tolist())
+            else:
+                n = max(1, int(len(members) * f))
+                all_indices.extend(members[torch.randperm(len(members), generator=rng)[:n].numpy()].tolist())
+        epoch_subset = torch.utils.data.Subset(train_set, sorted(all_indices))
+        sampler = DistributedSampler(epoch_subset, shuffle=True) if is_distributed else None
+        if sampler is not None:
+            sampler.set_epoch(epoch)
+        return DataLoader(
+            epoch_subset,
+            batch_size=config["batch_size"],
+            shuffle=(sampler is None),
+            sampler=sampler,
+            num_workers=config["num_workers"],
+            pin_memory=config["pin_memory"],
+            collate_fn=collate_fn,
+            drop_last=True,
+        )
 
     if dataset_fraction >= 1.0:
         # Use full dataset - create standard sampler
@@ -2443,7 +2496,16 @@ def main(config: dict):
         print(f"  Train: {len(train_set)}")
         print(f"  Val: {len(val_set)}")
         print(f"  Test: {len(test_set)}")
-        if dataset_fraction < 1.0:
+        if config.get("dataset_fraction_by_session"):
+            fr, _ = _per_sample_fractions(train_set, config["dataset_fraction_by_session"], dataset_fraction)
+            names, _ = read_session_frame_index(train_set.dataset.hdf5_path)
+            names = np.asarray(names, dtype=object)[np.asarray(train_set.indices)]
+            print(f"\n  Dataset fraction by session (default {dataset_fraction:.0%}):")
+            for n in dict.fromkeys(names.tolist()):
+                m = names == n
+                f = float(fr[m][0])
+                print(f"    {n}: {f:.0%} of {int(m.sum())} -> {int(m.sum()) if f >= 1 else max(1, int(m.sum() * f))} per epoch")
+        elif dataset_fraction < 1.0:
             samples_per_epoch = max(1, int(len(train_set) * dataset_fraction))
             print(f"\n  Dataset fraction: {dataset_fraction:.1%}")
             print(f"  Samples per epoch: {samples_per_epoch} (of {len(train_set)} total)")

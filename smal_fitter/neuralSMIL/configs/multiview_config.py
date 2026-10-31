@@ -118,6 +118,7 @@ class MultiViewConfig(BaseTrainingConfig):
             "mesh_scale_init": self.mesh_scaling.init_mesh_scale,
             # Dataset fraction
             "dataset_fraction": self.dataset.dataset_fraction,
+            "dataset_fraction_by_session": dict(self.dataset.dataset_fraction_by_session),
             # SMAL model configuration
             "shape_family": (
                 self.smal_model.shape_family
