@@ -1458,6 +1458,13 @@ class SMILImageRegressor(SMALFitter):
                     axes.append(u / np.linalg.norm(u))
         self._twist_idx = torch.tensor(idx, dtype=torch.long, device=self.device)
         self._twist_axes = torch.tensor(np.array(axes).reshape(-1, 3), dtype=torch.float32, device=self.device)
+        if not idx:  # runs once per model (first penalty call), so this warns once
+            warnings.warn(
+                "joint_twist_regularization is enabled (weight > 0) but no joint of the model has a single unlocked "
+                "chain child, so no bone has a twist axis: the twist penalty is 0 for this model.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     def _joint_twist_penalty(self, joint_rot_pred):
         """Hinge on each bone's axial twist beyond ``_TWIST_FREE_DEG``.
@@ -1471,10 +1478,13 @@ class SMILImageRegressor(SMALFitter):
             joint_rot_pred: ``(N, N_POSE, 6 or 3)`` predicted rotations.
 
         Returns:
-            Scalar tensor: mean over the twist joints of the overshoot in radians.
+            Scalar tensor: mean over the twist joints of the overshoot in radians. A model without twist joints gets a
+            zero that stays on the graph (see :meth:`_init_twist_axes`, which warns once).
         """
         if not hasattr(self, "_twist_idx"):
             self._init_twist_axes()
+        if self._twist_idx.numel() == 0:
+            return joint_rot_pred.sum() * 0.0  # the mean below would be NaN on an empty selection
         if self.rotation_representation == "6d":
             R = rotation_6d_to_matrix(joint_rot_pred)
         else:
