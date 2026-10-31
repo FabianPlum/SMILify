@@ -17,6 +17,21 @@ def test_left_right_pairs_and_symmetry(monkeypatch):
     monkeypatch.setattr(config, "joint_names", ["root", "femur_L", "femur_R", "Foot_L_tip", "Foot_R_tip", "Tail_01"])
     assert MV._lr_joint_pairs(_Model()) == [(1, 2), (3, 4)]
 
+    # The scale_symmetry term of the full loss, on a bare regressor with per-joint scales and only that weight on
+    m = MV.__new__(MV)
+    torch.nn.Module.__init__(m)
+    m.device, m.rotation_representation, m.scale_trans_mode, m.allow_mesh_scaling = "cpu", "6d", "separate", False
+
+    def symmetry(log_scales):
+        pred = {"global_rot": torch.zeros(2, 6), "num_views": 0, "log_beta_scales": log_scales}
+        _, components = m.compute_multiview_batch_loss(pred, [{}, {}], {"scale_symmetry": 1.0}, return_components=True)
+        return components["scale_symmetry"].item()
+
+    scales = torch.randn(2, 6, 3)
+    assert symmetry(scales) > 0
+    scales[:, [2, 4]] = scales[:, [1, 3]]  # right = left; root and tail stay unpaired
+    assert symmetry(scales) == 0.0
+
 
 def test_scale_consistency_tracks_a_per_session_mean_in_training_only():
     m = _Model()
