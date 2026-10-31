@@ -16,7 +16,7 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from smal_fitter.neuralSMIL.ddp_utils import any_rank, ddp_forward, replica_divergence, zero_loss
+from smal_fitter.neuralSMIL.ddp_utils import any_rank, ddp_forward, reaches_parameters, replica_divergence, zero_loss
 
 WORLD = 2
 
@@ -37,6 +37,28 @@ class _Net(nn.Module):
         parameter that only some batches use, like the camera head of a slot only some samples' views fill."""
         loss = self(batch[0]["x"]).pow(2).sum()
         return loss + self.unused(batch[0]["x"][:, :2]).sum() if use_extra else loss
+
+    def loss(self, batch, kind):
+        """step's loss ("real"), or one that reaches no parameter, as the regressors' losses do when every target is
+        missing: a placeholder leaf ("leaf"), or placeholders summed into a graph ("graph")."""
+        if kind == "real":
+            return self.step(batch)
+        eps = torch.tensor(1e-8, requires_grad=True)
+        return eps if kind == "leaf" else torch.zeros((), requires_grad=True) + 0.5 * eps
+
+    # The trainers' model interface; the targets name the kind of loss
+    def predict_from_batch(self, x_data_batch, y_data_batch):
+        return {"x": x_data_batch}, y_data_batch, None
+
+    def compute_batch_loss(self, predicted_params, targets, auxiliary_data, return_components=False, loss_weights=None):
+        loss = self.loss(predicted_params["x"], targets)
+        return loss, {"total": loss}
+
+    def predict_from_multiview_batch(self, x_data_batch, y_data_batch):
+        return {"x": x_data_batch}, None, None
+
+    def compute_multiview_batch_loss(self, predicted_params, y_data_batch, loss_weights=None, return_components=False):
+        return self.compute_batch_loss(predicted_params, y_data_batch, None)
 
 
 def _grads(module):
@@ -131,6 +153,33 @@ def _worker(rank, store_uri, queue, exit_barrier):
     res["no_sync_leaves_sporadic_parameter_unsynced"] = not torch.allclose(g[0], g[1])
     g = extra_grad(use_no_sync=False)
     res["sync_every_batch_syncs_sporadic_parameter"] = torch.allclose(g[0], g[1]) and bool(g[0].abs().sum() > 0)
+
+    # 8. A loss that reaches no parameter fires no gradient hook, so that rank would skip the all-reduce. Both trainers'
+    # _training_step backpropagate zero_loss instead, as for a missing prediction. (Imported in the worker processes:
+    # importing the trainers changes CUDA_VISIBLE_DEVICES and socket.getaddrinfo.)
+    from smal_fitter.neuralSMIL import train_multiview_regressor, train_smil_regressor
+
+    net = _Net()
+    guarded = DDP(net, find_unused_parameters=True)
+    res["reaches_parameters"] = reaches_parameters(net.loss(batch, "real"), net) and not any(
+        reaches_parameters(net.loss(batch, kind), net) for kind in ("leaf", "graph")
+    )
+    rank1_alone = _gather(local)[1] / 2
+    training_steps = {
+        "singleview": lambda m, kind: train_smil_regressor._training_step(m, batch, kind, None),
+        "multiview": lambda m, kind: train_multiview_regressor._training_step(m, batch, kind, None, 1)[:2],
+    }
+    for trainer, training_step in training_steps.items():
+        for kind in ("leaf", "graph"):  # on rank 0; rank 1's loss is real
+            loss, components = ddp_forward(guarded, training_step, kind if rank == 0 else "real")
+            loss.backward()
+            g = _gather(_grads(net))
+            res[f"{trainer}_{kind}_loss_synced"] = (
+                torch.allclose(g[0], g[1])
+                and torch.allclose(g[0], rank1_alone, atol=1e-6)
+                and (components is None) == (rank == 0)
+            )
+            guarded.zero_grad(set_to_none=True)
 
     results = [None] * WORLD
     dist.all_gather_object(results, res)

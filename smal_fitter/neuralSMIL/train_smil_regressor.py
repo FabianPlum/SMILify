@@ -69,7 +69,7 @@ from smal_fitter.neuralSMIL.data_splits import (
     split_dataset,
     tag_output_dir,
 )
-from smal_fitter.neuralSMIL.ddp_utils import any_rank, check_replicas, ddp_forward, zero_loss
+from smal_fitter.neuralSMIL.ddp_utils import any_rank, check_replicas, ddp_forward, reaches_parameters, zero_loss
 from smal_fitter.fitter import SMALFitter
 from smal_fitter.Unreal2Pytorch3D import return_placeholder_data
 import config
@@ -475,8 +475,8 @@ def create_fractional_train_loader_sv(
 def _training_step(model, x_data_batch, y_data_batch, loss_weights):
     """One batch's forward pass and loss, run as DDP's forward pass under DDP (``ddp_forward``).
 
-    Returns ``(loss, loss components (detached))``, or ``(zero loss, None)`` for a batch without valid samples. Only
-    the loss carries gradients (see ``ddp_forward``).
+    Returns ``(loss, loss components (detached))``, or ``(zero loss, None)`` for a batch without valid samples or
+    whose loss reaches no trainable parameter. Only the loss carries gradients (see ``ddp_forward``).
     """
     predicted_params, target_params_batch, auxiliary_data = model.predict_from_batch(x_data_batch, y_data_batch)
     if predicted_params is None:
@@ -484,6 +484,8 @@ def _training_step(model, x_data_batch, y_data_batch, loss_weights):
     loss, loss_components = model.compute_batch_loss(
         predicted_params, target_params_batch, auxiliary_data, return_components=True, loss_weights=loss_weights
     )
+    if not reaches_parameters(loss, model):  # e.g. every sample filtered out: the loss is a placeholder leaf
+        return zero_loss(model), None
     return loss, {k: v.detach() if torch.is_tensor(v) else v for k, v in loss_components.items()}
 
 

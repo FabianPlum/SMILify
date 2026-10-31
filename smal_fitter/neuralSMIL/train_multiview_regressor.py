@@ -80,7 +80,7 @@ from smal_fitter.neuralSMIL.data_splits import (
     split_dataset,
     tag_output_dir,
 )
-from smal_fitter.neuralSMIL.ddp_utils import any_rank, check_replicas, ddp_forward, zero_loss
+from smal_fitter.neuralSMIL.ddp_utils import any_rank, check_replicas, ddp_forward, reaches_parameters, zero_loss
 from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
@@ -558,7 +558,8 @@ def _training_step(
     """One batch's forward pass and loss, run as DDP's forward pass under DDP (``ddp_forward``).
 
     Returns ``(loss / accum_steps, loss components (detached), IEF pose deltas (floats))``. A batch without a
-    prediction returns ``(zero loss, None, {})``. Only the loss carries gradients (see ``ddp_forward``).
+    prediction, or whose loss reaches no trainable parameter, returns ``(zero loss, None, {})``. Only the loss carries
+    gradients (see ``ddp_forward``).
     """
     predicted_params, _, _ = model.predict_from_multiview_batch(x_data_batch, y_data_batch)
     if predicted_params is None:
@@ -566,6 +567,8 @@ def _training_step(
     loss, loss_components = model.compute_multiview_batch_loss(
         predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
     )
+    if not reaches_parameters(loss, model):  # e.g. every target missing: only placeholder leaves were summed
+        return zero_loss(model), None, {}
     components = {k: v.detach() if torch.is_tensor(v) else v for k, v in loss_components.items()}
     pose_hist = predicted_params.get("iteration_history", {}).get("pose", [])
     ief_deltas = {

@@ -8,10 +8,12 @@ instead, the "forward redirection" used by Lightning Fabric.
 
 Once gradients are all-reduced, every rank must run the same sequence of collectives: a rank that skips a backward pass
 leaves the others waiting (or pairs their all-reduces with the wrong step). ``zero_loss`` gives a batch without a
-prediction a backward pass that touches every parameter; ``any_rank`` makes a rank-local decision (step or skip)
-the same on every rank. ``replica_divergence`` checks that the replicas stayed identical.
+prediction a backward pass that touches every parameter, and ``reaches_parameters`` finds a loss whose backward pass
+would touch none; ``any_rank`` makes a rank-local decision (step or skip) the same on every rank.
+``replica_divergence`` checks that the replicas stayed identical.
 """
 
+from collections import deque
 from typing import Any, Callable, List, Tuple
 
 import torch
@@ -69,6 +71,29 @@ def zero_loss(module: torch.nn.Module) -> torch.Tensor:
     if not terms:
         raise ValueError("zero_loss: the module has no trainable parameters")
     return torch.stack(terms).sum() * 0.0
+
+
+def reaches_parameters(loss: torch.Tensor, module: torch.nn.Module) -> bool:
+    """True if the backward pass of ``loss`` reaches a trainable parameter of ``module``. A loss made only of the
+    placeholder leaves the losses use for missing targets (``torch.tensor(eps, requires_grad=True)``) has no
+    ``grad_fn``, or a graph without a parameter: its backward pass fires none of DDP's gradient hooks, so this rank
+    would skip the all-reduce the other ranks wait in. Treat it like a missing prediction (``zero_loss``). Call it
+    inside the training step: on the output of the DDP forward the ``grad_fn`` is DDP's own."""
+    if loss.grad_fn is None:
+        return False
+    trainable = {id(p) for p in module.parameters() if p.requires_grad}
+    seen = {loss.grad_fn}
+    queue = deque(seen)
+    while queue:  # breadth-first, stopping at the first trainable parameter
+        node = queue.popleft()
+        variable = getattr(node, "variable", None)  # AccumulateGrad nodes: the leaf tensor they accumulate into
+        if variable is not None and id(variable) in trainable:
+            return True
+        for next_node, _ in node.next_functions:
+            if next_node is not None and next_node not in seen:
+                seen.add(next_node)
+                queue.append(next_node)
+    return False
 
 
 def is_distributed() -> bool:
