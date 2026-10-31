@@ -206,6 +206,8 @@ Example:
 | `joint_angle_regularization` | Joint angle prior/regularization | 0.001 |
 | `limb_scale_regularization` | Limb scale regularization | 0.01 |
 | `limb_trans_regularization` | Limb translation regularization | 1.0 |
+| `scale_consistency` | Multi-view: per-joint log scales and log mesh scale stay at a running per-session mean (one animal per session has one set of proportions). Needs per-joint scales (`scale_trans_beta.mode` `"separate"`, without the legacy PCA transformation); training stops at start-up otherwise. In a fine-tune, start it at epoch 1 or later with a `curriculum_stages` entry: the running mean (an EMA) starts from the first predictions, so from epoch 0 it pins the mesh scale at the initial checkpoint's value | 0.0 |
+| `scale_symmetry` | Multi-view: paired `_L` / `_R` joints share their per-joint log scales. Same requirement as `scale_consistency`, and the model needs `_L` / `_R` joint name pairs: training stops at start-up for a model without them, e.g. the stick insect and OmniAnt models (their lowercase `_l` / `_r` names are not paired) | 0.0 |
 | `triangulation_consistency` | Cross-view triangulation consistency (multi-view). **Disabled by default — see note below.** | 0.0 |
 | `ief_intermediate` | Intermediate IEF iteration loss | 0.0 |
 
