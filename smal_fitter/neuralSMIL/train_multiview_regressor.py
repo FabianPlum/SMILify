@@ -280,6 +280,24 @@ def _per_sample_fractions(train_set, by_session, default):
     return out, group
 
 
+def _check_fraction_by_session(train_set, by_session):
+    """Raise ValueError naming every dataset_fraction_by_session entry that cannot apply as written: an empty key,
+    a key that takes no training session (no match, or an earlier key takes its matches) or a fraction outside
+    (0, 1]."""
+    _, groups = _per_sample_fractions(train_set, by_session, 1.0)
+    taken = set(groups.tolist())
+    bad = []
+    for key, f in by_session.items():
+        if not key:
+            bad.append("'' is empty (dataset_fraction covers the sessions no key matches)")
+        elif key not in taken:
+            bad.append(f"{key!r} matches no training session (or only ones an earlier key takes)")
+        if not (isinstance(f, (int, float)) and 0 < f <= 1):
+            bad.append(f"{key!r}: {f!r} is not in (0, 1]")
+    if bad:
+        raise ValueError("dataset.dataset_fraction_by_session: " + "; ".join(bad))
+
+
 def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distributed: bool, collate_fn) -> DataLoader:
     """
     Create a DataLoader that samples a fraction of the training dataset.
@@ -2483,6 +2501,8 @@ def main(config: dict):
         seed=config["seed"],
         holdout_fold=config.get("holdout_fold"),
     )
+    if config.get("dataset_fraction_by_session"):  # checked on every rank, before the model is built
+        _check_fraction_by_session(train_set, config["dataset_fraction_by_session"])
 
     # Get dataset fraction config
     dataset_fraction = config.get("dataset_fraction", 1.0)
