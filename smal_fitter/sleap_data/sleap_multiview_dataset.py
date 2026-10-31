@@ -511,6 +511,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             "keypoints_2d": keypoints_2d,  # (num_views, n_joints, 2)
             "keypoint_visibility": keypoint_visibility,  # (num_views, n_joints)
             **raw_labels,
+            "session_name": session_name,
             "view_valid": view_valid,  # (num_views,)
             # Shared body parameters
             "shape_betas": betas if has_ground_truth_betas else None,

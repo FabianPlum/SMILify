@@ -2559,11 +2559,24 @@ def main(config: dict):
     # (fail-fast) instead of raising inside the per-batch try/except of
     # train_epoch, where the error would print-and-skip every batch.
     _base_loss_weights = config.get("loss_weights") or TrainingConfig.LOSS_CURRICULUM["base_weights"]
-    joint_limit_reg_weight = float(_base_loss_weights.get("joint_limit_regularization", 0.0))
-    for _epoch_threshold, _weight_updates in TrainingConfig.LOSS_CURRICULUM["curriculum_stages"]:
-        joint_limit_reg_weight = max(
-            joint_limit_reg_weight, float(_weight_updates.get("joint_limit_regularization", 0.0))
+
+    def _max_curriculum_weight(name: str) -> float:
+        return max(
+            [float(_base_loss_weights.get(name, 0.0))]
+            + [float(w.get(name, 0.0)) for _, w in TrainingConfig.LOSS_CURRICULUM["curriculum_stages"]]
         )
+
+    joint_limit_reg_weight = _max_curriculum_weight("joint_limit_regularization")
+    # Same for the shape terms: a positive weight anywhere needs per-joint scales, otherwise every batch would
+    # silently train without them.
+    scale_symmetry_weight = _max_curriculum_weight("scale_symmetry")
+    if max(_max_curriculum_weight("scale_consistency"), scale_symmetry_weight) > 0:
+        use_pca = TrainingConfig.get_scale_trans_config().get("separate", {}).get("use_pca_transformation", True)
+        if config["scale_trans_mode"] != "separate" or use_pca:
+            raise ValueError(
+                "loss weights 'scale_consistency' / 'scale_symmetry' need per-joint scales: scale_trans_mode "
+                f"'separate' without the PCA transformation (got {config['scale_trans_mode']!r}, PCA {use_pca})"
+            )
 
     model = create_multiview_regressor(
         device=device,
@@ -2594,6 +2607,8 @@ def main(config: dict):
     )
 
     model = model.to(device)
+    if scale_symmetry_weight > 0 and not model._lr_joint_pairs():
+        raise ValueError("loss weight 'scale_symmetry' > 0 but the model has no left/right joint pairs ('_L'/'_R')")
 
     # Wrap in DDP if distributed
     if is_distributed:
