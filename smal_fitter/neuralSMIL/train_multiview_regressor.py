@@ -67,7 +67,7 @@ from datetime import timedelta
 import argparse
 import gc
 import imageio
-from typing import Optional
+from typing import Optional, Tuple
 
 
 from smal_fitter.neuralSMIL.multiview_smil_regressor import MultiViewSMILImageRegressor, create_multiview_regressor
@@ -574,6 +574,42 @@ def _step_if_finite(model, optimizer, clip_norm: float) -> bool:
     return False
 
 
+def _add_components(sums: dict, counts: dict, components: dict) -> None:
+    """Add one batch's loss components (tensors or floats) to running sums and per-key batch counts. Some terms
+    are absent from some batches (e.g. keypoint_3d when no sample has 3D labels), so each key is averaged over its
+    own count."""
+    for key, value in components.items():
+        sums[key] = sums.get(key, 0.0) + (value.item() if torch.is_tensor(value) else value)
+        counts[key] = counts.get(key, 0) + 1
+
+
+def _ief_pose_deltas(predicted_params: dict) -> dict:
+    """IEF refinement monitoring: ief_pose_delta_N = mean L2 distance between the pose of iteration N and N-1.
+    Healthy IEF shows delta_1 > delta_2 (coarse correction, then fine-tuning); flat or growing deltas indicate the
+    IEF is not learning to refine."""
+    pose_hist = (predicted_params.get("iteration_history", {}) if predicted_params else {}).get("pose", [])
+    return {
+        f"ief_pose_delta_{i}": (pose_hist[i].detach() - pose_hist[i - 1].detach()).norm(dim=-1).mean().item()
+        for i in range(1, len(pose_hist))
+    }
+
+
+def _all_reduce_components(sums: dict, counts: dict, device) -> Tuple[dict, dict]:
+    """Sum the component sums and counts over all ranks. The key sets can differ between ranks (data-dependent
+    terms, or a rank whose batches were all non-finite), so the reduction runs over the union of all ranks' keys and
+    every rank always joins it."""
+    rank_keys = [None] * dist.get_world_size()
+    dist.all_gather_object(rank_keys, sorted(sums))
+    keys = sorted(set().union(*rank_keys))
+    if not keys:
+        return {}, {}
+    t = torch.tensor(
+        [[sums.get(k, 0.0) for k in keys], [float(counts.get(k, 0)) for k in keys]], device=device, dtype=torch.float64
+    )
+    dist.all_reduce(t, op=dist.ReduceOp.SUM)
+    return dict(zip(keys, t[0].tolist())), {k: int(c) for k, c in zip(keys, t[1].tolist())}
+
+
 def _training_step(
     model: MultiViewSMILImageRegressor, x_data_batch, y_data_batch, loss_weights: dict, accum_steps: int
 ):
@@ -592,12 +628,7 @@ def _training_step(
     if not reaches_parameters(loss, model):  # e.g. every target missing: only placeholder leaves were summed
         return zero_loss(model), None, {}
     components = {k: v.detach() if torch.is_tensor(v) else v for k, v in loss_components.items()}
-    pose_hist = predicted_params.get("iteration_history", {}).get("pose", [])
-    ief_deltas = {
-        f"ief_pose_delta_{i}": (pose_hist[i].detach() - pose_hist[i - 1].detach()).norm(dim=-1).mean().item()
-        for i in range(1, len(pose_hist))
-    }
-    return loss / accum_steps, components, ief_deltas
+    return loss / accum_steps, components, _ief_pose_deltas(predicted_params)
 
 
 def train_epoch(
@@ -636,6 +667,7 @@ def train_epoch(
 
     total_loss = 0.0
     loss_components_sum = {}
+    component_counts = {}
     num_batches = 0
     nonfinite_batches = 0  # batches whose loss was not finite (left out of the epoch averages)
     skipped_steps = 0  # optimizer steps dropped because the gradients were not finite
@@ -699,12 +731,6 @@ def train_epoch(
             if loss_components is None:
                 continue
 
-            # IEF refinement monitoring: ief_pose_delta_N = avg L2 distance between iter N and iter N-1 predictions.
-            # Healthy IEF shows delta_1 > delta_2 (coarse correction then fine-tuning).
-            # Flat or growing deltas indicate the IEF is not learning to refine.
-            for key, delta in ief_deltas.items():
-                loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
-
             # Accumulate metrics (use un-scaled loss for logging); a non-finite batch would make the epoch average NaN
             loss_value = loss.item() * accum_steps
             if not math.isfinite(loss_value):
@@ -712,11 +738,8 @@ def train_epoch(
                 continue
             total_loss += loss_value
             num_batches += 1
-
-            for key, value in loss_components.items():
-                if key not in loss_components_sum:
-                    loss_components_sum[key] = 0.0
-                loss_components_sum[key] += value.item() if torch.is_tensor(value) else value
+            _add_components(loss_components_sum, component_counts, loss_components)
+            _add_components(loss_components_sum, component_counts, ief_deltas)
 
             # Update progress bar
             if rank == 0:
@@ -755,13 +778,12 @@ def train_epoch(
                     pass
             continue
 
-    # Compute averages
+    # Compute averages (NaN, not 0, when every batch was non-finite: the history must not show a perfect epoch)
     if num_batches > 0:
         avg_loss = total_loss / num_batches
-        avg_components = {k: v / num_batches for k, v in loss_components_sum.items()}
     else:
-        avg_loss = 0.0
-        avg_components = {}
+        avg_loss = float("nan") if nonfinite_batches else 0.0
+    avg_components = {k: v / component_counts[k] for k, v in loss_components_sum.items()}
 
     if rank == 0 and (nonfinite_batches or skipped_steps):
         print(
@@ -811,6 +833,7 @@ def validate(
 
     total_loss = 0.0
     loss_components_sum = {}
+    component_counts = {}
     num_batches = 0
     nonfinite_batches = 0  # left out of the averages: one NaN batch would otherwise make the epoch's val loss NaN
 
@@ -833,19 +856,8 @@ def validate(
                     continue
                 total_loss += loss.item()
                 num_batches += 1
-
-                for key, value in loss_components.items():
-                    if key not in loss_components_sum:
-                        loss_components_sum[key] = 0.0
-                    loss_components_sum[key] += value.item() if torch.is_tensor(value) else value
-
-                # IEF refinement monitoring (already in no_grad context)
-                hist = predicted_params.get("iteration_history", {}) if predicted_params else {}
-                pose_hist = hist.get("pose", [])
-                for i in range(1, len(pose_hist)):
-                    delta = (pose_hist[i] - pose_hist[i - 1]).norm(dim=-1).mean().item()
-                    key = f"ief_pose_delta_{i}"
-                    loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
+                _add_components(loss_components_sum, component_counts, loss_components)
+                _add_components(loss_components_sum, component_counts, _ief_pose_deltas(predicted_params))
 
             except Exception as e:
                 print(f"Validation error: {e}")
@@ -861,19 +873,10 @@ def validate(
         total_loss = stats[0].item()
         num_batches = int(stats[1].item())
         nonfinite_batches = int(stats[2].item())
+        loss_components_sum, component_counts = _all_reduce_components(loss_components_sum, component_counts, device_t)
 
-        if loss_components_sum:
-            keys = sorted(loss_components_sum.keys())
-            comp_tensor = torch.tensor([loss_components_sum[k] for k in keys], device=device_t, dtype=torch.float32)
-            dist.all_reduce(comp_tensor, op=dist.ReduceOp.SUM)
-            loss_components_sum = {k: comp_tensor[i].item() for i, k in enumerate(keys)}
-
-    if num_batches > 0:
-        avg_loss = total_loss / num_batches
-        avg_components = {k: v / num_batches for k, v in loss_components_sum.items()}
-    else:
-        avg_loss = float("inf")
-        avg_components = {}
+    avg_loss = total_loss / num_batches if num_batches > 0 else float("inf")
+    avg_components = {k: v / component_counts[k] for k, v in loss_components_sum.items() if component_counts[k] > 0}
 
     if rank == 0 and nonfinite_batches:
         print(f"Warning: {nonfinite_batches} validation batches had a non-finite loss and were left out")
