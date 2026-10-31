@@ -1,17 +1,20 @@
-"""Pure-numpy geometry for the SMIL mouse limb fix (no bpy), shared by the Blender build script.
+"""Pure-numpy geometry for the SMIL mouse limb fix (no bpy), used by build_mouse_limbfix.py.
 
-Two fixes:
+The source model's elbow (`ulna-radius`) pivot sits mid-chest: its forearm is about twice the labelled elbow-to-wrist
+length in two independent 3D label sets (body-normalised). The repose model also moved the knee (`tibia`) pivot
+without re-skinning, so part of the tibia's skin lies on the thigh side of the knee.
 
-1. Elbow pivot. The source model's `ulna-radius` pivot sits mid-chest; in two label sets its forearm is about twice
-   the labelled elbow-to-wrist length. The new pivot stays on the current forearm line (wrist -> old elbow), at the
-   point where forearm / upper-arm equals the labelled ratio (median over both label sets). Shoulder and wrist pivots
-   are unchanged.
-2. Skinning around a pivot. Weights of a parent/child bone pair are re-split around the child pivot's bisector plane
-   with a smoothstep band, so that a bone's skin lies on the distal side of its own pivot. Used for the moved elbow
-   (humerus | ulna-radius) and for the knee (femur | tibia), whose pivot the repose pkl moved without re-skinning.
-   The total weight of the pair per vertex is kept, every other bone's weight is untouched, and vertices keep at most
-   two non-zero weights (the add-on's "limit total 2" convention): a vertex that also carries a third bone gets the
-   pair's weight on one side only.
+1. Elbow pivot (`limbfix`). The new pivot stays on the current forearm line (wrist -> old elbow), at the point where
+   forearm / upper-arm equals the labelled ratio (FOREARM_UPPERARM_RATIO). Shoulder and wrist pivots are unchanged; the
+   knee pivots can be taken from a reference model.
+2. Skinning around a pivot (`repartition_pair`). Weights of a parent/child bone pair are re-split around the child
+   pivot's bisector plane with a smoothstep band, gated by the distance to the child bone, so that a bone's skin lies
+   on the distal side of its own pivot. The total weight of the pair per vertex is kept and every other bone's weight
+   is untouched. A vertex that would exceed `max_weights` non-zero weights (2 = the add-on's "limit total 2"
+   convention) gets the pair's weight on one side only.
+3. Pivot plans (`apply_pivot_plan`): move the pivots a plan lists, then run its re-skin steps in order. The v5 model
+   was built from plans/pivot_plan_v5.json, which moves the elbow, shoulder and knee pivots (each re-skinned) and
+   puts the eyes on the eyeball centres.
 """
 
 import numpy as np
