@@ -2,15 +2,17 @@
 
   blender -b --python 3D_model_prep/mouse_limbfix/build_mouse_limbfix.py -- \
       --src <in.pkl> --out_dir <dir for .blend + debug sidecars> --export_pkl <out.pkl> \
-      --mode {roundtrip,build} [--author_limits {none,from_pkl}] [--addon_dir <dir containing smil_importer/>] \
+      --mode {roundtrip,build,proxies} [--author_limits {none,from_pkl}] [--addon_dir <dir containing smil_importer/>] \
       [--knee_from <pkl whose tibia_L/R pivots to use>] [--knee_half_width 0.06] [--max_weights 3]
       [--pivot_plan <pivot plan JSON>] [--proxy_plan <proxy bone plan JSON>]
 
 roundtrip: import -> export unchanged (proves the add-on round trip); build: import -> limb fix -> export;
 proxies: import -> append the plan's proxy leaf bones (Spine/Trunk format) -> export.
---author_limits from_pkl recreates the pkl's joint_limits as LOCAL Limit Rotation constraints before export (the add-on's
-import does not do this, so without it the exporter writes its +-default range instead of the source limits).
+--author_limits from_pkl keeps the pkl's joint_limits: an add-on with the issue-#116 fix recreates them as Limit
+Rotation constraints on import, and with an older add-on this script authors them (LOCAL space) before export. Without
+them the exporter writes its +-default range instead of the source limits.
 Import runs with clean_mesh / symmetrise / regress_joints off so the mesh topology and the static joints are untouched.
+Export with Blender 4.2 LTS: pickles written by a numpy-2 Blender do not load with the numpy 1.x of the pytorch3d env.
 
 The shipped models were built from the repo root with the plans in 3D_model_prep/mouse_limbfix/plans/:
   v5: --mode build --pivot_plan 3D_model_prep/mouse_limbfix/plans/pivot_plan_v5.json
@@ -213,8 +215,10 @@ if a.mode == "build":
 if a.mode == "proxies":
     # Proxy joints in the Spine/Trunk format: a leaf bone on the skin at a template vertex, parented to the bone that
     # carries it, no children. It shares that one vertex with the bones skinning it (Spine: 0.60 proxy / 0.40 parent)
-    # and its rotation is locked, so it drives nothing. Bones are appended after the existing ones, which keep their
-    # indices, rest frames (+z tail, zero roll) and skinning.
+    # and its rotation is locked, so it drives nothing. The existing bones keep their rest frames (+z tail, zero roll)
+    # and their skinning elsewhere, but not their indices: the add-on exports bones in Blender's depth-first order, so
+    # each new bone lands after its parent's subtree and the joints after it shift (v6: from index 12 on). Per-joint
+    # data must follow by name (smal_fitter/multiview_common/remap_joints_by_name.py for multi-view HDF5s).
     plan = json.load(open(a.proxy_plan))
     share = float(plan["share"])
     V = np.array([v.co for v in mesh.data.vertices], dtype=np.float64)
