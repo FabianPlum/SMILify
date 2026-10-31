@@ -73,9 +73,10 @@ def test_fraction_by_session_draws_exact_counts_and_a_fresh_subset_each_epoch(me
 
 
 def test_fraction_by_session_names_every_entry_that_cannot_apply(merged):
-    # A typo, a fraction above 1 and an empty key; "rig_a" is fine and must not be named.
+    # A typo, fractions above 1 and of 0, and an empty key; "rig_a" is fine and must not be named.
     with pytest.raises(ValueError) as err:
-        _check_fraction_by_session(merged[2], {"rig_a": 0.25, "rig_c": 0.5, "rig_b": 1.5, "": 0.5})
+        _check_fraction_by_session(merged[2], {"rig_a": 0.25, "rig_c": 0.5, "rig_b": 1.5, "sparse": 0.0, "": 0.5})
     msg = str(err.value)
     assert "'rig_c' matches no training session" in msg and "'rig_b': 1.5" in msg and "'' is empty" in msg
+    assert "'sparse': 0.0" in msg
     assert "'rig_a'" not in msg
