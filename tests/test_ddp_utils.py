@@ -5,7 +5,7 @@ Calling that method on ``ddp_model.module`` skips DDP's forward pass, so gradien
 drift apart; routing it through ``ddp_forward`` must give every rank the averaged gradients.
 """
 
-import socket
+import os
 from contextlib import nullcontext
 from datetime import timedelta
 
@@ -49,10 +49,8 @@ def _gather(t):
     return out
 
 
-def _worker(rank, port, queue):
-    dist.init_process_group(
-        "gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=WORLD, timeout=timedelta(seconds=60)
-    )
+def _worker(rank, store_uri, queue, exit_barrier):
+    dist.init_process_group("gloo", init_method=store_uri, rank=rank, world_size=WORLD, timeout=timedelta(seconds=60))
     res = {}
     torch.manual_seed(100 + rank)  # different data per rank
     batch = [{"x": torch.randn(5, 4)}]
@@ -138,13 +136,12 @@ def _worker(rank, port, queue):
     dist.all_gather_object(results, res)
     if rank == 0:
         queue.put(results)
-    dist.destroy_process_group()
-
-
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        queue.close()
+        queue.join_thread()
+    # Leave without closing the process group: closing a gloo group (destroy_process_group(), or at exit) now and then
+    # hangs or aborts one rank. Once both ranks are past the barrier, every collective has completed.
+    exit_barrier.wait(timeout=60)
+    os._exit(0)
 
 
 def test_ddp_forward_without_process_group_calls_step_directly():
@@ -155,10 +152,12 @@ def test_ddp_forward_without_process_group_calls_step_directly():
 
 
 @pytest.mark.skipif(not dist.is_available(), reason="torch.distributed not available")
-def test_ddp_forward_synchronises_gradients_across_ranks():
+def test_ddp_forward_synchronises_gradients_across_ranks(tmp_path):
     ctx = mp.get_context("spawn")
     queue = ctx.Queue()
-    mp.start_processes(_worker, args=(_free_port(), queue), nprocs=WORLD, join=True, start_method="spawn")
+    exit_barrier = ctx.Barrier(WORLD)
+    store_uri = (tmp_path / "store").as_uri()  # a FileStore: no TCP port to pick (and race for)
+    mp.start_processes(_worker, args=(store_uri, queue, exit_barrier), nprocs=WORLD, join=True, start_method="spawn")
     results = queue.get(timeout=10)
     for rank, res in enumerate(results):
         failed = [k for k, ok in res.items() if not ok]
