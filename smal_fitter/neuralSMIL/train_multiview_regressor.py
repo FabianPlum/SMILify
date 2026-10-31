@@ -265,8 +265,6 @@ def cleanup_ddp():
 def _per_sample_fractions(train_set, by_session, default):
     """(fraction, group) per training-set position from each sample's session name (first matching key wins;
     group = that key, or "" for unmatched sessions, which take `default`)."""
-    from smal_fitter.neuralSMIL.data_splits import read_session_frame_index
-
     base, idx = train_set, None
     if isinstance(train_set, torch.utils.data.Subset):
         base, idx = train_set.dataset, np.asarray(train_set.indices)
