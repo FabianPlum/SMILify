@@ -321,6 +321,12 @@ A CLI override exists only on the non-training entrypoints (note the inconsisten
 
 A DDP barrier is inserted after each epoch's checkpointing and visualization to prevent rank desynchronization.
 
+Both trainers run each training step (prediction and loss) as the DDP forward pass (`ddp_utils.ddp_forward`), so the backward pass all-reduces the gradients after every mini-batch, also inside a gradient-accumulation window. One optimizer step therefore averages `batch_size × gradient_accumulation_steps × number of GPUs` samples, which the multi-view trainer logs as `Effective batch size`. A batch without a prediction, or whose loss reaches no trainable parameter (for example because every sample was filtered out), still takes part in the all-reduce with a zero loss.
+
+After every epoch rank 0 logs `DDP replicas after epoch N: identical`. `DIFFERENT`, followed by the most different parameters, means the replicas have drifted apart, i.e. the gradients were not synchronised. Under DDP an exception in a training batch stops the run, because skipping the batch on one rank would desynchronise the all-reduces; relaunch to resume from the last checkpoint. Single-GPU runs still skip the batch.
+
+Multi-GPU checkpoints from before `ddp_utils.py` existed hold a single rank's replica: the trainers called their methods on `model.module`, which bypasses `DistributedDataParallel.forward`, so no gradient was all-reduced and every rank trained its own replica on its share of each epoch. Rank 0 saved its own.
+
 ## Dataset Formats
 
 ### SLEAP Multi-View HDF5 Format
