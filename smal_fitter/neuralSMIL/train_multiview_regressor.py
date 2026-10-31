@@ -2504,7 +2504,9 @@ def main(config: dict):
             for n in dict.fromkeys(names.tolist()):
                 m = names == n
                 f = float(fr[m][0])
-                print(f"    {n}: {f:.0%} of {int(m.sum())} -> {int(m.sum()) if f >= 1 else max(1, int(m.sum() * f))} per epoch")
+                print(
+                    f"    {n}: {f:.0%} of {int(m.sum())} -> {int(m.sum()) if f >= 1 else max(1, int(m.sum() * f))} per epoch"
+                )
         elif dataset_fraction < 1.0:
             samples_per_epoch = max(1, int(len(train_set) * dataset_fraction))
             print(f"\n  Dataset fraction: {dataset_fraction:.1%}")
