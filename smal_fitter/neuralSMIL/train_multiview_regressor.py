@@ -646,9 +646,9 @@ def train_epoch(
             # Backward (gradients accumulate across mini-batches). A batch without a prediction backpropagates a zero
             # loss, so every rank takes part in the same all-reduces. Under DDP the accumulated gradients are
             # all-reduced after every mini-batch, not only on the step batch (no model.no_sync()): with
-            # find_unused_parameters, a parameter used only inside no_sync() on one rank (e.g. the camera head of a
-            # slot that only that rank's random views used) counts as unused in the syncing batch and keeps its
-            # rank-local gradient, so the replicas drift apart.
+            # find_unused_parameters on torch < 2.4 (fixed in 2.4, pytorch/pytorch#124193), a parameter used only
+            # inside no_sync() on one rank (e.g. the camera head of a slot that only that rank's random views used)
+            # counts as unused in the syncing batch and keeps its rank-local gradient, so the replicas drift apart.
             if scaler is not None:
                 scaler.scale(loss).backward()
             else:

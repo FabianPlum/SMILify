@@ -140,7 +140,8 @@ def _worker(rank, store_uri, queue, exit_barrier):
     res["unfrozen_synced_after_rewrap"] = torch.allclose(ga[0], ga[1])
 
     # 7. Gradient accumulation over two mini-batches; one parameter is used only by rank 0's first mini-batch. With
-    # model.no_sync() on the first one it keeps rank 0's local gradient (the trainers therefore sync every mini-batch).
+    # model.no_sync() on the first one it keeps rank 0's local gradient on torch < 2.4 (fixed in 2.4,
+    # pytorch/pytorch#124193), so the trainers sync every mini-batch.
     def extra_grad(use_no_sync):
         m = DDP(_Net(), find_unused_parameters=True)
         with m.no_sync() if use_no_sync else nullcontext():
@@ -149,8 +150,9 @@ def _worker(rank, store_uri, queue, exit_barrier):
         grad = m.module.unused.weight.grad
         return _gather(torch.zeros(2, 2) if grad is None else grad.clone())
 
-    g = extra_grad(use_no_sync=True)
-    res["no_sync_leaves_sporadic_parameter_unsynced"] = not torch.allclose(g[0], g[1])
+    if torch.__version__ < (2, 4):
+        g = extra_grad(use_no_sync=True)
+        res["no_sync_leaves_sporadic_parameter_unsynced"] = not torch.allclose(g[0], g[1])
     g = extra_grad(use_no_sync=False)
     res["sync_every_batch_syncs_sporadic_parameter"] = torch.allclose(g[0], g[1]) and bool(g[0].abs().sum() > 0)
 
