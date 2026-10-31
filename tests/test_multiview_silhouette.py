@@ -93,9 +93,11 @@ def test_dataset_checks_the_silhouette_sidecar(tmp_path):
         f["auxiliary/video_frame_idx"][0, 0] = 99  # same rows, other images (e.g. a rebuilt frame map)
     with pytest.raises(ValueError, match="video_frame_idx"):
         _bare_dataset(main, side)._init_silhouettes()
+    with h5py.File(main, "a") as f:
+        f["auxiliary/video_frame_idx"][0, 0] = 0  # restore: only frame_idx differs below
     with h5py.File(side, "a") as s:
         s["auxiliary/frame_idx"][0] = 99
-    with pytest.raises(ValueError, match="frame_idx"):
+    with pytest.raises(ValueError, match="in auxiliary/frame_idx"):
         _bare_dataset(main, side)._init_silhouettes()
 
 
