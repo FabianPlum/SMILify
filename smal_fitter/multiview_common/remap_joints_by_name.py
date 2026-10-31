@@ -21,6 +21,8 @@ Modifies the HDF5 IN PLACE, so run it on a copy:
 - A remap that would delete or overwrite labels is refused before the HDF5 is opened: a target model that lacks a
   proxy joint the convention moves labels to, a source model that already has one (a second run on a remapped file,
   for example), and source joints that the target model lacks and no move covers (v6 -> v5 with "none", for example).
+  Source and target models with the same joints are refused too: there is nothing to remap, and a rerun would only
+  overwrite the file's proxy_remap record.
 - Joint rotations (POSE_DATASETS: parameters/joint_rot, root at index 0) are pose parameters, not labels. They follow
   the joint name only, whatever the convention: every joint keeps its own rotation, and a target joint that the
   source model lacks (a proxy joint, for example) gets zero rotation.
@@ -107,6 +109,8 @@ def remap_joints_by_name(path, source_pkl, target_pkl, convention):
     dropped = [n for n in n_src if n not in n_dst and n not in moves]
     if dropped:  # e.g. v6 -> v5 with "none"
         raise ValueError(f"{target_pkl} lacks the source joints {dropped}: their labels would be deleted")
+    if n_src == n_dst:  # e.g. v6 -> v6 with "none": would only overwrite the file's proxy_remap record
+        raise ValueError(f"{source_pkl} and {target_pkl} have the same joints: nothing to remap")
     label_src = source_slots(n_src, n_dst, moves)
     pose_src = source_slots(n_src, n_dst, {})  # no label moves: a joint keeps its rotation
     with h5py.File(path, "r+") as f:

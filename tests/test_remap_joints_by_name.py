@@ -136,6 +136,8 @@ def test_remap_refuses_a_second_run_with_the_target_as_source(tmp_path):
     proxies = r"\['head_falkner', 'heel_L_falkner', 'knee_L_falkner'\]"
     with pytest.raises(ValueError, match=r"already has the proxy joints " + proxies):
         remap_joints_by_name(str(path), dst, dst, "falkner")
+    with pytest.raises(ValueError, match="have the same joints"):  # would overwrite the proxy_remap record
+        remap_joints_by_name(str(path), dst, dst, "none")
 
     assert path.read_bytes() == before
 
