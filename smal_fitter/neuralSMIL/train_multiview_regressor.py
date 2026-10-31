@@ -2559,8 +2559,12 @@ def main(config: dict):
         if config.get("use_mixed_precision"):
             print("Mixed precision training: enabled")
         accum = config.get("gradient_accumulation_steps", 1)
-        if accum > 1:
-            print(f"Gradient accumulation: {accum} steps (effective batch size: {config['batch_size'] * accum})")
+        if accum > 1 or world_size > 1:
+            # One optimizer step averages the gradients of accum mini-batches on each of the world_size GPUs
+            print(
+                f"Effective batch size: {config['batch_size'] * accum * world_size} (batch_size {config['batch_size']}"
+                f" x gradient_accumulation_steps {accum} x world_size {world_size})"
+            )
         if config.get("backbone_unfreeze_epoch") is not None:
             print(
                 f"Staged backbone freezing: frozen until epoch {config['backbone_unfreeze_epoch']}, "
