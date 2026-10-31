@@ -243,6 +243,7 @@ Curriculum stages example:
 | `pin_memory` | bool | `true` | Pin DataLoader memory for faster GPU transfer. |
 | `prefetch_factor` | int | `4` | Batches prefetched per worker. |
 | `resume_checkpoint` | string or null | `null` | Path to checkpoint `.pth` file to resume from. |
+| `init_checkpoint` | string or null | `null` | Multi-view only: checkpoint to take initial weights from when fine-tuning on a new dataset or rig. Training starts at epoch 0 with a fresh optimizer and LR schedule, and the model is built from the dataset (its cameras); tensors whose shape differs, such as the per-camera view embeddings, keep their fresh init. Ignored when `resume_checkpoint` is set. Also a CLI flag: `--init_checkpoint`. |
 | `reset_ief_token_embedding` | bool | `false` | Re-initialize IEF token embeddings when resuming (useful when changing `transformer_ief_iters`). |
 | `use_gt_camera_init` | bool | `true` | Use ground-truth camera parameters as initialization base and predict deltas (multi-view). |
 | `use_mixed_precision` | bool | `false` | Enable FP16 mixed precision training via `torch.cuda.amp`. Roughly halves activation memory and speeds up Tensor Core operations. Weight updates remain FP32 for numerical stability. |

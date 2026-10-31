@@ -2083,7 +2083,12 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
         for s in skipped:
             print(s)
 
-    current_model.load_state_dict(filtered_state, strict=False)
+    incompatible = current_model.load_state_dict(filtered_state, strict=False)
+    if incompatible.missing_keys or incompatible.unexpected_keys:
+        print(
+            f"Loaded {len(filtered_state)} checkpoint tensors; {len(incompatible.missing_keys)} model keys not in the "
+            f"checkpoint (fresh init), {len(incompatible.unexpected_keys)} checkpoint keys unused"
+        )
 
     if optimizer and "optimizer_state_dict" in checkpoint:
         if skipped:
@@ -2623,6 +2628,13 @@ def main(config: dict):
                             "reset_ief_token_embedding: token_embedding weights and "
                             "optimizer state reset. Set flag to false for subsequent runs."
                         )
+    elif config.get("init_checkpoint"):
+        # Weights-only start for fine-tuning: keep epoch 0, the fresh optimizer/LR schedule and best_val_loss = inf.
+        if not os.path.exists(config["init_checkpoint"]):
+            raise FileNotFoundError(f"init_checkpoint not found: {config['init_checkpoint']}")
+        if rank == 0:
+            print(f"Initialising weights from {config['init_checkpoint']} (fresh optimizer and LR schedule, epoch 0)")
+        load_checkpoint(config["init_checkpoint"], model, None, None, device)
 
     # Training loop
     if rank == 0:
@@ -2983,6 +2995,13 @@ if __name__ == "__main__":
     # Resume training
     parser.add_argument("--resume_checkpoint", type=str, default=None, help="Path to checkpoint to resume from")
     parser.add_argument(
+        "--init_checkpoint",
+        type=str,
+        default=None,
+        help="Checkpoint to take initial weights from (fine-tuning): epoch 0, fresh optimizer and LR schedule. "
+        "Ignored when --resume_checkpoint is set.",
+    )
+    parser.add_argument(
         "--reset_ief_token_embedding",
         action="store_true",
         default=None,
@@ -3077,6 +3096,9 @@ if __name__ == "__main__":
             if args.resume_checkpoint is not None:
                 cli_overrides["training"] = cli_overrides.get("training", {})
                 cli_overrides["training"]["resume_checkpoint"] = args.resume_checkpoint
+            if args.init_checkpoint is not None:
+                cli_overrides["training"] = cli_overrides.get("training", {})
+                cli_overrides["training"]["init_checkpoint"] = args.init_checkpoint
             if args.use_gt_camera_init is not None:
                 cli_overrides["training"] = cli_overrides.get("training", {})
                 cli_overrides["training"]["use_gt_camera_init"] = args.use_gt_camera_init
