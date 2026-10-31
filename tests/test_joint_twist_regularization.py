@@ -88,10 +88,10 @@ def test_twist_penalty_hinges_on_axial_twist_only(monkeypatch):
 
 def test_twist_penalty_without_twist_joints_is_finite_zero(monkeypatch):
     """A model where no joint has a single chain child (root with three leaves) has no twist axis. The mean over the
-    empty selection would be NaN in every batch; the penalty is a zero on the graph instead, with one warning."""
+    empty selection would be NaN in every batch; the penalty is a +0.0 on the graph instead, with one warning."""
     _toy_model(monkeypatch, [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], [-1, 0, 0, 0])
     stub = _twist_stub("axis_angle")
-    jr = torch.linspace(-1.0, 1.0, 18).reshape(2, 3, 3).requires_grad_(True)
+    jr = torch.linspace(-1.0, 0.5, 18).reshape(2, 3, 3).requires_grad_(True)  # negative sum: sum() * 0.0 is -0.0
 
     with pytest.warns(RuntimeWarning, match="no bone has a twist axis") as record:
         penalties = [stub.penalty(jr) for _ in range(3)]
@@ -99,6 +99,7 @@ def test_twist_penalty_without_twist_joints_is_finite_zero(monkeypatch):
 
     for penalty in penalties:
         assert torch.isfinite(penalty) and penalty.item() == 0.0
+        assert not torch.signbit(penalty)  # 0.0, not the -0.0 of a bare sum() * 0.0
         assert penalty.requires_grad
     penalties[0].backward()
     assert torch.all(jr.grad == 0)

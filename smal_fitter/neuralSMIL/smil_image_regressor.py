@@ -1484,7 +1484,8 @@ class SMILImageRegressor(SMALFitter):
         if not hasattr(self, "_twist_idx"):
             self._init_twist_axes()
         if self._twist_idx.numel() == 0:
-            return joint_rot_pred.sum() * 0.0  # the mean below would be NaN on an empty selection
+            # The mean below would be NaN on an empty selection. + 0.0 turns a negative sum's -0.0 into 0.0.
+            return joint_rot_pred.sum() * 0.0 + 0.0
         if self.rotation_representation == "6d":
             R = rotation_6d_to_matrix(joint_rot_pred)
         else:
