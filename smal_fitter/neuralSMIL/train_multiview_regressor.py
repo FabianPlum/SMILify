@@ -2787,8 +2787,11 @@ def main(config: dict):
                     f"limb_trans_reg={current_loss_weights.get('limb_trans_regularization', 0):.6f}"
                 )
 
-            # Save best model
-            if val_metrics["avg_loss"] < best_val_loss:
+            # Save best model; not from an epoch whose validation left out non-finite batches (its average is partial)
+            if val_metrics["avg_loss"] < best_val_loss and val_metrics["nonfinite_batches"]:
+                if rank == 0:
+                    print("  Not saved as best model: validation had non-finite batches")
+            elif val_metrics["avg_loss"] < best_val_loss:
                 best_val_loss = val_metrics["avg_loss"]
                 if rank == 0:
                     save_checkpoint(
