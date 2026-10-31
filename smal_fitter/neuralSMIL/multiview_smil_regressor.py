@@ -1304,7 +1304,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     else:
                         iter_body_params["betas_trans"] = raw_jtrans
                 if "mesh_scale" in hist:
-                    iter_body_params["mesh_scale"] = hist["mesh_scale"][i]
+                    # The decoder's iteration history holds log mesh scales (only the final output is
+                    # exponentiated, transformer_decoder.py); _predict_canonical_joints_3d needs the linear scale.
+                    iter_body_params["mesh_scale"] = torch.exp(hist["mesh_scale"][i])
 
                 # Forward through body model to get intermediate 3D joints
                 try:
