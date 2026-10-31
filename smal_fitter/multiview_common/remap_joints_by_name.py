@@ -13,7 +13,8 @@ Modifies the HDF5 IN PLACE, so run it on a copy:
 
 - A target joint that also exists in the source model keeps its data, unless the convention moves it.
 - CONVENTION selects one table of label moves (MOVES): the labels of each listed source joint go to a proxy joint of
-  the target model, and the source joint's own slot becomes unlabelled.
+  the target model, and the source joint's own slot becomes unlabelled. "none" moves nothing: a plain reorder by
+  name. A target model that lacks a proxy joint the convention moves labels to is refused before the HDF5 is opened.
 - Every other target joint is unlabelled: all zeros (keypoints, visibility, confidence), which is how the HDF5 stores
   joints that were never labelled.
 - Only the per-joint datasets (JOINT_DATASETS, which must all exist) are rewritten, keeping their dtype, chunking and
@@ -47,6 +48,7 @@ MOVES = {
         "Foot_L": "heel_L_falkner",
         "Foot_R": "heel_R_falkner",
     },
+    "none": {},  # plain reorder by joint name
 }
 # Datasets with a joint axis: (name, axis).
 JOINT_DATASETS = [
@@ -83,15 +85,22 @@ def remap_joints_by_name(path, source_pkl, target_pkl, convention):
     """Rewrite the per-joint datasets of the HDF5 at `path` IN PLACE in the joint order of `target_pkl`."""
     n_src, n_dst = _joint_names(source_pkl), _joint_names(target_pkl)
     moves = MOVES[convention]
+    # Labels moved to a proxy joint the target model lacks would be deleted: refuse before opening the file.
+    missing = sorted(p for s, p in moves.items() if s in n_src and p not in n_dst)
+    if missing:
+        raise ValueError(f"{target_pkl} has no proxy joints {missing} for convention {convention!r}")
     src = source_slots(n_src, n_dst, moves)
     with h5py.File(path, "r+") as f:
         md = f["metadata"].attrs
-        assert int(md["n_joints"]) == len(n_src), f"the HDF5 has {md['n_joints']} joints, the source model {len(n_src)}"
-        assert "joint_names" not in md or json.loads(md["joint_names"]) == n_src
+        if int(md["n_joints"]) != len(n_src):
+            raise ValueError(f"the HDF5 has {md['n_joints']} joints, the source model {len(n_src)}")
+        if "joint_names" in md and json.loads(md["joint_names"]) != n_src:
+            raise ValueError(f"the HDF5's joint_names differ from the J_names of {source_pkl}")
         for name, ax in JOINT_DATASETS:
             d = f[name]
+            if d.shape[ax] != len(n_src):
+                raise ValueError(f"{name} has shape {d.shape}, expected {len(n_src)} joints on axis {ax}")
             a = d[()]
-            assert a.shape[ax] == len(n_src), (name, a.shape)
             out = np.zeros(a.shape[:ax] + (len(n_dst),) + a.shape[ax + 1 :], a.dtype)
             idx = [slice(None)] * a.ndim
             for j, s in enumerate(src):
@@ -124,7 +133,9 @@ def main():
     parser.add_argument("source_pkl", help="Model the HDF5 was built for (e.g. the 40-joint v5 mouse)")
     parser.add_argument("target_pkl", help="Model whose joint order to write (e.g. the 51-joint v6 mouse)")
     parser.add_argument(
-        "convention", choices=sorted(MOVES), help="Labelling convention, i.e. which label moves to apply"
+        "convention",
+        choices=sorted(MOVES),
+        help='Labelling convention, i.e. which label moves to apply ("none": reorder by name only)',
     )
     args = parser.parse_args()
     remap_joints_by_name(args.hdf5, args.source_pkl, args.target_pkl, args.convention)

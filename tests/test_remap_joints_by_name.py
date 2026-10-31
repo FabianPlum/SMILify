@@ -25,6 +25,7 @@ FROM = {
     "heel_L_falkner": "Foot_L",
     "Tail_00": "Tail_00",
 }
+BY_NAME = {n: n for n in DST if n in SRC}  # oracle for a plain reorder by name
 
 
 def _shape(name, axis, n_joints):
@@ -33,8 +34,8 @@ def _shape(name, axis, n_joints):
     return lead + (n_joints,) + trailing.get(name.rsplit("/", 1)[1], ())
 
 
-@pytest.mark.parametrize("layout", ["chunked", "contiguous"])
-def test_remap_reorders_by_name_and_leaves_new_joints_unlabelled(tmp_path, layout):
+def _write_inputs(tmp_path, layout="chunked"):
+    """src.pkl, dst.pkl and a source HDF5 whose per-joint datasets are all non-zero. Returns (path, data, K)."""
     for tag, names in (("src", SRC), ("dst", DST)):
         with open(tmp_path / f"{tag}.pkl", "wb") as f:
             pickle.dump({"J_names": names}, f)
@@ -55,6 +56,22 @@ def test_remap_reorders_by_name_and_leaves_new_joints_unlabelled(tmp_path, layou
             f.create_dataset(name, data=a, **kw)
         f.create_dataset("multiview_keypoints/camera_intrinsics", data=K)
         f.create_dataset("auxiliary/session_name", data=["s"] * N, dtype=h5py.string_dtype())
+    return path, data, K
+
+
+def _assert_joints_follow(out, source, ax, oracle, name):
+    """Each target joint holds the data of the source joint `oracle` names, and every other joint is all zeros."""
+    for j, joint in enumerate(DST):
+        got = np.take(out, j, axis=ax)
+        if joint in oracle:
+            assert np.array_equal(got, np.take(source, SRC.index(oracle[joint]), axis=ax)), (name, joint)
+        else:  # unlabelled: zero keypoints, visibility and confidence
+            assert not got.any(), (name, joint)
+
+
+@pytest.mark.parametrize("layout", ["chunked", "contiguous"])
+def test_remap_reorders_by_name_and_leaves_new_joints_unlabelled(tmp_path, layout):
+    path, data, K = _write_inputs(tmp_path, layout)
 
     remap_joints_by_name(str(path), str(tmp_path / "src.pkl"), str(tmp_path / "dst.pkl"), "falkner")
 
@@ -67,12 +84,7 @@ def test_remap_reorders_by_name_and_leaves_new_joints_unlabelled(tmp_path, layou
                 assert (d.chunks, d.compression, d.compression_opts) == ((1,) + data[name].shape[1:], "gzip", 4), name
             else:
                 assert d.chunks is None and d.compression is None, name
-            for j, joint in enumerate(DST):
-                got = np.take(out, j, axis=ax)
-                if joint in FROM:
-                    assert np.array_equal(got, np.take(data[name], SRC.index(FROM[joint]), axis=ax)), (name, joint)
-                else:  # unlabelled: zero keypoints, visibility and confidence
-                    assert not got.any(), (name, joint)
+            _assert_joints_follow(out, data[name], ax, FROM, name)
         np.testing.assert_array_equal(f["multiview_keypoints/camera_intrinsics"][()], K)
         assert [s.decode() for s in f["auxiliary/session_name"][()]] == ["s"] * N
         md = f["metadata"].attrs
@@ -81,3 +93,27 @@ def test_remap_reorders_by_name_and_leaves_new_joints_unlabelled(tmp_path, layou
         remap = json.loads(md["proxy_remap"])
         assert remap["convention"] == "falkner"
         assert remap["source_slot_per_joint"] == [0, -1, 2, 1, -1, -1, 3, 4, 5, -1]
+
+
+def test_remap_refuses_a_target_without_the_proxy_joints(tmp_path):
+    path, _, _ = _write_inputs(tmp_path)
+    with open(tmp_path / "no_proxies.pkl", "wb") as f:  # e.g. the source model passed as the target by mistake
+        pickle.dump({"J_names": SRC}, f)
+    before = path.read_bytes()
+
+    with pytest.raises(ValueError, match=r"\['head_falkner', 'heel_L_falkner', 'knee_L_falkner'\]"):
+        remap_joints_by_name(str(path), str(tmp_path / "src.pkl"), str(tmp_path / "no_proxies.pkl"), "falkner")
+
+    assert path.read_bytes() == before
+
+
+def test_remap_convention_none_reorders_by_name(tmp_path):
+    path, data, _ = _write_inputs(tmp_path)
+
+    remap_joints_by_name(str(path), str(tmp_path / "src.pkl"), str(tmp_path / "dst.pkl"), "none")
+
+    with h5py.File(path, "r") as f:
+        for name, ax in JOINT_DATASETS:
+            _assert_joints_follow(f[name][()], data[name], ax, BY_NAME, name)
+        remap = json.loads(f["metadata"].attrs["proxy_remap"])
+        assert (remap["moves"], remap["source_slot_per_joint"]) == ({}, [0, 1, 2, -1, 3, 4, -1, -1, 5, -1])
