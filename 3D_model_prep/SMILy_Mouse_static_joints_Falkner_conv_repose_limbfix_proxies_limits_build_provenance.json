@@ -1,0 +1,339 @@
+{
+ "source_pkl": "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_limbfix_limits.pkl",
+ "mode": "proxies",
+ "author_limits": "from_pkl",
+ "addon_version": [
+  2,
+  2,
+  0
+ ],
+ "blender": "4.2.0",
+ "proxy_plan": {
+  "path": "3D_model_prep/mouse_limbfix/plans/proxy_bone_plan.json",
+  "model": "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_limbfix_limits.pkl",
+  "share": 0.6,
+  "proxies": [
+   {
+    "name": "head_falkner",
+    "source": "skull_surf_falkner",
+    "convention": "falkner",
+    "label_slot": "skull",
+    "parent": "skull",
+    "head": [
+     4.1901014213863164e-08,
+     -0.35149121284484863,
+     0.4520778954029083
+    ],
+    "vertex": 3129,
+    "candidates": {
+     "cervical-vertebrae": {
+      "to_skin_mm": 13.182827060052537,
+      "to_label_mm": 11.737036154240059
+     },
+     "skull": {
+      "to_skin_mm": 2.4179498891071036,
+      "to_label_mm": 2.0419373151390605
+     },
+     "Ear_L": {
+      "to_skin_mm": 7.262985672232569,
+      "to_label_mm": 7.714418525207705
+     },
+     "Ear_R": {
+      "to_skin_mm": 6.642187320440488,
+      "to_label_mm": 7.53636511080175
+     },
+     "head_top": {
+      "to_skin_mm": 2.8014879678759517,
+      "to_label_mm": 1.8217129818039393
+     }
+    },
+    "surf_point": [
+     -0.0019124675929648384,
+     -0.34242252459112277,
+     0.45454160022619206
+    ]
+   },
+   {
+    "name": "Tail_06_falkner",
+    "source": "Tail_06_surf_falkner",
+    "convention": "falkner",
+    "label_slot": "Tail_06",
+    "parent": "Tail_05",
+    "head": [
+     0.009869685396552086,
+     2.079484462738037,
+     0.10654275864362717
+    ],
+    "vertex": 8028,
+    "candidates": {
+     "Tail_05": {
+      "to_skin_mm": 0.49833511314480083,
+      "to_label_mm": 2.2567592125768217
+     },
+     "Tail_06": {
+      "to_skin_mm": 1.240121558664251,
+      "to_label_mm": 2.7119246590287105
+     }
+    },
+    "surf_point": [
+     0.011940831653494438,
+     2.0773351160585656,
+     0.10874232437416913
+    ]
+   },
+   {
+    "name": "knee_L_falkner",
+    "source": "tibia_L_surf_falkner",
+    "convention": "falkner",
+    "label_slot": "tibia_L",
+    "parent": "tibia_L",
+    "head": [
+     0.18380843102931976,
+     0.6565837860107422,
+     0.11048518121242523
+    ],
+    "vertex": 9594,
+    "candidates": {
+     "femur_L": {
+      "to_skin_mm": 4.030901738442879,
+      "to_label_mm": 5.571934825231596
+     },
+     "tibia_L": {
+      "to_skin_mm": 0.5117290294484258,
+      "to_label_mm": 4.41615820232936
+     }
+    },
+    "surf_point": [
+     0.18768649785319244,
+     0.6515130240992772,
+     0.11323549581913217
+    ]
+   },
+   {
+    "name": "knee_R_falkner",
+    "source": "tibia_R_surf_falkner",
+    "convention": "falkner",
+    "label_slot": "tibia_R",
+    "parent": "tibia_R",
+    "head": [
+     -0.1838086098432541,
+     0.6565836668014526,
+     0.11048518121242523
+    ],
+    "vertex": 2356,
+    "candidates": {
+     "femur_R": {
+      "to_skin_mm": 4.746576748254285,
+      "to_label_mm": 7.76766710020093
+     },
+     "tibia_R": {
+      "to_skin_mm": 0.5233862234145144,
+      "to_label_mm": 3.9534370887068815
+     }
+    },
+    "surf_point": [
+     -0.18768653420489753,
+     0.6515130065027357,
+     0.11323541512570323
+    ]
+   },
+   {
+    "name": "heel_L_falkner",
+    "source": "Foot_L_surf_falkner",
+    "convention": "falkner",
+    "label_slot": "Foot_L",
+    "parent": "tibia_L",
+    "head": [
+     0.17185238003730774,
+     0.7284502387046814,
+     0.12119371443986893
+    ],
+    "vertex": 7450,
+    "candidates": {
+     "tibia_L": {
+      "to_skin_mm": 0.7371099511667445,
+      "to_label_mm": 3.4045978791938243
+     },
+     "Foot_L": {
+      "to_skin_mm": 3.257918180793373,
+      "to_label_mm": 4.795946357339991
+     }
+    },
+    "surf_point": [
+     0.17321949180927465,
+     0.719228801995864,
+     0.12858191514457126
+    ]
+   },
+   {
+    "name": "heel_R_falkner",
+    "source": "Foot_R_surf_falkner",
+    "convention": "falkner",
+    "label_slot": "Foot_R",
+    "parent": "tibia_R",
+    "head": [
+     -0.17185255885124207,
+     0.7284501194953918,
+     0.12119371443986893
+    ],
+    "vertex": 9251,
+    "candidates": {
+     "tibia_R": {
+      "to_skin_mm": 0.8303435848414293,
+      "to_label_mm": 3.1071954252425718
+     },
+     "Foot_R": {
+      "to_skin_mm": 4.450992503537883,
+      "to_label_mm": 5.2893143054491105
+     }
+    },
+    "surf_point": [
+     -0.1732194995983711,
+     0.7192288087271699,
+     0.12858192560225476
+    ]
+   },
+   {
+    "name": "hip_center_m103",
+    "source": "Lumbar-Vertebrae_surf_m103",
+    "convention": "m103",
+    "label_slot": "Lumbar-Vertebrae",
+    "parent": "Lumbar-Vertebrae",
+    "head": [
+     -9.104251574854061e-08,
+     0.7637199759483337,
+     0.37787288427352905
+    ],
+    "vertex": 8529,
+    "candidates": {
+     "Lumbar-Vertebrae": {
+      "to_skin_mm": 1.1769489085176585,
+      "to_label_mm": 0.981127725987215
+     },
+     "Tail_00": {
+      "to_skin_mm": 1.8362764155718048,
+      "to_label_mm": 1.617663932653775
+     }
+    },
+    "surf_point": [
+     -0.011720478487703766,
+     0.774538643648721,
+     0.3681778593807588
+    ]
+   },
+   {
+    "name": "shoulder_L_m103",
+    "source": "humerus_L_surf_m103",
+    "convention": "m103",
+    "label_slot": "humerus_L",
+    "parent": "tharocic-vertebrae",
+    "head": [
+     0.2326866239309311,
+     0.005882591940462589,
+     0.31990206241607666
+    ],
+    "vertex": 9463,
+    "candidates": {
+     "tharocic-vertebrae": {
+      "to_skin_mm": 2.0830357441184475,
+      "to_label_mm": 2.380969324946191
+     },
+     "humerus_L": {
+      "to_skin_mm": 2.846433070225639,
+      "to_label_mm": 2.6826009575857577
+     }
+    },
+    "surf_point": [
+     0.23772300198603125,
+     0.009593463189062453,
+     0.3149401044721758
+    ]
+   },
+   {
+    "name": "shoulder_R_m103",
+    "source": "humerus_R_surf_m103",
+    "convention": "m103",
+    "label_slot": "humerus_R",
+    "parent": "tharocic-vertebrae",
+    "head": [
+     -0.2326866239309311,
+     0.005882536992430687,
+     0.31990206241607666
+    ],
+    "vertex": 2018,
+    "candidates": {
+     "tharocic-vertebrae": {
+      "to_skin_mm": 1.2480972474556895,
+      "to_label_mm": 2.0880085903205368
+     },
+     "humerus_R": {
+      "to_skin_mm": 2.408494999850725,
+      "to_label_mm": 2.2606259951021404
+     }
+    },
+    "surf_point": [
+     -0.2377230115516255,
+     0.009593460185455628,
+     0.314940112435992
+    ]
+   },
+   {
+    "name": "knee_L_m103",
+    "source": "tibia_L_surf_m103",
+    "convention": "m103",
+    "label_slot": "tibia_L",
+    "parent": "tibia_L",
+    "head": [
+     0.20706109702587128,
+     0.552895188331604,
+     0.12976618111133575
+    ],
+    "vertex": 9634,
+    "candidates": {
+     "femur_L": {
+      "to_skin_mm": 1.0196442444156533,
+      "to_label_mm": 1.0455125169805206
+     },
+     "tibia_L": {
+      "to_skin_mm": 0.7604664689759586,
+      "to_label_mm": 1.202360982483747
+     }
+    },
+    "surf_point": [
+     0.21026231749723243,
+     0.557405573694019,
+     0.12959055660156704
+    ]
+   },
+   {
+    "name": "knee_R_m103",
+    "source": "tibia_R_surf_m103",
+    "convention": "m103",
+    "label_slot": "tibia_R",
+    "parent": "tibia_R",
+    "head": [
+     -0.20706121623516083,
+     0.5528950691223145,
+     0.12976618111133575
+    ],
+    "vertex": 2788,
+    "candidates": {
+     "femur_R": {
+      "to_skin_mm": 1.6394096976534602,
+      "to_label_mm": 1.813446882163427
+     },
+     "tibia_R": {
+      "to_skin_mm": 0.7961463467492087,
+      "to_label_mm": 0.5374158687229278
+     }
+    },
+    "surf_point": [
+     -0.21026232473603385,
+     0.5574055663824684,
+     0.12959051759503062
+    ]
+   }
+  ]
+ },
+ "limit_constraints_from_addon_import": 39
+}

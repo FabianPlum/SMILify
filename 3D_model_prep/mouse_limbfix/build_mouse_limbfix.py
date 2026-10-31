@@ -11,6 +11,14 @@ proxies: import -> append the plan's proxy leaf bones (Spine/Trunk format) -> ex
 --author_limits from_pkl recreates the pkl's joint_limits as LOCAL Limit Rotation constraints before export (the add-on's
 import does not do this, so without it the exporter writes its +-default range instead of the source limits).
 Import runs with clean_mesh / symmetrise / regress_joints off so the mesh topology and the static joints are untouched.
+
+The shipped models were built from the repo root with the plans in 3D_model_prep/mouse_limbfix/plans/:
+  v5: --mode build --pivot_plan 3D_model_prep/mouse_limbfix/plans/pivot_plan_v5.json
+      --src 3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs_limits.pkl
+  v6: --mode proxies --proxy_plan 3D_model_prep/mouse_limbfix/plans/proxy_bone_plan.json
+      --src 3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_limbfix_limits.pkl
+The <name>_build_provenance.json written next to the exported pkl records the inputs; paths of files inside the repo
+are stored repo-relative.
 """
 
 import argparse
@@ -47,15 +55,32 @@ ap.add_argument(
     help="build: max non-zero weights per vertex in re-split regions (3 lets thigh/shank/pelvis skin blend)",
 )
 ap.add_argument(
-    "--pivot_plan", default=None, help="build: JSON pivot plan; replaces the v3 knee/limbfix options"
+    "--pivot_plan",
+    default=None,
+    help="build: JSON pivot plan (v5: plans/pivot_plan_v5.json); used instead of --knee_from/--knee_half_width/"
+    "--max_weights",
 )
 ap.add_argument(
-    "--proxy_plan", default=None, help="proxies: JSON plan of leaf bones (name, parent, head, vertex) to append"
+    "--proxy_plan",
+    default=None,
+    help="proxies: JSON plan of leaf bones (name, parent, head, vertex) to append (v6: plans/proxy_bone_plan.json)",
 )
 a = ap.parse_args(argv)
 src, out_dir, export_pkl = (os.path.abspath(p) for p in (a.src, a.out_dir, a.export_pkl))
 os.makedirs(out_dir, exist_ok=True)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def repo_path(p):
+    """Path as recorded in the provenance: repo-relative (POSIX separators) inside the repo, absolute outside it."""
+    p = os.path.abspath(p)
+    try:
+        rel = os.path.relpath(p, REPO_ROOT)
+    except ValueError:  # different drive (Windows)
+        return p
+    return p if rel == os.pardir or rel.startswith(os.pardir + os.sep) else rel.replace(os.sep, "/")
+
 
 bpy.ops.wm.read_homefile(use_empty=True)  # clean scene: the add-on resolves some armatures globally
 if a.addon_dir:
@@ -125,7 +150,7 @@ def author_limits(limits):
 
 B_before = {b.name: rot3(b.matrix_local) for b in arm.data.bones}
 prov = {
-    "source_pkl": src,
+    "source_pkl": repo_path(src),
     "mode": a.mode,
     "author_limits": a.author_limits,
     "addon_version": list(smil_importer.bl_info["version"]),
@@ -143,11 +168,11 @@ if a.mode == "build":
             ref = pickle.load(f, encoding="latin1")
         assert list(ref["J_names"]) == names, "--knee_from model has different joints"
         knee_J = np.asarray(ref["J"])
-        prov["knee_from"] = os.path.abspath(a.knee_from)
+        prov["knee_from"] = repo_path(a.knee_from)
     if a.pivot_plan:
         plan = json.load(open(a.pivot_plan))
         J_new, W_new, geo = apply_pivot_plan(np.asarray(data["J"]), V, np.asarray(data["weights"]), names, plan)
-        prov["pivot_plan"] = {"path": os.path.abspath(a.pivot_plan), **plan}
+        prov["pivot_plan"] = {"path": repo_path(a.pivot_plan), **plan}
     else:
         J_new, W_new, geo = limbfix(
             np.asarray(data["J"]),
@@ -219,7 +244,7 @@ if a.mode == "proxies":
         print(f"[build] proxy {p['name']} <- {p['parent']} at vertex {v} {np.round(p['head'], 4)} (locked)")
     bad = [n for n in names if not np.allclose(rot3(arm.data.bones[n].matrix_local), B_before[n], atol=1e-6)]
     assert not bad, f"bone rest frames changed: {bad}"
-    prov["proxy_plan"] = {"path": os.path.abspath(a.proxy_plan), **plan}
+    prov["proxy_plan"] = {"path": repo_path(a.proxy_plan), **plan}
 
 n_con = sum(c.type == "LIMIT_ROTATION" for n in names for c in arm.pose.bones[n].constraints)  # source bones only
 prov["limit_constraints_from_addon_import"] = n_con
