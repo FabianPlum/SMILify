@@ -66,8 +66,9 @@ def ddp_forward(model: torch.nn.Module, step_fn: Callable[..., Any], *args, **kw
 
 def zero_loss(module: torch.nn.Module) -> torch.Tensor:
     """A loss of exactly 0 that depends on every trainable parameter: its backward pass gives zero gradients and takes
-    part in DDP's all-reduce, for a batch that produced no prediction on this rank."""
-    terms = [p.reshape(-1)[0] for p in module.parameters() if p.requires_grad]
+    part in DDP's all-reduce, for a batch that produced no prediction on this rank. Zero-size parameters (e.g. a head
+    with no outputs) have no element to depend on and are left out."""
+    terms = [p.reshape(-1)[0] for p in module.parameters() if p.requires_grad and p.numel() > 0]
     if not terms:
         raise ValueError("zero_loss: the module has no trainable parameters")
     return torch.stack(terms).sum() * 0.0

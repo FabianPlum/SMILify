@@ -236,6 +236,8 @@ def test_ddp_forward_without_process_group_calls_step_directly():
     batch = [{"x": torch.randn(2, 4)}]
     assert torch.equal(ddp_forward(net, lambda m, b: m.step(b), batch), net.step(batch))
     assert zero_loss(net).item() == 0.0
+    net.empty = nn.Parameter(torch.empty(0, 3))  # zero-size, like the weight of a head for 0 shape betas
+    assert zero_loss(net).item() == 0.0
 
 
 @pytest.mark.skipif(not dist.is_available(), reason="torch.distributed not available")
