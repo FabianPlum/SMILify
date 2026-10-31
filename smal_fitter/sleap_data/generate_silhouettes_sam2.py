@@ -15,10 +15,38 @@ the tail keypoints is marked "ignore", so no real tail pixel is labelled backgro
 (head-fixation hardware) are also "ignore".
 
 SAM rarely segments beyond its box, and the labels stop short of the outline (spine joints lie inside the body), so a
-box side the mask runs along is grown and SAM predicts again. Optional prompt-file keys (defaults): box_clip_frac
-(0.1, fraction of a side the mask must touch), box_grow (0.2 of the box size, at least box_grow_min_px 24),
-box_max_expansions (2), box_border_px (8, sides this close to the image border are left alone), min_body_px (500,
-smaller body masks give no target), min_tail_px (50, smaller SAM tail masks fail the tail QC).
+box side the mask runs along is grown and SAM predicts again (the box_* keys below).
+
+Prompt file (--prompts, JSON). Joints are names from joint_names, points are [x, y] in pixels of the stored views,
+and cameras are names from the dataset's canonical_camera_order. Required keys:
+    joint_names            list[str]        the dataset's joints, in keypoint order
+    box_exclude            list[str]        joints left out of the body box (e.g. the tail)
+    box_pad                float            box margin per side, as a fraction of the keypoint box size, plus 8 px
+    positive               list[str]        joints that become positive points
+    positive_midpoint      [str, str]       one more positive point, midway between these two joints
+    tail                   list[str]        tail joints, base to tip (the ignore band follows them)
+    tail_negative          list[str]        joints that become negative points of the tail prompt
+    tail_band_px           int              width of the ignore band along the tail when the tail mask passes QC,
+                                            and the radius around the tail base that stays supervised
+    tail_band_fallback_px  int              band width when the tail mask fails QC
+    tail_dilate_px         int              dilation radius of a passing tail mask before it is marked ignore
+    min_tail_score         float            tail QC: lowest SAM score
+    max_tail_frac          float            tail QC: largest fraction of the image
+    label_flag_px          float            label_flag is set when label_disagree_px is larger
+Optional keys (default):
+    static_positive        {cam: [[x, y]]}  fixed positive points per camera; the box is widened to include them
+    static_box_margin      [int, int]       x and y margin of the box around those points ([60, 40])
+    hardware_points        {cam: [[x, y]]}  negative points on static rig hardware, for the body and the tail
+    ignore_masks           str              .npz beside the prompt file: one bool mask per camera, at the dataset's
+                                            target_resolution, marked ignore (static occluders)
+    min_box_keypoints      int              fewer usable box keypoints give no target (3)
+    min_body_px            int              smaller body masks give no target (500)
+    min_tail_px            int              smaller tail masks fail the tail QC (50)
+    box_clip_frac          float            fraction of a box side the mask must run along to grow it (0.1)
+    box_grow               float            growth of such a side, as a fraction of the box size (0.2) ...
+    box_grow_min_px        int              ... and at least this many px (24)
+    box_max_expansions     int              most growth steps (2)
+    box_border_px          int              sides this close to the image border are not grown (8)
 
 Sidecar layout (N samples, V view slots in the order of multiview_images, R = --resolution):
     multiview_silhouettes/target           (N, V, R, R) uint8   0 = background, 1 = mouse, 255 = ignore
