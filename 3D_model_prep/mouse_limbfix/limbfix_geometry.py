@@ -19,7 +19,7 @@ without re-skinning, so part of the tibia's skin lies on the thigh side of the k
 
 import numpy as np
 
-# Median labelled forearm/upper-arm ratio, pooled over two 3D label sets.
+# Mean of the median labelled forearm/upper-arm ratios of two 3D label sets.
 FOREARM_UPPERARM_RATIO = 0.7175
 # Half-width of the parent/child weight transition (model units); the source model's elbow and wrist bands span
 # about +-0.04 u around the bisector plane (p5..p95 of mixed vertices).
