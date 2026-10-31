@@ -60,6 +60,7 @@ import os
 import sys
 import random
 import json
+import math
 from tqdm import tqdm
 from contextlib import nullcontext
 from datetime import timedelta
@@ -552,6 +553,27 @@ class MultiViewTrainingConfig:
         return TrainingConfig.get_learning_rate_for_epoch(epoch)
 
 
+def _step_if_finite(model, optimizer, clip_norm: float) -> bool:
+    """Clip and take the optimizer step only if the gradients are finite; otherwise drop them.
+
+    One non-finite gradient would otherwise turn every weight into NaN (clip_grad_norm_ rescales by the NaN norm).
+    Under DDP the gradients are already all-reduced here (every mini-batch syncs, see train_epoch), so every rank
+    sees the same norm and takes the same branch. Returns True when the step was taken.
+    """
+    params = [p for p in model.parameters() if p.grad is not None]
+    if not params:
+        return False
+    if clip_norm and clip_norm > 0:
+        norm = torch.nn.utils.clip_grad_norm_(params, clip_norm)
+    else:
+        norm = torch.linalg.vector_norm(torch.stack([torch.linalg.vector_norm(p.grad.detach()) for p in params]))
+    if torch.isfinite(norm):
+        optimizer.step()
+        return True
+    optimizer.zero_grad(set_to_none=True)
+    return False
+
+
 def _training_step(
     model: MultiViewSMILImageRegressor, x_data_batch, y_data_batch, loss_weights: dict, accum_steps: int
 ):
@@ -615,6 +637,9 @@ def train_epoch(
     total_loss = 0.0
     loss_components_sum = {}
     num_batches = 0
+    nonfinite_batches = 0  # batches whose loss was not finite (left out of the epoch averages)
+    skipped_steps = 0  # optimizer steps dropped because the gradients were not finite
+    clip_norm = training_config.get("gradient_clip_norm", 0)
 
     accum_steps = training_config.get("gradient_accumulation_steps", 1)
 
@@ -665,10 +690,12 @@ def train_epoch(
                         torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
                     scaler.step(optimizer)
                     scaler.update()
-                else:
-                    if training_config.get("gradient_clip_norm", 0) > 0:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
-                    optimizer.step()
+                elif not _step_if_finite(model, optimizer, clip_norm):
+                    skipped_steps += 1
+                    if rank == 0 and (skipped_steps <= 5 or skipped_steps % 50 == 0):
+                        print(
+                            f"Warning: non-finite gradients, optimizer step {batch_idx} skipped ({skipped_steps} this epoch)"
+                        )
             if loss_components is None:
                 continue
 
@@ -678,8 +705,12 @@ def train_epoch(
             for key, delta in ief_deltas.items():
                 loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
 
-            # Accumulate metrics (use un-scaled loss for logging)
-            total_loss += loss.item() * accum_steps
+            # Accumulate metrics (use un-scaled loss for logging); a non-finite batch would make the epoch average NaN
+            loss_value = loss.item() * accum_steps
+            if not math.isfinite(loss_value):
+                nonfinite_batches += 1
+                continue
+            total_loss += loss_value
             num_batches += 1
 
             for key, value in loss_components.items():
@@ -719,7 +750,7 @@ def train_epoch(
                         scaler.step(optimizer)
                         scaler.update()
                     else:
-                        optimizer.step()
+                        skipped_steps += not _step_if_finite(model, optimizer, clip_norm)
                 except Exception:
                     pass
             continue
@@ -732,12 +763,18 @@ def train_epoch(
         avg_loss = 0.0
         avg_components = {}
 
+    if rank == 0 and (nonfinite_batches or skipped_steps):
+        print(
+            f"Warning: epoch {epoch}: {nonfinite_batches} non-finite training batches, {skipped_steps} optimizer steps skipped"
+        )
     # The replicas must be identical after synchronised updates; a difference means the gradients were not all-reduced
     divergence = check_replicas(model, epoch, rank) if is_distributed else 0.0
     return {
         "avg_loss": avg_loss,
         "loss_components": avg_components,
         "num_batches": num_batches,
+        "nonfinite_batches": nonfinite_batches,
+        "skipped_steps": skipped_steps,
         "replica_divergence": divergence,
     }
 
@@ -775,6 +812,7 @@ def validate(
     total_loss = 0.0
     loss_components_sum = {}
     num_batches = 0
+    nonfinite_batches = 0  # left out of the averages: one NaN batch would otherwise make the epoch's val loss NaN
 
     with torch.no_grad():
         for x_data_batch, y_data_batch in tqdm(val_loader, desc="Validating", disable=(rank != 0)):
@@ -790,6 +828,9 @@ def validate(
                     predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
                 )
 
+                if not math.isfinite(loss.item()):
+                    nonfinite_batches += 1
+                    continue
                 total_loss += loss.item()
                 num_batches += 1
 
@@ -813,10 +854,13 @@ def validate(
     # Reduce validation metrics across ranks (mean over all batches across all GPUs)
     if dist.is_initialized():
         device_t = torch.device(device)
-        stats = torch.tensor([total_loss, float(num_batches)], device=device_t, dtype=torch.float32)
+        stats = torch.tensor(
+            [total_loss, float(num_batches), float(nonfinite_batches)], device=device_t, dtype=torch.float32
+        )
         dist.all_reduce(stats, op=dist.ReduceOp.SUM)
         total_loss = stats[0].item()
         num_batches = int(stats[1].item())
+        nonfinite_batches = int(stats[2].item())
 
         if loss_components_sum:
             keys = sorted(loss_components_sum.keys())
@@ -831,7 +875,14 @@ def validate(
         avg_loss = float("inf")
         avg_components = {}
 
-    return {"avg_loss": avg_loss, "loss_components": avg_components, "num_batches": num_batches}
+    if rank == 0 and nonfinite_batches:
+        print(f"Warning: {nonfinite_batches} validation batches had a non-finite loss and were left out")
+    return {
+        "avg_loss": avg_loss,
+        "loss_components": avg_components,
+        "num_batches": num_batches,
+        "nonfinite_batches": nonfinite_batches,
+    }
 
 
 def visualize_multiview_training_progress(
