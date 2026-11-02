@@ -156,7 +156,7 @@ What happens:
 
 **To train on your own dataset:** pass `--dataset_path /path/to/your.h5`, or edit `dataset.data_path` in a copy of the config.
 
-> ⚠️ **The "train from scratch" gotcha:** most of the *other* example configs hard-code a `training.resume_checkpoint` path — with those, a "fresh" run will either crash (single-view) or **silently resume** (multi-view). `getting_started.json` sets it to `null` so this just works. If you adapt a different config, clear `resume_checkpoint` first.
+> ⚠️ **The "train from scratch" gotcha:** a few other example configs (`multiview_sticks_UNET_continue.json`, `singleview_baseline.json`) set `training.resume_checkpoint`: with those a run **resumes** that checkpoint, and stops with an error if the file is missing. `getting_started.json` sets it to `null` so this just works. If you adapt a different config, check `resume_checkpoint` first.
 >
 > Full reference: [Training](README.md#training) · [config fields](smal_fitter/neuralSMIL/configs/README.md) · [example configs](smal_fitter/neuralSMIL/configs/examples/README.md).
 

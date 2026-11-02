@@ -66,6 +66,7 @@ class MultiViewConfig(BaseTrainingConfig):
             "seed": self.training.seed,
             "rotation_representation": self.training.rotation_representation,
             "resume_checkpoint": self.training.resume_checkpoint,
+            "init_checkpoint": self.training.init_checkpoint,
             "num_workers": self.training.num_workers,
             "pin_memory": self.training.pin_memory,
             "gradient_clip_norm": self.optimizer.gradient_clip_norm,
