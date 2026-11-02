@@ -572,7 +572,8 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                       (transformer_decoder with multiview context).
             batch_size: Batch size.
             view_mask: Optional ``(B, V)`` boolean mask for valid views.  Only
-                       used when features is 3-D (transformer_decoder path).
+                       used when features is 3-D (transformer_decoder path), where
+                       the decoder's cross-attention ignores the padded views.
             patch_tokens: Optional ``(B, V, P, D)`` per-view ViT patch tokens.
                           When provided, used as spatial cross-attention context
                           instead of the V fused CLS tokens.
@@ -662,6 +663,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
 
         elif self.head_type == "transformer_decoder":
             # Use transformer decoder for body params.
+            spatial_mask = None
             if features.dim() == 3:
                 # Multiview: features is (B, V, D) — fused CLS tokens
 
@@ -683,7 +685,10 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
 
                 # Cross-attention context: use per-view patch tokens when
                 # available (rich spatial detail), else fall back to V fused
-                # CLS tokens.
+                # CLS tokens. The tokens of padded view slots (samples with
+                # fewer views than the batch's largest) are masked out, so a
+                # sample's prediction does not depend on its batch.
+                padded = view_mask is not None and not bool(view_mask.all())
                 if patch_tokens is not None and camera_indices is not None:
                     # Add view identity so the decoder knows which view each
                     # spatial patch came from: (B, V, D) → broadcast over P
@@ -691,14 +696,18 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     spatial_feats = patch_tokens + view_emb.unsqueeze(2)  # (B, V, P, D)
                     Bp, Vp, P, D = spatial_feats.shape
                     spatial_feats = spatial_feats.reshape(Bp, Vp * P, D)  # (B, V*P, D)
+                    if padded:
+                        spatial_mask = view_mask.unsqueeze(-1).expand(Bp, Vp, P).reshape(Bp, Vp * P)
                 else:
                     spatial_feats = features  # (B, V, D) — one token per view
+                    if padded:
+                        spatial_mask = view_mask
             else:
                 # Single-view / already-pooled fallback: (B, D)
                 spatial_feats = features.unsqueeze(1)  # (B, 1, D)
                 global_feats = features
 
-            params = self.transformer_head(global_feats, spatial_feats)
+            params = self.transformer_head(global_feats, spatial_feats, spatial_mask)
 
             # Handle scale/trans mode
             if self.scale_trans_mode == "entangled_with_betas":
