@@ -79,6 +79,7 @@ from smal_fitter.neuralSMIL.data_splits import (
     split_args_to_overrides,
     split_dataset,
     tag_output_dir,
+    warn_init_split,
 )
 from smal_fitter.fitter import SMALFitter
 import config
@@ -2024,15 +2025,43 @@ def save_checkpoint(model, optimizer, scheduler, epoch, config, metrics, filepat
     print(f"Checkpoint saved: {filepath}")
 
 
-def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cuda"):
+def _warn_init_mismatch(checkpoint, config, model):
+    """Warnings for an init_checkpoint start that loads into a different body model, backbone or split."""
+    ckpt_config = checkpoint.get("config") or {}
+    path = config["init_checkpoint"]
+    warn_init_split(ckpt_config, config, path)
+    old_smal, new_smal = ckpt_config.get("smal_file"), config.get("smal_file")
+    saved = checkpoint.get("model_state_dict", {})
+    current = (model.module if hasattr(model, "module") else model).state_dict()
+    pose_key = "transformer_head.pose_head.weight"
+    pose_differs = pose_key in saved and pose_key in current and saved[pose_key].shape != current[pose_key].shape
+    if pose_differs or (old_smal and new_smal and os.path.basename(old_smal) != os.path.basename(new_smal)):
+        print(
+            f"WARNING: init_checkpoint was trained with body model {os.path.basename(old_smal or '?')}, this run uses "
+            f"{os.path.basename(new_smal or '?')}"
+            + (
+                " with a different joint count: the pose head (global rotation included) starts fresh."
+                if pose_differs
+                else ". Per-joint tensors load by joint index, so a reordered joint set gets mismatched pose rows."
+            )
+        )
+    backbone = [k for k in current if k.startswith("backbone.")]
+    if backbone and not any(k in saved and saved[k].shape == current[k].shape for k in backbone):
+        print(
+            "WARNING: no backbone tensor of init_checkpoint fits this model's backbone: it keeps its pretrained init."
+        )
+
+
+def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cuda", checkpoint=None):
     """
     Load training checkpoint.
 
-    Note: The model architecture should already match the checkpoint (max_views, etc.)
-    since model creation uses checkpoint config when resuming. This function just loads
-    the state dict and optimizer/scheduler states.
+    Tensors whose shape differs from the model's keep their fresh init (reported), so a checkpoint of another
+    architecture loads partially (init_checkpoint). On resume, model creation already follows the checkpoint's
+    config (max_views, etc.). ``checkpoint``: the already loaded checkpoint dict, to skip reading ``filepath`` again.
     """
-    checkpoint = torch.load(filepath, map_location=device)
+    if checkpoint is None:
+        checkpoint = torch.load(filepath, map_location=device)
 
     # Load model state dict, skipping keys whose shapes changed between
     # architecture versions (e.g. token_embedding after IEF feedback fix).
@@ -2372,7 +2401,10 @@ def main(config: dict):
     # CRITICAL: The model architecture must match the checkpoint, not the dataset.
     # The model can still handle samples with fewer views than max_views via view_mask.
     resume_checkpoint_path = config.get("resume_checkpoint")
-    if resume_checkpoint_path and os.path.exists(resume_checkpoint_path):
+    if resume_checkpoint_path and not os.path.exists(resume_checkpoint_path):
+        # Without this a mistyped or stale path silently trained from scratch (and skipped init_checkpoint)
+        raise FileNotFoundError(f"resume_checkpoint not found: {resume_checkpoint_path}")
+    if resume_checkpoint_path:
         if rank == 0:
             print("\nResuming from checkpoint - inferring model architecture from checkpoint...")
         checkpoint = torch.load(resume_checkpoint_path, map_location="cpu")  # Load on CPU first
@@ -2636,7 +2668,10 @@ def main(config: dict):
             raise FileNotFoundError(f"init_checkpoint not found: {config['init_checkpoint']}")
         if rank == 0:
             print(f"Initialising weights from {config['init_checkpoint']} (fresh optimizer and LR schedule, epoch 0)")
-        load_checkpoint(config["init_checkpoint"], model, None, None, device)
+        init_ckpt = torch.load(config["init_checkpoint"], map_location=device)
+        if rank == 0:
+            _warn_init_mismatch(init_ckpt, config, model)
+        load_checkpoint(config["init_checkpoint"], model, None, None, device, checkpoint=init_ckpt)
 
     # Training loop
     if rank == 0:
