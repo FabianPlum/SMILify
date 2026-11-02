@@ -89,6 +89,7 @@ On the console you'll see **PCK@5px** (2D accuracy) — reported at **two** reso
 > - Watch the flag spelling: `--dataset_path` (underscore) but `--smal-file` (hyphen).
 > - Always pass `--smal-file` — some checkpoints don't embed the model path and the run will abort without it.
 > - Add `--max_batches 2` for a fast first-run sanity check.
+> - **Temporary:** multi-view checkpoints trained before #132 on data with mixed view counts learned with padded views visible to the decoder. Add `--legacy_view_padding` to reproduce their numbers (issue #134; the flag goes once those runs are replaced). The example model is not affected: its data always has 5 views.
 > - **Pass `--orig_width` / `--orig_height` = the dataset's original capture resolution** so PCK is scored in original-image pixels (both are required together, or the run errors). The stick-insect dataset is **1530 px square** → `--orig_width 1530 --orig_height 1530`.
 >
 > Full reference: [Benchmarking](README.md#benchmarking).
@@ -150,6 +151,7 @@ What happens:
 - Training runs single-GPU by default — add `--num_gpus N`, or launch with `torchrun --nproc_per_node=N` for multi-GPU.
 - Checkpoints save every 5 epochs to `getting_started_checkpoints/` (`best_model.pth`, `checkpoint_epoch_*.pth`), next to a resolved `config.json` and validation visualizations.
 - This is the **real ViT-Large recipe** used to train the example model (`batch_size 8`, augmentation on). If you hit out-of-memory, lower `training.batch_size` or `backbone_chunk_size` in the config.
+- The example model predates the fix to the intermediate IEF loss (`ief_intermediate`, #121). Before it, that term collapsed the intermediate skeletons and contributed almost nothing, so re-running this recipe now optimises a slightly different loss and can land on somewhat different numbers than the shipped checkpoint.
 - Stop anytime with `Ctrl-C`, then benchmark a saved checkpoint with the Step 3 command (point `--checkpoint` at `getting_started_checkpoints/best_model.pth`).
 
 **To train on your own dataset:** pass `--dataset_path /path/to/your.h5`, or edit `dataset.data_path` in a copy of the config.
