@@ -89,6 +89,7 @@ On the console you'll see **PCK@5px** (2D accuracy) — reported at **two** reso
 > - Watch the flag spelling: `--dataset_path` (underscore) but `--smal-file` (hyphen).
 > - Always pass `--smal-file` — some checkpoints don't embed the model path and the run will abort without it.
 > - Add `--max_batches 2` for a fast first-run sanity check.
+> - **Temporary:** multi-view checkpoints trained before #132 on data with mixed view counts learned with padded views visible to the decoder. Add `--legacy_view_padding` to reproduce their numbers (issue #134; the flag goes once those runs are replaced). The example model is not affected: its data always has 5 views.
 > - **Pass `--orig_width` / `--orig_height` = the dataset's original capture resolution** so PCK is scored in original-image pixels (both are required together, or the run errors). The stick-insect dataset is **1530 px square** → `--orig_width 1530 --orig_height 1530`.
 >
 > Full reference: [Benchmarking](README.md#benchmarking).
