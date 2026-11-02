@@ -1,4 +1,4 @@
-# Ruff configuration for SMILify (tracked by issue #15, tracker item C17).
+# Ruff configuration for Holotype (tracked by issue #15, tracker item C17).
 #
 # The repo is intentionally NOT pip-installable, so this is a standalone
 # ruff.toml rather than a [tool.ruff] table in pyproject.toml.

@@ -2,7 +2,7 @@
 SLEAP Data Integration Package
 
 This package provides tools for integrating SLEAP pose estimation datasets
-into the SMILify training pipeline.
+into the Holotype training pipeline.
 
 Main components:
 - SLEAPDatasetPreprocessor: Preprocesses SLEAP sessions into HDF5 format

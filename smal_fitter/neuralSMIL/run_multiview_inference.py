@@ -134,7 +134,8 @@ def setup_ddp(rank: int, world_size: int, port: str = "12345", local_rank: int =
         port: Master port for communication (default: 12345, ignored if MASTER_PORT env var is set)
         local_rank: Local rank within the node (for GPU assignment). If None, uses rank.
         timeout_s: Process-group / store timeout in seconds. Defaults to the
-            SMILIFY_DIST_TIMEOUT_S env var, else 14400 (4 h). This inference
+            HOLOTYPE_DIST_TIMEOUT_S env var (or its pre-rename name
+            SMILIFY_DIST_TIMEOUT_S), else 14400 (4 h). This inference
             pipeline has long rank-0-only phases BETWEEN collectives (gathering
             ~100k predictions from temp pickles, writing animation exports,
             merging videos) during which the other ranks sit at a dist.barrier();
@@ -143,11 +144,14 @@ def setup_ddp(rank: int, world_size: int, port: str = "12345", local_rank: int =
             the whole mp.spawn job down after inference had already succeeded.
     """
     if timeout_s is None:
-        raw = os.environ.get("SMILIFY_DIST_TIMEOUT_S", "14400")
+        env_name = "HOLOTYPE_DIST_TIMEOUT_S"
+        if env_name not in os.environ and "SMILIFY_DIST_TIMEOUT_S" in os.environ:
+            env_name = "SMILIFY_DIST_TIMEOUT_S"
+        raw = os.environ.get(env_name, "14400")
         try:
             timeout_s = int(raw)
         except ValueError:
-            print(f"[setup_ddp] invalid SMILIFY_DIST_TIMEOUT_S={raw!r}; using default 14400 s")
+            print(f"[setup_ddp] invalid {env_name}={raw!r}; using default 14400 s")
             timeout_s = 14400
     dist_timeout = timedelta(seconds=timeout_s)
 
@@ -1569,7 +1573,7 @@ def main():
         type=int,
         default=None,
         help="Distributed process-group timeout in SECONDS for multi-GPU runs "
-        "(default: SMILIFY_DIST_TIMEOUT_S env var, else 14400 = 4 h). Must "
+        "(default: HOLOTYPE_DIST_TIMEOUT_S env var, else 14400 = 4 h). Must "
         "exceed the longest rank-0-only phase (prediction gather, animation "
         "export, video merge) or the NCCL watchdog kills the ranks waiting at "
         "the next barrier — on ~100k-frame datasets the old 1800 s default "

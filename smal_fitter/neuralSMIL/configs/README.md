@@ -1,4 +1,4 @@
-# SMILify Unified Configuration System
+# Holotype Unified Configuration System
 
 This package provides a single, type-safe configuration system for both **single-view** and **multi-view** SMIL image regressor training. It replaces the previous mix of `training_config.py`, in-script defaults, and CLI-only overrides with JSON config files and dataclasses.
 

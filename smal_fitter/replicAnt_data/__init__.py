@@ -1,7 +1,7 @@
 """replicAnt Data Integration Package
 
 Tools for integrating replicAnt (procedural Unreal-Engine generated)
-datasets into the SMILify pipeline. Sibling of `sleap_data/` for the
+datasets into the Holotype pipeline. Sibling of `sleap_data/` for the
 SLEAP-sourced multi-camera path.
 
 Main components:

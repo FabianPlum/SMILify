@@ -1088,7 +1088,7 @@ def main():
         log_lines.append(str(msg))
 
     log("=" * 60)
-    log(f"SMILify Benchmark ({model_type})")
+    log(f"Holotype Benchmark ({model_type})")
     log("=" * 60)
     log(f"Model type: {model_type}")
     log(f"Checkpoint: {args.checkpoint}")

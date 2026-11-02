@@ -38,18 +38,18 @@ set -euo pipefail
 
 # Source to clone. Override to rehearse the rewrite against a local copy
 # without hitting the network, e.g.  PURGE_SOURCE=. ./scripts/purge_licensed_blobs.sh --execute
-PURGE_SOURCE="${PURGE_SOURCE:-https://github.com/FabianPlum/SMILify}"
+PURGE_SOURCE="${PURGE_SOURCE:-https://github.com/FabianPlum/Holotype}"
 
 # Where a deliberate force-push would go. Kept separate from PURGE_SOURCE so a
 # local-path rehearsal (PURGE_SOURCE=.) still prints the real remote.
-PUSH_REMOTE="${PUSH_REMOTE:-https://github.com/FabianPlum/SMILify.git}"
+PUSH_REMOTE="${PUSH_REMOTE:-https://github.com/FabianPlum/Holotype.git}"
 
 # Deliberately NOT /tmp: the rewritten mirror must survive between the rewrite
 # and the force-push, and /tmp is wiped on WSL session restart (observed during
 # testing -- the mirror disappeared between two commands). Override with
 # PURGE_WORKDIR if you want it elsewhere.
-WORKDIR="${PURGE_WORKDIR:-${HOME}/smilify-purge}"
-MIRROR="${WORKDIR}/SMILify.git"
+WORKDIR="${PURGE_WORKDIR:-${HOME}/holotype-purge}"
+MIRROR="${WORKDIR}/Holotype.git"
 
 # Paths to erase from every commit. The whole smal_model/smpl/ tree goes: it
 # held only the two MPI SMPL models, an MPI-copyrighted __init__ stub and a
@@ -70,7 +70,7 @@ PURGE_PATHS=(
 EXECUTE=0
 [[ "${1:-}" == "--execute" ]] && EXECUTE=1
 
-echo "=== SMILify licensed-blob purge (issue #84) ==="
+echo "=== Holotype licensed-blob purge (issue #84) ==="
 echo
 echo "Paths to erase from all history:"
 printf '  %s\n' "${PURGE_PATHS[@]}"

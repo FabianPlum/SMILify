@@ -37,7 +37,7 @@ set -eo pipefail
 # ---- locations --------------------------------------------------------------
 # Defaults are generic: repo = submit directory, conda derived from `conda`
 # on PATH. Override per site, e.g.:
-#     REPO_DIR=/p/scratch/.../SMILify CONDA_SH=/path/to/conda.sh \
+#     REPO_DIR=/p/scratch/.../Holotype CONDA_SH=/path/to/conda.sh \
 #       sbatch --export=ALL,REPO_DIR,CONDA_SH scripts/prior_study/submit_baseline.sbatch
 REPO_DIR="${REPO_DIR:-$SLURM_SUBMIT_DIR}"
 REPO_DIR="${REPO_DIR:-.}"

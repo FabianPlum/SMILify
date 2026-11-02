@@ -1,8 +1,8 @@
 # Legacy functionality
 
-This directory documents the **optimization-based** fitting workflow that SMILify inherited from [SMALify](https://github.com/benjiebob/SMALify). It is kept for compatibility, but fitting is now done primarily through the neural single-/multi-view pipeline — see the [root README](../README.md) and [smal_fitter/neuralSMIL/README.md](../smal_fitter/neuralSMIL/README.md). Use this path if you specifically need the gradient-descent `SMALFitter`, e.g. to fit a SMIL model to a single annotated image.
+This directory documents the **optimization-based** fitting workflow that Holotype inherited from [SMALify](https://github.com/benjiebob/SMALify). It is kept for compatibility, but fitting is now done primarily through the neural single-/multi-view pipeline — see the [root README](../README.md) and [smal_fitter/neuralSMIL/README.md](../smal_fitter/neuralSMIL/README.md). Use this path if you specifically need the gradient-descent `SMALFitter`, e.g. to fit a SMIL model to a single annotated image.
 
-> The fitter works with any rigged SMIL model `.pkl` set as `config.SMAL_FILE`: joint names, hierarchy, root joint, `N_POSE`, `N_BETAS` and joint limits are all read from the model file. The original SMAL quadruped path (hard-coded dog skeleton, BADJA / StanfordExtra loaders, `generate_video.py`) was removed in [#110](https://github.com/FabianPlum/SMILify/issues/110); the last commit containing it is `ef17be6`.
+> The fitter works with any rigged SMIL model `.pkl` set as `config.SMAL_FILE`: joint names, hierarchy, root joint, `N_POSE`, `N_BETAS` and joint limits are all read from the model file. The original SMAL quadruped path (hard-coded dog skeleton, BADJA / StanfordExtra loaders, `generate_video.py`) was removed in [#110](https://github.com/FabianPlum/Holotype/issues/110); the last commit containing it is `ef17be6`.
 
 ## Installation
 

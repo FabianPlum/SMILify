@@ -1,5 +1,5 @@
 """
-SMILify Unified Configuration System
+Holotype Unified Configuration System
 
 Supports single-view and multi-view training with JSON config files,
 CLI overrides, and backward compatibility with legacy config.py.

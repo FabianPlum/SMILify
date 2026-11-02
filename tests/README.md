@@ -1,6 +1,6 @@
-# SMILify Tests
+# Holotype Tests
 
-`pytest` suite for the SMILify pipeline — the optimization fitters, the neural
+`pytest` suite for the Holotype pipeline — the optimization fitters, the neural
 single/multi-view path, the config system, augmentation, triangulation, and
 animation export.
 

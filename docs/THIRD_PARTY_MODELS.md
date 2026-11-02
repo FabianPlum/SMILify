@@ -1,14 +1,14 @@
 # Third-party models and priors
 
-SMILify is MIT-licensed. Earlier versions had a legacy SMAL quadruped path that
+Holotype is MIT-licensed. Earlier versions had a legacy SMAL quadruped path that
 depended on models and priors from the Max Planck Institute (SMPL / SMAL /
 SMALST), released under research licences which **do not permit
 redistribution**. That path was removed in
-[#110](https://github.com/FabianPlum/SMILify/issues/110): **no code in SMILify
+[#110](https://github.com/FabianPlum/Holotype/issues/110): **no code in Holotype
 loads these files any more**, and you do not need to download them.
 
 Those files were previously committed to this repository by accident
-(see [issue #84](https://github.com/FabianPlum/SMILify/issues/84)). They have been
+(see [issue #84](https://github.com/FabianPlum/Holotype/issues/84)). They have been
 removed from version control, purged from history (below), and are git-ignored.
 
 ## Which files this concerns
@@ -99,7 +99,7 @@ the parent is clean. Please either:
 - Reset it onto the rewritten history and force-push your own fork:
 
   ```bash
-  git remote add upstream https://github.com/FabianPlum/SMILify.git
+  git remote add upstream https://github.com/FabianPlum/Holotype.git
   git fetch upstream
   git checkout master && git reset --hard upstream/master
   git push --force origin master

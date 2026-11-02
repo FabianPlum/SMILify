@@ -1210,7 +1210,7 @@ def visualize_pytorch3d_alignment(
     overlaid with original 2D keypoints to verify alignment.
 
     This function verifies that camera parameters can be correctly converted to
-    the pytorch3d format used by the SMILify framework.
+    the pytorch3d format used by the Holotype framework.
 
     Args:
         loader: SLEAP3DDataLoader instance

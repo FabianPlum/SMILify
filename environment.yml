@@ -1,4 +1,4 @@
-# SMILify conda environment.
+# Holotype conda environment.
 #
 # Reproduce with:
 #   conda env create -f environment.yml

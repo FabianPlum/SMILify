@@ -3,7 +3,7 @@
 Multi-View SLEAP Dataset Preprocessing Script
 
 This script preprocesses multi-view SLEAP pose estimation datasets into optimized HDF5 format
-compatible with the SMILify multi-view training pipeline. Each sample contains all synchronized
+compatible with the Holotype multi-view training pipeline. Each sample contains all synchronized
 camera views for a single time instant.
 
 Usage:
