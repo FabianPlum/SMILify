@@ -24,6 +24,16 @@ from smal_fitter.neuralSMIL.training_config import TrainingConfig
 from pytorch3d.renderer import FoVPerspectiveCameras
 
 
+def _scatter_real_views(values: torch.Tensor, real_views: torch.Tensor) -> torch.Tensor:
+    """Place the real views' backbone outputs ``(N_real, ...)`` into the ``(B*V, ...)`` layout, zeros in padded slots.
+
+    ``real_views`` is the flattened ``(B*V,)`` view mask the outputs were selected with.
+    """
+    full = values.new_zeros((real_views.shape[0], *values.shape[1:]))
+    full[real_views] = values
+    return full
+
+
 class CrossViewAttention(nn.Module):
     """
     Cross-attention module for multi-view feature fusion.
@@ -448,7 +458,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             camera_indices: Tensor of canonical camera indices for each view
                            Shape: (batch_size, num_views) with values in [0, num_canonical_cameras)
             view_mask: Optional boolean mask indicating valid views
-                      Shape: (batch_size, num_views), True = valid view
+                      Shape: (batch_size, num_views), True = valid view. Padded
+                      slots (False) skip the backbone and are masked out of the
+                      cross-view attention and the decoder.
 
         Returns:
             Dictionary containing:
@@ -458,11 +470,20 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         batch_size = images_per_view[0].size(0)
         num_views = len(images_per_view)
 
-        # =================== Backbone pass for all views ===================
+        # =================== Backbone pass for all real views ===================
         # Stack all views: List of (B, C, H, W) -> (B, V, C, H, W) -> (B*V, C, H, W)
         all_images = torch.stack(images_per_view, dim=1)  # (B, V, C, H, W)
         B, V, C, H, W = all_images.shape
         all_images_flat = all_images.view(B * V, C, H, W)  # (B*V, C, H, W)
+
+        # Padded view slots (samples with fewer views than the batch's largest)
+        # skip the backbone; their features are zeros, which every later stage
+        # masks out.
+        real_views = None
+        if view_mask is not None and not bool(view_mask.all()):
+            real_views = view_mask.reshape(B * V)
+            all_images_flat = all_images_flat[real_views]  # (N_real, C, H, W)
+        num_images = all_images_flat.shape[0]
 
         # Backbone forward pass — optionally chunked to reduce peak VRAM.
         # When backbone_chunk_size is set, we process images in smaller batches
@@ -471,12 +492,12 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         use_spatial = self.head_type == "transformer_decoder" and hasattr(self.backbone, "forward_with_spatial")
         chunk = self.backbone_chunk_size
 
-        patch_tokens = None
-        if chunk is not None and chunk < B * V:
+        all_patches = None
+        if chunk is not None and chunk < num_images:
             # Chunked backbone forward to reduce peak VRAM
             feat_chunks = []
             patch_chunks = [] if use_spatial else None
-            for i in range(0, B * V, chunk):
+            for i in range(0, num_images, chunk):
                 imgs_chunk = all_images_flat[i : i + chunk]
                 if use_spatial:
                     f, p = self.backbone.forward_with_spatial(imgs_chunk)
@@ -487,18 +508,22 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             all_features = torch.cat(feat_chunks, dim=0)
             if use_spatial:
                 all_patches = torch.cat(patch_chunks, dim=0)
-                _spatial_dim = (
-                    self.backbone.get_spatial_dim() if hasattr(self.backbone, "get_spatial_dim") else self.feature_dim
-                )
-                patch_tokens = all_patches.view(B, V, -1, _spatial_dim)
         elif use_spatial:
             all_features, all_patches = self.backbone.forward_with_spatial(all_images_flat)
+        else:
+            all_features = self.backbone(all_images_flat)  # (num_images, feature_dim)
+
+        if real_views is not None:
+            all_features = _scatter_real_views(all_features, real_views)  # (B*V, feature_dim)
+            if all_patches is not None:
+                all_patches = _scatter_real_views(all_patches, real_views)  # (B*V, P, spatial_dim)
+
+        patch_tokens = None
+        if all_patches is not None:
             _spatial_dim = (
                 self.backbone.get_spatial_dim() if hasattr(self.backbone, "get_spatial_dim") else self.feature_dim
             )
             patch_tokens = all_patches.view(B, V, -1, _spatial_dim)  # (B, V, P, spatial_dim)
-        else:
-            all_features = self.backbone(all_images_flat)  # (B*V, feature_dim)
 
         # Reshape back to (B, V, feature_dim)
         stacked_features = all_features.view(B, V, -1)
@@ -2492,7 +2517,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
 
                     sample_view_mask.append(True)
                 else:
-                    # Pad with zeros
+                    # Pad with zeros (forward_multiview skips padded slots in the backbone)
                     dummy_img = torch.zeros(
                         3, self.input_resolution, self.input_resolution, dtype=torch.float32, device=self.device
                     )
