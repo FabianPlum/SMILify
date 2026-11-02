@@ -80,6 +80,7 @@ from smal_fitter.neuralSMIL.data_splits import (
     split_dataset,
     tag_output_dir,
 )
+from smal_fitter.neuralSMIL.ddp_utils import any_rank, check_replicas, ddp_forward, reaches_parameters, zero_loss
 from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
@@ -551,6 +552,32 @@ class MultiViewTrainingConfig:
         return TrainingConfig.get_learning_rate_for_epoch(epoch)
 
 
+def _training_step(
+    model: MultiViewSMILImageRegressor, x_data_batch, y_data_batch, loss_weights: dict, accum_steps: int
+):
+    """One batch's forward pass and loss, run as DDP's forward pass under DDP (``ddp_forward``).
+
+    Returns ``(loss / accum_steps, loss components (detached), IEF pose deltas (floats))``. A batch without a
+    prediction, or whose loss reaches no trainable parameter, returns ``(zero loss, None, {})``. Only the loss carries
+    gradients (see ``ddp_forward``).
+    """
+    predicted_params, _, _ = model.predict_from_multiview_batch(x_data_batch, y_data_batch)
+    if predicted_params is None:
+        return zero_loss(model), None, {}
+    loss, loss_components = model.compute_multiview_batch_loss(
+        predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
+    )
+    if not reaches_parameters(loss, model):  # e.g. every target missing: only placeholder leaves were summed
+        return zero_loss(model), None, {}
+    components = {k: v.detach() if torch.is_tensor(v) else v for k, v in loss_components.items()}
+    pose_hist = predicted_params.get("iteration_history", {}).get("pose", [])
+    ief_deltas = {
+        f"ief_pose_delta_{i}": (pose_hist[i].detach() - pose_hist[i - 1].detach()).norm(dim=-1).mean().item()
+        for i in range(1, len(pose_hist))
+    }
+    return loss / accum_steps, components, ief_deltas
+
+
 def train_epoch(
     model: MultiViewSMILImageRegressor,
     train_loader: DataLoader,
@@ -581,12 +608,9 @@ def train_epoch(
     """
     model.train()
 
-    # If wrapped in DDP, call custom helper methods on the underlying module.
-    # NOTE: DDP does not automatically expose arbitrary custom methods.
-    base_model = model.module if hasattr(model, "module") else model
-
     # Get epoch-specific loss weights from curriculum
     loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(epoch, training_config.get("loss_weights"))
+    param_device = next(model.parameters()).device
 
     total_loss = 0.0
     loss_components_sum = {}
@@ -611,79 +635,48 @@ def train_epoch(
         # Whether this is the last mini-batch in the current accumulation window
         is_step_batch = (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(train_loader)
 
-        # For DDP: suppress gradient all-reduce during accumulation steps.
-        # Sync only happens on the step batch to avoid redundant communication
-        # and incorrect gradient averaging mid-accumulation.
-        maybe_no_sync = model.no_sync() if (is_distributed and accum_steps > 1 and not is_step_batch) else nullcontext()
-
         try:
-            with maybe_no_sync:
-                # Forward pass with mixed precision if enabled
+            # Forward pass (as DDP's forward under DDP, so the backward pass all-reduces gradients), with mixed
+            # precision if enabled. The loss is scaled by the accumulation steps so accumulated gradients have the
+            # same magnitude as a single large batch.
+            with torch.cuda.amp.autocast() if scaler is not None else nullcontext():
+                loss, loss_components, ief_deltas = ddp_forward(
+                    model, _training_step, x_data_batch, y_data_batch, loss_weights, accum_steps
+                )
+            # Backward (gradients accumulate across mini-batches). A batch without a prediction backpropagates a zero
+            # loss, so every rank takes part in the same all-reduces. Under DDP the accumulated gradients are
+            # all-reduced after every mini-batch, not only on the step batch (no model.no_sync()): with
+            # find_unused_parameters on torch < 2.4 (fixed in 2.4, pytorch/pytorch#124193), a parameter used only
+            # inside no_sync() on one rank (e.g. the camera head of a slot that only that rank's random views used)
+            # counts as unused in the syncing batch and keeps its rank-local gradient, so the replicas drift apart.
+            if scaler is not None:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
+            valid_steps_in_window += loss_components is not None
+
+            # Only step optimizer at the end of each accumulation window, and only if a batch in the window had a
+            # prediction (on any rank: the replicas must take the same steps)
+            window_has_data = valid_steps_in_window > 0
+            if is_step_batch and (any_rank(window_has_data, param_device) if is_distributed else window_has_data):
                 if scaler is not None:
-                    with torch.cuda.amp.autocast():
-                        predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
-                            x_data_batch, y_data_batch
-                        )
-
-                        if predicted_params is None:
-                            if is_step_batch and valid_steps_in_window > 0:
-                                scaler.step(optimizer)
-                                scaler.update()
-                            continue
-
-                        loss, loss_components = base_model.compute_multiview_batch_loss(
-                            predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
-                        )
-                        # Scale loss by accumulation steps so accumulated gradients
-                        # have the same magnitude as a single large batch
-                        loss = loss / accum_steps
-
-                    # Backward with scaling (gradients accumulate across mini-batches)
-                    scaler.scale(loss).backward()
-                    valid_steps_in_window += 1
-
-                    # Only step optimizer at the end of each accumulation window
-                    if is_step_batch:
-                        if training_config.get("gradient_clip_norm", 0) > 0:
-                            scaler.unscale_(optimizer)
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
-                        scaler.step(optimizer)
-                        scaler.update()
+                    if training_config.get("gradient_clip_norm", 0) > 0:
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
+                    scaler.step(optimizer)
+                    scaler.update()
                 else:
-                    # Standard forward/backward
-                    predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
-                        x_data_batch, y_data_batch
-                    )
+                    if training_config.get("gradient_clip_norm", 0) > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
+                    optimizer.step()
+            if loss_components is None:
+                continue
 
-                    if predicted_params is None:
-                        if is_step_batch and valid_steps_in_window > 0:
-                            optimizer.step()
-                        continue
-
-                    loss, loss_components = base_model.compute_multiview_batch_loss(
-                        predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
-                    )
-                    loss = loss / accum_steps
-
-                    loss.backward()
-                    valid_steps_in_window += 1
-
-                    if is_step_batch:
-                        if training_config.get("gradient_clip_norm", 0) > 0:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
-                        optimizer.step()
-
-            # IEF refinement monitoring: track per-iteration pose delta norms.
-            # ief_pose_delta_N = avg L2 distance between iter N and iter N-1 predictions.
+            # IEF refinement monitoring: ief_pose_delta_N = avg L2 distance between iter N and iter N-1 predictions.
             # Healthy IEF shows delta_1 > delta_2 (coarse correction then fine-tuning).
             # Flat or growing deltas indicate the IEF is not learning to refine.
-            with torch.no_grad():
-                hist = predicted_params.get("iteration_history", {}) if predicted_params else {}
-                pose_hist = hist.get("pose", [])
-                for i in range(1, len(pose_hist)):
-                    delta = (pose_hist[i].detach() - pose_hist[i - 1].detach()).norm(dim=-1).mean().item()
-                    key = f"ief_pose_delta_{i}"
-                    loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
+            for key, delta in ief_deltas.items():
+                loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
 
             # Accumulate metrics (use un-scaled loss for logging)
             total_loss += loss.item() * accum_steps
@@ -708,6 +701,11 @@ def train_epoch(
             import traceback
 
             traceback.print_exc()
+            if is_distributed:
+                # Skipping the batch on this rank only would leave the other ranks waiting in (or pair them with the
+                # wrong) gradient all-reduce. Stop instead; relaunch with resume_checkpoint to continue from the last saved
+                # checkpoint.
+                raise
             # Clean up GPU memory after OOM to prevent cascading failures.
             # Without this, the failed forward pass's GPU tensors stay alive
             # and every subsequent batch also OOMs.
@@ -735,7 +733,14 @@ def train_epoch(
         avg_loss = 0.0
         avg_components = {}
 
-    return {"avg_loss": avg_loss, "loss_components": avg_components, "num_batches": num_batches}
+    # The replicas must be identical after synchronised updates; a difference means the gradients were not all-reduced
+    divergence = check_replicas(model, epoch, rank) if is_distributed else 0.0
+    return {
+        "avg_loss": avg_loss,
+        "loss_components": avg_components,
+        "num_batches": num_batches,
+        "replica_divergence": divergence,
+    }
 
 
 def validate(
@@ -2555,8 +2560,12 @@ def main(config: dict):
         if config.get("use_mixed_precision"):
             print("Mixed precision training: enabled")
         accum = config.get("gradient_accumulation_steps", 1)
-        if accum > 1:
-            print(f"Gradient accumulation: {accum} steps (effective batch size: {config['batch_size'] * accum})")
+        if accum > 1 or world_size > 1:
+            # One optimizer step averages the gradients of accum mini-batches on each of the world_size GPUs
+            print(
+                f"Effective batch size: {config['batch_size'] * accum * world_size} (batch_size {config['batch_size']}"
+                f" x gradient_accumulation_steps {accum} x world_size {world_size})"
+            )
         if config.get("backbone_unfreeze_epoch") is not None:
             print(
                 f"Staged backbone freezing: frozen until epoch {config['backbone_unfreeze_epoch']}, "
@@ -2654,12 +2663,20 @@ def main(config: dict):
             collate_fn=multiview_collate_fn,
         )
 
-        # Staged backbone unfreeze
+        # Staged backbone unfreeze (">=": a run resumed after the unfreeze epoch must unfreeze too)
         unfreeze_epoch = config.get("backbone_unfreeze_epoch")
-        if unfreeze_epoch is not None and epoch == unfreeze_epoch:
-            _backbone = model.module.backbone if hasattr(model, "module") else model.backbone
+        _backbone = (model.module if hasattr(model, "module") else model).backbone
+        if (
+            unfreeze_epoch is not None
+            and epoch >= unfreeze_epoch
+            and not all(p.requires_grad for p in _backbone.parameters())
+        ):
             for param in _backbone.parameters():
                 param.requires_grad = True
+            if is_distributed:
+                # DDP registers only the parameters that require grad when it is built: wrap again, or the
+                # backbone's gradients would never be all-reduced
+                model = DDP(model.module, device_ids=[gpu_idx], find_unused_parameters=True)
             if rank == 0:
                 trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
                 print(
@@ -3233,9 +3250,6 @@ if __name__ == "__main__":
         print(f"Launching multi-GPU training on {args.num_gpus} GPUs (using mp.spawn)...")
         print(f"Master port: {master_port}")
         print(f"Batch size per GPU: {args.batch_size if args.batch_size else 'from config'}")
-        print(
-            f"Total effective batch size: {args.batch_size * args.num_gpus if args.batch_size else 'config_batch_size * num_gpus'}"
-        )
 
         # Launch multi-GPU training using spawn
         mp.spawn(ddp_main, args=(args.num_gpus, training_config, master_port), nprocs=args.num_gpus, join=True)
