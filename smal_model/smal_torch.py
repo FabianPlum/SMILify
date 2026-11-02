@@ -179,6 +179,13 @@ class SMAL(nn.Module):
         # LBS weights
         self.weights = Variable(torch.Tensor(undo_chumpy(dd["weights"])), requires_grad=False).to(device)
 
+    def rest_joints(self):
+        """(J, 3) rest joint positions at zero shape, the ones the forward pass poses: the stored J with static joint
+        locations, else the joint regressor applied to the template."""
+        if config.STATIC_JOINT_LOCATIONS:
+            return self.J
+        return self.J_regressor.T @ self.v_template
+
     def __call__(
         self,
         beta,

@@ -28,6 +28,7 @@ from smal_fitter.neuralSMIL.transformer_decoder import build_smil_transformer_de
 from pytorch3d.transforms import (
     axis_angle_to_matrix,
     matrix_to_axis_angle,
+    matrix_to_quaternion,
     rotation_6d_to_matrix,
     matrix_to_rotation_6d,
 )
@@ -1442,8 +1443,10 @@ class SMILImageRegressor(SMALFitter):
     def _init_twist_axes(self):
         """Rest bone direction per joint for :meth:`_joint_twist_penalty`: joint -> its single chain child, where
         children locked by the model's joint limits (all zero: label proxies) do not count. Joints with no or several
-        chain children (root, hips, skull, ...) get no axis: their twist moves the other children."""
-        J = np.asarray(config.dd["J"], np.float64)
+        chain children (root, hips, skull, ...) get no axis: their twist moves the other children. The rest joints are
+        the body model's own (``SMAL.rest_joints``): for models without static joint locations the stored ``J`` is not
+        what the forward pass poses."""
+        J = self.smal_model.rest_joints().detach().cpu().double().numpy()
         parents = np.asarray(config.dd["kintree_table"][0])
         locked = np.zeros(len(J), bool)
         if "joint_limits" in config.dd:
@@ -1471,8 +1474,9 @@ class SMILImageRegressor(SMALFitter):
 
         A local rotation acts on rest-frame offsets, so its twist about the rest bone direction (swing-twist
         decomposition) leaves the child joint where it is: keypoints cannot see it, and a network can twist a femur by
-        90 deg and bend the knee sideways to compensate. Per-axis limit boxes cannot bound it for tilted bones.
-        twist = 2 atan2(vee(R - R^T) . u, 1 + tr R), the quaternion form 2 atan2(q_xyz . u, q_w).
+        90 deg and bend the knee sideways to compensate. Per-axis limit boxes cannot bound it for tilted bones. (Exactly
+        so with an isotropic per-joint scale and no per-joint translation; anisotropic scales tilt the invisible axis a
+        little.) twist = 2 atan2(q_xyz . u, q_w) of the rotation's quaternion with q_w >= 0, also at 180 deg.
 
         Args:
             joint_rot_pred: ``(N, N_POSE, 6 or 3)`` predicted rotations.
@@ -1490,10 +1494,9 @@ class SMILImageRegressor(SMALFitter):
             R = rotation_6d_to_matrix(joint_rot_pred)
         else:
             R = axis_angle_to_matrix(joint_rot_pred)
-        R = R[:, self._twist_idx]
-        s = torch.stack([R[..., 2, 1] - R[..., 1, 2], R[..., 0, 2] - R[..., 2, 0], R[..., 1, 0] - R[..., 0, 1]], -1)
-        tr = R[..., 0, 0] + R[..., 1, 1] + R[..., 2, 2]
-        twist = 2 * torch.atan2((s * self._twist_axes).sum(-1), 1 + tr + 1e-6)  # 1 + tr >= 0
+        q = matrix_to_quaternion(R[:, self._twist_idx])  # (N, T, 4), real part first
+        q = torch.where(q[..., :1] < 0, -q, q)  # q_w >= 0, so the twist lies in [-180, 180] deg
+        twist = 2 * torch.atan2((q[..., 1:] * self._twist_axes).sum(-1), q[..., 0])
         return torch.relu(twist.abs() - float(np.deg2rad(self._TWIST_FREE_DEG))).mean()
 
     def compute_batch_loss(

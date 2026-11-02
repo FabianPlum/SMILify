@@ -31,6 +31,7 @@ def _twist_stub(rotation_representation):
     from smal_fitter.neuralSMIL.smil_image_regressor import SMILImageRegressor
 
     stub = types.SimpleNamespace(rotation_representation=rotation_representation, device="cpu")
+    stub.smal_model = types.SimpleNamespace(rest_joints=lambda: torch.as_tensor(config.dd["J"]))
     stub._TWIST_FREE_DEG = SMILImageRegressor._TWIST_FREE_DEG
     stub._init_twist_axes = types.MethodType(SMILImageRegressor._init_twist_axes, stub)
     stub.penalty = types.MethodType(SMILImageRegressor._joint_twist_penalty, stub)
@@ -103,3 +104,44 @@ def test_twist_penalty_without_twist_joints_is_finite_zero(monkeypatch):
         assert penalty.requires_grad
     penalties[0].backward()
     assert torch.all(jr.grad == 0)
+
+
+def test_twist_at_180_deg_is_penalised(monkeypatch):
+    """At a 180 deg twist the matrix form 2 atan2(vee(R - R^T) . u, 1 + tr R) was 0/0 (penalty 0); the quaternion form
+    gives 180 deg."""
+    _toy_model(monkeypatch, [[0, 0, 0], [1, 0, 0], [2, 0, 0]], [-1, 0, 1])
+    stub = _twist_stub("axis_angle")
+    jr = torch.zeros(1, 2, 3)
+    jr[0, 0] = math.pi * torch.tensor([1.0, 0.0, 0.0])
+    expected = math.pi - math.radians(stub._TWIST_FREE_DEG)
+    assert math.isclose(stub.penalty(jr).item(), expected, rel_tol=1e-5)  # one twist joint
+
+
+def test_twist_axes_follow_the_body_models_rest_joints(monkeypatch):
+    """SMILy_STICK regresses its joints from the template (no static joint locations), and its stored J is stale. A
+    twist about each axis must leave the child joint where it is through the real kinematic chain."""
+    from smal_model.batch_lbs import batch_global_rigid_transformation
+    from smal_model.smal_torch import SMAL, load_smal_model
+
+    stick = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "3D_model_prep", "SMILy_STICK.pkl"
+    )
+    monkeypatch.setattr(config, "SMAL_FILE", stick)
+    monkeypatch.setattr(config, "dd", load_smal_model(stick))
+    monkeypatch.setattr(config, "STATIC_JOINT_LOCATIONS", False)
+    stub = _twist_stub("axis_angle")
+    stub.smal_model = SMAL("cpu")
+    stub._init_twist_axes()
+    assert stub._twist_idx.numel() > 10
+
+    rest = stub.smal_model.rest_joints()[None]
+    parents = np.asarray(config.dd["kintree_table"][0], np.int64)
+    n = rest.shape[1]
+    for k, j in enumerate((stub._twist_idx + 1).tolist()):
+        child = int(np.flatnonzero(parents == j)[0]) if (parents == j).sum() == 1 else None
+        if child is None:  # several children, one of them a locked proxy: the axis points to the unlocked one
+            continue
+        Rs = torch.eye(3).repeat(1, n, 1, 1)
+        Rs[0, j] = axis_angle_to_matrix(math.pi / 2 * stub._twist_axes[k])
+        posed, _ = batch_global_rigid_transformation(Rs, rest, parents)
+        assert torch.allclose(posed[0, child], rest[0, child], atol=1e-5), f"joint {j}"
