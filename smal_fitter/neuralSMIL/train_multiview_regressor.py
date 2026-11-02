@@ -389,7 +389,7 @@ class MultiViewTrainingConfig:
     MULTIVIEW_DEFAULTS = {
         # Multi-view specific data settings
         "dataset_path": None,  # Required - path to multi-view HDF5
-        "num_views_to_use": None,  # None = use all available views
+        "num_views_to_use": None,  # Training only: at most N random views per sample (None = all)
         "min_views_per_sample": 2,
         # Cross-attention settings (multi-view specific)
         "cross_attention_layers": 2,
