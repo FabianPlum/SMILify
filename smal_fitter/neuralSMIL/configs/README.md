@@ -345,7 +345,7 @@ These fields are set at the **top level** of the JSON (not inside a section) for
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `num_views_to_use` | int or null | `null` | Maximum views per sample. `null` = use all available views in the dataset. |
+| `num_views_to_use` | int or null | `null` | Training only: at most this many views per sample. A sample with more gets a new random subset each time it is loaded (view augmentation). `null` = all views. Validation and inference use every view of each sample, and so does the benchmark unless given `--num_views_to_use`. |
 | `min_views_per_sample` | int | `2` | Minimum views required per training sample. |
 | `cross_attention_layers` | int | `2` | Number of cross-view attention layers for multi-view feature fusion. |
 | `cross_attention_heads` | int | `8` | Number of attention heads in cross-view attention. |
