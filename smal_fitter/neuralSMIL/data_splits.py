@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
 import math
+import os
 
 import h5py
 import numpy as np
@@ -221,6 +222,29 @@ def check_resume_split(
         log(f"WARNING: {msg} Continuing because allow_split_change is set.")
         return
     raise SplitMismatchError(msg)
+
+
+def warn_init_split(stored: Optional[dict], current: dict, checkpoint_path: str, log=print) -> None:
+    """Warn when an init_checkpoint was trained on the same dataset with a different split.
+
+    A weights-only start does not resume the checkpoint's split, so this is no error: fine-tuning on another
+    dataset is the normal case. On the same HDF5 with other split settings, though, the new run's validation and
+    test frames may have been training frames of the checkpoint, which inflates the new scores.
+    """
+    stored = stored or {}
+    old_path, new_path = stored.get("dataset_path"), current.get("dataset_path")
+    if not old_path or not new_path or os.path.basename(old_path) != os.path.basename(new_path):
+        return
+    try:
+        old, new = split_signature(stored), split_signature(current)
+    except (KeyError, TypeError, ValueError):
+        return
+    diffs = [f"{k}: {old.get(k)!r} -> {new.get(k)!r}" for k in dict.fromkeys([*old, *new]) if old.get(k) != new.get(k)]
+    if diffs:
+        log(
+            f"WARNING: init_checkpoint {checkpoint_path} was trained on {os.path.basename(new_path)} with a different "
+            f"split ({'; '.join(diffs)}). This run's validation and test frames may be frames it trained on."
+        )
 
 
 def fold_tag(split_method: str, holdout_fold: Optional[int], val_ratio: float, test_ratio: float) -> str:

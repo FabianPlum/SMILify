@@ -556,6 +556,10 @@ class TrainingHyperparameters:
     pin_memory: bool = True
     prefetch_factor: int = 4
     resume_checkpoint: Optional[str] = None
+    # Weights-only start (fine-tuning on a new dataset/rig): epoch 0, fresh optimizer and LR schedule, architecture
+    # from the dataset; checkpoint tensors whose shape differs (e.g. per-camera embeddings) keep their fresh init.
+    # Multiview only; ignored when resume_checkpoint is set.
+    init_checkpoint: Optional[str] = None
     reset_ief_token_embedding: bool = False
     use_gt_camera_init: bool = True
     use_mixed_precision: bool = False

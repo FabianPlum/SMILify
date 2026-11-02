@@ -1612,6 +1612,7 @@ The following files have been created implementing the multi-view system:
   - `smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py`
 
 #### Multi-GPU Distributed Training Fix (2026-01-14)
+- **Superseded (2026-10-31)**: calling the methods on `model.module` bypasses `DistributedDataParallel.forward`, so DDP never all-reduced a gradient and every GPU trained its own replica. The trainers now run each training step through `ddp_utils.ddp_forward`; see "Distributed Training" in `smal_fitter/neuralSMIL/README.md`.
 - **Issue**: When using `DistributedDataParallel` (DDP) for multi-GPU training, custom methods like `predict_from_multiview_batch()` and `compute_multiview_batch_loss()` were not accessible on the DDP wrapper object, causing `AttributeError: 'DistributedDataParallel' object has no attribute 'predict_from_multiview_batch'`.
 - **Root Cause**: DDP only exposes standard PyTorch `nn.Module` methods (e.g., `forward()`, `parameters()`), not arbitrary custom methods defined on the wrapped model.
 - **Fix**: Unwrap DDP before calling custom methods by accessing `model.module` when these methods are needed. Applied in both `train_epoch()` and `validate()` functions:
@@ -1650,7 +1651,7 @@ torchrun --nproc_per_node=4 smal_fitter/neuralSMIL/train_multiview_regressor.py 
 *Status: IMPLEMENTED - Multi-view system with optional GT 3D + calibrated camera supervision*
 
 **Changelog**:
-- v2.4: Fixed multi-GPU distributed training by unwrapping DDP before calling custom methods (`predict_from_multiview_batch`, `compute_multiview_batch_loss`)
+- v2.4: Fixed multi-GPU distributed training by unwrapping DDP before calling custom methods (`predict_from_multiview_batch`, `compute_multiview_batch_loss`). Superseded on 2026-10-31: training then ran, but without gradient synchronisation (see the note in "Multi-GPU Distributed Training Fix")
 - v2.3: Added GT 3D + calibrated camera supervision (world_scale + aspect_ratio), fixed transformer body-head conditioning bug, and hardened rendering (dtype, rasterization, clipping planes)
 - v2.2: Added joint angle regularization, device mismatch fix, and OBJ mesh export functionality
 - v2.1: Added Phase 4 (Visualization) - multi-view training progress visualization

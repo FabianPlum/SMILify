@@ -36,7 +36,10 @@ class CrossAttention(nn.Module):
 
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
 
-    def forward(self, x: torch.Tensor, context: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, context: Optional[torch.Tensor] = None, context_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """context_mask: optional (batch_size, context_len) bool, True = attend; False tokens get no weight."""
         context = context if context is not None else x
 
         # Get query, key, value
@@ -50,6 +53,8 @@ class CrossAttention(nn.Module):
 
         # Compute attention
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+        if context_mask is not None:
+            dots = dots.masked_fill(~context_mask[:, None, None, :], float("-inf"))
         attn = self.attend(dots)
         attn = self.dropout(attn)
 
@@ -98,9 +103,12 @@ class TransformerDecoderLayer(nn.Module):
         self.norm2 = nn.LayerNorm(dim)
         self.ff = FeedForward(dim, mlp_dim, dropout)
 
-    def forward(self, x: torch.Tensor, context: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, context: Optional[torch.Tensor] = None, context_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         # Cross-attention (normalize both query and context for stability)
-        x = x + self.cross_attn(self.norm1(x), self.norm_context(context) if context is not None else None)
+        context = self.norm_context(context) if context is not None else None
+        x = x + self.cross_attn(self.norm1(x), context, context_mask)
 
         # Feed-forward
         x = x + self.ff(self.norm2(x))
@@ -340,7 +348,10 @@ class SMILTransformerDecoderHead(nn.Module):
             self.register_buffer("init_mesh_scale", torch.tensor([[init_log_scale]]))
 
     def forward(
-        self, features: torch.Tensor, spatial_features: Optional[torch.Tensor] = None
+        self,
+        features: torch.Tensor,
+        spatial_features: Optional[torch.Tensor] = None,
+        spatial_mask: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Forward pass through transformer decoder head.
@@ -358,6 +369,9 @@ class SMILTransformerDecoderHead(nn.Module):
                 non-None when ``spatial_features`` is None (e.g. ResNet
                 backbones).
             spatial_features: Spatial features from backbone (batch_size, seq_len, context_dim)
+            spatial_mask: Optional (batch_size, seq_len) bool, True = attend. The
+                multi-view regressor masks the tokens of padded view slots with it.
+                None attends to every token.
 
         Returns:
             Dictionary containing predicted SMIL parameters
@@ -370,10 +384,13 @@ class SMILTransformerDecoderHead(nn.Module):
             features = features.float()
             if spatial_features is not None:
                 spatial_features = spatial_features.float()
-            return self._forward_impl(features, spatial_features)
+            return self._forward_impl(features, spatial_features, spatial_mask)
 
     def _forward_impl(
-        self, features: torch.Tensor, spatial_features: Optional[torch.Tensor] = None
+        self,
+        features: torch.Tensor,
+        spatial_features: Optional[torch.Tensor] = None,
+        spatial_mask: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """Inner forward running in FP32 (called from forward with autocast disabled)."""
         batch_size = features.shape[0]
@@ -435,7 +452,7 @@ class SMILTransformerDecoderHead(nn.Module):
             # Pass through transformer decoder layers (dropout lives inside
             # the attention/FF blocks; no extra per-iter token dropout).
             for layer in self.layers:
-                token = layer(token, spatial_features)
+                token = layer(token, spatial_features, spatial_mask)
 
             # Extract predictions (residual updates)
             token_out = token.squeeze(1)  # (batch_size, hidden_dim)
