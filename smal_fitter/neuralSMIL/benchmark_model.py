@@ -1046,7 +1046,10 @@ def main():
     )
     # Multi-view only options
     parser.add_argument(
-        "--num_views_to_use", type=int, default=None, help="Override num views per sample (multi-view only)"
+        "--num_views_to_use",
+        type=int,
+        default=None,
+        help="Score at most N views per sample instead of all (multi-view only)",
     )
     parser.add_argument(
         "--legacy_view_padding",
@@ -1054,7 +1057,9 @@ def main():
         help="Temporary: pre-#132 handling of padded views, to reproduce legacy multi-view checkpoints' numbers",
     )
     parser.add_argument(
-        "--no_random_view_sampling", action="store_true", help="Disable random view sampling (multi-view only)"
+        "--no_random_view_sampling",
+        action="store_true",
+        help="With --num_views_to_use: the first N views instead of a random N (multi-view only)",
     )
     args = parser.parse_args()
 
@@ -1152,8 +1157,6 @@ def _run_multiview_benchmark(
         config_from_ckpt["batch_size"] = args.batch_size
     if args.num_workers is not None:
         config_from_ckpt["num_workers"] = args.num_workers
-    if args.num_views_to_use is not None:
-        config_from_ckpt["num_views_to_use"] = args.num_views_to_use
     random_view_sampling = not args.no_random_view_sampling
 
     # Reproducibility
@@ -1164,10 +1167,11 @@ def _run_multiview_benchmark(
     for line in _collect_hdf5_inventory(args.dataset_path):
         log_fn(line)
 
+    # Every view of each sample unless --num_views_to_use: the checkpoint's num_views_to_use only subsampled training
     dataset = SLEAPMultiViewDataset(
         hdf5_path=args.dataset_path,
         rotation_representation=config_from_ckpt["rotation_representation"],
-        num_views_to_use=config_from_ckpt.get("num_views_to_use"),
+        num_views_to_use=args.num_views_to_use,
         random_view_sampling=random_view_sampling,
         include_raw_keypoints=True,
     )
@@ -1175,6 +1179,10 @@ def _run_multiview_benchmark(
     log_fn("\nDATASET SUMMARY:")
     for line in _collect_dataset_summary(dataset):
         log_fn(line)
+    log_fn(
+        f"Views per sample: {args.num_views_to_use or 'all'} "
+        f"(num_views_to_use in training: {config_from_ckpt.get('num_views_to_use')})"
+    )
 
     # Get dataset max_views and canonical_camera_order
     dataset_max_views = dataset.get_max_views_in_dataset()

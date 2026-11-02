@@ -28,7 +28,7 @@ class MultiViewConfig(BaseTrainingConfig):
     """Configuration for multi-view training."""
 
     # Multi-view specific parameters
-    num_views_to_use: Optional[int] = None  # None = use all available views
+    num_views_to_use: Optional[int] = None  # Training only: at most N random views per sample (None = all)
     min_views_per_sample: int = 2
     # Temporary (issue #134): True reproduces the pre-#132 handling of padded view slots (backbone runs on the zero
     # padding, decoder attends to it). Only for legacy checkpoints, until they are replaced.
