@@ -757,7 +757,8 @@ def train_epoch(
             traceback.print_exc()
             if is_distributed:
                 # Skipping the batch on this rank only would leave the other ranks waiting in (or pair them with the
-                # wrong) gradient all-reduce. Stop instead; training resumes from the last checkpoint.
+                # wrong) gradient all-reduce. Stop instead; relaunch with resume_checkpoint to continue from the last saved
+                # checkpoint.
                 raise
             # Clean up GPU memory after OOM to prevent cascading failures.
             # Without this, the failed forward pass's GPU tensors stay alive
@@ -3306,9 +3307,6 @@ if __name__ == "__main__":
         print(f"Launching multi-GPU training on {args.num_gpus} GPUs (using mp.spawn)...")
         print(f"Master port: {master_port}")
         print(f"Batch size per GPU: {args.batch_size if args.batch_size else 'from config'}")
-        print(
-            f"Total effective batch size: {args.batch_size * args.num_gpus if args.batch_size else 'config_batch_size * num_gpus'}"
-        )
 
         # Launch multi-GPU training using spawn
         mp.spawn(ddp_main, args=(args.num_gpus, training_config, master_port), nprocs=args.num_gpus, join=True)
