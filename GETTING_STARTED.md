@@ -150,6 +150,7 @@ What happens:
 - Training runs single-GPU by default — add `--num_gpus N`, or launch with `torchrun --nproc_per_node=N` for multi-GPU.
 - Checkpoints save every 5 epochs to `getting_started_checkpoints/` (`best_model.pth`, `checkpoint_epoch_*.pth`), next to a resolved `config.json` and validation visualizations.
 - This is the **real ViT-Large recipe** used to train the example model (`batch_size 8`, augmentation on). If you hit out-of-memory, lower `training.batch_size` or `backbone_chunk_size` in the config.
+- The example model predates the fix to the intermediate IEF loss (`ief_intermediate`, #121). Before it, that term collapsed the intermediate skeletons and contributed almost nothing, so re-running this recipe now optimises a slightly different loss and can land on somewhat different numbers than the shipped checkpoint.
 - Stop anytime with `Ctrl-C`, then benchmark a saved checkpoint with the Step 3 command (point `--checkpoint` at `getting_started_checkpoints/best_model.pth`).
 
 **To train on your own dataset:** pass `--dataset_path /path/to/your.h5`, or edit `dataset.data_path` in a copy of the config.

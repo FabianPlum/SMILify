@@ -1276,6 +1276,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             n_iters = len(hist.get("pose", []))
             global_rot_dim = 6 if self.rotation_representation == "6d" else 3
             rot_per_joint = 6 if self.rotation_representation == "6d" else 3
+            ief_total = torch.zeros((), device=self.device)  # weighted sum of the intermediate terms
 
             for i in range(n_iters - 1):  # skip final iter — already supervised above
                 w = ief_w * (i + 1) / n_iters  # linear ramp: earlier iters get lower weight
@@ -1344,7 +1345,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                                 wvc = combined_mask.sum().float() * 3 + 1e-8
                             ief_kp3d = masked_loss.sum() / wvc
                             if torch.isfinite(ief_kp3d):
-                                total_loss = total_loss + w * loss_weights["keypoint_3d"] * ief_kp3d
+                                ief_total = ief_total + w * loss_weights["keypoint_3d"] * ief_kp3d
 
                 # 2D keypoint loss on intermediate predictions (project using final cameras)
                 if all_kp_data is not None and loss_weights.get("keypoint_2d", 0) > 0:
@@ -1365,7 +1366,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                             joint_weights=joint_importance_weights,
                         )
                         if torch.isfinite(ief_kp2d):
-                            total_loss = total_loss + w * loss_weights["keypoint_2d"] * ief_kp2d
+                            ief_total = ief_total + w * loss_weights["keypoint_2d"] * ief_kp2d
                     except Exception:
                         pass  # projection can fail for degenerate intermediate cameras
 
@@ -1380,19 +1381,23 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         body_targets["joint_rot"].reshape(batch_size, -1),
                         body_targets.get("joint_rot_mask"),
                     )
-                    total_loss = total_loss + w * loss_weights["joint_rot"] * ief_loss
+                    ief_total = ief_total + w * loss_weights["joint_rot"] * ief_loss
 
                 if body_targets.get("betas") is not None and loss_weights.get("betas", 0) > 0:
                     mask = body_targets.get("betas_mask")
                     if mask is not None and mask.any():
                         ief_loss = F.mse_loss(iter_betas[mask], body_targets["betas"][mask])
-                        total_loss = total_loss + w * loss_weights["betas"] * ief_loss
+                        ief_total = ief_total + w * loss_weights["betas"] * ief_loss
 
                 if body_targets.get("trans") is not None and loss_weights.get("trans", 0) > 0:
                     mask = body_targets.get("trans_mask")
                     if mask is not None and mask.any():
                         ief_loss = F.mse_loss(iter_trans[mask], body_targets["trans"][mask])
-                        total_loss = total_loss + w * loss_weights["trans"] * ief_loss
+                        ief_total = ief_total + w * loss_weights["trans"] * ief_loss
+
+            total_loss = total_loss + ief_total
+            # Logged like the other components: the loss weight times this value is its share of the total
+            loss_components["ief_intermediate"] = ief_total / ief_w
 
         if return_components:
             return total_loss, loss_components
