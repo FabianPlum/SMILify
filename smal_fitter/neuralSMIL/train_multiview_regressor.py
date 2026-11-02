@@ -377,6 +377,7 @@ class MultiViewTrainingConfig:
         "dataset_path": None,  # Required - path to multi-view HDF5
         "num_views_to_use": None,  # None = use all available views
         "min_views_per_sample": 2,
+        "legacy_view_padding": False,  # temporary, see MultiViewConfig.legacy_view_padding
         # Cross-attention settings (multi-view specific)
         "cross_attention_layers": 2,
         "cross_attention_heads": 8,
@@ -2372,6 +2373,8 @@ def main(config: dict):
         print(f"Dataset: {config['dataset_path']}")
         print(f"Backbone: {config['backbone_name']}")
         print(f"Num views to use: {config.get('num_views_to_use', 'all')}")
+        if config.get("legacy_view_padding"):
+            print("legacy_view_padding: on (pre-#132 padded views, for legacy checkpoints only)")
         print(f"Cross-attention layers: {config['cross_attention_layers']}")
         print(f"{'=' * 60}\n")
 
@@ -2430,6 +2433,11 @@ def main(config: dict):
             print("\nResuming from checkpoint - inferring model architecture from checkpoint...")
         checkpoint = torch.load(resume_checkpoint_path, map_location="cpu")  # Load on CPU first
         ckpt_config = checkpoint.get("config", {})
+        if ckpt_config.get("legacy_view_padding") and not config.get("legacy_view_padding"):
+            # A resumed run continues as it was trained; init_checkpoint is the way to switch a legacy model over
+            config["legacy_view_padding"] = True
+            if rank == 0:
+                print("Resumed checkpoint was trained with legacy_view_padding: continuing with it")
         # Before splitting: a resume must not move the checkpoint's held-out frames into training
         check_resume_split(
             ckpt_config,
@@ -2590,6 +2598,7 @@ def main(config: dict):
         use_gt_camera_init=config.get("use_gt_camera_init", False),
         transformer_config=config.get("transformer_config", {}),
         backbone_chunk_size=config.get("backbone_chunk_size", None),
+        legacy_view_padding=bool(config.get("legacy_view_padding", False)),
         # Max curriculum weight of the issue-#56 penalty; > 0 triggers fail-fast
         # validation of the model's joint_limits at construction (see above).
         joint_limit_regularization=joint_limit_reg_weight,
@@ -3041,6 +3050,12 @@ if __name__ == "__main__":
 
     # Multi-view specific
     parser.add_argument("--num_views_to_use", type=int, default=None, help="Max views to use per sample (None = all)")
+    parser.add_argument(
+        "--legacy_view_padding",
+        action="store_true",
+        help="Temporary: pre-#132 handling of padded views (backbone on the zero padding, decoder attends to it). "
+        "Only for legacy checkpoints.",
+    )
 
     # Output configuration
     parser.add_argument("--checkpoint_dir", type=str, default=None, help="Checkpoint directory (default: from config)")
@@ -3150,6 +3165,8 @@ if __name__ == "__main__":
                 cli_overrides["model"]["backbone_name"] = args.backbone_name
             if args.num_views_to_use is not None:
                 cli_overrides["num_views_to_use"] = args.num_views_to_use
+            if args.legacy_view_padding:
+                cli_overrides["legacy_view_padding"] = True
             if args.cross_attention_layers is not None:
                 cli_overrides["cross_attention_layers"] = args.cross_attention_layers
             if args.cross_attention_heads is not None:
