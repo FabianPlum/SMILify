@@ -726,7 +726,8 @@ def train_epoch(
                     skipped_steps += 1
                     if rank == 0 and (skipped_steps <= 5 or skipped_steps % 50 == 0):
                         print(
-                            f"Warning: non-finite gradients, optimizer step {batch_idx} skipped ({skipped_steps} this epoch)"
+                            f"Warning: non-finite gradients after mini-batch {batch_idx}, optimizer step skipped"
+                            f" ({skipped_steps} this epoch)"
                         )
             if loss_components is None:
                 continue
@@ -2653,6 +2654,7 @@ def main(config: dict):
     # Load checkpoint if specified
     start_epoch = 0
     best_val_loss = float("inf")
+    epochs_not_saved_nonfinite = 0  # epochs whose validation beat the best but had non-finite batches
 
     if config.get("resume_checkpoint"):
         if os.path.exists(config["resume_checkpoint"]):
@@ -2790,6 +2792,7 @@ def main(config: dict):
 
             # Save best model; not from an epoch whose validation left out non-finite batches (its average is partial)
             if val_metrics["avg_loss"] < best_val_loss and val_metrics["nonfinite_batches"]:
+                epochs_not_saved_nonfinite += 1
                 if rank == 0:
                     print("  Not saved as best model: validation had non-finite batches")
             elif val_metrics["avg_loss"] < best_val_loss:
@@ -2902,6 +2905,12 @@ def main(config: dict):
 
         print("\nTraining completed!")
         print(f"Best validation loss: {best_val_loss:.4f}")
+        if not math.isfinite(best_val_loss):
+            print(
+                "WARNING: no epoch qualified as best model, so this run wrote no best_model.pth"
+                f" ({epochs_not_saved_nonfinite} epochs were left out for non-finite validation batches)."
+                " Use final_model.pth."
+            )
         print(f"Checkpoints saved to: {config['checkpoint_dir']}")
         print(f"Training plots saved to: {plots_dir}")
 
