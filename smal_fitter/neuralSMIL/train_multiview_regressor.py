@@ -61,7 +61,7 @@ import sys
 import random
 import json
 from tqdm import tqdm
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import timedelta
 import argparse
 import gc
@@ -338,6 +338,22 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
         collate_fn=collate_fn,
         drop_last=True,
     )
+
+
+@contextmanager
+def training_sampling(dataset: SLEAPMultiViewDataset, augment: bool, num_views_to_use: Optional[int]):
+    """Training-only sampling inside the block: ``augment``, and ``num_views_to_use`` random views of each sample that
+    has more (None: all). Outside the block, where validation and the visualizations read the val loader, the dataset
+    returns every view of each sample, unaugmented.
+
+    DataLoader workers copy the dataset when they start, so each loader has to start iterating in the phase it serves:
+    the train loader inside the block, the val loader outside it.
+    """
+    dataset.augment, dataset.num_views_to_use = augment, num_views_to_use
+    try:
+        yield
+    finally:
+        dataset.augment, dataset.num_views_to_use = False, None
 
 
 def _print_component_metrics(train_components: dict, val_components: dict, indent: str = "    "):
@@ -2311,7 +2327,9 @@ def main(config: dict):
         print(f"Distributed: {is_distributed} (world_size={world_size})")
         print(f"Dataset: {config['dataset_path']}")
         print(f"Backbone: {config['backbone_name']}")
-        print(f"Num views to use: {config.get('num_views_to_use', 'all')}")
+        n_views = config.get("num_views_to_use")
+        train_views = f"up to {n_views} (random subset)" if n_views else "all"
+        print(f"Views per sample: training {train_views}, validation all")
         print(f"Cross-attention layers: {config['cross_attention_layers']}")
         print(f"{'=' * 60}\n")
 
@@ -2341,7 +2359,7 @@ def main(config: dict):
     dataset = SLEAPMultiViewDataset(
         hdf5_path=config["dataset_path"],
         rotation_representation=config["rotation_representation"],
-        num_views_to_use=config.get("num_views_to_use"),
+        num_views_to_use=None,  # all views; training_sampling() applies num_views_to_use around train_epoch
         random_view_sampling=True,
         augment=False,  # Toggled on/off around train vs val; see training loop
         augmentation_config=aug_config if aug_enabled else None,
@@ -2672,26 +2690,25 @@ def main(config: dict):
         optimizer.param_groups[0]["lr"] = curriculum_lr  # head
         optimizer.param_groups[1]["lr"] = curriculum_lr * backbone_lr_multiplier  # backbone
 
-        # Train (with augmentation enabled)
-        dataset.augment = aug_enabled
-        train_metrics = train_epoch(
-            model,
-            train_loader,
-            optimizer,
-            device,
-            epoch,
-            config,
-            scaler=scaler,
-            is_distributed=is_distributed,
-            rank=rank,
-        )
-        dataset.augment = False
+        # Train with augmentation and the training view subset; validation below gets every view, unaugmented
+        with training_sampling(dataset, aug_enabled, config.get("num_views_to_use")):
+            train_metrics = train_epoch(
+                model,
+                train_loader,
+                optimizer,
+                device,
+                epoch,
+                config,
+                scaler=scaler,
+                is_distributed=is_distributed,
+                rank=rank,
+            )
 
         training_history["train_loss"].append(train_metrics["avg_loss"])
         training_history["loss_components"].append(train_metrics["loss_components"])
         training_history["learning_rates"].append(curriculum_lr)
 
-        # Validate (augmentation disabled)
+        # Validate (every view of each sample, augmentation disabled)
         if epoch % config["validate_every_n_epochs"] == 0:
             val_metrics = validate(model, val_loader, device, config, epoch=epoch, rank=rank)
             training_history["val_loss"].append(val_metrics["avg_loss"])
@@ -2957,7 +2974,12 @@ if __name__ == "__main__":
     add_split_args(parser)
 
     # Multi-view specific
-    parser.add_argument("--num_views_to_use", type=int, default=None, help="Max views to use per sample (None = all)")
+    parser.add_argument(
+        "--num_views_to_use",
+        type=int,
+        default=None,
+        help="Max views per training sample, a random subset (None = all); validation uses all",
+    )
 
     # Output configuration
     parser.add_argument("--checkpoint_dir", type=str, default=None, help="Checkpoint directory (default: from config)")
