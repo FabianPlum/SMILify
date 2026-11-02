@@ -30,6 +30,9 @@ class MultiViewConfig(BaseTrainingConfig):
     # Multi-view specific parameters
     num_views_to_use: Optional[int] = None  # None = use all available views
     min_views_per_sample: int = 2
+    # Temporary (issue #134): True reproduces the pre-#132 handling of padded view slots (backbone runs on the zero
+    # padding, decoder attends to it). Only for legacy checkpoints, until they are replaced.
+    legacy_view_padding: bool = False
 
     # Cross-attention configuration
     cross_attention_layers: int = 2
@@ -88,6 +91,7 @@ class MultiViewConfig(BaseTrainingConfig):
             "dataset_path": self.dataset.data_path,
             "num_views_to_use": self.num_views_to_use,
             "min_views_per_sample": self.min_views_per_sample,
+            "legacy_view_padding": self.legacy_view_padding,
             "cross_attention_layers": self.cross_attention_layers,
             "cross_attention_heads": self.cross_attention_heads,
             "cross_attention_dropout": self.cross_attention_dropout,

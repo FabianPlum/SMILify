@@ -377,6 +377,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         cross_attention_dropout: float = 0.1,
         use_gt_camera_init: bool = False,
         backbone_chunk_size: Optional[int] = None,
+        legacy_view_padding: bool = False,
         **kwargs,
     ):
         """
@@ -396,6 +397,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             backbone_chunk_size: Max images to process through backbone at once.
                 None = all at once (default). Set to e.g. 6 to reduce peak VRAM
                 when using many views and/or large input resolutions.
+            legacy_view_padding: Temporary (issue #134). True reproduces the pre-#132 handling of padded view slots
+                in mixed-view-count batches: the zero images go through the backbone and the decoder attends to
+                them. For legacy checkpoints only, until they are replaced.
             **kwargs: Additional arguments passed to parent SMILImageRegressor
         """
         # Initialize parent single-view regressor
@@ -406,6 +410,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         self.num_canonical_cameras = len(self.canonical_camera_order) if self.canonical_camera_order else max_views
         self.use_gt_camera_init = use_gt_camera_init
         self.backbone_chunk_size = backbone_chunk_size
+        self.legacy_view_padding = legacy_view_padding
 
         # Cross-attention feature fusion
         self.view_fusion = MultiViewFeatureFusion(
@@ -480,15 +485,16 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         # skip the backbone; their features are zeros, which every later stage
         # masks out.
         real_views = None
-        if view_mask is not None and not bool(view_mask.all()):
+        if view_mask is not None and not self.legacy_view_padding and not bool(view_mask.all()):
             real_views = view_mask.reshape(B * V)
             all_images_flat = all_images_flat[real_views]  # (N_real, C, H, W)
         num_images = all_images_flat.shape[0]
 
         # Backbone forward pass — optionally chunked to reduce peak VRAM.
         # When backbone_chunk_size is set, we process images in smaller batches
-        # through the backbone and concatenate results. This is mathematically
-        # equivalent to processing all at once since the backbone is per-image.
+        # through the backbone and concatenate results. For LayerNorm (ViT)
+        # backbones that equals processing all at once; BatchNorm backbones
+        # (ResNet, UNet) normalise each chunk with its own statistics in train mode.
         use_spatial = self.head_type == "transformer_decoder" and hasattr(self.backbone, "forward_with_spatial")
         chunk = self.backbone_chunk_size
 
@@ -713,7 +719,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 # CLS tokens. The tokens of padded view slots (samples with
                 # fewer views than the batch's largest) are masked out, so a
                 # sample's prediction does not depend on its batch.
-                padded = view_mask is not None and not bool(view_mask.all())
+                padded = view_mask is not None and not self.legacy_view_padding and not bool(view_mask.all())
                 if patch_tokens is not None and camera_indices is not None:
                     # Add view identity so the decoder knows which view each
                     # spatial patch came from: (B, V, D) → broadcast over P

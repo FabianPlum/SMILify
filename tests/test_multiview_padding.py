@@ -35,7 +35,22 @@ class _CountingBackbone(nn.Module):
         return DIM
 
 
-def _tiny_regressor(backbone_chunk_size):
+class _CountingPooledBackbone(nn.Module):
+    """ResNet-like stand-in: pooled features only, so the decoder's context is one fused CLS token per view."""
+
+    def __init__(self):
+        super().__init__()
+        self.inner = _CountingBackbone()
+
+    @property
+    def images_seen(self):
+        return self.inner.images_seen
+
+    def forward(self, x):
+        return self.inner.forward_with_spatial(x)[0]
+
+
+def _tiny_regressor(backbone_chunk_size, patch_context=True, legacy_view_padding=False):
     """The real forward_multiview on scaled-down modules: transformer_decoder head, 3 cameras, no SMAL model."""
     torch.manual_seed(0)
     model = object.__new__(MultiViewSMILImageRegressor)
@@ -47,7 +62,8 @@ def _tiny_regressor(backbone_chunk_size):
     model.num_canonical_cameras = 3
     model.use_gt_camera_init = False
     model.backbone_chunk_size = backbone_chunk_size
-    model.backbone = _CountingBackbone()
+    model.legacy_view_padding = legacy_view_padding
+    model.backbone = _CountingBackbone() if patch_context else _CountingPooledBackbone()
     model.view_fusion = MultiViewFeatureFusion(DIM, num_layers=1, num_heads=2, dropout=0.0)
     model.view_embeddings = nn.Embedding(3, DIM)
     model.patch_view_embed = nn.Embedding(3, DIM)
@@ -70,9 +86,7 @@ def _tiny_regressor(backbone_chunk_size):
     return model.eval()
 
 
-@pytest.mark.parametrize("backbone_chunk_size", [None, 3])
-def test_padded_sample_matches_the_sample_alone(backbone_chunk_size):
-    model = _tiny_regressor(backbone_chunk_size)
+def _padded_batch():
     torch.manual_seed(1)
     views_a = torch.rand(3, 3, 8, 8)  # sample a: 3 views (cameras 0, 1, 2)
     view_b = torch.rand(3, 8, 8)  # sample b: 1 view (camera 2), padded to 3 in the batch
@@ -84,6 +98,13 @@ def test_padded_sample_matches_the_sample_alone(backbone_chunk_size):
     ]
     camera_indices = torch.tensor([[0, 1, 2], [2, 0, 0]])
     view_mask = torch.tensor([[True, True, True], [True, False, False]])
+    return views_a, view_b, images_per_view, camera_indices, view_mask
+
+
+@pytest.mark.parametrize("backbone_chunk_size,patch_context", [(None, True), (3, True), (None, False)])
+def test_padded_sample_matches_the_sample_alone(backbone_chunk_size, patch_context):
+    model = _tiny_regressor(backbone_chunk_size, patch_context)
+    views_a, view_b, images_per_view, camera_indices, view_mask = _padded_batch()
 
     with torch.no_grad():
         batch = model.forward_multiview(images_per_view, camera_indices, view_mask)
@@ -101,3 +122,14 @@ def test_padded_sample_matches_the_sample_alone(backbone_chunk_size):
         for v in range(3):
             torch.testing.assert_close(batch[key][v][0], alone_a[key][v][0], **close)
         torch.testing.assert_close(batch[key][0][1], alone_b[key][0][0], **close)
+
+
+def test_legacy_view_padding_keeps_the_old_padded_path():
+    """The temporary legacy_view_padding flag: padded slots go through the backbone and the decoder attends to them."""
+    model = _tiny_regressor(None, legacy_view_padding=True)
+    _, view_b, images_per_view, camera_indices, view_mask = _padded_batch()
+    with torch.no_grad():
+        batch = model.forward_multiview(images_per_view, camera_indices, view_mask)
+        assert model.backbone.images_seen == 6
+        alone_b = model.forward_multiview([view_b[None]], camera_indices[1:, :1], view_mask[1:, :1])
+    assert (batch["betas"][1] - alone_b["betas"][0]).abs().max() > 1e-2  # the padding leaks into sample b

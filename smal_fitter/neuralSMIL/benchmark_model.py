@@ -1049,6 +1049,11 @@ def main():
         "--num_views_to_use", type=int, default=None, help="Override num views per sample (multi-view only)"
     )
     parser.add_argument(
+        "--legacy_view_padding",
+        action="store_true",
+        help="Temporary: pre-#132 handling of padded views, to reproduce legacy multi-view checkpoints' numbers",
+    )
+    parser.add_argument(
         "--no_random_view_sampling", action="store_true", help="Disable random view sampling (multi-view only)"
     )
     args = parser.parse_args()
@@ -1296,7 +1301,10 @@ def _run_multiview_benchmark(
         mesh_scale_init=mesh_scale_init,
         use_gt_camera_init=use_gt_camera_init,
         transformer_config=config_from_ckpt.get("transformer_config", {}),
+        legacy_view_padding=bool(args.legacy_view_padding or config_from_ckpt.get("legacy_view_padding", False)),
     )
+    if model.legacy_view_padding:
+        log_fn("legacy_view_padding: on (pre-#132 padded views)")
     model = model.to(device)
 
     _ = load_checkpoint(args.checkpoint, model, optimizer=None, scheduler=None, device=device)
