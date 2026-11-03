@@ -1716,6 +1716,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         and not saved with the model (they restart from the first batch after a reload). Frames with a non-finite
         or out-of-range (|log| >= bound) scale are left out of the term and the mean, so one diverged prediction
         cannot poison the mean for the rest of the run."""
+        # In fp32: under autocast an MLP head's scales are fp16, where a 1% EMA update rounds away and the mean stalls
+        log_scales = log_scales.float()
+        log_mesh_scale = log_mesh_scale.float() if log_mesh_scale is not None else None
         ema = self.__dict__.setdefault("_scale_ema", {})
         ok = torch.isfinite(log_scales).all(-1).all(-1) & (log_scales.abs() < bound).all(-1).all(-1)
         if log_mesh_scale is not None:

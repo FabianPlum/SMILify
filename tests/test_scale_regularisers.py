@@ -43,6 +43,8 @@ def test_scale_consistency_tracks_a_per_session_mean_in_training_only():
     varying = torch.randn(4, 5, 3)
     assert MV._scale_consistency_loss(m, varying, torch.zeros(4, 1), ["a", "a", "b", "b"]).item() > 0
     ema_a = m.__dict__["_scale_ema"]["a"][0].clone()
+    MV._scale_consistency_loss(m, varying.half(), None, ["h"] * 4)  # an MLP head's scales under autocast
+    assert m.__dict__["_scale_ema"]["h"][0].dtype == torch.float32  # an fp16 mean stalls (1% updates round away)
     m.training = False
     MV._scale_consistency_loss(m, varying + 1, torch.zeros(4, 1), ["a", "a", "new", "new"])
     torch.testing.assert_close(m.__dict__["_scale_ema"]["a"][0], ema_a)  # eval does not move the mean ...
