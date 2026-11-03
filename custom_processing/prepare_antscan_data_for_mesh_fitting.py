@@ -49,32 +49,63 @@ def ensure_addon_enabled(addon_name):
         print(f"Enabled addon: {addon_name}")
 
 
-def _median_edge_length(obj):
+def _median_edge_length(bm):
     """
-    Computes the median edge length of the object's current mesh.
+    Computes the median edge length of a mesh.
 
     This provides a measure of local mesh density that, unlike overall
     bounding-box size, reflects how finely or sparsely the mesh is
-    triangulated.
+    triangulated. For an even number of edges it is the mean of the two
+    middle lengths.
 
     Args:
-        obj (bpy.types.Object): The Blender object to measure.
+        bm (BMesh): The mesh to measure.
 
     Returns:
         float: The median edge length, or 0.0 if the mesh has no edges.
     """
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.mode_set(mode="EDIT")
-    bm = bmesh.from_edit_mesh(obj.data)
     lengths = sorted(edge.calc_length() for edge in bm.edges)
-    bpy.ops.object.mode_set(mode="OBJECT")
-
     if not lengths:
         return 0.0
     mid = len(lengths) // 2
     if len(lengths) % 2:
         return lengths[mid]
     return (lengths[mid - 1] + lengths[mid]) / 2
+
+
+def _face_islands(faces):
+    """
+    Splits faces into islands of faces connected through shared edges.
+
+    Islands are seeded in the order of faces rather than in set order, so the
+    islands come out in the same order in every run (the iteration order of a
+    set of BMesh elements changes from run to run).
+
+    Args:
+        faces (sequence of BMFace): The faces to split, in a fixed order such
+            as bm.faces. Only these faces are joined into islands.
+
+    Returns:
+        list[set[BMFace]]: The islands, ordered by their first face in faces.
+    """
+    unvisited = set(faces)
+    islands = []
+    for seed in faces:
+        if seed not in unvisited:
+            continue
+        unvisited.remove(seed)
+        island = {seed}
+        to_visit = [seed]
+        while to_visit:
+            current = to_visit.pop()
+            for edge in current.edges:
+                for linked_face in edge.link_faces:
+                    if linked_face in unvisited:
+                        unvisited.remove(linked_face)
+                        island.add(linked_face)
+                        to_visit.append(linked_face)
+        islands.append(island)
+    return islands
 
 
 def apply_modifiers(
@@ -116,7 +147,10 @@ def apply_modifiers(
         bbox_threshold = max_dimension * 0.002  # 0.2 % of the largest dimension
         print(f"Bounding box size: {bbox_size}, bbox-based threshold: {bbox_threshold}")
 
-        median_edge = _median_edge_length(obj)
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.mode_set(mode="EDIT")
+        median_edge = _median_edge_length(bmesh.from_edit_mesh(obj.data))
+        bpy.ops.object.mode_set(mode="OBJECT")
         local_threshold = median_edge * 0.3  # 30 % of local median edge length
         print(f"Median edge length: {median_edge}, local-density-based threshold: {local_threshold}")
 
@@ -264,25 +298,11 @@ def bridge_nearby_islands(
     bm.edges.ensure_lookup_table()
 
     kept_faces = [f for f in bm.faces if all(v.index in vertices_to_keep for v in f.verts)]
-    # Seed islands in face-index order: the iteration order of a set of BMesh
-    # elements changes from run to run, and the island order decides from which
-    # island of a pair the bridge search starts, and so which pairs get bridged.
-    unvisited = set(kept_faces)
+    # Islands in face-index order (see _face_islands): the island order decides
+    # from which island of a pair the bridge search starts, and so which pairs
+    # get bridged.
     islands = []
-    for seed in kept_faces:
-        if seed not in unvisited:
-            continue
-        unvisited.remove(seed)
-        island_faces = {seed}
-        to_visit = [seed]
-        while to_visit:
-            current = to_visit.pop()
-            for edge in current.edges:
-                for linked_face in edge.link_faces:
-                    if linked_face in unvisited:
-                        unvisited.remove(linked_face)
-                        island_faces.add(linked_face)
-                        to_visit.append(linked_face)
+    for island_faces in _face_islands(kept_faces):
         island_verts = set()
         for f in island_faces:
             island_verts.update(f.verts)
@@ -308,9 +328,7 @@ def bridge_nearby_islands(
         (verts, sorted(boundary_verts(verts, faces), key=lambda v: v.index)) for verts, faces in real_islands
     ]
 
-    edge_lengths = sorted(e.calc_length() for e in bm.edges)
-    median_edge = edge_lengths[len(edge_lengths) // 2] if edge_lengths else 1.0
-    prefilter_threshold = prefilter_gap_multiplier * median_edge
+    prefilter_threshold = prefilter_gap_multiplier * _median_edge_length(bm)
 
     def bbox(verts):
         xs = [v.co.x for v in verts]
@@ -587,24 +605,10 @@ def filter_small_components(obj, min_faces=4):
     bm = bmesh.from_edit_mesh(obj.data)
     bm.faces.ensure_lookup_table()
 
-    unvisited = set(bm.faces)
     removed_components = 0
     faces_to_remove = []
 
-    while unvisited:
-        seed = unvisited.pop()
-        component = {seed}
-        to_visit = [seed]
-
-        while to_visit:
-            current = to_visit.pop()
-            for edge in current.edges:
-                for linked_face in edge.link_faces:
-                    if linked_face in unvisited:
-                        unvisited.remove(linked_face)
-                        component.add(linked_face)
-                        to_visit.append(linked_face)
-
+    for component in _face_islands(bm.faces):
         if len(component) < min_faces:
             removed_components += 1
             faces_to_remove.extend(component)
