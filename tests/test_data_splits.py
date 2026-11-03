@@ -24,6 +24,7 @@ from smal_fitter.neuralSMIL.data_splits import (
     split_dataset_from_settings,
     tag_output_dir,
     validate_split_settings,
+    warn_init_split,
 )
 
 
@@ -169,6 +170,16 @@ def test_resume_refuses_a_different_split():
     assert "seed: 42 -> 0" in logged[0]
     check_resume_split(None, blocked, "ckpt.pth", log=logged.append)  # nothing stored: warn only
     assert "cannot check" in logged[1]
+
+
+def test_init_start_warns_on_the_same_data_with_another_split():
+    stored = {"dataset_path": "/runs/a/M103.h5", "train_ratio": 0.85, "val_ratio": 0.05, "test_ratio": 0.1, "seed": 42}
+    logged = []
+    warn_init_split(stored, {**stored, "dataset_path": "M103.h5"}, "ckpt.pth", log=logged.append)  # same split
+    warn_init_split(stored, {**stored, "dataset_path": "other.h5", "seed": 0}, "ckpt.pth", log=logged.append)
+    assert logged == []
+    warn_init_split(stored, {**stored, "seed": 0}, "ckpt.pth", log=logged.append)
+    assert "seed: 42 -> 0" in logged[0] and "may be frames it trained on" in logged[0]
 
 
 def test_fold_tags_and_stored_split_rebuild():

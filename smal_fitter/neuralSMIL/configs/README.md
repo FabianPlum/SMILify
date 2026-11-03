@@ -209,8 +209,8 @@ Example:
 | `joint_angle_regularization` | Joint angle prior/regularization | 0.001 |
 | `limb_scale_regularization` | Limb scale regularization | 0.01 |
 | `limb_trans_regularization` | Limb translation regularization | 1.0 |
-| `scale_consistency` | Multi-view: per-joint log scales and log mesh scale stay at a running per-session mean (one animal per session has one set of proportions). Needs per-joint scales (`scale_trans_beta.mode` `"separate"`, without the legacy PCA transformation); training stops at start-up otherwise. In a fine-tune, start it at epoch 1 or later with a `curriculum_stages` entry: the running mean (an EMA) starts from the first predictions, so from epoch 0 it pins the mesh scale at the initial checkpoint's value | 0.0 |
-| `scale_symmetry` | Multi-view: paired `_L` / `_R` joints share their per-joint log scales. Same requirement as `scale_consistency`, and the model needs `_L` / `_R` joint name pairs: training stops at start-up for a model without them, e.g. the stick insect and OmniAnt models (their lowercase `_l` / `_r` names are not paired) | 0.0 |
+| `scale_consistency` | Multi-view: per-joint log scales and log mesh scale stay at a running per-session mean (one animal per session has one set of proportions). Needs per-joint scales (`scale_trans_beta.mode` `"separate"`, without the legacy PCA transformation); training stops at start-up otherwise. Start it with a `curriculum_stages` entry once the scales have settled: at epoch 1 or later in a fine-tune (the running mean, an EMA, starts from the first predictions, so from epoch 0 it pins the mesh scale at the initial checkpoint's value), and later in a from-scratch run (the combined run used epoch 20; not measured). From the epoch it starts, the term is part of the validation loss, so `best_model.pth` compares epochs with and without it. Keep it off for data with several animals per `session_name`, e.g. replicAnt HDF5s (one session per generated dataset). | 0.05 (from a later epoch) |
+| `scale_symmetry` | Multi-view: paired `_L` / `_R` joints share their per-joint log scales. Same requirement as `scale_consistency`, and the model needs `_L` / `_R` joint name pairs: training stops at start-up for a model without them, e.g. the stick insect and OmniAnt models (their lowercase `_l` / `_r` names are not paired) | 0.25 |
 | `triangulation_consistency` | Cross-view triangulation consistency (multi-view). **Disabled by default — see note below.** | 0.0 |
 | `ief_intermediate` | Intermediate IEF iteration loss | 0.0 |
 
@@ -248,10 +248,11 @@ Curriculum stages example:
 | `pin_memory` | bool | `true` | Pin DataLoader memory for faster GPU transfer. |
 | `prefetch_factor` | int | `4` | Batches prefetched per worker. |
 | `resume_checkpoint` | string or null | `null` | Path to checkpoint `.pth` file to resume from. |
+| `init_checkpoint` | string or null | `null` | Multi-view only: checkpoint to take initial weights from when fine-tuning on a new dataset or rig. Training starts at epoch 0 with a fresh optimizer and LR schedule, and the model is built from the dataset (its cameras); tensors whose shape differs, such as the per-camera view embeddings, keep their fresh init. Ignored when `resume_checkpoint` is set. Also a CLI flag: `--init_checkpoint`. |
 | `reset_ief_token_embedding` | bool | `false` | Re-initialize IEF token embeddings when resuming (useful when changing `transformer_ief_iters`). |
 | `use_gt_camera_init` | bool | `true` | Use ground-truth camera parameters as initialization base and predict deltas (multi-view). |
 | `use_mixed_precision` | bool | `false` | Enable FP16 mixed precision training via `torch.cuda.amp`. Roughly halves activation memory and speeds up Tensor Core operations. Weight updates remain FP32 for numerical stability. |
-| `backbone_chunk_size` | int or null | `null` | Maximum number of images processed through the backbone in a single forward pass. `null` = process all views at once. Set to a smaller value (e.g. `6`) to reduce peak VRAM when using many views with high-resolution inputs. Mathematically equivalent to unchunked — only affects memory, not results. |
+| `backbone_chunk_size` | int or null | `null` | Maximum number of images processed through the backbone in a single forward pass. `null` = process all views at once. Set to a smaller value (e.g. `6`) to reduce peak VRAM when using many views with high-resolution inputs. For per-image backbones with LayerNorm (ViT) this only affects memory, not results. BatchNorm backbones (ResNet, UNet) normalise each chunk with its own statistics in training mode, so there the chunk size (and, in batches that mix view counts, which real views share a chunk) changes the outputs and the running statistics. |
 | `gradient_accumulation_steps` | int | `1` | Accumulate gradients over N mini-batches before an optimizer step (effective batch size ×N without extra VRAM). Also a CLI flag: `--gradient_accumulation_steps`. |
 
 ### `augmentation` — Training-time image augmentation
@@ -350,8 +351,9 @@ These fields are set at the **top level** of the JSON (not inside a section) for
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `num_views_to_use` | int or null | `null` | Maximum views per sample. `null` = use all available views in the dataset. |
+| `num_views_to_use` | int or null | `null` | Training only: at most this many views per sample. A sample with more gets a new random subset each time it is loaded (view augmentation). `null` = all views. Validation and inference use every view of each sample, and so does the benchmark unless given `--num_views_to_use`. |
 | `min_views_per_sample` | int | `2` | Minimum views required per training sample. |
+| `legacy_view_padding` | bool | `false` | **Temporary** (issue #134). `true` reproduces the pre-#132 handling of padded view slots in batches that mix view counts: the zero padding goes through the backbone and the decoder attends to it. Only for checkpoints trained that way, until they are replaced. A resumed run keeps its checkpoint's setting. CLI: `--legacy_view_padding` (training and benchmark). |
 | `cross_attention_layers` | int | `2` | Number of cross-view attention layers for multi-view feature fusion. |
 | `cross_attention_heads` | int | `8` | Number of attention heads in cross-view attention. |
 | `cross_attention_dropout` | float | `0.1` | Dropout in cross-view attention layers. |
