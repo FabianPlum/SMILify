@@ -373,6 +373,8 @@ When the HDF5 has [raw 2D labels](#raw-2d-labels), every 2D metric is reported t
 
 **The test split is the one the model was trained with.** The benchmark rebuilds it from the split settings stored in the checkpoint (random with its seed, or the blocked fold), so it takes no split arguments; the report logs it (`Split: blocked, fold 2 of 5 ...`). See the [cross-validation recipe](smal_fitter/neuralSMIL/configs/README.md#dataset--data-paths-and-splits).
 
+**Multi-view: every view of each test sample is scored**, whatever `num_views_to_use` the model trained with. `--num_views_to_use N` scores at most N per sample instead (a random N, or the first N with `--no_random_view_sampling`).
+
 **Output files** are written to `benchmark_{model_type}_{checkpoint}_on_{dataset}/` (with `_fold{k}` appended for a checkpoint trained on a blocked split):
 
 | File | Description |
@@ -393,6 +395,7 @@ When the HDF5 has [raw 2D labels](#raw-2d-labels), every 2D metric is reported t
 | `--smal-file` | _(checkpoint)_ | SMIL/SMAL model `.pkl` (required if not stored in checkpoint) |
 | `--device` | auto | Force device, e.g. `cuda:0` or `cpu` |
 | `--orig_width` / `--orig_height` | _(dataset)_ | Original capture resolution for pixel-space PCK scaling; **pass both** (e.g. `1530` / `1530` for the stick dataset). |
+| `--legacy_view_padding` | off | **Temporary** (issue #134): pre-#132 handling of padded views in batches that mix view counts, to reproduce the numbers of multi-view checkpoints trained that way. Removed once those runs are replaced. |
 
 ## Adding new parametric models
 

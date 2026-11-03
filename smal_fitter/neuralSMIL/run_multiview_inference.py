@@ -1120,7 +1120,7 @@ def main_inference(
         print(f"{'=' * 60}\n")
 
     # Load dataset
-    # Use num_views_to_use=None to use all available views per sample (same as training)
+    # Use num_views_to_use=None to use all available views per sample (same as validation)
     # This allows the dataset to have variable numbers of views per sample
     dataset = SLEAPMultiViewDataset(
         hdf5_path=str(dataset_path),

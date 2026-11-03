@@ -40,6 +40,9 @@ fitter_3d/pointcloud2smil/
 
 # unless specifically added, ignore videos
 *.mp4
+# run_multiview_inference writes <dataset>_multiview_inference.avi into the
+# working directory.
+*_inference.avi
 
 # ignore partial SMPL file contens
 *.npy
@@ -215,6 +218,12 @@ SMOKE_*/
 merged_*.h5
 sleap_canonicalize_proto*.png
 
+# Local work folders (diagnostics, writing drafts) and placeholder notes left
+# where a large local file was moved.
+diagnostics/
+writing/
+*.MOVED.txt
+
 # ============================================================
 # Generated data, model weights, and run outputs (none tracked)
 # ============================================================
@@ -242,9 +251,25 @@ getting_started*plots/
 getting_started*visualizations*/
 benchmark_singleview_*/
 
+# More run outputs: single-view runs named after their dataset, the
+# getting-started single-view renders, multi-view inference and benchmarks.
+singleview_*_checkpoints/
+singleview_*_visualizations*/
+getting_started*renders/
+multiview_inference_outputs/
+multiview_benchmarks_*/
+
 # Scratch parametric-model exports from Blender prep. The tracked .pkl
 # models carry no _TEST suffix, so they are unaffected.
 3D_model_prep/*_TEST*.pkl
+
+# Blender add-on exports (PCA tables, test CSVs) and local-only Blender files
+# and model variants; the .blend is over GitHub's 100 MB file limit.
+3D_model_prep/smil_morph_*
+3D_model_prep/smil_shape_*
+3D_model_prep/test_*.csv
+3D_model_prep/SMIL_OmniAnt_25PCs_joint_limits.blend
+3D_model_prep/SMIL_OmniAnt_aug.pkl
 
 # Claude Code: project CLAUDE.md is tracked; machine-local settings are not.
 .claude/settings.local.json
