@@ -249,6 +249,10 @@ class LossCurriculumConfig:
             # model's 'joint_limits' (issue #56). Off by default; enabling it
             # requires a model file with usable (non-wide-open) limits.
             "joint_limit_regularization": 0.0,
+            # Multi-view: per-session constant per-joint scales and mesh scale (one animal per session),
+            # and left/right paired joints sharing their scales. Off by default.
+            "scale_consistency": 0.0,
+            "scale_symmetry": 0.0,
         }
     )
 

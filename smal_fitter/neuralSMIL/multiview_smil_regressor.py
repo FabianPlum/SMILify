@@ -867,6 +867,8 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 "limb_scale_regularization": 0.01,  # Penalty for deviations from scale=1 (log_beta_scales)
                 "limb_trans_regularization": 0.1,  # Heavy penalty for translation changes (betas_trans)
                 "triangulation_consistency": 0.0,  # Triangulate GT 2D keypoints with predicted cameras, compare to predicted 3D
+                "scale_consistency": 0.0,  # Per-session constant per-joint scales / mesh scale (one animal)
+                "scale_symmetry": 0.0,  # Left/right paired joints share their per-joint scales
             }
 
         batch_size = predicted_params["global_rot"].shape[0]
@@ -1047,6 +1049,29 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             trans_reg = torch.mean(betas_trans_joint**2)
             loss_components["limb_trans_regularization"] = trans_reg
             total_loss = total_loss + loss_weights["limb_trans_regularization"] * trans_reg
+
+        # Per-subject scale consistency and left/right symmetry of the per-joint log scales (per-joint values only,
+        # i.e. 'separate' mode without the PCA transformation).
+        w_cons, w_sym = loss_weights.get("scale_consistency", 0), loss_weights.get("scale_symmetry", 0)
+        if (w_cons > 0 or w_sym > 0) and "log_beta_scales" in predicted_params and self.scale_trans_mode == "separate":
+            use_pca = TrainingConfig.get_scale_trans_config().get("separate", {}).get("use_pca_transformation", True)
+            if not use_pca:
+                log_scales = predicted_params["log_beta_scales"].reshape(batch_size, -1, 3)
+                if w_cons > 0:
+                    log_ms = None
+                    if self.allow_mesh_scaling and "mesh_scale" in predicted_params:
+                        log_ms = torch.log(predicted_params["mesh_scale"].reshape(batch_size, 1).clamp_min(1e-8))
+                    sessions = [str(td.get("session_name", "")) for td in target_data]
+                    cons = self._scale_consistency_loss(log_scales, log_ms, sessions)
+                    loss_components["scale_consistency"] = cons
+                    total_loss = total_loss + w_cons * cons
+                pairs = self._lr_joint_pairs()
+                if w_sym > 0 and pairs:
+                    li = torch.tensor([p[0] for p in pairs], device=log_scales.device)
+                    ri = torch.tensor([p[1] for p in pairs], device=log_scales.device)
+                    sym = ((log_scales[:, li] - log_scales[:, ri]) ** 2).mean()
+                    loss_components["scale_symmetry"] = sym
+                    total_loss = total_loss + w_sym * sym
 
         # =================== BATCHED 2D KEYPOINT LOSS (OPTIMIZED) ===================
         # This is the core multi-view loss: project 3D keypoints to each view using
@@ -1667,6 +1692,69 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
 
         canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]  # (B, J, 3)
         return canonical_joints.float()
+
+    # ------------------------------------------------------------------ shape regularisation
+    def _lr_joint_pairs(self) -> List[Tuple[int, int]]:
+        """(left, right) joint index pairs from the model joint names ('_L' / '_R' tokens)."""
+        pairs = self.__dict__.get("_lr_pairs")
+        if pairs is None:
+            idx = {n: i for i, n in enumerate(config.joint_names)}
+            pairs = []
+            for name, i in idx.items():
+                tokens = name.split("_")
+                if "L" in tokens:
+                    partner = "_".join("R" if t == "L" else t for t in tokens)
+                    if partner in idx:
+                        pairs.append((i, idx[partner]))
+            self.__dict__["_lr_pairs"] = pairs
+        return pairs
+
+    def _scale_consistency_loss(
+        self,
+        log_scales: torch.Tensor,
+        log_mesh_scale: Optional[torch.Tensor],
+        sessions: List[str],
+        momentum: float = 0.99,
+        bound: float = 10.0,
+    ) -> torch.Tensor:
+        """One animal has one set of proportions: penalise each frame's per-joint log scales (and log mesh scale)
+        for deviating from a running per-session mean. The means are detached EMA state, created and updated in
+        training mode only (validation measures against them, or against its own batch mean for an unseen session)
+        and not saved with the model (they restart from the first batch after a reload). Frames with a non-finite
+        or out-of-range (|log| >= bound) scale are left out of the term and the mean, so one diverged prediction
+        cannot poison the mean for the rest of the run."""
+        # In fp32: under autocast an MLP head's scales are fp16, where a 1% EMA update rounds away and the mean stalls
+        log_scales = log_scales.float()
+        log_mesh_scale = log_mesh_scale.float() if log_mesh_scale is not None else None
+        ema = self.__dict__.setdefault("_scale_ema", {})
+        ok = torch.isfinite(log_scales).all(-1).all(-1) & (log_scales.abs() < bound).all(-1).all(-1)
+        if log_mesh_scale is not None:
+            ok &= torch.isfinite(log_mesh_scale).all(-1) & (log_mesh_scale.abs() < bound).all(-1)
+        terms = []
+        for session in sorted(set(sessions)):
+            sel = torch.tensor([s == session for s in sessions], device=log_scales.device) & ok
+            if not sel.any():
+                continue
+            ls = log_scales[sel]
+            lm = log_mesh_scale[sel] if log_mesh_scale is not None else None
+            mu_s, mu_m = ema.get(session, (None, None))
+            if mu_s is None:  # first batch of this session
+                mu_s = ls.detach().mean(0)
+            if lm is not None and mu_m is None:  # first batch of this session that carries a mesh scale
+                mu_m = lm.detach().mean(0)
+            term = ((ls - mu_s) ** 2).mean()
+            if lm is not None:
+                term = term + ((lm - mu_m) ** 2).mean()
+            terms.append(term * sel.sum())
+            if self.training:
+                with torch.no_grad():
+                    ema[session] = (
+                        momentum * mu_s + (1 - momentum) * ls.mean(0),
+                        momentum * mu_m + (1 - momentum) * lm.mean(0) if lm is not None else mu_m,
+                    )
+        if not terms:
+            return torch.zeros((), device=log_scales.device)
+        return torch.stack(terms).sum() / ok.sum()
 
     def _compute_world_space_joints(self, body_params: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
