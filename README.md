@@ -7,7 +7,7 @@
 
 > **Formerly SMILify.** The project was renamed to Holotype in [#130](https://github.com/FabianPlum/Holotype/issues/130). Links to the old repository name redirect here.
 
-In taxonomy, a *holotype* is the single specimen that the description of a species is based on. Here, one rigged template mesh plays that role: the parametric model's shape and pose space is built around it, and fitting registers new individuals to it.
+In taxonomy, a *holotype* is the single specimen a species name is tied to. Here, one rigged template mesh plays that role: the parametric model's shape and pose space is built around it, and fitting estimates each new individual's shape and pose relative to it.
 
 This repository is based on [SMALify](https://github.com/benjiebob/SMALify) with the aim to turn any rigged 3D model into
 a SMAL compatible model. There are Blender files to convert your mesh and lots of code
