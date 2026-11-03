@@ -28,11 +28,13 @@ class DatasetConfig:
     train_ratio: float = 0.85
     val_ratio: float = 0.05
     test_ratio: float = 0.1
-    dataset_fraction: float = 0.5  # Fraction of training data used per epoch
+    # Fraction of the training split drawn per epoch (1.0 = all of it, 0.2 = a fresh fifth each epoch); val and test
+    # are never subsampled. The old name dataset_fraction is a deprecated alias (config_utils).
+    train_sub_sampling: float = 1.0
     # Per-source fractions for merged datasets: {substring of the sample's session name: fraction}. A densely sampled
     # source (every video frame) can take a fresh fraction per epoch while an already subsampled one is used in full.
-    # The first matching key wins; unmatched sessions use dataset_fraction. Empty = dataset_fraction for all.
-    dataset_fraction_by_session: Dict[str, float] = field(default_factory=dict)
+    # The first matching key wins; unmatched sessions use train_sub_sampling. Empty = train_sub_sampling for all.
+    train_sub_sampling_by_session: Dict[str, float] = field(default_factory=dict)
     # How samples are assigned to train/val/test (see neuralSMIL/data_splits.py).
     # "random": seeded random split over samples.
     # "blocked": blocked k-fold cross-validation along time within each session;
@@ -681,7 +683,7 @@ class BaseTrainingConfig:
             "split_config": {
                 "test_size": self.dataset.test_ratio,
                 "val_size": self.dataset.val_ratio,
-                "dataset_fraction": self.dataset.dataset_fraction,
+                "train_sub_sampling": self.dataset.train_sub_sampling,
             },
             "dataset": {
                 "from_multiview": self.dataset.from_multiview,

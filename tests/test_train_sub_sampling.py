@@ -1,21 +1,31 @@
 """
-Tests for the per-source dataset fraction of the multi-view trainer
-(dataset.dataset_fraction_by_session in create_fractional_train_loader).
+Tests for the training-split sub-sampling of the multi-view trainer
+(dataset.train_sub_sampling and dataset.train_sub_sampling_by_session).
 
 Each source of a merged dataset draws its own subset of the training split per
 epoch: the same subset for the same epoch (every DDP rank seeds with seed +
 epoch), a new one for the next epoch, and sessions without a key keep
-dataset_fraction. Entries that cannot apply stop the run at start-up.
+train_sub_sampling. Entries that cannot apply stop the run at start-up. The old
+name dataset_fraction still works as a deprecated alias, in a JSON and on the
+command line.
 """
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 import torch
 
+from smal_fitter.neuralSMIL.configs import load_config
 from smal_fitter.neuralSMIL.train_multiview_regressor import _check_fraction_by_session, create_fractional_train_loader
 
 SIZES = {"rig_a_s1": 400, "rig_b_s1": 120, "sparse_s1": 80}
+REPO = Path(__file__).resolve().parents[1]
 
 
 class _FakeDataset:
@@ -48,8 +58,8 @@ def merged(tmp_path):
 def test_fraction_by_session_draws_exact_counts_and_a_fresh_subset_each_epoch(merged):
     names, rows, train_set = merged
     config = {
-        "dataset_fraction": 1.0,
-        "dataset_fraction_by_session": {"rig_a": 0.25, "rig_b": 0.5},
+        "train_sub_sampling": 1.0,
+        "train_sub_sampling_by_session": {"rig_a": 0.25, "rig_b": 0.5},
         "seed": 7,
         "batch_size": 4,
         "num_workers": 0,
@@ -80,3 +90,45 @@ def test_fraction_by_session_names_every_entry_that_cannot_apply(merged):
     assert "'rig_c' matches no training session" in msg and "'rig_b': 1.5" in msg and "'' is empty" in msg
     assert "'sparse': 0.0" in msg
     assert "'rig_a'" not in msg
+
+
+def _mode_json(tmp_path, dataset, mode="multiview"):
+    path = tmp_path / "config.json"
+    out = {"checkpoint_dir": str(tmp_path / "checkpoints")}
+    path.write_text(json.dumps({"mode": mode, "dataset": dataset, "output": out}))
+    return str(path)
+
+
+def test_dataset_fraction_is_a_deprecated_alias_of_train_sub_sampling(tmp_path):
+    with pytest.warns(FutureWarning, match="dataset.dataset_fraction is deprecated.*use dataset.train_sub_sampling"):
+        cfg = load_config(_mode_json(tmp_path, {"dataset_fraction": 0.2, "train_sub_sampling_by_session": {"a": 0.5}}))
+    assert cfg.dataset.train_sub_sampling == 0.2
+    # The trainers' main() read the legacy dicts, not the dataclass.
+    legacy = cfg.to_multiview_legacy_dict()
+    assert legacy["train_sub_sampling"] == 0.2 and legacy["train_sub_sampling_by_session"] == {"a": 0.5}
+    with pytest.warns(FutureWarning):
+        cfg = load_config(_mode_json(tmp_path, {"dataset_fraction": 0.2}, mode="singleview"))
+    assert cfg.to_legacy_dict()["split_config"]["train_sub_sampling"] == 0.2
+
+
+def test_dataset_fraction_and_train_sub_sampling_together_stop_the_run(tmp_path):
+    with pytest.raises(ValueError, match="both set"):
+        load_config(_mode_json(tmp_path, {"dataset_fraction": 0.2, "train_sub_sampling": 0.2}))
+
+
+@pytest.mark.parametrize("flag", ["--train_sub_sampling", "--dataset_fraction"])
+def test_train_sub_sampling_flag_overrides_a_mode_json(tmp_path, flag):
+    # The trainer saves the resolved config, then stops on the missing dataset before any model is built.
+    cfg = _mode_json(tmp_path, {"data_path": str(tmp_path / "missing.h5"), "train_sub_sampling": 0.5})
+    run = subprocess.run(
+        [sys.executable, "-m", "smal_fitter.neuralSMIL.train_multiview_regressor", "--config", cfg, flag, "0.3"],
+        cwd=REPO,
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert "Dataset path does not exist" in run.stderr, run.stdout[-2000:] + run.stderr[-2000:]
+    resolved = json.loads((tmp_path / "checkpoints" / "config.json").read_text())
+    assert resolved["dataset"]["train_sub_sampling"] == 0.3
+    assert ("--dataset_fraction is deprecated" in run.stderr) == (flag == "--dataset_fraction")

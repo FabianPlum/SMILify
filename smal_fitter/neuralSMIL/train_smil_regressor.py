@@ -430,7 +430,7 @@ def custom_collate_fn(batch):
 def create_fractional_train_loader_sv(
     train_set,
     epoch,
-    dataset_fraction,
+    train_sub_sampling,
     seed,
     batch_size,
     num_workers,
@@ -441,16 +441,16 @@ def create_fractional_train_loader_sv(
 ):
     """Per-epoch fractional training loader (mirrors the multi-view trainer).
 
-    Returns a DataLoader over a deterministic random `dataset_fraction` subset of
+    Returns a DataLoader over a deterministic random `train_sub_sampling` subset of
     `train_set`, re-sampled each epoch via seed `seed + epoch` (so all DDP ranks
-    agree on the subset). Returns `None` when `dataset_fraction >= 1.0` so the
+    agree on the subset). Returns `None` when `train_sub_sampling >= 1.0` so the
     caller falls back to the full-dataset loader.
     """
-    if dataset_fraction >= 1.0:
+    if train_sub_sampling >= 1.0:
         return None
 
     full_size = len(train_set)
-    n_samples = max(1, int(full_size * dataset_fraction))
+    n_samples = max(1, int(full_size * train_sub_sampling))
     rng = torch.Generator()
     rng.manual_seed(int(seed) + int(epoch))
     indices = torch.randperm(full_size, generator=rng)[:n_samples].tolist()
@@ -1518,7 +1518,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
     backbone_lr_mult = float(model_config.get("backbone_lr_multiplier", 0.1))
     # Fraction of the training set used per epoch (previously ignored in the
     # single-view trainer). 1.0 = full set; <1.0 = deterministic per-epoch subset.
-    dataset_fraction = float(training_config.get("split_config", {}).get("dataset_fraction", 1.0))
+    train_sub_sampling = float(training_config.get("split_config", {}).get("train_sub_sampling", 1.0))
     # Predicted per-sample mesh scale (previously not wired into the single-view
     # trainer). Essential for camera_centric: the SMAL mesh's native size does
     # not match the metric triangulated 3D, and translation alone cannot resize.
@@ -2165,7 +2165,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
             create_fractional_train_loader_sv(
                 train_set,
                 epoch,
-                dataset_fraction,
+                train_sub_sampling,
                 seed,
                 batch_size,
                 num_workers,

@@ -19,7 +19,7 @@
     "test_ratio": 0.15,
     "split_method": "blocked",
     "holdout_fold": null,
-    "dataset_fraction": 0.5
+    "train_sub_sampling": 0.5
   },
 
   "model": {

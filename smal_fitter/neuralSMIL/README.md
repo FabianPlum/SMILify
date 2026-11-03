@@ -247,7 +247,7 @@ Every JSON config must include `"mode": "singleview"` or `"mode": "multiview"`. 
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
-    "dataset_fraction": 0.1
+    "train_sub_sampling": 0.1
   },
 
   "model": {

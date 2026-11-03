@@ -363,9 +363,24 @@ def read_session_frame_index(hdf5_path: str) -> Tuple[np.ndarray, np.ndarray]:
                 f"Blocked split needs auxiliary/session_name and auxiliary/frame_idx in {hdf5_path} "
                 "(written by the multi-view preprocessors)"
             )
-        names = [s.decode("utf-8") if isinstance(s, bytes) else str(s) for s in f["auxiliary/session_name"][:]]
+        names = _decode_session_names(f)
         frames = f["auxiliary/frame_idx"][:].astype(np.int64)
-    return np.asarray(names, dtype=object), frames
+    return names, frames
+
+
+def read_session_names(hdf5_path: str, needed_by: str) -> np.ndarray:
+    """Read ``auxiliary/session_name`` (one entry per sample); ``needed_by`` names the setting in the error."""
+    with h5py.File(hdf5_path, "r") as f:
+        if "auxiliary/session_name" not in f:
+            raise ValueError(
+                f"{needed_by} needs auxiliary/session_name in {hdf5_path} (written by the multi-view preprocessors)"
+            )
+        return _decode_session_names(f)
+
+
+def _decode_session_names(f) -> np.ndarray:
+    names = [s.decode("utf-8") if isinstance(s, bytes) else str(s) for s in f["auxiliary/session_name"][:]]
+    return np.asarray(names, dtype=object)
 
 
 def split_samples(
