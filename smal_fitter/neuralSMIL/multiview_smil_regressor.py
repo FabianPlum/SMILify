@@ -21,7 +21,14 @@ from smal_fitter.neuralSMIL.smil_image_regressor import (
 )
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
-from pytorch3d.renderer import FoVPerspectiveCameras
+from pytorch3d.renderer import (
+    BlendParams,
+    FoVPerspectiveCameras,
+    MeshRasterizer,
+    RasterizationSettings,
+    SoftSilhouetteShader,
+)
+from pytorch3d.structures import Meshes
 
 
 def _scatter_real_views(values: torch.Tensor, real_views: torch.Tensor) -> torch.Tensor:
@@ -867,6 +874,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 "limb_scale_regularization": 0.01,  # Penalty for deviations from scale=1 (log_beta_scales)
                 "limb_trans_regularization": 0.1,  # Heavy penalty for translation changes (betas_trans)
                 "triangulation_consistency": 0.0,  # Triangulate GT 2D keypoints with predicted cameras, compare to predicted 3D
+                "silhouette": 0.0,  # Masked soft-IoU vs per-view silhouette targets (needs a silhouette sidecar)
                 "scale_consistency": 0.0,  # Per-session constant per-joint scales / mesh scale (one animal)
                 "scale_symmetry": 0.0,  # Left/right paired joints share their per-joint scales
             }
@@ -1335,6 +1343,16 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         # No valid joints in batch
                         loss_components["keypoint_3d"] = torch.tensor(0.0, device=self.device, requires_grad=True)
 
+        # =================== SILHOUETTE LOSS ===================
+        if loss_weights.get("silhouette", 0) > 0:
+            sil_loss, sil_iou = self._compute_silhouette_loss(predicted_params, target_data, num_views, view_mask)
+            if sil_loss is not None and torch.isfinite(sil_loss):
+                loss_components["silhouette"] = sil_loss
+                loss_components["silhouette_iou"] = sil_iou
+                total_loss = total_loss + loss_weights["silhouette"] * sil_loss
+            elif sil_loss is not None:
+                print("Warning: Non-finite silhouette loss detected, skipping")
+
         # IEF intermediate keypoint supervision
         # Runs each non-final IEF prediction through the body model to get 3D
         # joints, then computes the same 2D/3D keypoint losses that supervise the
@@ -1616,7 +1634,15 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         This mirrors the SMAL forward + scaling/trans logic used in `_render_keypoints_with_camera`,
         but returns 3D joints instead of rendering/projecting to 2D.
         """
-        body_params["global_rot"].shape[0]
+        _, joints = self._body_model_world(body_params)
+        return joints[:, config.CANONICAL_MODEL_JOINTS].float()  # (B, J, 3)
+
+    def _body_model_world(self, body_params: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """One SMAL forward with the scaling/translation every keypoint loss uses.
+
+        Returns world-space vertices (B, V, 3) and all model joints (B, J_all, 3); vertices get exactly the
+        transform the joints get (mesh scale about the root joint, then translation).
+        """
 
         # Convert rotations to axis-angle format for SMAL model
         if self.rotation_representation == "6d":
@@ -1656,9 +1682,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         betas_trans_val = betas_trans_joint
                     except Exception as e:
                         # If conversion fails, log and fall back
-                        print(
-                            f"Warning: Failed to convert PCA weights to joint values in _predict_canonical_joints_3d: {e}"
-                        )
+                        print(f"Warning: Failed to convert PCA weights to joint values in _body_model_world: {e}")
                         betas_logscale = None
                         betas_trans_val = None
                 else:
@@ -1680,18 +1704,138 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         )
 
         # Apply transformation consistent with `_render_keypoints_with_camera`
+        trans = body_params["trans"].unsqueeze(1)
+        root_joint = joints[:, 0:1, :]
         if self.use_ue_scaling:
-            root_joint = joints[:, 0:1, :]
-            joints = (joints - root_joint) * 10 + body_params["trans"].unsqueeze(1)
+            joints = (joints - root_joint) * 10 + trans
+            verts = (verts - root_joint) * 10 + trans
         elif self.allow_mesh_scaling and "mesh_scale" in body_params:
-            mesh_scale = body_params["mesh_scale"]
-            root_joint = joints[:, 0:1, :]
-            joints = (joints - root_joint) * mesh_scale.unsqueeze(-1) + body_params["trans"].unsqueeze(1)
+            mesh_scale = body_params["mesh_scale"].unsqueeze(-1)
+            joints = (joints - root_joint) * mesh_scale + trans
+            verts = (verts - root_joint) * mesh_scale + trans
         else:
-            joints = joints + body_params["trans"].unsqueeze(1)
+            joints = joints + trans
+            verts = verts + trans
+        return verts, joints
 
-        canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]  # (B, J, 3)
-        return canonical_joints.float()
+    # ------------------------------------------------------------------ silhouettes
+    def _silhouette_settings(self) -> Dict[str, Any]:
+        """Render settings for the silhouette loss; the trainer sets ``silhouette_config`` from the config."""
+        cfg = {"render_size": 128, "sigma": 1e-5, "faces_per_pixel": 64, "camera": "gt", "cull_backfaces": False}
+        cfg.update(getattr(self, "silhouette_config", None) or {})
+        if cfg["camera"] not in ("gt", "pred"):
+            raise ValueError(f"silhouette camera must be 'gt' or 'pred', got {cfg['camera']!r}")
+        return cfg
+
+    def _silhouette_rasterizer(self, cfg: Dict[str, Any]):
+        """Cached soft-silhouette rasterizer and shader (kept out of the module registry, so state_dict is unchanged)."""
+        key = (int(cfg["render_size"]), float(cfg["sigma"]), int(cfg["faces_per_pixel"]), bool(cfg["cull_backfaces"]))
+        cache = self.__dict__.get("_silhouette_cache")
+        if cache is None or cache[0] != key:
+            settings = RasterizationSettings(
+                image_size=key[0],
+                blur_radius=float(np.log(1.0 / 1e-4 - 1.0) * key[1]),
+                faces_per_pixel=key[2],
+                bin_size=0,  # naive rasterization: coarse-to-fine bins overflow on this dense mesh
+                cull_backfaces=key[3],
+            )
+            cache = (
+                key,
+                MeshRasterizer(raster_settings=settings),
+                SoftSilhouetteShader(BlendParams(sigma=key[1], gamma=1e-4)),
+            )
+            self.__dict__["_silhouette_cache"] = cache
+        return cache[1], cache[2]
+
+    def _render_silhouette_alpha(
+        self, meshes: Meshes, cameras: FoVPerspectiveCameras, cfg: Dict[str, Any]
+    ) -> torch.Tensor:
+        """Soft silhouettes (N, S, S), always in fp32: the PyTorch3D rasterizer has no half-precision kernel, and
+        under autocast (use_mixed_precision) its camera transform would hand it fp16 vertices."""
+        rasterizer, shader = self._silhouette_rasterizer(cfg)
+        with torch.autocast(device_type=meshes.device.type, enabled=False):
+            return shader(rasterizer(meshes, cameras=cameras), meshes, cameras=cameras)[..., 3]
+
+    @staticmethod
+    def _soft_iou_loss(
+        pred: torch.Tensor, target: torch.Tensor, valid: torch.Tensor, eps: float = 1e-6
+    ) -> torch.Tensor:
+        """Per-view 1 - soft IoU over valid pixels; (N, S, S) inputs in [0, 1] -> (N,). Empty prediction and
+        target count as a perfect match."""
+        inter = (pred * target * valid).flatten(1).sum(1)
+        union = ((pred + target - pred * target) * valid).flatten(1).sum(1)
+        iou = torch.where(union > eps, inter / union.clamp_min(eps), torch.ones_like(union))
+        return 1.0 - iou
+
+    def _compute_silhouette_loss(
+        self,
+        predicted_params: Dict[str, Any],
+        target_data: List[Dict[str, Any]],
+        num_views: int,
+        view_mask: Optional[torch.Tensor],
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Masked soft-IoU between the rendered mesh and per-view silhouette targets.
+
+        Targets come from ``y_data["silhouette_target"]`` (num_views, R, R) uint8 (0 background, 1 animal,
+        255 ignore) with ``y_data["silhouette_valid"]`` (num_views,) bool, in the same view order as the images.
+        All valid views of the batch are rendered in one call. With camera 'gt' the calibrated cameras are used
+        (the camera heads get no silhouette gradient); 'pred' uses the predicted cameras, detached.
+        Returns (mean loss, mean IoU detached), or (None, None) when the batch has no usable target.
+        """
+        cfg = self._silhouette_settings()
+        size = int(cfg["render_size"])
+        pairs, targets = [], []
+        for b, td in enumerate(target_data):
+            tgt, valid = td.get("silhouette_target"), td.get("silhouette_valid")
+            if tgt is None or valid is None:
+                continue
+            for v in range(min(num_views, len(valid))):
+                if bool(valid[v]) and (view_mask is None or bool(view_mask[b, v])):
+                    pairs.append((b, v))
+                    targets.append(np.asarray(tgt[v]))
+        if not pairs:
+            return None, None
+
+        gt_cam = self._collect_all_view_camera_data(target_data, num_views)
+        if cfg["camera"] == "gt":
+            if gt_cam is None:
+                return None, None
+            keep = [i for i, (b, v) in enumerate(pairs) if bool(gt_cam["mask"][b, v])]
+            pairs, targets = [pairs[i] for i in keep], [targets[i] for i in keep]
+            if not pairs:
+                return None, None
+            fov, rot, trans = gt_cam["fov"], gt_cam["cam_rot"], gt_cam["cam_trans"]
+        else:
+            batch = len(target_data)
+            fov = torch.stack([f.reshape(batch) for f in predicted_params["fov_per_view"]], 1).detach()
+            rot = torch.stack(predicted_params["cam_rot_per_view"], 1).detach()
+            trans = torch.stack(predicted_params["cam_trans_per_view"], 1).detach()
+        aspect = gt_cam["aspect_ratio"] if gt_cam is not None else torch.ones_like(fov)
+        bi = torch.tensor([b for b, _ in pairs], device=self.device)
+        vi = torch.tensor([v for _, v in pairs], device=self.device)
+
+        verts, _ = self._body_model_world(predicted_params)  # (B, nV, 3)
+        faces = self.smal_model.faces
+        meshes = Meshes(verts=verts[bi].float(), faces=faces.unsqueeze(0).expand(len(pairs), -1, -1))
+        cameras = FoVPerspectiveCameras(
+            device=self.device,
+            R=rot[bi, vi].float(),
+            T=trans[bi, vi].float(),
+            fov=fov[bi, vi].float(),
+            aspect_ratio=aspect[bi, vi].float(),
+            znear=self.renderer.DEFAULT_ZNEAR if hasattr(self.renderer, "DEFAULT_ZNEAR") else 0.001,
+            zfar=self.renderer.DEFAULT_ZFAR if hasattr(self.renderer, "DEFAULT_ZFAR") else 1000.0,
+        )
+        alpha = self._render_silhouette_alpha(meshes, cameras, cfg)  # (N, S, S)
+
+        tgt = torch.from_numpy(np.stack(targets)).to(self.device)  # (N, R, R) uint8
+        animal = (tgt == 1).float().unsqueeze(1)
+        ignore = (tgt == 255).float().unsqueeze(1)
+        if tgt.shape[-1] != size:
+            animal = F.interpolate(animal, size=(size, size), mode="area")
+            ignore = F.adaptive_max_pool2d(ignore, (size, size))
+        per_view = self._soft_iou_loss(alpha, animal[:, 0], 1.0 - ignore[:, 0])
+        return per_view.mean(), (1.0 - per_view.detach()).mean()
 
     # ------------------------------------------------------------------ shape regularisation
     def _lr_joint_pairs(self) -> List[Tuple[int, int]]:

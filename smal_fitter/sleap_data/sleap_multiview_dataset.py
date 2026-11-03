@@ -10,6 +10,8 @@ import h5py
 import numpy as np
 import cv2
 import json
+import os
+import warnings
 from typing import Dict, List, Tuple, Optional, Any
 
 
@@ -57,6 +59,9 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         keypoint_source: str = "reprojected",
         raw_keypoint_min_confidence: Optional[float] = None,
         include_raw_keypoints: bool = False,
+        silhouette_path: Optional[str] = None,
+        silhouette_exclude_label_flag: bool = True,
+        silhouette_min_score: float = 0.0,
         **kwargs,
     ):
         """
@@ -98,6 +103,17 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                             y_data["keypoints_2d_raw"] / ["keypoint_visibility_raw"]
                             when the HDF5 has them (not augmented), so a benchmark
                             can score against both label sets.
+            silhouette_path: Multi-view only. Sidecar HDF5 with per-view silhouette
+                            targets aligned to this dataset (smal_fitter/sleap_data/
+                            generate_silhouettes_sam2.py). Adds y_data["silhouette_target"]
+                            (num_views, R, R) uint8 (0 background, 1 animal, 255 ignore) and
+                            y_data["silhouette_valid"] (num_views,) bool. None: no silhouettes.
+            silhouette_exclude_label_flag: Views whose stored labels disagree with the
+                            raw SLEAP detections (label_flag) get no target. The flag is
+                            recomputed from this file's labels when it has raw labels (a
+                            sidecar's stored flag goes stale after a recalibration), else
+                            the sidecar's stored label_flag is used.
+            silhouette_min_score: Views whose SAM score is below this get no target.
             **kwargs: Additional keyword arguments (for compatibility)
         """
         self.hdf5_path = hdf5_path
@@ -140,6 +156,15 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         # Validate dataset
         self._validate_dataset()
         self.include_raw_keypoints = self.include_raw_keypoints and self.has_raw_keypoints
+
+        # Optional silhouette sidecar (opened lazily per process, like the main file)
+        self.silhouette_path = silhouette_path
+        self.silhouette_exclude_label_flag = silhouette_exclude_label_flag
+        self.silhouette_min_score = float(silhouette_min_score)
+        self.silhouette_resolution = None
+        self._sil_file = None
+        if silhouette_path is not None:
+            self._init_silhouettes()
 
         # Single-view "all views as items" flat index (sample, view_slot).
         self._sv_items: Optional[List[Tuple[int, int]]] = None
@@ -308,10 +333,96 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         visibility = (confidence > 0) & (confidence >= self.raw_keypoint_min_confidence)
         return keypoints, visibility.astype(np.float32)
 
+    @property
+    def has_silhouettes(self) -> bool:
+        return self.silhouette_path is not None
+
+    # Compared with the dataset when the sidecar has them too (older sidecars only carry the row alignment): they
+    # pin which images were segmented, which session/frame/camera names alone do not (e.g. a rebuilt frame map).
+    _SILHOUETTE_IMAGE_IDENTITY = ("auxiliary/video_frame_idx", "multiview_keypoints/camera_intrinsics")
+    _SILHOUETTE_SOURCE_ATTRS = ("crop_mode", "target_resolution", "undistort_images")
+
+    def _init_silhouettes(self):
+        """Check the silhouette sidecar against this dataset once, in the constructing process."""
+        from smal_fitter.sleap_data.add_raw_keypoints import _check_alignment
+
+        if self.return_single_view:
+            raise NotImplementedError("silhouette_path is only supported for multi-view samples")
+        if self.aug_geometric_enabled:
+            raise ValueError("silhouette_path does not support geometric augmentation (masks are not warped)")
+        with h5py.File(self.hdf5_path, "r") as f, h5py.File(self.silhouette_path, "r") as s:
+            if "multiview_silhouettes/target" not in s:
+                raise ValueError(f"{self.silhouette_path} has no multiview_silhouettes/target")
+            _check_alignment(f, s)
+            for name in self._SILHOUETTE_IMAGE_IDENTITY:
+                if name in f and name in s and not np.array_equal(f[name][()], s[name][()]):
+                    raise ValueError(
+                        f"Silhouette sidecar does not match the dataset in {name}; was it built from this file?"
+                    )
+            g = s["multiview_silhouettes"]
+            source = json.loads(g.attrs.get("source_metadata", "{}"))
+            for key in self._SILHOUETTE_SOURCE_ATTRS:
+                value = f["metadata"].attrs.get(key)
+                value = value.item() if hasattr(value, "item") else value  # numpy scalar -> Python, as in the JSON
+                if key in source and value is not None and source[key] != value:
+                    raise ValueError(
+                        f"Silhouette sidecar was made from images with {key}={source[key]!r}, the dataset has {value!r}"
+                    )
+            self.silhouette_resolution = int(g["target"].shape[-1])
+            self.silhouette_label_flag = g["label_flag"][()].astype(bool)
+            file_name = os.path.basename(self.hdf5_path)
+            if not self.silhouette_exclude_label_flag:
+                self.silhouette_label_flag_source = "label_flag not used"
+            elif not self.has_raw_keypoints:
+                self.silhouette_label_flag_source = f"stored label_flag (no raw labels in {file_name})"
+            else:  # the stored flag measured the labels and cameras the sidecar was made from
+                names = ("keypoints_2d", "keypoint_visibility", "keypoints_2d_raw", "keypoint_visibility_raw")
+                labels = [f[f"multiview_keypoints/{n}"][()] for n in names]
+                threshold = json.loads(g.attrs["prompts"])["label_flag_px"]
+                flag = self._label_flag(*labels, int(self.target_resolution), threshold)
+                flag &= f["multiview_images/view_mask"][()].astype(bool)  # the generator flags only these
+                masked = g["has_mask"][()].astype(bool)
+                self.silhouette_label_flag_source = (
+                    f"label_flag recomputed from {file_name}'s labels (> {threshold} px): {int((flag & masked).sum())} "
+                    f"views with a mask flagged, {int((masked & (flag != self.silhouette_label_flag)).sum())} differ "
+                    "from the sidecar's stored flags"
+                )
+                self.silhouette_label_flag = flag
+            usable = self._usable_silhouettes(g, ())
+            self.silhouette_view_counts = (
+                int(usable.sum()),
+                int(g["has_mask"][()].sum()),
+                int(f["multiview_images/view_mask"][()].sum()),
+            )
+
+    @staticmethod
+    def _label_flag(kp_rep, vis_rep, kp_raw, vis_raw, resolution: int, threshold: float) -> np.ndarray:
+        """generate_silhouettes_sam2.segment_view's label_flag, vectorised over the leading axes (kept in sync by
+        hand): the median distance between reprojected and raw labels, in px of the stored views, over the joints
+        visible and inside the crop in both, is above ``threshold``. False where no joint qualifies."""
+        inside = lambda k: np.all((k >= 0) & (k <= 1), -1) & np.isfinite(k).all(-1)  # noqa: E731
+        both = (vis_rep > 0) & inside(kp_rep) & (vis_raw > 0) & inside(kp_raw)
+        with warnings.catch_warnings():  # all-NaN slices: no joint in both
+            warnings.simplefilter("ignore", RuntimeWarning)
+            dist = np.where(both, np.linalg.norm((kp_rep - kp_raw) * [resolution, resolution], axis=-1), np.nan)
+            return np.nanmedian(dist, axis=-1) > threshold  # NaN > threshold is False
+
+    def _usable_silhouettes(self, g, index) -> np.ndarray:
+        """Bool mask of the sidecar views (``g[...][index]``) whose target is used: a mask exists, and it passes
+        the label-flag (``silhouette_label_flag``, set in _init_silhouettes) and score filters."""
+        valid = g["has_mask"][index].astype(bool)
+        if self.silhouette_exclude_label_flag:
+            valid &= ~self.silhouette_label_flag[index]
+        if self.silhouette_min_score > 0:
+            valid &= np.nan_to_num(g["score"][index]) >= self.silhouette_min_score
+        return valid
+
     def _ensure_file_open(self):
         """Ensure HDF5 file is open in current process."""
         if self._file is None:
             self._file = h5py.File(self.hdf5_path, "r")
+        if self.silhouette_path is not None and self._sil_file is None:
+            self._sil_file = h5py.File(self.silhouette_path, "r")
 
     def _pose_available(self, idx: int, global_rot: np.ndarray, joint_rot: np.ndarray, trans: np.ndarray) -> bool:
         """Decide whether sample `idx` carries ground-truth body pose.
@@ -478,6 +589,12 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         root_rot, joint_angles, root_loc = self._load_pose_targets(idx)
         has_pose = joint_angles is not None
 
+        silhouettes = {}
+        if self._sil_file is not None:
+            g = self._sil_file["multiview_silhouettes"]
+            valid = self._usable_silhouettes(g, idx)[selected_indices]
+            silhouettes = {"silhouette_target": g["target"][idx][selected_indices], "silhouette_valid": valid}
+
         # Prepare x_data (input data)
         x_data = {
             "images": images,  # List of (H, W, C) arrays in [0, 1]
@@ -501,7 +618,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                 "betas_trans": False,
                 "keypoint_2d": True,
                 "keypoint_3d": self.has_3d_keypoints,
-                "silhouette": False,
+                "silhouette": bool(silhouettes and silhouettes["silhouette_valid"].any()),
             },
         }
 
@@ -511,6 +628,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             "keypoints_2d": keypoints_2d,  # (num_views, n_joints, 2)
             "keypoint_visibility": keypoint_visibility,  # (num_views, n_joints)
             **raw_labels,
+            **silhouettes,
             "session_name": session_name,
             "view_valid": view_valid,  # (num_views,)
             # Shared body parameters
@@ -1158,11 +1276,13 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
 
     def __del__(self):
         """Close file handle on deletion."""
-        if hasattr(self, "_file") and self._file is not None:
-            try:
-                self._file.close()
-            except Exception:
-                pass
+        for name in ("_file", "_sil_file"):
+            handle = getattr(self, name, None)
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
 
 
 def multiview_collate_fn(batch: List[Tuple[Dict, Dict]]) -> Tuple[List[Dict], List[Dict]]:

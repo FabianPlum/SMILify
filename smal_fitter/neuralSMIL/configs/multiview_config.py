@@ -5,7 +5,7 @@ Extends BaseTrainingConfig with parameters specific to multi-view
 SMIL regression training with cross-view attention.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional
 
 from .base_config import BaseTrainingConfig, OutputConfig
@@ -21,6 +21,29 @@ class MultiViewOutputConfig(OutputConfig):
     save_checkpoint_every: int = 10
     generate_visualizations_every: int = 10
     num_visualization_samples: int = 3
+
+
+@dataclass
+class SilhouetteConfig:
+    """Rendering for the multi-view silhouette loss (loss weight 'silhouette' > 0, dataset.silhouette_path set).
+
+    All valid views are rendered with a soft silhouette shader and compared to the targets with a masked soft IoU.
+    """
+
+    render_size: int = 128  # square render resolution; targets are area-resampled to it
+    # Soft-rasterizer edge width. The soft edge makes the render slightly larger than the hard silhouette, so the
+    # IoU optimum sits about 2-3% (up to 4% in some views) below the true mesh scale at 1e-5, about 3% at 3e-5;
+    # 1e-5 still renders the dense mouse mesh without holes at faces_per_pixel 64.
+    sigma: float = 1e-5
+    faces_per_pixel: int = 64
+    camera: str = (
+        "gt"  # "gt": calibrated cameras (camera heads get no silhouette gradient); "pred": predicted, detached
+    )
+    cull_backfaces: bool = False
+
+    def validate(self):
+        if self.camera not in ("gt", "pred"):
+            raise ValueError(f"silhouette.camera must be 'gt' or 'pred', got {self.camera!r}")
 
 
 @dataclass
@@ -42,8 +65,12 @@ class MultiViewConfig(BaseTrainingConfig):
     # Override output defaults for multi-view
     output: MultiViewOutputConfig = field(default_factory=MultiViewOutputConfig)
 
+    # Silhouette loss rendering
+    silhouette: SilhouetteConfig = field(default_factory=SilhouetteConfig)
+
     def validate(self):
         super().validate()
+        self.silhouette.validate()
         if self.min_views_per_sample < 1:
             raise ValueError("min_views_per_sample must be >= 1")
 
@@ -117,6 +144,11 @@ class MultiViewConfig(BaseTrainingConfig):
             "keypoint_source": self.dataset.keypoint_source,
             "raw_keypoint_min_confidence": self.dataset.raw_keypoint_min_confidence,
             "allow_split_change": self.dataset.allow_split_change,
+            # Silhouettes
+            "silhouette_path": self.dataset.silhouette_path,
+            "silhouette_exclude_label_flag": self.dataset.silhouette_exclude_label_flag,
+            "silhouette_min_score": self.dataset.silhouette_min_score,
+            "silhouette_config": asdict(self.silhouette),
             # Scale/trans
             "scale_trans_mode": self.scale_trans_beta.mode,
             "allow_mesh_scaling": self.mesh_scaling.allow_mesh_scaling,

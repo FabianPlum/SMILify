@@ -47,7 +47,7 @@ The `MultiViewSMILImageRegressor` adds:
 - **Parameter Loss**: MSE for global rotation, joint rotations, shape, translation, camera
 - **2D Keypoint Loss**: MSE between projected and ground truth 2D keypoints (per-view, visibility-weighted)
 - **3D Keypoint Loss**: MSE between predicted and ground truth 3D joint positions
-- **Silhouette Loss**: Binary cross-entropy for rendered vs. ground truth silhouettes
+- **Silhouette Loss**: single-view: L1 between the rendered and ground-truth silhouettes; multi-view: masked soft IoU over all valid views against a silhouette sidecar (`dataset.silhouette_path`, ignore regions excluded)
 - **Triangulation Consistency Loss**: Differentiable DLT triangulation of GT 2D keypoints through predicted cameras, compared to body model 3D predictions — gradients flow into camera heads
 - **Regularization**: Joint angle, limb scale, and limb translation regularizers with curriculum weighting
 
@@ -334,7 +334,7 @@ Multi-GPU checkpoints trained with code that predates `ddp_utils.py` (added 2026
 ### SLEAP Multi-View HDF5 Format
 
 Multi-view training uses SLEAP-exported HDF5 files containing synchronized frames from multiple cameras. The `SLEAPMultiViewDataset` loader handles:
-- Per-view RGB images and silhouette masks
+- Per-view RGB images, and optionally per-view silhouette targets from an aligned sidecar HDF5 (`silhouette_path`, built with `smal_fitter/sleap_data/generate_silhouettes_sam2.py`)
 - Per-view 2D keypoints with visibility flags
 - GT camera parameters (rotation, translation, FOV) per view
 - 3D keypoint ground truth

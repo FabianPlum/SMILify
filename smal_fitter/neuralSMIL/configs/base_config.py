@@ -51,6 +51,13 @@ class DatasetConfig:
     # Resume only: continue when the split settings differ from the resumed
     # checkpoint's (a deliberate fine-tune on a new split). Off: such a resume stops.
     allow_split_change: bool = False
+    # Multi-view only: sidecar HDF5 with per-view silhouette targets aligned to data_path
+    # (smal_fitter/sleap_data/generate_silhouettes_sam2.py); used by loss weight 'silhouette'.
+    silhouette_path: Optional[str] = None
+    # Views whose stored labels disagree with the raw SLEAP detections (sidecar label_flag) get no target.
+    silhouette_exclude_label_flag: bool = True
+    # Views whose SAM score is below this get no target.
+    silhouette_min_score: float = 0.0
 
     # ── Single-view-from-multiview sampling ──────────────────────────────
     # Draw single-view training items from a multi-view HDF5. When enabled the
