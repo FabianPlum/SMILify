@@ -4,9 +4,9 @@ The source model's elbow (`ulna-radius`) pivot sits mid-chest: its forearm is ab
 length in two independent 3D label sets (body-normalised). The repose model also moved the knee (`tibia`) pivot
 without re-skinning, so part of the tibia's skin lies on the thigh side of the knee.
 
-1. Elbow pivot (`limbfix`). The new pivot stays on the current forearm line (wrist -> old elbow), at the point where
-   forearm / upper-arm equals the labelled ratio (FOREARM_UPPERARM_RATIO). Shoulder and wrist pivots are unchanged; the
-   knee pivots can be taken from a reference model.
+1. Elbow pivot (`elbow_on_forearm_line`), the source of the pivot plan's elbow rule: the new pivot stays on the source
+   forearm line (wrist -> old elbow), at the point where forearm / upper-arm equals the labelled ratio
+   (FOREARM_UPPERARM_RATIO). The plan stores the resulting pivots, so the build does not call it.
 2. Skinning around a pivot (`repartition_pair`). Weights of a parent/child bone pair are re-split around the child
    pivot's bisector plane with a smoothstep band, gated by the distance to the child bone, so that a bone's skin lies
    on the distal side of its own pivot. The total weight of the pair per vertex is kept and every other bone's weight
@@ -100,50 +100,6 @@ def repartition_pair(
         "child_radius_units": radius,
     }
     return Wn, info
-
-
-def limbfix(J, V, W, names, knee_ref_J=None, knee_half_width=TRANSITION_HALF_WIDTH, max_weights=2):
-    """Apply both fixes to copies of J (40, 3) and W (N, 40). Returns (J_new, W_new, provenance dict).
-
-    knee_ref_J: optional (40, 3) joints of a reference model whose `tibia_L/R` (knee) pivots replace the source's
-    before the knee is re-skinned. Used to restore the anatomical knee of `..._Falkner_conv.pkl`: tibia/femur 1.22
-    vs 1.12-1.20 in adult C57BL/6 bones, whereas the repose knee (moved to Falkner's skin-marker labels) gives 0.84.
-    """
-    I = {nm: i for i, nm in enumerate(names)}
-    Jn, Wn = np.array(J, copy=True), np.array(W, copy=True)
-    prov = {
-        "forearm_upperarm_ratio": FOREARM_UPPERARM_RATIO,
-        "transition_half_width_units": TRANSITION_HALF_WIDTH,
-        "knee_transition_half_width_units": knee_half_width,
-        "max_weights_per_vertex": max_weights,
-    }
-    if knee_ref_J is not None:
-        for s in "LR":
-            k = I[f"tibia_{s}"]
-            prov[f"knee_{s}"] = {"old": Jn[k].tolist(), "new": np.asarray(knee_ref_J[k]).tolist()}
-            Jn[k] = knee_ref_J[k]
-    for s in "LR":
-        sh, el, wr = I[f"humerus_{s}"], I[f"ulna-radius_{s}"], I[f"paw_{s}"]
-        E, t = elbow_on_forearm_line(Jn[sh].astype(float), Jn[el].astype(float), Jn[wr].astype(float))
-        U, F = np.linalg.norm(E - Jn[sh]), np.linalg.norm(Jn[wr] - E)
-        ang = np.degrees(np.arccos(unit(Jn[sh] - E) @ unit(Jn[wr] - E)))
-        prov[f"elbow_{s}"] = {
-            "old": Jn[el].tolist(),
-            "new": E.tolist(),
-            "t_from_wrist": t,
-            "upper_arm_u": U,
-            "forearm_u": F,
-            "rest_elbow_angle_deg": ang,
-        }
-        Jn[el] = E
-        Wn, info = repartition_pair(V, Wn, Jn[sh], Jn[el], Jn[wr], sh, el, max_weights=max_weights)
-        prov[f"skin_elbow_{s}"] = info
-        hp, kn, an = I[f"femur_{s}"], I[f"tibia_{s}"], I[f"Foot_{s}"]
-        Wn, info = repartition_pair(
-            V, Wn, Jn[hp], Jn[kn], Jn[an], hp, kn, half_width=knee_half_width, max_weights=max_weights
-        )
-        prov[f"skin_knee_{s}"] = info
-    return Jn, Wn, prov
 
 
 def apply_pivot_plan(J, V, W, names, plan):

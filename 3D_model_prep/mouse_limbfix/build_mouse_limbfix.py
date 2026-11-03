@@ -3,10 +3,10 @@
   blender -b --python 3D_model_prep/mouse_limbfix/build_mouse_limbfix.py -- \
       --src <in.pkl> --out_dir <dir for .blend + debug sidecars> --export_pkl <out.pkl> \
       --mode {roundtrip,build,proxies} [--author_limits {none,from_pkl}] [--addon_dir <dir containing smil_importer/>] \
-      [--knee_from <pkl whose tibia_L/R pivots to use>] [--knee_half_width 0.06] [--max_weights 3]
       [--pivot_plan <pivot plan JSON>] [--proxy_plan <proxy bone plan JSON>]
 
-roundtrip: import -> export unchanged (proves the add-on round trip); build: import -> limb fix -> export;
+roundtrip: import -> export unchanged (proves the add-on round trip); build: import -> the pivot plan's pivots and
+re-skinning (--pivot_plan, required) -> export;
 proxies: import -> append the plan's proxy leaf bones (Spine/Trunk format) -> export.
 --author_limits from_pkl keeps the pkl's joint_limits: an add-on with the issue-#116 fix recreates them as Limit
 Rotation constraints on import, and with an older add-on this script authors them (LOCAL space) before export. Without
@@ -44,30 +44,15 @@ ap.add_argument("--author_limits", choices=["none", "from_pkl"], default="from_p
 ap.add_argument(
     "--addon_dir", default=None, help="load smil_importer from this directory instead of the installed add-on"
 )
-ap.add_argument(
-    "--knee_from", default=None, help="build: take the tibia_L/R (knee) pivots from this pkl (anatomical knee)"
-)
-ap.add_argument(
-    "--knee_half_width", type=float, default=0.06, help="build: knee weight-transition half-width (model units)"
-)
-ap.add_argument(
-    "--max_weights",
-    type=int,
-    default=3,
-    help="build: max non-zero weights per vertex in re-split regions (3 lets thigh/shank/pelvis skin blend)",
-)
-ap.add_argument(
-    "--pivot_plan",
-    default=None,
-    help="build: JSON pivot plan (v5: plans/pivot_plan_v5.json); used instead of --knee_from/--knee_half_width/"
-    "--max_weights",
-)
+ap.add_argument("--pivot_plan", default=None, help="build (required): JSON pivot plan (v5: plans/pivot_plan_v5.json)")
 ap.add_argument(
     "--proxy_plan",
     default=None,
     help="proxies: JSON plan of leaf bones (name, parent, head, vertex) to append (v6: plans/proxy_bone_plan.json)",
 )
 a = ap.parse_args(argv)
+if a.mode == "build" and not a.pivot_plan:
+    ap.error("--mode build requires --pivot_plan (v5: 3D_model_prep/mouse_limbfix/plans/pivot_plan_v5.json)")
 src, out_dir, export_pkl = (os.path.abspath(p) for p in (a.src, a.out_dir, a.export_pkl))
 os.makedirs(out_dir, exist_ok=True)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -160,31 +145,13 @@ prov = {
 }
 
 if a.mode == "build":
-    from limbfix_geometry import apply_pivot_plan, limbfix
+    from limbfix_geometry import apply_pivot_plan
 
     V = np.array([v.co for v in mesh.data.vertices], dtype=np.float64)
     assert np.abs(V - np.asarray(data["v_template"])).max() < 1e-5, "Blender mesh != pkl v_template"
-    knee_J = None
-    if a.knee_from:
-        with open(a.knee_from, "rb") as f:
-            ref = pickle.load(f, encoding="latin1")
-        assert list(ref["J_names"]) == names, "--knee_from model has different joints"
-        knee_J = np.asarray(ref["J"])
-        prov["knee_from"] = repo_path(a.knee_from)
-    if a.pivot_plan:
-        plan = json.load(open(a.pivot_plan))
-        J_new, W_new, geo = apply_pivot_plan(np.asarray(data["J"]), V, np.asarray(data["weights"]), names, plan)
-        prov["pivot_plan"] = {"path": repo_path(a.pivot_plan), **plan}
-    else:
-        J_new, W_new, geo = limbfix(
-            np.asarray(data["J"]),
-            V,
-            np.asarray(data["weights"]),
-            names,
-            knee_ref_J=knee_J,
-            knee_half_width=a.knee_half_width,
-            max_weights=a.max_weights,
-        )
+    plan = json.load(open(a.pivot_plan))
+    J_new, W_new, geo = apply_pivot_plan(np.asarray(data["J"]), V, np.asarray(data["weights"]), names, plan)
+    prov["pivot_plan"] = {"path": repo_path(a.pivot_plan), **plan}
     prov["limbfix"] = geo
     # 1. pivots: move bone heads; keep each bone's +z tail and zero roll so its rest frame (and the limit remap) is unchanged
     bpy.context.view_layer.objects.active = arm

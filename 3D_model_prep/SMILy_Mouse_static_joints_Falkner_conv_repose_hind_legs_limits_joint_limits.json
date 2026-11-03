@@ -564,5 +564,6 @@
  "method": "per joint/axis [p1, p99] of a trained multi-view mouse model's predictions on a subset of its own training data, left/right mirrored union (x, -y, -z), rest pose included, widened by margin, clipped to +-180 deg; root fixed",
  "margin_deg": 45.0,
  "source_rotations": "not in the repo: axis-angle joint rotations predicted by that model",
- "source_pkl": "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl"
+ "source_pkl": "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs.pkl",
+ "note": "joint_limits_deg rounded to 0.1 deg; the pkl's joint_limits key is authoritative"
 }
