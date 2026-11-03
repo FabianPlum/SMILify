@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate per-view mouse silhouette targets for a multi-view SLEAP HDF5 with SAM 2.1, as an aligned sidecar HDF5.
+Generate per-view animal silhouette targets for a multi-view SLEAP HDF5 with SAM 2.1, as an aligned sidecar HDF5.
 
 Runs in an environment with ``sam2`` (torch >= 2.5.1). Training never imports this file, and the training HDF5 is
 only read. The stored views (already undistorted and cropped) are segmented, so the targets align with the training
@@ -50,7 +50,7 @@ Optional keys (default):
     box_border_px          int              sides this close to the image border are not grown (8)
 
 Sidecar layout (N samples, V view slots in the order of multiview_images, R = --resolution):
-    multiview_silhouettes/target           (N, V, R, R) uint8   0 = background, 1 = mouse, 255 = ignore
+    multiview_silhouettes/target           (N, V, R, R) uint8   0 = background, 1 = animal, 255 = ignore
     multiview_silhouettes/has_mask         (N, V)       bool    False: no target for this slot (all 255)
     multiview_silhouettes/score            (N, V)       float32 SAM score of the body mask
     multiview_silhouettes/kp_inside        (N, V)       float32 fraction of box keypoints inside the mask
@@ -106,7 +106,7 @@ SAME_ACROSS_SHARDS = (
 GROUP = "multiview_silhouettes"
 QC_FLOAT = {"score": (), "kp_inside": (), "label_disagree_px": (), "box_expansions": (), "box": (4,)}  # name: shape
 QC_BOOL = ("has_mask", "label_flag", "tail_used")
-MOUSE, BACKGROUND, IGNORE = 1, 0, 255
+ANIMAL, BACKGROUND, IGNORE = 1, 0, 255
 
 
 def _sha256(path: str) -> str:
@@ -141,8 +141,14 @@ def _source_metadata(f: h5py.File) -> str:
     return json.dumps({k: (md[k].item() if hasattr(md[k], "item") else md[k]) for k in SOURCE_ATTRS if k in md})
 
 
-def _check_prompts(P: dict, f: h5py.File, ignore_masks: dict) -> None:
-    """Fail before SAM loads when the prompt file does not fit the dataset."""
+def _check_prompts(P: dict, f: h5py.File, ignore_masks: dict, resolution: int) -> None:
+    """Fail before SAM loads when the prompt file or --resolution does not fit the dataset."""
+    raw = [n for n in ("keypoints_2d_raw", "keypoint_visibility_raw") if n not in f["multiview_keypoints"]]
+    if raw:
+        raise ValueError(
+            f"the dataset has no multiview_keypoints/{raw}: the prompts come from the raw SLEAP labels; add them "
+            "with smal_fitter/sleap_data/add_raw_keypoints.py (merged datasets have none)"
+        )
     n_joints = f["multiview_keypoints/keypoints_2d"].shape[2]
     if len(P["joint_names"]) != n_joints:
         raise ValueError(f"prompts list {len(P['joint_names'])} joint names, the dataset has {n_joints} joints")
@@ -152,6 +158,8 @@ def _check_prompts(P: dict, f: h5py.File, ignore_masks: dict) -> None:
         raise ValueError(f"prompts name joints that are not in joint_names: {unknown}")
     cams = set(json.loads(f["metadata"].attrs["canonical_camera_order"]))
     res = int(f["metadata"].attrs["target_resolution"])
+    if resolution <= 0 or res % resolution:
+        raise ValueError(f"--resolution {resolution} must divide the dataset's target_resolution {res}")
     for key in ("static_positive", "hardware_points"):
         if set(P.get(key, {})) - cams:
             raise ValueError(f"prompts {key} has unknown cameras {sorted(set(P[key]) - cams)}")
@@ -188,13 +196,13 @@ def _box_contact(mask: np.ndarray, box, border_px: float) -> np.ndarray:
 
 
 def _downsample(target: np.ndarray, res: int) -> np.ndarray:
-    """512 -> res: a block is ignore if any pixel is ignore, else mouse if at least half is mouse."""
+    """512 -> res: a block is ignore if any pixel is ignore, else animal if at least half is animal."""
     k = target.shape[0] // res
     assert target.shape == (res * k, res * k), (target.shape, res)
     blocks = target.reshape(res, k, res, k)
     ign = (blocks == IGNORE).any(axis=(1, 3))
-    mouse = (blocks == MOUSE).mean(axis=(1, 3)) >= 0.5
-    return np.where(ign, IGNORE, mouse.astype(np.uint8)).astype(np.uint8)
+    animal = (blocks == ANIMAL).mean(axis=(1, 3)) >= 0.5
+    return np.where(ign, IGNORE, animal.astype(np.uint8)).astype(np.uint8)
 
 
 def segment_view(predictor, img_rgb, kp_rep, vis_rep, kp_raw, vis_raw, cam, P, J, ignore_static):
@@ -314,7 +322,7 @@ def segment_view(predictor, img_rgb, kp_rep, vis_rep, kp_raw, vis_raw, cam, P, J
             cv2.circle(keep, (int(base[0]), int(base[1])), P["tail_band_px"], 1, -1)
             tig &= keep == 0
         ignore |= tig
-    target = np.where(ignore, IGNORE, np.where(body, MOUSE, BACKGROUND)).astype(np.uint8)
+    target = np.where(ignore, IGNORE, np.where(body, ANIMAL, BACKGROUND)).astype(np.uint8)
     return target, qc
 
 
@@ -334,12 +342,13 @@ def run(a):
     from sam2.build_sam import build_sam2
     from sam2.sam2_image_predictor import SAM2ImagePredictor
 
+    _raise_on_stop_signals()  # before --out is opened: a stop at any later point leaves it closed and readable
     P = json.load(open(a.prompts))
     J = {n: i for i, n in enumerate(P["joint_names"])}
     ignore_masks = dict(np.load(Path(a.prompts).parent / P["ignore_masks"])) if P.get("ignore_masks") else {}
     shard, nshards = (int(v) for v in a.shard.split("/"))
     with h5py.File(a.h5, "r") as f:
-        _check_prompts(P, f, ignore_masks)
+        _check_prompts(P, f, ignore_masks, a.resolution)
     predictor = SAM2ImagePredictor(build_sam2(a.sam_config, a.sam_ckpt, device="cuda"))
     with h5py.File(a.h5, "r") as f:
         N, V = f["multiview_images/view_mask"].shape
@@ -376,7 +385,6 @@ def run(a):
             _copy_source_datasets(f, o)
             g.attrs.update(_provenance(a, P, N))
             g.attrs["source_metadata"] = _source_metadata(f)
-            _raise_on_stop_signals()
             t0, done = time.time(), 0
             try:
                 for n, s in enumerate(rows):
@@ -419,7 +427,7 @@ def run(a):
 
 def _provenance(a, P, N):
     return {
-        "value_convention": json.dumps({"background": BACKGROUND, "mouse": MOUSE, "ignore": IGNORE}),
+        "value_convention": json.dumps({"background": BACKGROUND, "mouse": ANIMAL, "ignore": IGNORE}),
         "resolution": int(a.resolution),
         "source_h5": os.path.basename(a.h5),
         "source_num_samples": int(N),

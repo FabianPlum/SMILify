@@ -1,5 +1,7 @@
 """Multi-view silhouette loss: masked soft IoU, render vs keypoint-projection convention, the dataset's silhouette
-sidecar check, and the SAM 2 generator's box growth."""
+sidecar check, and the SAM 2 generator's box growth and start-up checks."""
+
+import json
 
 import h5py
 import numpy as np
@@ -17,7 +19,7 @@ def test_soft_iou_ignores_masked_pixels_and_handles_empty_views():
     target[:, 2:6, 2:6] = 1
     valid = torch.ones(3, 8, 8)
     pred = target.clone()
-    pred[1] = 0  # misses the mouse entirely
+    pred[1] = 0  # misses the animal entirely
     pred[2, 0, 0] = 1  # one false-foreground pixel ...
     valid[2, 0, 0] = 0  # ... that lies in an ignore region
     loss = MV._soft_iou_loss(pred, target, valid)
@@ -68,11 +70,12 @@ def _write_pair(tmp_path, n=4, views=2, res=8):
     return main, side
 
 
-def _bare_dataset(main, side, geometric=False):
+def _bare_dataset(main, side, geometric=False, raw=False):
     ds = object.__new__(SLEAPMultiViewDataset)
     ds.hdf5_path, ds.silhouette_path = str(main), str(side)
     ds.return_single_view, ds.aug_geometric_enabled = False, geometric
     ds.silhouette_exclude_label_flag, ds.silhouette_min_score = True, 0.0
+    ds.has_raw_keypoints, ds.target_resolution = raw, 512
     return ds
 
 
@@ -99,6 +102,50 @@ def test_dataset_checks_the_silhouette_sidecar(tmp_path):
         s["auxiliary/frame_idx"][0] = 99
     with pytest.raises(ValueError, match="in auxiliary/frame_idx"):
         _bare_dataset(main, side)._init_silhouettes()
+
+
+def test_label_flag_is_recomputed_from_the_dataset_labels(tmp_path):
+    """A recalibration moves the reprojected labels, so a sidecar's stored label_flag can be stale. With raw labels in
+    the dataset, the flag is recomputed at load with the generator's definition; without, the stored one is used."""
+    from smal_fitter.sleap_data.generate_silhouettes_sam2 import segment_view
+
+    main, side = _write_pair(tmp_path)  # 4 rows x 2 views; stored flags on views (0, 0) and (1, 1)
+    rep = np.full((4, 2, 4, 2), 0.5, np.float32)  # rows, views, joints, normalised [y, x]
+    dx = np.zeros((4, 2, 4), np.float32)  # raw minus reprojected, x px at 512
+    dx[0, 1] = 40  # flagged
+    dx[1, 0] = [10, 20, 30, 60]  # median exactly 25 px: not above label_flag_px
+    dx[2, 0] = [40, 40, 40, 2]  # the three far joints are unusable below; the one left is 2 px off
+    dx[3, 1] = 40  # no joint visible in both: no flag
+    raw, vis, vis_raw = rep.copy(), np.ones((4, 2, 4), np.float32), np.ones((4, 2, 4), np.float32)
+    raw[..., 1] += dx / 512
+    raw[2, 0, 0], raw[2, 0, 1, 0], vis_raw[2, 0, 2], vis_raw[3, 1] = np.nan, 1.5, 0, 0  # NaN, outside, not visible
+    with h5py.File(main, "a") as f:
+        for name, data in (("", rep), ("_raw", raw)):
+            f[f"multiview_keypoints/keypoints_2d{name}"] = data
+        f["multiview_keypoints/keypoint_visibility"], f["multiview_keypoints/keypoint_visibility_raw"] = vis, vis_raw
+    with h5py.File(side, "a") as s:
+        s["multiview_silhouettes"].attrs["prompts"] = json.dumps({"label_flag_px": 25.0})
+    P, img = {"label_flag_px": 25.0, "box_exclude": []}, np.zeros((512, 512, 3), np.uint8)  # no box joints: no SAM
+    generator = np.array(
+        [
+            segment_view(None, img, rep[r, v], vis[r, v], raw[r, v], vis_raw[r, v], "c", P, {}, None)[1]["label_flag"]
+            for r in range(4)
+            for v in range(2)
+        ]
+    ).reshape(4, 2)
+    assert np.argwhere(generator).tolist() == [[0, 1]]  # view (0, 1) only
+
+    ds = _bare_dataset(main, side, raw=True)
+    ds._init_silhouettes()
+    with h5py.File(side, "r") as s:
+        g = s["multiview_silhouettes"]
+        np.testing.assert_array_equal(ds._usable_silhouettes(g, ()), ~generator)  # has_mask is all True
+        np.testing.assert_array_equal(ds._usable_silhouettes(g, 0), [True, False])  # per sample, as __getitem__
+    assert "recomputed" in ds.silhouette_label_flag_source and "3 differ" in ds.silhouette_label_flag_source
+
+    ds = _bare_dataset(main, side)  # no raw labels: the stored flags
+    ds._init_silhouettes()
+    assert ds.silhouette_view_counts == (6, 8, 8) and "stored" in ds.silhouette_label_flag_source
 
 
 class _BoxBoundSAM:
@@ -138,3 +185,20 @@ def test_generator_grows_the_box_until_the_mask_is_not_clipped(half):
     )
     assert ((target == 1) == obj).all()  # the whole object, nothing cut at the box
     assert qc["box_expansions"] == (2 if hx == 100 else 0)
+
+
+def test_generator_checks_raw_labels_and_resolution_before_sam_loads(tmp_path):
+    from smal_fitter.sleap_data.generate_silhouettes_sam2 import _check_prompts
+
+    P = {k: [] for k in ("box_exclude", "positive", "positive_midpoint", "tail", "tail_negative")}
+    P["joint_names"] = ["a"]
+    with h5py.File(tmp_path / "ds.h5", "w") as f:
+        f.create_dataset("multiview_keypoints/keypoints_2d", data=np.zeros((1, 1, 1, 2), np.float32))
+        f.create_group("metadata").attrs.update({"canonical_camera_order": '["A"]', "target_resolution": 224})
+        with pytest.raises(ValueError, match="keypoints_2d_raw"):  # e.g. a merged dataset
+            _check_prompts(P, f, {}, 112)
+        f.create_dataset("multiview_keypoints/keypoints_2d_raw", data=np.zeros((1, 1, 1, 2), np.float32))
+        f.create_dataset("multiview_keypoints/keypoint_visibility_raw", data=np.zeros((1, 1, 1), np.float32))
+        with pytest.raises(ValueError, match="must divide"):  # the default --resolution 256 on a 224 px dataset
+            _check_prompts(P, f, {}, 256)
+        _check_prompts(P, f, {}, 112)

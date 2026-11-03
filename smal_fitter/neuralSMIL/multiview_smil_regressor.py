@@ -1675,9 +1675,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         betas_trans_val = betas_trans_joint
                     except Exception as e:
                         # If conversion fails, log and fall back
-                        print(
-                            f"Warning: Failed to convert PCA weights to joint values in _predict_canonical_joints_3d: {e}"
-                        )
+                        print(f"Warning: Failed to convert PCA weights to joint values in _body_model_world: {e}")
                         betas_logscale = None
                         betas_trans_val = None
                 else:
@@ -1771,7 +1769,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
         """Masked soft-IoU between the rendered mesh and per-view silhouette targets.
 
-        Targets come from ``y_data["silhouette_target"]`` (num_views, R, R) uint8 (0 background, 1 mouse,
+        Targets come from ``y_data["silhouette_target"]`` (num_views, R, R) uint8 (0 background, 1 animal,
         255 ignore) with ``y_data["silhouette_valid"]`` (num_views,) bool, in the same view order as the images.
         All valid views of the batch are rendered in one call. With camera 'gt' the calibrated cameras are used
         (the camera heads get no silhouette gradient); 'pred' uses the predicted cameras, detached.
@@ -1824,12 +1822,12 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         alpha = self._render_silhouette_alpha(meshes, cameras, cfg)  # (N, S, S)
 
         tgt = torch.from_numpy(np.stack(targets)).to(self.device)  # (N, R, R) uint8
-        mouse = (tgt == 1).float().unsqueeze(1)
+        animal = (tgt == 1).float().unsqueeze(1)
         ignore = (tgt == 255).float().unsqueeze(1)
         if tgt.shape[-1] != size:
-            mouse = F.interpolate(mouse, size=(size, size), mode="area")
+            animal = F.interpolate(animal, size=(size, size), mode="area")
             ignore = F.adaptive_max_pool2d(ignore, (size, size))
-        per_view = self._soft_iou_loss(alpha, mouse[:, 0], 1.0 - ignore[:, 0])
+        per_view = self._soft_iou_loss(alpha, animal[:, 0], 1.0 - ignore[:, 0])
         return per_view.mean(), (1.0 - per_view.detach()).mean()
 
     # ------------------------------------------------------------------ shape regularisation

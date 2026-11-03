@@ -2476,7 +2476,7 @@ def main(config: dict):
             print(
                 f"Silhouette targets: {config['silhouette_path']} ({dataset.silhouette_resolution} px), "
                 f"{used} of {views} views used ({views - masked} without a mask, "
-                f"{masked - used} left out by the label-flag/score filters)"
+                f"{masked - used} left out by the label-flag/score filters); {dataset.silhouette_label_flag_source}"
             )
         print(f"2D labels: {dataset.keypoint_source}")
 
