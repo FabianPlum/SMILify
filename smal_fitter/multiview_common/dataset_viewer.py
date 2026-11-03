@@ -891,7 +891,7 @@ def _parse_cli_default_path() -> Optional[str]:
 
 def main() -> None:
     st.set_page_config(
-        page_title="SMILify multi-view dataset viewer",
+        page_title="Holotype multi-view dataset viewer",
         layout="wide",
     )
     st.title("Multi-view dataset viewer")

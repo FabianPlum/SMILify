@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the SMILify pytorch3d conda environment on Ubuntu/Linux.
+# Install the Holotype pytorch3d conda environment on Ubuntu/Linux.
 # Mirrors the steps documented in README.md.
 # Also installs tmux (handy for detaching long-running run.ai jobs).
 #

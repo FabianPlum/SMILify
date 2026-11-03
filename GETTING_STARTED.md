@@ -1,4 +1,4 @@
-# Getting Started with SMILify
+# Getting Started with Holotype
 
 This guide takes you from a fresh clone to your first 3D reconstruction in four steps:
 **install → get the example data → benchmark a trained model → train your own from scratch.**
@@ -15,8 +15,8 @@ The rest of the [README](README.md) is the full reference — this is the fast p
 
 ```bash
 # Clone
-git clone https://github.com/FabianPlum/SMILify
-cd SMILify
+git clone https://github.com/FabianPlum/Holotype
+cd Holotype
 
 # Create and activate the conda environment (named "pytorch3d", defined in environment.yml)
 conda env create -f environment.yml
@@ -176,7 +176,7 @@ What happens:
 
 | Symptom | Fix |
 |---|---|
-| `conda activate pytorch3d` — env not found | The env is named **`pytorch3d`** (not `smilify`), regardless of the `environment.yml` filename. |
+| `conda activate pytorch3d` — env not found | The env is named **`pytorch3d`** (not `holotype`), regardless of the `environment.yml` filename. |
 | `pytest` shows import/collection errors | Run it from the **repo root** (`pytest`, or `pytest tests/`) — the suite is clean there. No `PYTHONPATH=...` prefix or `--continue-on-collection-errors` is needed. See [tests/README.md](tests/README.md). |
 | Benchmark exits with a SMAL-file error | Pass `--smal-file 3D_model_prep/SMILy_STICK.pkl` — older checkpoints don't embed the model path. |
 | `unrecognized arguments` on a flag | Flag spelling differs by script: benchmark uses `--dataset_path` / `--smal-file`; multi-view inference uses `--dataset` / `--smal_file`. |

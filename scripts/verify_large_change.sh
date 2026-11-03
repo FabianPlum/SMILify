@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Post-large-change verification for SMILify.
+# Post-large-change verification for Holotype.
 #
 # Run this after ANY substantial change (new feature, refactor, shared-code edit)
 # BEFORE committing / pushing / opening a PR. It runs, in order:

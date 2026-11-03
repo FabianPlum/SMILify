@@ -1,8 +1,8 @@
 """
-Multi-View SLEAP Dataset Class for SMILify Training Pipeline
+Multi-View SLEAP Dataset Class for Holotype Training Pipeline
 
 This module provides a PyTorch dataset class for loading preprocessed multi-view SLEAP datasets
-that is compatible with the multi-view SMILify training pipeline.
+that is compatible with the multi-view Holotype training pipeline.
 """
 
 import torch
@@ -197,7 +197,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             self.load_3d_data = bool(metadata.attrs.get("load_3d_data", False))
 
             # World unit scale for 3D + camera translation.
-            # - SMAL/SMILify generally operates in "meters-ish" units (order 1.0)
+            # - SMAL/Holotype generally operates in "meters-ish" units (order 1.0)
             # - SLEAP/anipose often produces mm-scale coordinates (order 100-1000)
             # We store an explicit `world_scale` if available; otherwise infer a sensible default.
             self.world_scale = float(metadata.attrs.get("world_scale", 1.0))
@@ -254,7 +254,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         R_cv: np.ndarray, t_cv: np.ndarray, K: np.ndarray, image_size_wh: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray, float, float]:
         """
-        Convert SLEAP/OpenCV camera parameters to the PyTorch3D convention used by SMILify.
+        Convert SLEAP/OpenCV camera parameters to the PyTorch3D convention used by Holotype.
 
         Mirrors `convert_sleap_to_pytorch3d_camera` in `smal_fitter/sleap_data/sleap_3d_loader.py`.
 
@@ -444,7 +444,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         Returns `(None, None, None)` when no pose ground truth is available so
         the loss masks the corresponding terms out. `joint_angles` is returned
         with the root joint at index 0 (shape `(n_joints, 3)`); downstream code
-        drops the root. `root_loc` is scaled into SMILify world units to match
+        drops the root. `root_loc` is scaled into Holotype world units to match
         `keypoints_3d` / camera translations.
         """
         if not self.has_pose_parameters:
@@ -676,7 +676,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                 for vi in range(num_views):
                     R_p3d, T_p3d, fov_y, aspect = self._sleap_to_pytorch3d_camera(
                         R_cv=R_sel[vi].astype(np.float32),
-                        # Scale translation into SMILify's world units (typically meters)
+                        # Scale translation into Holotype's world units (typically meters)
                         t_cv=(t_sel[vi].astype(np.float32) * float(self.world_scale)),
                         K=K_sel[vi].astype(np.float32),
                         image_size_wh=sz_sel[vi].astype(np.float32),

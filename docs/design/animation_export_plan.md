@@ -97,7 +97,7 @@ choose.
 Schema versions (`SCHEMA_VERSION` in `animation_export.py`): `1.0` initial; `1.1`
 adds the optional `mesh_scale` array; `1.2` drops the sidecar key
 `ignore_hardcoded_body` together with the flag
-([#110](https://github.com/FabianPlum/SMILify/issues/110)). Readers must ignore
+([#110](https://github.com/FabianPlum/Holotype/issues/110)). Readers must ignore
 unknown keys, so older sidecars that still carry it import unchanged.
 
 ### Field sourcing (verified against code)

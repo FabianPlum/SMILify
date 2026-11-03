@@ -1,8 +1,8 @@
 """
-SLEAP Data Loader for SMILify Pipeline
+SLEAP Data Loader for Holotype Pipeline
 
 This module provides functionality to load and process SLEAP pose estimation data
-for integration with the SMILify training pipeline.
+for integration with the Holotype training pipeline.
 """
 
 import h5py
@@ -1731,7 +1731,7 @@ class SLEAPDataLoader:
         self, keypoints_2d: np.ndarray, visibility: np.ndarray, image_size: Tuple[int, int]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Map SLEAP keypoints to SMAL model joint order and convert to SMILify format.
+        Map SLEAP keypoints to SMAL model joint order and convert to Holotype format.
 
         Args:
             keypoints_2d (np.ndarray): SLEAP 2D keypoints (N, 2) in pixel coordinates
@@ -1757,7 +1757,7 @@ class SLEAPDataLoader:
                 sleap_visible = visibility[sleap_idx]
 
                 # Convert to normalized coordinates [0, 1]
-                # Note: SLEAP uses [x, y] format, SMILify uses [y, x] format
+                # Note: SLEAP uses [x, y] format, Holotype uses [y, x] format
                 norm_x = sleap_x / width
                 norm_y = sleap_y / height
 

@@ -1,5 +1,5 @@
 """
-SLEAP Dataset Class for SMILify Training Pipeline
+SLEAP Dataset Class for Holotype Training Pipeline
 
 This module provides a PyTorch dataset class for loading preprocessed SLEAP datasets
 that is compatible with the UnifiedSMILDataset interface.
@@ -23,7 +23,7 @@ class SLEAPDataset(torch.utils.data.Dataset):
     PyTorch dataset class for loading preprocessed SLEAP datasets.
 
     This class loads HDF5 files created by the SLEAP dataset preprocessor
-    and provides data in the same format as the existing SMILify datasets.
+    and provides data in the same format as the existing Holotype datasets.
     """
 
     def __init__(self, hdf5_path: str, rotation_representation: str = "6d", backbone_name: str = None, **kwargs):

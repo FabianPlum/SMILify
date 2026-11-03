@@ -2,7 +2,7 @@
 
 This document describes the linear regression models in [smpl_beta_calculator.py](smpl_beta_calculator.py) — a standalone Python port of the Unity/C# *Virtual Caliper – BodyCreator* implementation ([MPI](https://virtualcaliper.is.tue.mpg.de/)) — which compute SMPL body shape parameters (betas) from anthropometric measurements.
 
-> **Note:** this is a self-contained utility that computes **human** SMPL betas. It is **not currently wired into the SMILify mouse/insect pipeline** — nothing else in the repo imports it. The coefficient tables below match the regressor matrices hard-coded in the Python module.
+> **Note:** this is a self-contained utility that computes **human** SMPL betas. It is **not currently wired into the Holotype mouse/insect pipeline** — nothing else in the repo imports it. The coefficient tables below match the regressor matrices hard-coded in the Python module.
 
 ## Overview
 

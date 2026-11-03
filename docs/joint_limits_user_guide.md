@@ -1,6 +1,6 @@
 # Defining Joint Limits in Blender — User Guide
 
-This guide shows, step by step, how to tell SMILify how far each joint of your model is allowed to rotate — e.g. "this knee bends between −30° and +45°". No coding needed: you author the limits in Blender, preview them in the viewport, export, and both fitting pipelines respect them automatically.
+This guide shows, step by step, how to tell Holotype how far each joint of your model is allowed to rotate — e.g. "this knee bends between −30° and +45°". No coding needed: you author the limits in Blender, preview them in the viewport, export, and both fitting pipelines respect them automatically.
 
 Under the hood, limits travel as data: `Blender Limit Rotation constraint → .pkl['joint_limits']` (shape `(J, 3, 2)`, radians, model frame) `→ LimitPrior → hinge loss`. See [smil_importer/README.md](../3D_model_prep/smil_importer/README.md) for the export options and `smal_fitter/priors/joint_limits_prior.py` for the consumer side.
 
@@ -10,7 +10,7 @@ Under the hood, limits travel as data: `Blender Limit Rotation constraint → .p
 
 ## 1. Why joint limits?
 
-When SMILify fits your model to images, it searches for a pose that matches. Without limits, it can find *impossible* poses — a leg bent backwards through the body. Joint limits fence off those poses: any joint that goes past its range gets penalised and is pulled back.
+When Holotype fits your model to images, it searches for a pose that matches. Without limits, it can find *impossible* poses — a leg bent backwards through the body. Joint limits fence off those poses: any joint that goes past its range gets penalised and is pulled back.
 
 If you never set a limit on a joint, it stays "wide open" (free to rotate). You only need to author limits where anatomy demands them.
 

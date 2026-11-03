@@ -82,7 +82,7 @@ jobs:
 
           **Recommended Blender version: 4.2 LTS** for export work - models
           exported from numpy >= 2 Blenders (4.5+/5.x) currently cannot be
-          loaded by the SMILify pipeline. See the
+          loaded by the Holotype pipeline. See the
           [add-on README](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/3D_model_prep/smil_importer/README.md).
           EOF
           gh release create '${{ steps.version.outputs.tag }}' \

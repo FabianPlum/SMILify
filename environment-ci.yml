@@ -12,7 +12,7 @@
 # committed to the repo and are intentionally excluded from CI).
 #
 # Keep the pinned versions in sync with environment.yml when that stack changes.
-name: smilify-ci
+name: holotype-ci
 channels:
   - conda-forge
 dependencies:

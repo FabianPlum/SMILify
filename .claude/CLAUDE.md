@@ -1,6 +1,6 @@
-# SMILify
+# Holotype
 
-3D (animal) model fitting and neural inference framework, based on SMALify. Supports arbitrary rigged 3D models (during developement focused on insects and mice) with single-view and multi-view reconstruction.
+3D (animal) model fitting and neural inference framework, based on SMALify. Formerly named SMILify (renamed in #130); older issues, commits and notes use that name. Supports arbitrary rigged 3D models (during developement focused on insects and mice) with single-view and multi-view reconstruction.
 
 ## Environment
 

@@ -4,7 +4,7 @@
 
 ## Overview
 
-This document outlines the architecture for integrating multi-camera replicAnt datasets into SMILify's training pipeline while maintaining backward compatibility with existing single-view replicAnt dataset handling.
+This document outlines the architecture for integrating multi-camera replicAnt datasets into Holotype's training pipeline while maintaining backward compatibility with existing single-view replicAnt dataset handling.
 
 **Goal**: Enable loading multi-camera replicAnt data that can be:
 1. Preprocessed into HDF5 format usable by multi-view training (`train_multiview_regressor.py`)

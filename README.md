@@ -1,9 +1,13 @@
-# SMILify
+# Holotype
 
-[![tests](https://github.com/FabianPlum/SMILify/actions/workflows/tests.yml/badge.svg)](https://github.com/FabianPlum/SMILify/actions/workflows/tests.yml)
+[![tests](https://github.com/FabianPlum/Holotype/actions/workflows/tests.yml/badge.svg)](https://github.com/FabianPlum/Holotype/actions/workflows/tests.yml)
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/)
-[![lint](https://github.com/FabianPlum/SMILify/actions/workflows/lint.yml/badge.svg)](https://github.com/FabianPlum/SMILify/actions/workflows/lint.yml)
+[![lint](https://github.com/FabianPlum/Holotype/actions/workflows/lint.yml/badge.svg)](https://github.com/FabianPlum/Holotype/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+> **Formerly SMILify.** The project was renamed to Holotype in [#130](https://github.com/FabianPlum/Holotype/issues/130). Links to the old repository name redirect here.
+
+In taxonomy, a *holotype* is the single specimen a species name is tied to. Here, one rigged template mesh plays that role: the parametric model's shape and pose space is built around it, and fitting estimates each new individual's shape and pose relative to it.
 
 This repository is based on [SMALify](https://github.com/benjiebob/SMALify) with the aim to turn any rigged 3D model into
 a SMAL compatible model. There are Blender files to convert your mesh and lots of code
@@ -12,7 +16,7 @@ quadruped model.
 
 For now, I'll focus on insects, hence **SMIL**.
 
-> **New here?** Start with the **[Getting Started guide](GETTING_STARTED.md)** — a step-by-step walkthrough from a fresh clone to (1) installing SMILify, (2) benchmarking a model on an example dataset, and (3) training your own from scratch. The sections below are the full reference.
+> **New here?** Start with the **[Getting Started guide](GETTING_STARTED.md)** — a step-by-step walkthrough from a fresh clone to (1) installing Holotype, (2) benchmarking a model on an example dataset, and (3) training your own from scratch. The sections below are the full reference.
 
 ## Neural Inference Examples
 
@@ -44,7 +48,7 @@ Example 4-5 camera inference results with a model trained on data collected from
 
 ## Architecture: two fitting approaches
 
-SMILify fits the same `smal_model` (SMAL/SMIL parametric model) in two ways:
+Holotype fits the same `smal_model` (SMAL/SMIL parametric model) in two ways:
 
 1. **Neural inference** ([`smal_fitter/neuralSMIL/`](smal_fitter/neuralSMIL/)) — learned regressors predict SMIL parameters (pose, shape, translation, cameras) directly from RGB images, single- or multi-view. This is the primary, actively-developed path; everything from *Dataset preprocessing* onward in this README describes it. See [smal_fitter/neuralSMIL/README.md](smal_fitter/neuralSMIL/README.md).
 2. **Optimization-based fitting** ([`smal_fitter/fitter.py`](smal_fitter/fitter.py), class `SMALFitter`) — an `nn.Module` that optimizes per-frame pose, shape (betas), translation and FOV by gradient descent against 2D-joint reprojection, silhouette and prior losses. Driven by the root [`config.py`](config.py); see [legacy/README.md](legacy/README.md). The related 3D **mesh registration** in [`fitter_3d/`](fitter_3d/) is the optimization pipeline used to author new parametric models.
@@ -59,8 +63,8 @@ The conda environment is defined in [environment.yml](environment.yml). The reco
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/FabianPlum/SMILify
-   cd SMILify
+   git clone https://github.com/FabianPlum/Holotype
+   cd Holotype
    ```
 
 2. **Create the environment** (recommended):
@@ -75,7 +79,7 @@ The conda environment is defined in [environment.yml](environment.yml). The reco
    ```
    (See [tests/README.md](tests/README.md).)
 
-> SMILify ships and uses only its own SMIL models; it does not need the MPI-licensed
+> Holotype ships and uses only its own SMIL models; it does not need the MPI-licensed
 > SMPL/SMAL models or priors. If your clone predates the July 2026 history purge, see
 > [docs/THIRD_PARTY_MODELS.md](docs/THIRD_PARTY_MODELS.md).
 
@@ -100,7 +104,7 @@ pip install matplotlib scipy opencv-python nibabel trimesh timm pytest h5py psut
 
 ## Dataset preprocessing
 
-SMILify uses [SLEAP](https://sleap.ai/) for 2D pose estimation and expects data to be preprocessed into an optimised HDF5 format before training.
+Holotype uses [SLEAP](https://sleap.ai/) for 2D pose estimation and expects data to be preprocessed into an optimised HDF5 format before training.
 Two preprocessing scripts are provided:
 
 - [smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py](smal_fitter/sleap_data/preprocess_sleap_multiview_dataset.py) — **multi-view** (recommended)
@@ -403,7 +407,7 @@ When the HDF5 has [raw 2D labels](#raw-2d-labels), every 2D metric is reported t
 
 The [Blender SMIL Addon](3D_model_prep/smil_importer) lets you turn virtually any rigged mesh into a fully parametric SMIL-compatible model — no fixed skeleton topology required. As long as your mesh has an armature with vertex weights, the addon can extract all the components needed for a differentiable linear blend skinning model: vertex templates, joint regressors, kinematic trees, shape spaces, and symmetry maps.
 
-<img src="docs/SMILify_Blender_Addon_ants.png" width="800">
+<img src="docs/Holotype_Blender_Addon_ants.png" width="800">
 
 The addon panel provides a single interface for importing existing SMIL/SMAL `.pkl` models, editing them in Blender, and re-exporting updated models. For building a new parametric model from scratch, the typical workflow is:
 
@@ -439,19 +443,19 @@ The disentangled components are exported as part of the `.pkl` model file and ar
 ____________________________________
 ## Code refactor TODOs 
 - [X] Move all legcay funcitonality and documentation to it's own sub-directory to clean up the repo and make its purpose more apparent.
-- [X] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules. ([#51](https://github.com/FabianPlum/SMILify/issues/51))
-- [X] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable. ([#52](https://github.com/FabianPlum/SMILify/issues/52)) — none were needed by maintained code; all three were dropped.
-- [X] Remove the hard-coded SMAL quadruped body path; every code path derives the skeleton from the model `.pkl`. ([#110](https://github.com/FabianPlum/SMILify/issues/110))
-- ~~At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.~~ ([#53](https://github.com/FabianPlum/SMILify/issues/53)) — won't do: the SMAL files are MPI-licensed and can't be redistributed (see [docs/THIRD_PARTY_MODELS.md](docs/THIRD_PARTY_MODELS.md)), so a consolidated file could never ship. SMIL models are already single-file and can carry their joint limits in the same `.pkl` (see the [Joint Limits User Guide](docs/joint_limits_user_guide.md)).
+- [X] Remove all currently used recursive clones. The repo should work on its own without the need of cloning submodules. ([#51](https://github.com/FabianPlum/Holotype/issues/51))
+- [X] If a submodule is needed, we should re-write it and add it to an appropriate subfolder. Otherwise, this repo is entirely un-maintainable. ([#52](https://github.com/FabianPlum/Holotype/issues/52)) — none were needed by maintained code; all three were dropped.
+- [X] Remove the hard-coded SMAL quadruped body path; every code path derives the skeleton from the model `.pkl`. ([#110](https://github.com/FabianPlum/Holotype/issues/110))
+- ~~At the moment, the legacy SMPL and SMAL models require 2 to 3 separate types of data files as well as hard-coded priors for the joint limits. These should be handled more gracefully, like in the new SMIL implementation. All model info should be contained in a single, readable and editable file.~~ ([#53](https://github.com/FabianPlum/Holotype/issues/53)) — won't do: the SMAL files are MPI-licensed and can't be redistributed (see [docs/THIRD_PARTY_MODELS.md](docs/THIRD_PARTY_MODELS.md)), so a consolidated file could never ship. SMIL models are already single-file and can carry their joint limits in the same `.pkl` (see the [Joint Limits User Guide](docs/joint_limits_user_guide.md)).
 - [X] Get rid of the numpy/chumpy dependency mess.
 - [X] Allow importing legacy SMAL models with chumpy variables WITHOUT requiring chumpy to be installed through custom unpickler.
-- ~~Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.~~ ([#54](https://github.com/FabianPlum/SMILify/issues/54)) — won't do, same licensing reason as above.
+- ~~Write a conversion script from the old SMAL format consisting of multiple files into our new single file structure containing all the data. I don't care if the files are large, as long as they are readable and first and foremost editable.~~ ([#54](https://github.com/FabianPlum/Holotype/issues/54)) — won't do, same licensing reason as above.
 - [X] The code is poorly tested. That needs to be fixed. Write integration tests for main functionality.
 
 ## Functionality / broader project TODOs
-- [X] Allow to add user-defined joint limits in the Blender addon. ([#56](https://github.com/FabianPlum/SMILify/issues/56)) See the [Joint Limits User Guide](docs/joint_limits_user_guide.md).
+- [X] Allow to add user-defined joint limits in the Blender addon. ([#56](https://github.com/FabianPlum/Holotype/issues/56)) See the [Joint Limits User Guide](docs/joint_limits_user_guide.md).
 - [X] Finish cleaning antscan dataset and prepare models for fitting.
-- [ ] Create SMIL model from massive antscan dataset. (future todo for _SMILify Gen2_) ([#57](https://github.com/FabianPlum/SMILify/issues/57))
+- [ ] Create SMIL model from massive antscan dataset. (future todo for _Holotype Gen2_) ([#57](https://github.com/FabianPlum/Holotype/issues/57))
 - [X] Add configurable mouse SMIL model.
 - [X] Re-implement multi-GPU mesh registration cleanly.
 

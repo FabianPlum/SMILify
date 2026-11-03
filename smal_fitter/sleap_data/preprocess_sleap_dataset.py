@@ -3,7 +3,7 @@
 SLEAP Dataset Preprocessing Script
 
 This script preprocesses SLEAP pose estimation datasets into optimized HDF5 format
-compatible with the SMILify training pipeline.
+compatible with the Holotype training pipeline.
 
 Usage:
     python preprocess_sleap_dataset.py sessions_dir output.h5 [options]
@@ -36,7 +36,7 @@ from smal_fitter.neuralSMIL.configs.config_utils import apply_smal_file_override
 
 class SLEAPDatasetPreprocessor:
     """
-    Preprocesses SLEAP datasets into optimized HDF5 format compatible with SMILify training.
+    Preprocesses SLEAP datasets into optimized HDF5 format compatible with Holotype training.
     """
 
     def __init__(

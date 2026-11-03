@@ -1641,7 +1641,7 @@ def render_singleview_for_sample(
                             if gt_fov.numel() != 1:
                                 gt_fov = gt_fov[:1]
 
-                            # GT 3D points (world coords, should already be scaled into SMILify world units by dataset)
+                            # GT 3D points (world coords, should already be scaled into Holotype world units by dataset)
                             pts3d = (
                                 torch.from_numpy(np.array(kp3d)).to(device=device, dtype=torch.float32).unsqueeze(0)
                             )  # (1,J,3)

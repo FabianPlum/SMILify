@@ -91,6 +91,6 @@ exported. Also available as a standalone script:
 
 Export `.pkl` files with **Blender 4.2 LTS**. Blender versions that bundle
 numpy >= 2 (4.5+/5.x) write pickles that environments running numpy < 2 —
-including the SMILify `pytorch3d` environment — cannot load
+including the Holotype `pytorch3d` environment — cannot load
 (`ModuleNotFoundError: No module named 'numpy._core...'`). Importing and
 editing models works on any Blender >= 4.2.
