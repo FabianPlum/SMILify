@@ -32,7 +32,7 @@ def _twist_stub(rotation_representation):
 
     stub = types.SimpleNamespace(rotation_representation=rotation_representation, device="cpu")
     stub.smal_model = types.SimpleNamespace(rest_joints=lambda: torch.as_tensor(config.dd["J"]))
-    stub._TWIST_FREE_DEG = SMILImageRegressor._TWIST_FREE_DEG
+    stub.joint_twist_free_deg = 45.0
     stub._init_twist_axes = types.MethodType(SMILImageRegressor._init_twist_axes, stub)
     stub.penalty = types.MethodType(SMILImageRegressor._joint_twist_penalty, stub)
     return stub
@@ -55,7 +55,7 @@ def test_twist_penalty_hinges_on_axial_twist_only(monkeypatch):
     assert stub._twist_idx.tolist() == [0, 1]
     assert torch.allclose(stub._twist_axes, torch.stack([u, z]))
 
-    free = math.radians(stub._TWIST_FREE_DEG)
+    free = math.radians(stub.joint_twist_free_deg)
 
     def pose(aa_joint1):
         jr = torch.zeros(1, 4, 3)
@@ -113,7 +113,7 @@ def test_twist_at_180_deg_is_penalised(monkeypatch):
     stub = _twist_stub("axis_angle")
     jr = torch.zeros(1, 2, 3)
     jr[0, 0] = math.pi * torch.tensor([1.0, 0.0, 0.0])
-    expected = math.pi - math.radians(stub._TWIST_FREE_DEG)
+    expected = math.pi - math.radians(stub.joint_twist_free_deg)
     assert math.isclose(stub.penalty(jr).item(), expected, rel_tol=1e-5)  # one twist joint
 
 
@@ -145,3 +145,24 @@ def test_twist_axes_follow_the_body_models_rest_joints(monkeypatch):
         Rs[0, j] = axis_angle_to_matrix(math.pi / 2 * stub._twist_axes[k])
         posed, _ = batch_global_rigid_transformation(Rs, rest, parents)
         assert torch.allclose(posed[0, child], rest[0, child], atol=1e-5), f"joint {j}"
+
+
+def test_locked_joint_with_children_still_counts_as_a_child(monkeypatch):
+    """Only locked leaves are label proxies: root -> 1 -> 2 (locked) -> 3 gives joint 1 its axis towards joint 2."""
+    limits = np.zeros((4, 3, 2), np.float32)
+    limits[1, :, 0], limits[1, :, 1] = -np.pi, np.pi
+    limits[3, :, 0], limits[3, :, 1] = -np.pi, np.pi
+    _toy_model(monkeypatch, [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]], [-1, 0, 1, 2], limits)
+    stub = _twist_stub("axis_angle")
+    stub._init_twist_axes()
+    assert stub._twist_idx.tolist() == [0]  # joint 1; the locked joint 2 itself gets none
+
+
+def test_free_angle_comes_from_the_loss_config():
+    from smal_fitter.neuralSMIL.configs import load_config
+
+    cfg = load_config(cli_overrides={"loss_curriculum": {"joint_twist_free_deg": 30.0}}, expected_mode="multiview")
+    assert cfg.to_multiview_legacy_dict()["loss_curriculum_config"]["joint_twist_free_deg"] == 30.0
+    cfg.loss_curriculum.joint_twist_free_deg = 180.0
+    with pytest.raises(ValueError, match="joint_twist_free_deg"):
+        cfg.validate()

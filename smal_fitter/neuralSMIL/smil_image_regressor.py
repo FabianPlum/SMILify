@@ -129,6 +129,7 @@ class SMILImageRegressor(SMALFitter):
         mesh_scale_init=1.0,
         fixed_camera=False,
         joint_limit_regularization=0.0,
+        joint_twist_free_deg=45.0,
     ):
         """
         Initialize the SMIL Image Regressor.
@@ -156,6 +157,8 @@ class SMILImageRegressor(SMALFitter):
                 set is validated here at construction time and a broken/missing set
                 raises immediately (fail-fast), instead of raising per-batch inside
                 the trainers' exception handlers where it would be swallowed.
+            joint_twist_free_deg: Axial twist (deg) a bone may take before the
+                joint_twist_regularization penalty starts.
         """
         # For rgb_only=True, SMALFitter expects data_batch to be just the RGB tensor
         if rgb_only and isinstance(data_batch, tuple):
@@ -218,6 +221,7 @@ class SMILImageRegressor(SMALFitter):
         # a clear error instead of being swallowed by the trainers' per-batch
         # exception handlers (which would skip every batch and "finish" at loss 0).
         self.joint_limit_regularization = float(joint_limit_regularization)
+        self.joint_twist_free_deg = float(joint_twist_free_deg)
         if self.joint_limit_regularization > 0.0:
             self._init_joint_limit_bounds()
 
@@ -1437,12 +1441,9 @@ class SMILImageRegressor(SMALFitter):
         zeros = torch.zeros_like(joint_rot_aa)
         return torch.mean(torch.maximum(joint_rot_aa - max_lim, zeros) + torch.maximum(min_lim - joint_rot_aa, zeros))
 
-    # Axial twist (deg) a bone may take before the twist penalty starts.
-    _TWIST_FREE_DEG = 45.0
-
     def _init_twist_axes(self):
         """Rest bone direction per joint for :meth:`_joint_twist_penalty`: joint -> its single chain child, where
-        children locked by the model's joint limits (all zero: label proxies) do not count. Joints with no or several
+        locked leaves (all-zero joint limits and no children: label proxies) do not count. Joints with no or several
         chain children (root, hips, skull, ...) get no axis: their twist moves the other children. The rest joints are
         the body model's own (``SMAL.rest_joints``): for models without static joint locations the stored ``J`` is not
         what the forward pass poses."""
@@ -1451,9 +1452,11 @@ class SMILImageRegressor(SMALFitter):
         locked = np.zeros(len(J), bool)
         if "joint_limits" in config.dd:
             locked = np.abs(np.asarray(config.dd["joint_limits"], np.float64)).reshape(len(J), -1).max(1) == 0
+        proxy = locked.copy()
+        proxy[parents[parents >= 0]] = False  # a locked joint with children is no label proxy
         idx, axes = [], []
         for j in range(1, len(J)):
-            chain = [c for c in range(1, len(J)) if parents[c] == j and not locked[c]]
+            chain = [c for c in range(1, len(J)) if parents[c] == j and not proxy[c]]
             if len(chain) == 1 and not locked[j]:
                 u = J[chain[0]] - J[j]
                 if np.linalg.norm(u) > 1e-9:
@@ -1463,14 +1466,15 @@ class SMILImageRegressor(SMALFitter):
         self._twist_axes = torch.tensor(np.array(axes).reshape(-1, 3), dtype=torch.float32, device=self.device)
         if not idx:  # runs once per model (first penalty call), so this warns once
             warnings.warn(
-                "joint_twist_regularization is enabled (weight > 0) but no joint of the model has a single unlocked "
-                "chain child, so no bone has a twist axis: the twist penalty is 0 for this model.",
+                "joint_twist_regularization is enabled (weight > 0) but no unlocked joint of the model has a single "
+                "chain child (locked proxy leaves do not count), so no bone has a twist axis: the twist penalty is 0 "
+                "for this model.",
                 RuntimeWarning,
                 stacklevel=2,
             )
 
     def _joint_twist_penalty(self, joint_rot_pred):
-        """Hinge on each bone's axial twist beyond ``_TWIST_FREE_DEG``.
+        """Hinge on each bone's axial twist beyond ``joint_twist_free_deg``.
 
         A local rotation acts on rest-frame offsets, so its twist about the rest bone direction (swing-twist
         decomposition) leaves the child joint where it is: keypoints cannot see it, and a network can twist a femur by
@@ -1497,7 +1501,7 @@ class SMILImageRegressor(SMALFitter):
         q = matrix_to_quaternion(R[:, self._twist_idx])  # (N, T, 4), real part first
         q = torch.where(q[..., :1] < 0, -q, q)  # q_w >= 0, so the twist lies in [-180, 180] deg
         twist = 2 * torch.atan2((q[..., 1:] * self._twist_axes).sum(-1), q[..., 0])
-        return torch.relu(twist.abs() - float(np.deg2rad(self._TWIST_FREE_DEG))).mean()
+        return torch.relu(twist.abs() - float(np.deg2rad(self.joint_twist_free_deg))).mean()
 
     def compute_batch_loss(
         self,
@@ -1540,6 +1544,7 @@ class SMILImageRegressor(SMALFitter):
                 "silhouette": 0.0,
                 "joint_angle_regularization": 0.001,  # Penalty for large joint angles
                 "joint_limit_regularization": 0.0,  # Issue #56: hinge penalty vs authored per-joint limits (off by default)
+                "joint_twist_regularization": 0.0,  # Hinge on axial bone twist beyond joint_twist_free_deg
                 "limb_scale_regularization": 0.01,  # Penalty for deviations from scale=1
                 "limb_trans_regularization": 0.1,  # Heavy penalty for translation changes
             }
@@ -2044,6 +2049,16 @@ class SMILImageRegressor(SMALFitter):
             joint_limit_reg = self._joint_limit_penalty(predicted_params["joint_rot"][sample_validity_mask])
             loss_components["joint_limit_regularization"] = joint_limit_reg
             total_loss = total_loss + loss_weights["joint_limit_regularization"] * joint_limit_reg
+
+        # Axial twist about the rest bone direction: see _joint_twist_penalty. Valid samples only.
+        if (
+            loss_weights.get("joint_twist_regularization", 0) > 0
+            and "joint_rot" in predicted_params
+            and num_valid_samples > 0
+        ):
+            joint_twist_reg = self._joint_twist_penalty(predicted_params["joint_rot"][sample_validity_mask])
+            loss_components["joint_twist_regularization"] = joint_twist_reg
+            total_loss = total_loss + loss_weights["joint_twist_regularization"] * joint_twist_reg
 
         # Batched 2D keypoint loss (only for valid samples with available 2D keypoints)
         if (

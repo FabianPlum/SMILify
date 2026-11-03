@@ -863,7 +863,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 "cam_trans": 0.0,
                 "joint_angle_regularization": 0.0001,  # Penalty for large joint angles
                 "joint_limit_regularization": 0.0,  # Issue #56: hinge penalty vs authored per-joint limits (off by default)
-                "joint_twist_regularization": 0.0,  # Hinge on axial bone twist beyond _TWIST_FREE_DEG (labels cannot see it)
+                "joint_twist_regularization": 0.0,  # Hinge on axial bone twist beyond joint_twist_free_deg (labels cannot see it)
                 "limb_scale_regularization": 0.01,  # Penalty for deviations from scale=1 (log_beta_scales)
                 "limb_trans_regularization": 0.1,  # Heavy penalty for translation changes (betas_trans)
                 "triangulation_consistency": 0.0,  # Triangulate GT 2D keypoints with predicted cameras, compare to predicted 3D
