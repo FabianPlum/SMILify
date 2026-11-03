@@ -1628,10 +1628,26 @@ class SLEAPDataLoader:
                 print(f"  - {label}")
             self.ground_truth_betas = None
 
+    def _load_extra_keypoint_names(self) -> List[str]:
+        """Names of static keypoints appended after the SLEAP nodes in points3d.h5 / reprojections.h5.
+
+        Opt-in: read from ``extra_keypoints.json`` in the project directory (written by
+        ``stage_timeline_session.py``). They only exist in 3D and reprojections, so the
+        2D SLEAP arrays never reach their indices and stay unmapped there.
+        """
+        path = self.project_path / "extra_keypoints.json"
+        if not path.exists():
+            return []
+        with open(path) as fh:
+            names = list(json.load(fh)["names"])
+        print(f"Extra static keypoints from {path.name}: {names}")
+        return names
+
     def _create_joint_mapping(self):
         """Create mapping between SMAL model joints and SLEAP keypoints."""
-        # Get SLEAP keypoint names
-        sleap_keypoint_names = self.get_keypoint_names()
+        # Get SLEAP keypoint names (+ optional static keypoints, indexed after them)
+        self.extra_keypoint_names = self._load_extra_keypoint_names()
+        sleap_keypoint_names = self.get_keypoint_names() + self.extra_keypoint_names
 
         print(
             f"Creating joint mapping between {len(self.smal_joint_names)} SMAL joints and {len(sleap_keypoint_names)} SLEAP keypoints"

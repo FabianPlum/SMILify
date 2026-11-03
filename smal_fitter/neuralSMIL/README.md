@@ -47,7 +47,7 @@ The `MultiViewSMILImageRegressor` adds:
 - **Parameter Loss**: MSE for global rotation, joint rotations, shape, translation, camera
 - **2D Keypoint Loss**: MSE between projected and ground truth 2D keypoints (per-view, visibility-weighted)
 - **3D Keypoint Loss**: MSE between predicted and ground truth 3D joint positions
-- **Silhouette Loss**: Binary cross-entropy for rendered vs. ground truth silhouettes
+- **Silhouette Loss**: single-view: L1 between the rendered and ground-truth silhouettes; multi-view: masked soft IoU over all valid views against a silhouette sidecar (`dataset.silhouette_path`, ignore regions excluded)
 - **Triangulation Consistency Loss**: Differentiable DLT triangulation of GT 2D keypoints through predicted cameras, compared to body model 3D predictions — gradients flow into camera heads
 - **Regularization**: Joint angle, limb scale, and limb translation regularizers with curriculum weighting
 
@@ -321,12 +321,20 @@ A CLI override exists only on the non-training entrypoints (note the inconsisten
 
 A DDP barrier is inserted after each epoch's checkpointing and visualization to prevent rank desynchronization.
 
+Both trainers run each training step (prediction and loss) as the DDP forward pass (`ddp_utils.ddp_forward`), so the backward pass all-reduces the gradients after every mini-batch, also inside a gradient-accumulation window. One optimizer step therefore averages `batch_size × gradient_accumulation_steps × number of GPUs` samples, which the multi-view trainer logs as `Effective batch size`. The learning rate is not scaled with the number of GPUs, so running a recipe on N GPUs multiplies its effective batch by N at the same learning rate. A batch without a prediction, or whose loss reaches no trainable parameter (for example because every sample was filtered out), still takes part in the all-reduce with a zero loss.
+
+After every epoch rank 0 logs `DDP replicas after epoch N: identical`. `DIFFERENT`, followed by the most different parameters, means the replicas have drifted apart, i.e. the gradients were not synchronised. Under DDP an exception in a training batch stops the run, because skipping the batch on one rank would desynchronise the all-reduces; relaunch with `resume_checkpoint` to continue from the last saved checkpoint. Single-GPU runs still skip the batch.
+
+The multi-view trainer skips an optimizer step whose gradient norm is non-finite (under DDP every rank agrees, because the check runs on the all-reduced gradients) and leaves batches with a non-finite loss out of the training and validation averages. An epoch whose validation left out such batches is not saved as `best_model.pth`; if no epoch qualifies, the run says so at the end and `final_model.pth` is the model to use. Loss components are averaged per key over the batches that have that key, so on mixed 2D/3D data the logged `keypoint_3d` is no longer diluted by batches without 3D labels: such curves from runs before #120 are not comparable with later ones.
+
+Multi-GPU checkpoints trained with code that predates `ddp_utils.py` (added 2026-10-31) hold a single rank's replica: the trainers called their methods on `model.module`, which bypasses `DistributedDataParallel.forward`, so no gradient was all-reduced and every rank trained its own replica on its share of each epoch. Rank 0 saved its own.
+
 ## Dataset Formats
 
 ### SLEAP Multi-View HDF5 Format
 
 Multi-view training uses SLEAP-exported HDF5 files containing synchronized frames from multiple cameras. The `SLEAPMultiViewDataset` loader handles:
-- Per-view RGB images and silhouette masks
+- Per-view RGB images, and optionally per-view silhouette targets from an aligned sidecar HDF5 (`silhouette_path`, built with `smal_fitter/sleap_data/generate_silhouettes_sam2.py`)
 - Per-view 2D keypoints with visibility flags
 - GT camera parameters (rotation, translation, FOV) per view
 - 3D keypoint ground truth

@@ -60,13 +60,14 @@ import os
 import sys
 import random
 import json
+import math
 from tqdm import tqdm
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import timedelta
 import argparse
 import gc
 import imageio
-from typing import Optional
+from typing import Optional, Tuple
 
 
 from smal_fitter.neuralSMIL.multiview_smil_regressor import MultiViewSMILImageRegressor, create_multiview_regressor
@@ -79,7 +80,9 @@ from smal_fitter.neuralSMIL.data_splits import (
     split_args_to_overrides,
     split_dataset,
     tag_output_dir,
+    warn_init_split,
 )
+from smal_fitter.neuralSMIL.ddp_utils import any_rank, check_replicas, ddp_forward, reaches_parameters, zero_loss
 from smal_fitter.fitter import SMALFitter
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
@@ -340,6 +343,22 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
     )
 
 
+@contextmanager
+def training_sampling(dataset: SLEAPMultiViewDataset, augment: bool, num_views_to_use: Optional[int]):
+    """Training-only sampling inside the block: ``augment``, and ``num_views_to_use`` random views of each sample that
+    has more (None: all). Outside the block, where validation and the visualizations read the val loader, the dataset
+    returns every view of each sample, unaugmented.
+
+    DataLoader workers copy the dataset when they start, so each loader has to start iterating in the phase it serves:
+    the train loader inside the block, the val loader outside it.
+    """
+    dataset.augment, dataset.num_views_to_use = augment, num_views_to_use
+    try:
+        yield
+    finally:
+        dataset.augment, dataset.num_views_to_use = False, None
+
+
 def _print_component_metrics(train_components: dict, val_components: dict, indent: str = "    "):
     """
     Print a stable, readable table of per-loss component metrics.
@@ -373,8 +392,9 @@ class MultiViewTrainingConfig:
     MULTIVIEW_DEFAULTS = {
         # Multi-view specific data settings
         "dataset_path": None,  # Required - path to multi-view HDF5
-        "num_views_to_use": None,  # None = use all available views
+        "num_views_to_use": None,  # Training only: at most N random views per sample (None = all)
         "min_views_per_sample": 2,
+        "legacy_view_padding": False,  # temporary, see MultiViewConfig.legacy_view_padding
         # Cross-attention settings (multi-view specific)
         "cross_attention_layers": 2,
         "cross_attention_heads": 8,
@@ -551,6 +571,84 @@ class MultiViewTrainingConfig:
         return TrainingConfig.get_learning_rate_for_epoch(epoch)
 
 
+def _step_if_finite(model, optimizer, clip_norm: float) -> bool:
+    """Clip and take the optimizer step only if the gradients are finite; otherwise drop them.
+
+    One non-finite gradient would otherwise turn every weight into NaN (clip_grad_norm_ rescales by the NaN norm).
+    Under DDP the gradients are already all-reduced here (every mini-batch syncs, see train_epoch), so every rank
+    sees the same norm and takes the same branch. Returns True when the step was taken.
+    """
+    params = [p for p in model.parameters() if p.grad is not None]
+    if not params:
+        return False
+    if clip_norm and clip_norm > 0:
+        norm = torch.nn.utils.clip_grad_norm_(params, clip_norm)
+    else:
+        norm = torch.linalg.vector_norm(torch.stack([torch.linalg.vector_norm(p.grad.detach()) for p in params]))
+    if torch.isfinite(norm):
+        optimizer.step()
+        return True
+    optimizer.zero_grad(set_to_none=True)
+    return False
+
+
+def _add_components(sums: dict, counts: dict, components: dict) -> None:
+    """Add one batch's loss components (tensors or floats) to running sums and per-key batch counts. Some terms
+    are absent from some batches (e.g. keypoint_3d when no sample has 3D labels), so each key is averaged over its
+    own count."""
+    for key, value in components.items():
+        sums[key] = sums.get(key, 0.0) + (value.item() if torch.is_tensor(value) else value)
+        counts[key] = counts.get(key, 0) + 1
+
+
+def _ief_pose_deltas(predicted_params: dict) -> dict:
+    """IEF refinement monitoring: ief_pose_delta_N = mean L2 distance between the pose of iteration N and N-1.
+    Healthy IEF shows delta_1 > delta_2 (coarse correction, then fine-tuning); flat or growing deltas indicate the
+    IEF is not learning to refine."""
+    pose_hist = (predicted_params.get("iteration_history", {}) if predicted_params else {}).get("pose", [])
+    return {
+        f"ief_pose_delta_{i}": (pose_hist[i].detach() - pose_hist[i - 1].detach()).norm(dim=-1).mean().item()
+        for i in range(1, len(pose_hist))
+    }
+
+
+def _all_reduce_components(sums: dict, counts: dict, device) -> Tuple[dict, dict]:
+    """Sum the component sums and counts over all ranks. The key sets can differ between ranks (data-dependent
+    terms, or a rank whose batches were all non-finite), so the reduction runs over the union of all ranks' keys and
+    every rank always joins it."""
+    rank_keys = [None] * dist.get_world_size()
+    dist.all_gather_object(rank_keys, sorted(sums))
+    keys = sorted(set().union(*rank_keys))
+    if not keys:
+        return {}, {}
+    t = torch.tensor(
+        [[sums.get(k, 0.0) for k in keys], [float(counts.get(k, 0)) for k in keys]], device=device, dtype=torch.float64
+    )
+    dist.all_reduce(t, op=dist.ReduceOp.SUM)
+    return dict(zip(keys, t[0].tolist())), {k: int(c) for k, c in zip(keys, t[1].tolist())}
+
+
+def _training_step(
+    model: MultiViewSMILImageRegressor, x_data_batch, y_data_batch, loss_weights: dict, accum_steps: int
+):
+    """One batch's forward pass and loss, run as DDP's forward pass under DDP (``ddp_forward``).
+
+    Returns ``(loss / accum_steps, loss components (detached), IEF pose deltas (floats))``. A batch without a
+    prediction, or whose loss reaches no trainable parameter, returns ``(zero loss, None, {})``. Only the loss carries
+    gradients (see ``ddp_forward``).
+    """
+    predicted_params, _, _ = model.predict_from_multiview_batch(x_data_batch, y_data_batch)
+    if predicted_params is None:
+        return zero_loss(model), None, {}
+    loss, loss_components = model.compute_multiview_batch_loss(
+        predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
+    )
+    if not reaches_parameters(loss, model):  # e.g. every target missing: only placeholder leaves were summed
+        return zero_loss(model), None, {}
+    components = {k: v.detach() if torch.is_tensor(v) else v for k, v in loss_components.items()}
+    return loss / accum_steps, components, _ief_pose_deltas(predicted_params)
+
+
 def train_epoch(
     model: MultiViewSMILImageRegressor,
     train_loader: DataLoader,
@@ -581,16 +679,17 @@ def train_epoch(
     """
     model.train()
 
-    # If wrapped in DDP, call custom helper methods on the underlying module.
-    # NOTE: DDP does not automatically expose arbitrary custom methods.
-    base_model = model.module if hasattr(model, "module") else model
-
     # Get epoch-specific loss weights from curriculum
     loss_weights = MultiViewTrainingConfig.get_loss_weights_for_epoch(epoch, training_config.get("loss_weights"))
+    param_device = next(model.parameters()).device
 
     total_loss = 0.0
     loss_components_sum = {}
+    component_counts = {}
     num_batches = 0
+    nonfinite_batches = 0  # batches whose loss was not finite (left out of the epoch averages)
+    skipped_steps = 0  # optimizer steps dropped because the gradients were not finite
+    clip_norm = training_config.get("gradient_clip_norm", 0)
 
     accum_steps = training_config.get("gradient_accumulation_steps", 1)
 
@@ -611,88 +710,55 @@ def train_epoch(
         # Whether this is the last mini-batch in the current accumulation window
         is_step_batch = (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(train_loader)
 
-        # For DDP: suppress gradient all-reduce during accumulation steps.
-        # Sync only happens on the step batch to avoid redundant communication
-        # and incorrect gradient averaging mid-accumulation.
-        maybe_no_sync = model.no_sync() if (is_distributed and accum_steps > 1 and not is_step_batch) else nullcontext()
-
         try:
-            with maybe_no_sync:
-                # Forward pass with mixed precision if enabled
+            # Forward pass (as DDP's forward under DDP, so the backward pass all-reduces gradients), with mixed
+            # precision if enabled. The loss is scaled by the accumulation steps so accumulated gradients have the
+            # same magnitude as a single large batch.
+            with torch.cuda.amp.autocast() if scaler is not None else nullcontext():
+                loss, loss_components, ief_deltas = ddp_forward(
+                    model, _training_step, x_data_batch, y_data_batch, loss_weights, accum_steps
+                )
+            # Backward (gradients accumulate across mini-batches). A batch without a prediction backpropagates a zero
+            # loss, so every rank takes part in the same all-reduces. Under DDP the accumulated gradients are
+            # all-reduced after every mini-batch, not only on the step batch (no model.no_sync()): with
+            # find_unused_parameters on torch < 2.4 (fixed in 2.4, pytorch/pytorch#124193), a parameter used only
+            # inside no_sync() on one rank (e.g. the camera head of a slot that only that rank's random views used)
+            # counts as unused in the syncing batch and keeps its rank-local gradient, so the replicas drift apart.
+            if scaler is not None:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
+            valid_steps_in_window += loss_components is not None
+
+            # Only step optimizer at the end of each accumulation window, and only if a batch in the window had a
+            # prediction (on any rank: the replicas must take the same steps)
+            window_has_data = valid_steps_in_window > 0
+            if is_step_batch and (any_rank(window_has_data, param_device) if is_distributed else window_has_data):
                 if scaler is not None:
-                    with torch.cuda.amp.autocast():
-                        predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
-                            x_data_batch, y_data_batch
+                    if training_config.get("gradient_clip_norm", 0) > 0:
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
+                    scaler.step(optimizer)
+                    scaler.update()
+                elif not _step_if_finite(model, optimizer, clip_norm):
+                    skipped_steps += 1
+                    if rank == 0 and (skipped_steps <= 5 or skipped_steps % 50 == 0):
+                        print(
+                            f"Warning: non-finite gradients after mini-batch {batch_idx}, optimizer step skipped"
+                            f" ({skipped_steps} this epoch)"
                         )
+            if loss_components is None:
+                continue
 
-                        if predicted_params is None:
-                            if is_step_batch and valid_steps_in_window > 0:
-                                scaler.step(optimizer)
-                                scaler.update()
-                            continue
-
-                        loss, loss_components = base_model.compute_multiview_batch_loss(
-                            predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
-                        )
-                        # Scale loss by accumulation steps so accumulated gradients
-                        # have the same magnitude as a single large batch
-                        loss = loss / accum_steps
-
-                    # Backward with scaling (gradients accumulate across mini-batches)
-                    scaler.scale(loss).backward()
-                    valid_steps_in_window += 1
-
-                    # Only step optimizer at the end of each accumulation window
-                    if is_step_batch:
-                        if training_config.get("gradient_clip_norm", 0) > 0:
-                            scaler.unscale_(optimizer)
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
-                        scaler.step(optimizer)
-                        scaler.update()
-                else:
-                    # Standard forward/backward
-                    predicted_params, _, auxiliary_data = base_model.predict_from_multiview_batch(
-                        x_data_batch, y_data_batch
-                    )
-
-                    if predicted_params is None:
-                        if is_step_batch and valid_steps_in_window > 0:
-                            optimizer.step()
-                        continue
-
-                    loss, loss_components = base_model.compute_multiview_batch_loss(
-                        predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
-                    )
-                    loss = loss / accum_steps
-
-                    loss.backward()
-                    valid_steps_in_window += 1
-
-                    if is_step_batch:
-                        if training_config.get("gradient_clip_norm", 0) > 0:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
-                        optimizer.step()
-
-            # IEF refinement monitoring: track per-iteration pose delta norms.
-            # ief_pose_delta_N = avg L2 distance between iter N and iter N-1 predictions.
-            # Healthy IEF shows delta_1 > delta_2 (coarse correction then fine-tuning).
-            # Flat or growing deltas indicate the IEF is not learning to refine.
-            with torch.no_grad():
-                hist = predicted_params.get("iteration_history", {}) if predicted_params else {}
-                pose_hist = hist.get("pose", [])
-                for i in range(1, len(pose_hist)):
-                    delta = (pose_hist[i].detach() - pose_hist[i - 1].detach()).norm(dim=-1).mean().item()
-                    key = f"ief_pose_delta_{i}"
-                    loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
-
-            # Accumulate metrics (use un-scaled loss for logging)
-            total_loss += loss.item() * accum_steps
+            # Accumulate metrics (use un-scaled loss for logging); a non-finite batch would make the epoch average NaN
+            loss_value = loss.item() * accum_steps
+            if not math.isfinite(loss_value):
+                nonfinite_batches += 1
+                continue
+            total_loss += loss_value
             num_batches += 1
-
-            for key, value in loss_components.items():
-                if key not in loss_components_sum:
-                    loss_components_sum[key] = 0.0
-                loss_components_sum[key] += value.item() if torch.is_tensor(value) else value
+            _add_components(loss_components_sum, component_counts, loss_components)
+            _add_components(loss_components_sum, component_counts, ief_deltas)
 
             # Update progress bar
             if rank == 0:
@@ -708,6 +774,11 @@ def train_epoch(
             import traceback
 
             traceback.print_exc()
+            if is_distributed:
+                # Skipping the batch on this rank only would leave the other ranks waiting in (or pair them with the
+                # wrong) gradient all-reduce. Stop instead; relaunch with resume_checkpoint to continue from the last saved
+                # checkpoint.
+                raise
             # Clean up GPU memory after OOM to prevent cascading failures.
             # Without this, the failed forward pass's GPU tensors stay alive
             # and every subsequent batch also OOMs.
@@ -722,20 +793,32 @@ def train_epoch(
                         scaler.step(optimizer)
                         scaler.update()
                     else:
-                        optimizer.step()
+                        skipped_steps += not _step_if_finite(model, optimizer, clip_norm)
                 except Exception:
                     pass
             continue
 
-    # Compute averages
+    # Compute averages (NaN, not 0, when every batch was non-finite: the history must not show a perfect epoch)
     if num_batches > 0:
         avg_loss = total_loss / num_batches
-        avg_components = {k: v / num_batches for k, v in loss_components_sum.items()}
     else:
-        avg_loss = 0.0
-        avg_components = {}
+        avg_loss = float("nan") if nonfinite_batches else 0.0
+    avg_components = {k: v / component_counts[k] for k, v in loss_components_sum.items()}
 
-    return {"avg_loss": avg_loss, "loss_components": avg_components, "num_batches": num_batches}
+    if rank == 0 and (nonfinite_batches or skipped_steps):
+        print(
+            f"Warning: epoch {epoch}: {nonfinite_batches} non-finite training batches, {skipped_steps} optimizer steps skipped"
+        )
+    # The replicas must be identical after synchronised updates; a difference means the gradients were not all-reduced
+    divergence = check_replicas(model, epoch, rank) if is_distributed else 0.0
+    return {
+        "avg_loss": avg_loss,
+        "loss_components": avg_components,
+        "num_batches": num_batches,
+        "nonfinite_batches": nonfinite_batches,
+        "skipped_steps": skipped_steps,
+        "replica_divergence": divergence,
+    }
 
 
 def validate(
@@ -770,7 +853,9 @@ def validate(
 
     total_loss = 0.0
     loss_components_sum = {}
+    component_counts = {}
     num_batches = 0
+    nonfinite_batches = 0  # left out of the averages: one NaN batch would otherwise make the epoch's val loss NaN
 
     with torch.no_grad():
         for x_data_batch, y_data_batch in tqdm(val_loader, desc="Validating", disable=(rank != 0)):
@@ -786,21 +871,13 @@ def validate(
                     predicted_params, y_data_batch, loss_weights=loss_weights, return_components=True
                 )
 
+                if not math.isfinite(loss.item()):
+                    nonfinite_batches += 1
+                    continue
                 total_loss += loss.item()
                 num_batches += 1
-
-                for key, value in loss_components.items():
-                    if key not in loss_components_sum:
-                        loss_components_sum[key] = 0.0
-                    loss_components_sum[key] += value.item() if torch.is_tensor(value) else value
-
-                # IEF refinement monitoring (already in no_grad context)
-                hist = predicted_params.get("iteration_history", {}) if predicted_params else {}
-                pose_hist = hist.get("pose", [])
-                for i in range(1, len(pose_hist)):
-                    delta = (pose_hist[i] - pose_hist[i - 1]).norm(dim=-1).mean().item()
-                    key = f"ief_pose_delta_{i}"
-                    loss_components_sum[key] = loss_components_sum.get(key, 0.0) + delta
+                _add_components(loss_components_sum, component_counts, loss_components)
+                _add_components(loss_components_sum, component_counts, _ief_pose_deltas(predicted_params))
 
             except Exception as e:
                 print(f"Validation error: {e}")
@@ -809,25 +886,26 @@ def validate(
     # Reduce validation metrics across ranks (mean over all batches across all GPUs)
     if dist.is_initialized():
         device_t = torch.device(device)
-        stats = torch.tensor([total_loss, float(num_batches)], device=device_t, dtype=torch.float32)
+        stats = torch.tensor(
+            [total_loss, float(num_batches), float(nonfinite_batches)], device=device_t, dtype=torch.float32
+        )
         dist.all_reduce(stats, op=dist.ReduceOp.SUM)
         total_loss = stats[0].item()
         num_batches = int(stats[1].item())
+        nonfinite_batches = int(stats[2].item())
+        loss_components_sum, component_counts = _all_reduce_components(loss_components_sum, component_counts, device_t)
 
-        if loss_components_sum:
-            keys = sorted(loss_components_sum.keys())
-            comp_tensor = torch.tensor([loss_components_sum[k] for k in keys], device=device_t, dtype=torch.float32)
-            dist.all_reduce(comp_tensor, op=dist.ReduceOp.SUM)
-            loss_components_sum = {k: comp_tensor[i].item() for i, k in enumerate(keys)}
+    avg_loss = total_loss / num_batches if num_batches > 0 else float("inf")
+    avg_components = {k: v / component_counts[k] for k, v in loss_components_sum.items() if component_counts[k] > 0}
 
-    if num_batches > 0:
-        avg_loss = total_loss / num_batches
-        avg_components = {k: v / num_batches for k, v in loss_components_sum.items()}
-    else:
-        avg_loss = float("inf")
-        avg_components = {}
-
-    return {"avg_loss": avg_loss, "loss_components": avg_components, "num_batches": num_batches}
+    if rank == 0 and nonfinite_batches:
+        print(f"Warning: {nonfinite_batches} validation batches had a non-finite loss and were left out")
+    return {
+        "avg_loss": avg_loss,
+        "loss_components": avg_components,
+        "num_batches": num_batches,
+        "nonfinite_batches": nonfinite_batches,
+    }
 
 
 def visualize_multiview_training_progress(
@@ -2024,15 +2102,43 @@ def save_checkpoint(model, optimizer, scheduler, epoch, config, metrics, filepat
     print(f"Checkpoint saved: {filepath}")
 
 
-def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cuda"):
+def _warn_init_mismatch(checkpoint, config, model):
+    """Warnings for an init_checkpoint start that loads into a different body model, backbone or split."""
+    ckpt_config = checkpoint.get("config") or {}
+    path = config["init_checkpoint"]
+    warn_init_split(ckpt_config, config, path)
+    old_smal, new_smal = ckpt_config.get("smal_file"), config.get("smal_file")
+    saved = checkpoint.get("model_state_dict", {})
+    current = (model.module if hasattr(model, "module") else model).state_dict()
+    pose_key = "transformer_head.pose_head.weight"
+    pose_differs = pose_key in saved and pose_key in current and saved[pose_key].shape != current[pose_key].shape
+    if pose_differs or (old_smal and new_smal and os.path.basename(old_smal) != os.path.basename(new_smal)):
+        print(
+            f"WARNING: init_checkpoint was trained with body model {os.path.basename(old_smal or '?')}, this run uses "
+            f"{os.path.basename(new_smal or '?')}"
+            + (
+                " with a different joint count: the pose head (global rotation included) starts fresh."
+                if pose_differs
+                else ". Per-joint tensors load by joint index, so a reordered joint set gets mismatched pose rows."
+            )
+        )
+    backbone = [k for k in current if k.startswith("backbone.")]
+    if backbone and not any(k in saved and saved[k].shape == current[k].shape for k in backbone):
+        print(
+            "WARNING: no backbone tensor of init_checkpoint fits this model's backbone: it keeps its pretrained init."
+        )
+
+
+def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cuda", checkpoint=None):
     """
     Load training checkpoint.
 
-    Note: The model architecture should already match the checkpoint (max_views, etc.)
-    since model creation uses checkpoint config when resuming. This function just loads
-    the state dict and optimizer/scheduler states.
+    Tensors whose shape differs from the model's keep their fresh init (reported), so a checkpoint of another
+    architecture loads partially (init_checkpoint). On resume, model creation already follows the checkpoint's
+    config (max_views, etc.). ``checkpoint``: the already loaded checkpoint dict, to skip reading ``filepath`` again.
     """
-    checkpoint = torch.load(filepath, map_location=device)
+    if checkpoint is None:
+        checkpoint = torch.load(filepath, map_location=device)
 
     # Load model state dict, skipping keys whose shapes changed between
     # architecture versions (e.g. token_embedding after IEF feedback fix).
@@ -2053,7 +2159,7 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
     }
 
     filtered_state = {}
-    skipped = []
+    skipped = {}  # key -> report line
     resized = []
     for key, param in saved_state.items():
         if key in current_state and param.shape != current_state[key].shape:
@@ -2070,7 +2176,7 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
                 filtered_state[key] = adapted
                 resized.append(f"  {key}: {param.shape} -> {adapted.shape} (batch dim adapted)")
             else:
-                skipped.append(f"  {key}: checkpoint {param.shape} vs model {cur_shape}")
+                skipped[key] = f"  {key}: checkpoint {param.shape} vs model {cur_shape}"
         else:
             filtered_state[key] = param
 
@@ -2080,10 +2186,17 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
             print(r)
     if skipped:
         print(f"Skipped {len(skipped)} mismatched keys (will use fresh init):")
-        for s in skipped:
+        for s in skipped.values():
             print(s)
 
-    current_model.load_state_dict(filtered_state, strict=False)
+    incompatible = current_model.load_state_dict(filtered_state, strict=False)
+    fresh = [k for k in incompatible.missing_keys if k not in skipped]
+    if skipped or fresh or incompatible.unexpected_keys:
+        print(
+            f"Loaded {len(filtered_state) - len(incompatible.unexpected_keys)} checkpoint tensors; {len(skipped)} "
+            f"shape-skipped and {len(fresh)} model keys not in the checkpoint keep their fresh init; "
+            f"{len(incompatible.unexpected_keys)} checkpoint keys unused"
+        )
 
     if optimizer and "optimizer_state_dict" in checkpoint:
         if skipped:
@@ -2107,7 +2220,7 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
     epoch = 0 if skipped else checkpoint.get("epoch", 0)
-    if skipped:
+    if skipped and optimizer is not None:  # only a resume passes the optimizer and uses the returned epoch
         print(f"Epoch counter reset to 0 (was {checkpoint.get('epoch', 0)}) so LR warmup applies to new layers.")
     return epoch, checkpoint.get("metrics", {})
 
@@ -2311,7 +2424,11 @@ def main(config: dict):
         print(f"Distributed: {is_distributed} (world_size={world_size})")
         print(f"Dataset: {config['dataset_path']}")
         print(f"Backbone: {config['backbone_name']}")
-        print(f"Num views to use: {config.get('num_views_to_use', 'all')}")
+        n_views = config.get("num_views_to_use")
+        train_views = f"up to {n_views} (random subset)" if n_views else "all"
+        print(f"Views per sample: training {train_views}, validation all")
+        if config.get("legacy_view_padding"):
+            print("legacy_view_padding: on (pre-#132 padded views, for legacy checkpoints only)")
         print(f"Cross-attention layers: {config['cross_attention_layers']}")
         print(f"{'=' * 60}\n")
 
@@ -2341,16 +2458,26 @@ def main(config: dict):
     dataset = SLEAPMultiViewDataset(
         hdf5_path=config["dataset_path"],
         rotation_representation=config["rotation_representation"],
-        num_views_to_use=config.get("num_views_to_use"),
+        num_views_to_use=None,  # all views; training_sampling() applies num_views_to_use around train_epoch
         random_view_sampling=True,
         augment=False,  # Toggled on/off around train vs val; see training loop
         augmentation_config=aug_config if aug_enabled else None,
         keypoint_source=config.get("keypoint_source", "reprojected"),
         raw_keypoint_min_confidence=config.get("raw_keypoint_min_confidence"),
+        silhouette_path=config.get("silhouette_path"),
+        silhouette_exclude_label_flag=config.get("silhouette_exclude_label_flag", True),
+        silhouette_min_score=config.get("silhouette_min_score", 0.0),
     )
 
     if rank == 0:
         dataset.print_dataset_summary()
+        if dataset.has_silhouettes:
+            used, masked, views = dataset.silhouette_view_counts
+            print(
+                f"Silhouette targets: {config['silhouette_path']} ({dataset.silhouette_resolution} px), "
+                f"{used} of {views} views used ({views - masked} without a mask, "
+                f"{masked - used} left out by the label-flag/score filters); {dataset.silhouette_label_flag_source}"
+            )
         print(f"2D labels: {dataset.keypoint_source}")
 
     # Get canonical camera order and max_views from dataset
@@ -2365,11 +2492,19 @@ def main(config: dict):
     # CRITICAL: The model architecture must match the checkpoint, not the dataset.
     # The model can still handle samples with fewer views than max_views via view_mask.
     resume_checkpoint_path = config.get("resume_checkpoint")
-    if resume_checkpoint_path and os.path.exists(resume_checkpoint_path):
+    if resume_checkpoint_path and not os.path.exists(resume_checkpoint_path):
+        # Without this a mistyped or stale path silently trained from scratch (and skipped init_checkpoint)
+        raise FileNotFoundError(f"resume_checkpoint not found: {resume_checkpoint_path}")
+    if resume_checkpoint_path:
         if rank == 0:
             print("\nResuming from checkpoint - inferring model architecture from checkpoint...")
         checkpoint = torch.load(resume_checkpoint_path, map_location="cpu")  # Load on CPU first
         ckpt_config = checkpoint.get("config", {})
+        if ckpt_config.get("legacy_view_padding") and not config.get("legacy_view_padding"):
+            # A resumed run continues as it was trained; init_checkpoint is the way to switch a legacy model over
+            config["legacy_view_padding"] = True
+            if rank == 0:
+                print("Resumed checkpoint was trained with legacy_view_padding: continuing with it")
         # Before splitting: a resume must not move the checkpoint's held-out frames into training
         check_resume_split(
             ckpt_config,
@@ -2501,11 +2636,34 @@ def main(config: dict):
     # (fail-fast) instead of raising inside the per-batch try/except of
     # train_epoch, where the error would print-and-skip every batch.
     _base_loss_weights = config.get("loss_weights") or TrainingConfig.LOSS_CURRICULUM["base_weights"]
-    joint_limit_reg_weight = float(_base_loss_weights.get("joint_limit_regularization", 0.0))
-    for _epoch_threshold, _weight_updates in TrainingConfig.LOSS_CURRICULUM["curriculum_stages"]:
-        joint_limit_reg_weight = max(
-            joint_limit_reg_weight, float(_weight_updates.get("joint_limit_regularization", 0.0))
+
+    def _max_curriculum_weight(name: str) -> float:
+        return max(
+            [float(_base_loss_weights.get(name, 0.0))]
+            + [float(w.get(name, 0.0)) for _, w in TrainingConfig.LOSS_CURRICULUM["curriculum_stages"]]
         )
+
+    joint_limit_reg_weight = _max_curriculum_weight("joint_limit_regularization")
+    # Same for the silhouette and shape terms: a positive weight anywhere needs their inputs, otherwise every batch
+    # would silently train without them.
+    if _max_curriculum_weight("silhouette") > 0:
+        if not dataset.has_silhouettes:
+            raise ValueError(
+                "loss weight 'silhouette' > 0 but no silhouette targets: set dataset.silhouette_path "
+                "(see smal_fitter/sleap_data/generate_silhouettes_sam2.py)"
+            )
+        if (config.get("silhouette_config") or {}).get("camera", "gt") == "gt" and not dataset.has_camera_parameters:
+            raise ValueError(
+                "silhouette.camera 'gt' needs calibrated cameras, but the dataset has none; use 'pred' for this dataset"
+            )
+    scale_symmetry_weight = _max_curriculum_weight("scale_symmetry")
+    if max(_max_curriculum_weight("scale_consistency"), scale_symmetry_weight) > 0:
+        use_pca = TrainingConfig.get_scale_trans_config().get("separate", {}).get("use_pca_transformation", True)
+        if config["scale_trans_mode"] != "separate" or use_pca:
+            raise ValueError(
+                "loss weights 'scale_consistency' / 'scale_symmetry' need per-joint scales: scale_trans_mode "
+                f"'separate' without the PCA transformation (got {config['scale_trans_mode']!r}, PCA {use_pca})"
+            )
 
     model = create_multiview_regressor(
         device=device,
@@ -2530,12 +2688,17 @@ def main(config: dict):
         use_gt_camera_init=config.get("use_gt_camera_init", False),
         transformer_config=config.get("transformer_config", {}),
         backbone_chunk_size=config.get("backbone_chunk_size", None),
+        legacy_view_padding=bool(config.get("legacy_view_padding", False)),
         # Max curriculum weight of the issue-#56 penalty; > 0 triggers fail-fast
         # validation of the model's joint_limits at construction (see above).
         joint_limit_regularization=joint_limit_reg_weight,
+        joint_twist_free_deg=float(TrainingConfig.LOSS_CURRICULUM.get("joint_twist_free_deg", 45.0)),
     )
 
     model = model.to(device)
+    model.silhouette_config = dict(config.get("silhouette_config") or {})  # render settings, see _silhouette_settings
+    if scale_symmetry_weight > 0 and not model._lr_joint_pairs():
+        raise ValueError("loss weight 'scale_symmetry' > 0 but the model has no left/right joint pairs ('_L'/'_R')")
 
     # Wrap in DDP if distributed
     if is_distributed:
@@ -2555,8 +2718,12 @@ def main(config: dict):
         if config.get("use_mixed_precision"):
             print("Mixed precision training: enabled")
         accum = config.get("gradient_accumulation_steps", 1)
-        if accum > 1:
-            print(f"Gradient accumulation: {accum} steps (effective batch size: {config['batch_size'] * accum})")
+        if accum > 1 or world_size > 1:
+            # One optimizer step averages the gradients of accum mini-batches on each of the world_size GPUs
+            print(
+                f"Effective batch size: {config['batch_size'] * accum * world_size} (batch_size {config['batch_size']}"
+                f" x gradient_accumulation_steps {accum} x world_size {world_size})"
+            )
         if config.get("backbone_unfreeze_epoch") is not None:
             print(
                 f"Staged backbone freezing: frozen until epoch {config['backbone_unfreeze_epoch']}, "
@@ -2590,6 +2757,7 @@ def main(config: dict):
     # Load checkpoint if specified
     start_epoch = 0
     best_val_loss = float("inf")
+    epochs_not_saved_nonfinite = 0  # epochs whose validation beat the best but had non-finite batches
 
     if config.get("resume_checkpoint"):
         if os.path.exists(config["resume_checkpoint"]):
@@ -2623,6 +2791,18 @@ def main(config: dict):
                             "reset_ief_token_embedding: token_embedding weights and "
                             "optimizer state reset. Set flag to false for subsequent runs."
                         )
+    elif config.get("init_checkpoint"):
+        # Weights-only start for fine-tuning: keep epoch 0, the fresh optimizer/LR schedule and best_val_loss = inf.
+        if not os.path.exists(config["init_checkpoint"]):
+            raise FileNotFoundError(f"init_checkpoint not found: {config['init_checkpoint']}")
+        if rank == 0:
+            print(f"Initialising weights from {config['init_checkpoint']} (fresh optimizer and LR schedule, epoch 0)")
+        # On the CPU and freed after loading: a checkpoint (with its optimizer state) left on the GPU stays for the whole run
+        init_ckpt = torch.load(config["init_checkpoint"], map_location="cpu")
+        if rank == 0:
+            _warn_init_mismatch(init_ckpt, config, model)
+        load_checkpoint(config["init_checkpoint"], model, None, None, device, checkpoint=init_ckpt)
+        del init_ckpt
 
     # Training loop
     if rank == 0:
@@ -2654,12 +2834,20 @@ def main(config: dict):
             collate_fn=multiview_collate_fn,
         )
 
-        # Staged backbone unfreeze
+        # Staged backbone unfreeze (">=": a run resumed after the unfreeze epoch must unfreeze too)
         unfreeze_epoch = config.get("backbone_unfreeze_epoch")
-        if unfreeze_epoch is not None and epoch == unfreeze_epoch:
-            _backbone = model.module.backbone if hasattr(model, "module") else model.backbone
+        _backbone = (model.module if hasattr(model, "module") else model).backbone
+        if (
+            unfreeze_epoch is not None
+            and epoch >= unfreeze_epoch
+            and not all(p.requires_grad for p in _backbone.parameters())
+        ):
             for param in _backbone.parameters():
                 param.requires_grad = True
+            if is_distributed:
+                # DDP registers only the parameters that require grad when it is built: wrap again, or the
+                # backbone's gradients would never be all-reduced
+                model = DDP(model.module, device_ids=[gpu_idx], find_unused_parameters=True)
             if rank == 0:
                 trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
                 print(
@@ -2672,26 +2860,25 @@ def main(config: dict):
         optimizer.param_groups[0]["lr"] = curriculum_lr  # head
         optimizer.param_groups[1]["lr"] = curriculum_lr * backbone_lr_multiplier  # backbone
 
-        # Train (with augmentation enabled)
-        dataset.augment = aug_enabled
-        train_metrics = train_epoch(
-            model,
-            train_loader,
-            optimizer,
-            device,
-            epoch,
-            config,
-            scaler=scaler,
-            is_distributed=is_distributed,
-            rank=rank,
-        )
-        dataset.augment = False
+        # Train with augmentation and the training view subset; validation below gets every view, unaugmented
+        with training_sampling(dataset, aug_enabled, config.get("num_views_to_use")):
+            train_metrics = train_epoch(
+                model,
+                train_loader,
+                optimizer,
+                device,
+                epoch,
+                config,
+                scaler=scaler,
+                is_distributed=is_distributed,
+                rank=rank,
+            )
 
         training_history["train_loss"].append(train_metrics["avg_loss"])
         training_history["loss_components"].append(train_metrics["loss_components"])
         training_history["learning_rates"].append(curriculum_lr)
 
-        # Validate (augmentation disabled)
+        # Validate (every view of each sample, augmentation disabled)
         if epoch % config["validate_every_n_epochs"] == 0:
             val_metrics = validate(model, val_loader, device, config, epoch=epoch, rank=rank)
             training_history["val_loss"].append(val_metrics["avg_loss"])
@@ -2717,8 +2904,12 @@ def main(config: dict):
                     f"limb_trans_reg={current_loss_weights.get('limb_trans_regularization', 0):.6f}"
                 )
 
-            # Save best model
-            if val_metrics["avg_loss"] < best_val_loss:
+            # Save best model; not from an epoch whose validation left out non-finite batches (its average is partial)
+            if val_metrics["avg_loss"] < best_val_loss and val_metrics["nonfinite_batches"]:
+                epochs_not_saved_nonfinite += 1
+                if rank == 0:
+                    print("  Not saved as best model: validation had non-finite batches")
+            elif val_metrics["avg_loss"] < best_val_loss:
                 best_val_loss = val_metrics["avg_loss"]
                 if rank == 0:
                     save_checkpoint(
@@ -2828,6 +3019,12 @@ def main(config: dict):
 
         print("\nTraining completed!")
         print(f"Best validation loss: {best_val_loss:.4f}")
+        if not math.isfinite(best_val_loss):
+            print(
+                "WARNING: no epoch qualified as best model, so this run wrote no best_model.pth"
+                f" ({epochs_not_saved_nonfinite} epochs were left out for non-finite validation batches)."
+                " Use final_model.pth."
+            )
         print(f"Checkpoints saved to: {config['checkpoint_dir']}")
         print(f"Training plots saved to: {plots_dir}")
 
@@ -2957,7 +3154,18 @@ if __name__ == "__main__":
     add_split_args(parser)
 
     # Multi-view specific
-    parser.add_argument("--num_views_to_use", type=int, default=None, help="Max views to use per sample (None = all)")
+    parser.add_argument(
+        "--num_views_to_use",
+        type=int,
+        default=None,
+        help="Max views per training sample, a random subset (None = all); validation uses all",
+    )
+    parser.add_argument(
+        "--legacy_view_padding",
+        action="store_true",
+        help="Temporary: pre-#132 handling of padded views (backbone on the zero padding, decoder attends to it). "
+        "Only for legacy checkpoints.",
+    )
 
     # Output configuration
     parser.add_argument("--checkpoint_dir", type=str, default=None, help="Checkpoint directory (default: from config)")
@@ -2982,6 +3190,13 @@ if __name__ == "__main__":
 
     # Resume training
     parser.add_argument("--resume_checkpoint", type=str, default=None, help="Path to checkpoint to resume from")
+    parser.add_argument(
+        "--init_checkpoint",
+        type=str,
+        default=None,
+        help="Checkpoint to take initial weights from (fine-tuning): epoch 0, fresh optimizer and LR schedule. "
+        "Ignored when --resume_checkpoint is set.",
+    )
     parser.add_argument(
         "--reset_ief_token_embedding",
         action="store_true",
@@ -3067,6 +3282,8 @@ if __name__ == "__main__":
                 cli_overrides["model"]["backbone_name"] = args.backbone_name
             if args.num_views_to_use is not None:
                 cli_overrides["num_views_to_use"] = args.num_views_to_use
+            if args.legacy_view_padding:
+                cli_overrides["legacy_view_padding"] = True
             if args.cross_attention_layers is not None:
                 cli_overrides["cross_attention_layers"] = args.cross_attention_layers
             if args.cross_attention_heads is not None:
@@ -3077,6 +3294,9 @@ if __name__ == "__main__":
             if args.resume_checkpoint is not None:
                 cli_overrides["training"] = cli_overrides.get("training", {})
                 cli_overrides["training"]["resume_checkpoint"] = args.resume_checkpoint
+            if args.init_checkpoint is not None:
+                cli_overrides["training"] = cli_overrides.get("training", {})
+                cli_overrides["training"]["init_checkpoint"] = args.init_checkpoint
             if args.use_gt_camera_init is not None:
                 cli_overrides["training"] = cli_overrides.get("training", {})
                 cli_overrides["training"]["use_gt_camera_init"] = args.use_gt_camera_init
@@ -3233,9 +3453,6 @@ if __name__ == "__main__":
         print(f"Launching multi-GPU training on {args.num_gpus} GPUs (using mp.spawn)...")
         print(f"Master port: {master_port}")
         print(f"Batch size per GPU: {args.batch_size if args.batch_size else 'from config'}")
-        print(
-            f"Total effective batch size: {args.batch_size * args.num_gpus if args.batch_size else 'config_batch_size * num_gpus'}"
-        )
 
         # Launch multi-GPU training using spawn
         mp.spawn(ddp_main, args=(args.num_gpus, training_config, master_port), nprocs=args.num_gpus, join=True)
