@@ -78,6 +78,9 @@ If you omit `--config`, the scripts fall back to the previous behavior (e.g. `Tr
 | `dataset_fraction` | float | `0.5` | Fraction of training split sampled per epoch (a different random subset is drawn each epoch for diversity). |
 | `keypoint_source` | string | `"reprojected"` | 2D training labels of a multi-view HDF5: `"reprojected"` (`keypoints_2d`) or `"raw"` (`keypoints_2d_raw`, the SLEAP predictions filtered by confidence only, see [Raw 2D labels](../../../README.md#raw-2d-labels)). Single-view `"raw"` needs `from_multiview: true`. The benchmark scores against both, whichever the model trained on. |
 | `raw_keypoint_min_confidence` | float or null | `null` | `"raw"` only: a raw label is visible when its SLEAP confidence is at least this value. `null` keeps the threshold the labels were stored with. |
+| `silhouette_path` | string or null | `null` | Multi-view only: sidecar HDF5 with per-view silhouette targets aligned to `data_path` (built with `smal_fitter/sleap_data/generate_silhouettes_sam2.py`; values 0 background, 1 animal, 255 ignore). Needed when the `silhouette` loss weight is > 0; training stops at start-up otherwise. |
+| `silhouette_exclude_label_flag` | bool | `true` | Views whose stored labels disagree with the raw SLEAP detections (`label_flag`: recomputed at load from the training file's labels when it has raw labels, else the sidecar's stored flag) get no silhouette target. |
+| `silhouette_min_score` | float | `0.0` | Views whose SAM score is below this get no silhouette target. The SAM score barely separates bad masks (M103 Front-Right: leaking views 0.777, clean 0.793), so keep `silhouette_exclude_label_flag` on rather than relying on this. |
 
 **Blocked split:** neighbouring video frames are near-duplicates, so a random split puts almost the same frame in train and test. `"blocked"` orders each session by `frame_idx` and cuts it into `K = 1 / (val_ratio + test_ratio)` contiguous blocks. Fold `k` holds out block `k` of every session: its first `val_ratio` share is validation, the rest is test, and the remainder of the session trains. Blocks are adjacent with no buffer gap, so only the frames at each block edge have a near-duplicate neighbour in another split. The ratios must tile a session (`train_ratio = 1 - val_ratio - test_ratio`, `K` a whole number), and the dataset must be a multi-view HDF5 (single-view needs `from_multiview: true`). The split does not depend on `training.seed`, so runs with different seeds share it. With ratios 0.80 / 0.05 / 0.15 there are 5 folds; `holdout_fold: null` (fold 4) trains on the first 80% of each session, validates on the next 5% and tests on the last 15%.
 
@@ -186,6 +189,7 @@ Example:
 |-------|------|---------|-------------|
 | `base_weights` | dict | *(see below)* | Initial loss weights applied from epoch 0. |
 | `curriculum_stages` | dict | *(see defaults)* | Epoch-to-weight-update mapping. Each stage partially overrides `base_weights` from that epoch onward. |
+| `joint_twist_free_deg` | float | `45.0` | Axial twist (deg) a bone may take before `joint_twist_regularization` applies. |
 
 #### Available loss terms
 
@@ -202,10 +206,14 @@ Example:
 | `betas_trans` | Per-limb translation parameter error | 0.0005 |
 | `keypoint_2d` | 2D keypoint reprojection error | 0.1 |
 | `keypoint_3d` | 3D keypoint error | 0.25 |
-| `silhouette` | Silhouette overlap loss | 0.0 |
+| `silhouette` | Silhouette overlap loss. Multi-view: masked soft IoU between the rendered mesh and the `dataset.silhouette_path` targets in every valid view (ignore pixels excluded; rendering set by the `silhouette` section) | 0.0 |
 | `joint_angle_regularization` | Joint angle prior/regularization | 0.001 |
+| `joint_limit_regularization` | Hinge on joint rotations outside the model's authored per-joint limits (issue #56); the model pkl must carry `joint_limits`, else training stops at start-up. 0.15 in the mouse runs. | 0.0 |
+| `joint_twist_regularization` | Hinge on each bone's axial twist about its rest direction beyond `joint_twist_free_deg` (default 45°; keypoints cannot see twist); locked proxy leaves are skipped. 0.15 in the mouse runs. | 0.0 |
 | `limb_scale_regularization` | Limb scale regularization | 0.01 |
 | `limb_trans_regularization` | Limb translation regularization | 1.0 |
+| `scale_consistency` | Multi-view: per-joint log scales and log mesh scale stay at a running per-session mean (one animal per session has one set of proportions). Needs per-joint scales (`scale_trans_beta.mode` `"separate"`, without the legacy PCA transformation); training stops at start-up otherwise. Start it with a `curriculum_stages` entry once the scales have settled: at epoch 1 or later in a fine-tune (the running mean, an EMA, starts from the first predictions, so from epoch 0 it pins the mesh scale at the initial checkpoint's value), and later in a from-scratch run (the combined run used epoch 20; not measured). From the epoch it starts, the term is part of the validation loss, so `best_model.pth` compares epochs with and without it. Keep it off for data with several animals per `session_name`, e.g. replicAnt HDF5s (one session per generated dataset). | 0.05 (from a later epoch) |
+| `scale_symmetry` | Multi-view: paired `_L` / `_R` joints share their per-joint log scales. Same requirement as `scale_consistency`, and the model needs `_L` / `_R` joint name pairs: training stops at start-up for a model without them, e.g. the stick insect and OmniAnt models (their lowercase `_l` / `_r` names are not paired) | 0.25 |
 | `triangulation_consistency` | Cross-view triangulation consistency (multi-view). **Disabled by default — see note below.** | 0.0 |
 | `ief_intermediate` | Intermediate IEF iteration loss | 0.0 |
 
@@ -243,10 +251,11 @@ Curriculum stages example:
 | `pin_memory` | bool | `true` | Pin DataLoader memory for faster GPU transfer. |
 | `prefetch_factor` | int | `4` | Batches prefetched per worker. |
 | `resume_checkpoint` | string or null | `null` | Path to checkpoint `.pth` file to resume from. |
+| `init_checkpoint` | string or null | `null` | Multi-view only: checkpoint to take initial weights from when fine-tuning on a new dataset or rig. Training starts at epoch 0 with a fresh optimizer and LR schedule, and the model is built from the dataset (its cameras); tensors whose shape differs, such as the per-camera view embeddings, keep their fresh init. Ignored when `resume_checkpoint` is set. Also a CLI flag: `--init_checkpoint`. |
 | `reset_ief_token_embedding` | bool | `false` | Re-initialize IEF token embeddings when resuming (useful when changing `transformer_ief_iters`). |
 | `use_gt_camera_init` | bool | `true` | Use ground-truth camera parameters as initialization base and predict deltas (multi-view). |
 | `use_mixed_precision` | bool | `false` | Enable FP16 mixed precision training via `torch.cuda.amp`. Roughly halves activation memory and speeds up Tensor Core operations. Weight updates remain FP32 for numerical stability. |
-| `backbone_chunk_size` | int or null | `null` | Maximum number of images processed through the backbone in a single forward pass. `null` = process all views at once. Set to a smaller value (e.g. `6`) to reduce peak VRAM when using many views with high-resolution inputs. Mathematically equivalent to unchunked — only affects memory, not results. |
+| `backbone_chunk_size` | int or null | `null` | Maximum number of images processed through the backbone in a single forward pass. `null` = process all views at once. Set to a smaller value (e.g. `6`) to reduce peak VRAM when using many views with high-resolution inputs. For per-image backbones with LayerNorm (ViT) this only affects memory, not results. BatchNorm backbones (ResNet, UNet) normalise each chunk with its own statistics in training mode, so there the chunk size (and, in batches that mix view counts, which real views share a chunk) changes the outputs and the running statistics. |
 | `gradient_accumulation_steps` | int | `1` | Accumulate gradients over N mini-batches before an optimizer step (effective batch size ×N without extra VRAM). Also a CLI flag: `--gradient_accumulation_steps`. |
 
 ### `augmentation` — Training-time image augmentation
@@ -345,11 +354,24 @@ These fields are set at the **top level** of the JSON (not inside a section) for
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `num_views_to_use` | int or null | `null` | Maximum views per sample. `null` = use all available views in the dataset. |
+| `num_views_to_use` | int or null | `null` | Training only: at most this many views per sample. A sample with more gets a new random subset each time it is loaded (view augmentation). `null` = all views. Validation and inference use every view of each sample, and so does the benchmark unless given `--num_views_to_use`. |
 | `min_views_per_sample` | int | `2` | Minimum views required per training sample. |
+| `legacy_view_padding` | bool | `false` | **Temporary** (issue #134). `true` reproduces the pre-#132 handling of padded view slots in batches that mix view counts: the zero padding goes through the backbone and the decoder attends to it. Only for checkpoints trained that way, until they are replaced. A resumed run keeps its checkpoint's setting. CLI: `--legacy_view_padding` (training and benchmark). |
 | `cross_attention_layers` | int | `2` | Number of cross-view attention layers for multi-view feature fusion. |
 | `cross_attention_heads` | int | `8` | Number of attention heads in cross-view attention. |
 | `cross_attention_dropout` | float | `0.1` | Dropout in cross-view attention layers. |
+
+### `silhouette` — Silhouette loss rendering (multi-view)
+
+Used when the `silhouette` loss weight is > 0. All valid views of a batch are rendered in one call with a soft silhouette shader. SAM masks can cut distal limbs (paws, feet) short: in M103, 20 of 36 suspected cases were confirmed by eye. Rendered limb pixels there count as background.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `render_size` | int | `128` | Square render resolution; targets are area-resampled to it (ignore pixels max-pooled). |
+| `sigma` | float | `1e-5` | Soft-rasterizer edge width. Lower is sharper; with `faces_per_pixel` 64 the dense mouse mesh renders without holes. The soft edge makes the render a little larger than the hard silhouette, so the IoU optimum sits about 2–3% (up to 4% in some views) below the true mesh scale at `1e-5`, and about 3% at `3e-5`; a larger `render_size` does not change this. Even a perfect mouse mesh reaches a soft IoU of only about 0.85 at `1e-5`, so the logged `silhouette_iou` tops out there. |
+| `faces_per_pixel` | int | `64` | Faces blended per pixel. Fewer punch holes into dense meshes. |
+| `camera` | string | `"gt"` | `"gt"`: calibrated cameras, so the camera heads get no silhouette gradient (training stops at start-up if the dataset has none). `"pred"`: the predicted cameras, detached. |
+| `cull_backfaces` | bool | `false` | Rasterizer back-face culling. |
 
 ## Memory optimization for multi-view training
 

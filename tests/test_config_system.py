@@ -179,6 +179,14 @@ class TestLegacyDictMultiView:
         assert d["checkpoint_dir"] == "multiview_checkpoints"
         assert d["visualizations_dir"] == "multiview_visualizations"
 
+    def test_init_checkpoint_from_json(self):
+        path = _write_tmp_json({"mode": "multiview", "training": {"init_checkpoint": "pretrained.pth"}})
+        try:
+            d = load_config(config_file=path).to_multiview_legacy_dict()
+        finally:
+            os.unlink(path)
+        assert d["init_checkpoint"] == "pretrained.pth"
+
 
 # ---------------------------------------------------------------------------
 # SMAL model argument passing (singleview / multiview) and downstream overwrite

@@ -21,7 +21,24 @@ from smal_fitter.neuralSMIL.smil_image_regressor import (
 )
 import config
 from smal_fitter.neuralSMIL.training_config import TrainingConfig
-from pytorch3d.renderer import FoVPerspectiveCameras
+from pytorch3d.renderer import (
+    BlendParams,
+    FoVPerspectiveCameras,
+    MeshRasterizer,
+    RasterizationSettings,
+    SoftSilhouetteShader,
+)
+from pytorch3d.structures import Meshes
+
+
+def _scatter_real_views(values: torch.Tensor, real_views: torch.Tensor) -> torch.Tensor:
+    """Place the real views' backbone outputs ``(N_real, ...)`` into the ``(B*V, ...)`` layout, zeros in padded slots.
+
+    ``real_views`` is the flattened ``(B*V,)`` view mask the outputs were selected with.
+    """
+    full = values.new_zeros((real_views.shape[0], *values.shape[1:]))
+    full[real_views] = values
+    return full
 
 
 class CrossViewAttention(nn.Module):
@@ -367,6 +384,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         cross_attention_dropout: float = 0.1,
         use_gt_camera_init: bool = False,
         backbone_chunk_size: Optional[int] = None,
+        legacy_view_padding: bool = False,
         **kwargs,
     ):
         """
@@ -386,6 +404,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             backbone_chunk_size: Max images to process through backbone at once.
                 None = all at once (default). Set to e.g. 6 to reduce peak VRAM
                 when using many views and/or large input resolutions.
+            legacy_view_padding: Temporary (issue #134). True reproduces the pre-#132 handling of padded view slots
+                in mixed-view-count batches: the zero images go through the backbone and the decoder attends to
+                them. For legacy checkpoints only, until they are replaced.
             **kwargs: Additional arguments passed to parent SMILImageRegressor
         """
         # Initialize parent single-view regressor
@@ -396,6 +417,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         self.num_canonical_cameras = len(self.canonical_camera_order) if self.canonical_camera_order else max_views
         self.use_gt_camera_init = use_gt_camera_init
         self.backbone_chunk_size = backbone_chunk_size
+        self.legacy_view_padding = legacy_view_padding
 
         # Cross-attention feature fusion
         self.view_fusion = MultiViewFeatureFusion(
@@ -448,7 +470,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             camera_indices: Tensor of canonical camera indices for each view
                            Shape: (batch_size, num_views) with values in [0, num_canonical_cameras)
             view_mask: Optional boolean mask indicating valid views
-                      Shape: (batch_size, num_views), True = valid view
+                      Shape: (batch_size, num_views), True = valid view. Padded
+                      slots (False) skip the backbone and are masked out of the
+                      cross-view attention and the decoder.
 
         Returns:
             Dictionary containing:
@@ -458,25 +482,35 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         batch_size = images_per_view[0].size(0)
         num_views = len(images_per_view)
 
-        # =================== Backbone pass for all views ===================
+        # =================== Backbone pass for all real views ===================
         # Stack all views: List of (B, C, H, W) -> (B, V, C, H, W) -> (B*V, C, H, W)
         all_images = torch.stack(images_per_view, dim=1)  # (B, V, C, H, W)
         B, V, C, H, W = all_images.shape
         all_images_flat = all_images.view(B * V, C, H, W)  # (B*V, C, H, W)
 
+        # Padded view slots (samples with fewer views than the batch's largest)
+        # skip the backbone; their features are zeros, which every later stage
+        # masks out.
+        real_views = None
+        if view_mask is not None and not self.legacy_view_padding and not bool(view_mask.all()):
+            real_views = view_mask.reshape(B * V)
+            all_images_flat = all_images_flat[real_views]  # (N_real, C, H, W)
+        num_images = all_images_flat.shape[0]
+
         # Backbone forward pass — optionally chunked to reduce peak VRAM.
         # When backbone_chunk_size is set, we process images in smaller batches
-        # through the backbone and concatenate results. This is mathematically
-        # equivalent to processing all at once since the backbone is per-image.
+        # through the backbone and concatenate results. For LayerNorm (ViT)
+        # backbones that equals processing all at once; BatchNorm backbones
+        # (ResNet, UNet) normalise each chunk with its own statistics in train mode.
         use_spatial = self.head_type == "transformer_decoder" and hasattr(self.backbone, "forward_with_spatial")
         chunk = self.backbone_chunk_size
 
-        patch_tokens = None
-        if chunk is not None and chunk < B * V:
+        all_patches = None
+        if chunk is not None and chunk < num_images:
             # Chunked backbone forward to reduce peak VRAM
             feat_chunks = []
             patch_chunks = [] if use_spatial else None
-            for i in range(0, B * V, chunk):
+            for i in range(0, num_images, chunk):
                 imgs_chunk = all_images_flat[i : i + chunk]
                 if use_spatial:
                     f, p = self.backbone.forward_with_spatial(imgs_chunk)
@@ -487,18 +521,22 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             all_features = torch.cat(feat_chunks, dim=0)
             if use_spatial:
                 all_patches = torch.cat(patch_chunks, dim=0)
-                _spatial_dim = (
-                    self.backbone.get_spatial_dim() if hasattr(self.backbone, "get_spatial_dim") else self.feature_dim
-                )
-                patch_tokens = all_patches.view(B, V, -1, _spatial_dim)
         elif use_spatial:
             all_features, all_patches = self.backbone.forward_with_spatial(all_images_flat)
+        else:
+            all_features = self.backbone(all_images_flat)  # (num_images, feature_dim)
+
+        if real_views is not None:
+            all_features = _scatter_real_views(all_features, real_views)  # (B*V, feature_dim)
+            if all_patches is not None:
+                all_patches = _scatter_real_views(all_patches, real_views)  # (B*V, P, spatial_dim)
+
+        patch_tokens = None
+        if all_patches is not None:
             _spatial_dim = (
                 self.backbone.get_spatial_dim() if hasattr(self.backbone, "get_spatial_dim") else self.feature_dim
             )
             patch_tokens = all_patches.view(B, V, -1, _spatial_dim)  # (B, V, P, spatial_dim)
-        else:
-            all_features = self.backbone(all_images_flat)  # (B*V, feature_dim)
 
         # Reshape back to (B, V, feature_dim)
         stacked_features = all_features.view(B, V, -1)
@@ -572,7 +610,8 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                       (transformer_decoder with multiview context).
             batch_size: Batch size.
             view_mask: Optional ``(B, V)`` boolean mask for valid views.  Only
-                       used when features is 3-D (transformer_decoder path).
+                       used when features is 3-D (transformer_decoder path), where
+                       the decoder's cross-attention ignores the padded views.
             patch_tokens: Optional ``(B, V, P, D)`` per-view ViT patch tokens.
                           When provided, used as spatial cross-attention context
                           instead of the V fused CLS tokens.
@@ -662,6 +701,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
 
         elif self.head_type == "transformer_decoder":
             # Use transformer decoder for body params.
+            spatial_mask = None
             if features.dim() == 3:
                 # Multiview: features is (B, V, D) — fused CLS tokens
 
@@ -683,7 +723,10 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
 
                 # Cross-attention context: use per-view patch tokens when
                 # available (rich spatial detail), else fall back to V fused
-                # CLS tokens.
+                # CLS tokens. The tokens of padded view slots (samples with
+                # fewer views than the batch's largest) are masked out, so a
+                # sample's prediction does not depend on its batch.
+                padded = view_mask is not None and not self.legacy_view_padding and not bool(view_mask.all())
                 if patch_tokens is not None and camera_indices is not None:
                     # Add view identity so the decoder knows which view each
                     # spatial patch came from: (B, V, D) → broadcast over P
@@ -691,14 +734,18 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     spatial_feats = patch_tokens + view_emb.unsqueeze(2)  # (B, V, P, D)
                     Bp, Vp, P, D = spatial_feats.shape
                     spatial_feats = spatial_feats.reshape(Bp, Vp * P, D)  # (B, V*P, D)
+                    if padded:
+                        spatial_mask = view_mask.unsqueeze(-1).expand(Bp, Vp, P).reshape(Bp, Vp * P)
                 else:
                     spatial_feats = features  # (B, V, D) — one token per view
+                    if padded:
+                        spatial_mask = view_mask
             else:
                 # Single-view / already-pooled fallback: (B, D)
                 spatial_feats = features.unsqueeze(1)  # (B, 1, D)
                 global_feats = features
 
-            params = self.transformer_head(global_feats, spatial_feats)
+            params = self.transformer_head(global_feats, spatial_feats, spatial_mask)
 
             # Handle scale/trans mode
             if self.scale_trans_mode == "entangled_with_betas":
@@ -823,9 +870,13 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 "cam_trans": 0.0,
                 "joint_angle_regularization": 0.0001,  # Penalty for large joint angles
                 "joint_limit_regularization": 0.0,  # Issue #56: hinge penalty vs authored per-joint limits (off by default)
+                "joint_twist_regularization": 0.0,  # Hinge on axial bone twist beyond joint_twist_free_deg (labels cannot see it)
                 "limb_scale_regularization": 0.01,  # Penalty for deviations from scale=1 (log_beta_scales)
                 "limb_trans_regularization": 0.1,  # Heavy penalty for translation changes (betas_trans)
                 "triangulation_consistency": 0.0,  # Triangulate GT 2D keypoints with predicted cameras, compare to predicted 3D
+                "silhouette": 0.0,  # Masked soft-IoU vs per-view silhouette targets (needs a silhouette sidecar)
+                "scale_consistency": 0.0,  # Per-session constant per-joint scales / mesh scale (one animal)
+                "scale_symmetry": 0.0,  # Left/right paired joints share their per-joint scales
             }
 
         batch_size = predicted_params["global_rot"].shape[0]
@@ -894,6 +945,12 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             joint_limit_reg = self._joint_limit_penalty(predicted_params["joint_rot"])
             loss_components["joint_limit_regularization"] = joint_limit_reg
             total_loss = total_loss + loss_weights["joint_limit_regularization"] * joint_limit_reg
+
+        # Axial twist about the rest bone direction: see SMILImageRegressor._joint_twist_penalty.
+        if loss_weights.get("joint_twist_regularization", 0) > 0 and "joint_rot" in predicted_params:
+            joint_twist_reg = self._joint_twist_penalty(predicted_params["joint_rot"])
+            loss_components["joint_twist_regularization"] = joint_twist_reg
+            total_loss = total_loss + loss_weights["joint_twist_regularization"] * joint_twist_reg
 
         # Betas loss
         if body_targets.get("betas") is not None and loss_weights.get("betas", 0) > 0:
@@ -1000,6 +1057,29 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             trans_reg = torch.mean(betas_trans_joint**2)
             loss_components["limb_trans_regularization"] = trans_reg
             total_loss = total_loss + loss_weights["limb_trans_regularization"] * trans_reg
+
+        # Per-subject scale consistency and left/right symmetry of the per-joint log scales (per-joint values only,
+        # i.e. 'separate' mode without the PCA transformation).
+        w_cons, w_sym = loss_weights.get("scale_consistency", 0), loss_weights.get("scale_symmetry", 0)
+        if (w_cons > 0 or w_sym > 0) and "log_beta_scales" in predicted_params and self.scale_trans_mode == "separate":
+            use_pca = TrainingConfig.get_scale_trans_config().get("separate", {}).get("use_pca_transformation", True)
+            if not use_pca:
+                log_scales = predicted_params["log_beta_scales"].reshape(batch_size, -1, 3)
+                if w_cons > 0:
+                    log_ms = None
+                    if self.allow_mesh_scaling and "mesh_scale" in predicted_params:
+                        log_ms = torch.log(predicted_params["mesh_scale"].reshape(batch_size, 1).clamp_min(1e-8))
+                    sessions = [str(td.get("session_name", "")) for td in target_data]
+                    cons = self._scale_consistency_loss(log_scales, log_ms, sessions)
+                    loss_components["scale_consistency"] = cons
+                    total_loss = total_loss + w_cons * cons
+                pairs = self._lr_joint_pairs()
+                if w_sym > 0 and pairs:
+                    li = torch.tensor([p[0] for p in pairs], device=log_scales.device)
+                    ri = torch.tensor([p[1] for p in pairs], device=log_scales.device)
+                    sym = ((log_scales[:, li] - log_scales[:, ri]) ** 2).mean()
+                    loss_components["scale_symmetry"] = sym
+                    total_loss = total_loss + w_sym * sym
 
         # =================== BATCHED 2D KEYPOINT LOSS (OPTIMIZED) ===================
         # This is the core multi-view loss: project 3D keypoints to each view using
@@ -1263,6 +1343,16 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         # No valid joints in batch
                         loss_components["keypoint_3d"] = torch.tensor(0.0, device=self.device, requires_grad=True)
 
+        # =================== SILHOUETTE LOSS ===================
+        if loss_weights.get("silhouette", 0) > 0:
+            sil_loss, sil_iou = self._compute_silhouette_loss(predicted_params, target_data, num_views, view_mask)
+            if sil_loss is not None and torch.isfinite(sil_loss):
+                loss_components["silhouette"] = sil_loss
+                loss_components["silhouette_iou"] = sil_iou
+                total_loss = total_loss + loss_weights["silhouette"] * sil_loss
+            elif sil_loss is not None:
+                print("Warning: Non-finite silhouette loss detected, skipping")
+
         # IEF intermediate keypoint supervision
         # Runs each non-final IEF prediction through the body model to get 3D
         # joints, then computes the same 2D/3D keypoint losses that supervise the
@@ -1276,6 +1366,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             n_iters = len(hist.get("pose", []))
             global_rot_dim = 6 if self.rotation_representation == "6d" else 3
             rot_per_joint = 6 if self.rotation_representation == "6d" else 3
+            ief_total = torch.zeros((), device=self.device)  # weighted sum of the intermediate terms
 
             for i in range(n_iters - 1):  # skip final iter — already supervised above
                 w = ief_w * (i + 1) / n_iters  # linear ramp: earlier iters get lower weight
@@ -1304,7 +1395,9 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                     else:
                         iter_body_params["betas_trans"] = raw_jtrans
                 if "mesh_scale" in hist:
-                    iter_body_params["mesh_scale"] = hist["mesh_scale"][i]
+                    # The decoder's iteration history holds log mesh scales (only the final output is
+                    # exponentiated, transformer_decoder.py); _predict_canonical_joints_3d needs the linear scale.
+                    iter_body_params["mesh_scale"] = torch.exp(hist["mesh_scale"][i])
 
                 # Forward through body model to get intermediate 3D joints
                 try:
@@ -1342,7 +1435,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                                 wvc = combined_mask.sum().float() * 3 + 1e-8
                             ief_kp3d = masked_loss.sum() / wvc
                             if torch.isfinite(ief_kp3d):
-                                total_loss = total_loss + w * loss_weights["keypoint_3d"] * ief_kp3d
+                                ief_total = ief_total + w * loss_weights["keypoint_3d"] * ief_kp3d
 
                 # 2D keypoint loss on intermediate predictions (project using final cameras)
                 if all_kp_data is not None and loss_weights.get("keypoint_2d", 0) > 0:
@@ -1363,7 +1456,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                             joint_weights=joint_importance_weights,
                         )
                         if torch.isfinite(ief_kp2d):
-                            total_loss = total_loss + w * loss_weights["keypoint_2d"] * ief_kp2d
+                            ief_total = ief_total + w * loss_weights["keypoint_2d"] * ief_kp2d
                     except Exception:
                         pass  # projection can fail for degenerate intermediate cameras
 
@@ -1378,19 +1471,23 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         body_targets["joint_rot"].reshape(batch_size, -1),
                         body_targets.get("joint_rot_mask"),
                     )
-                    total_loss = total_loss + w * loss_weights["joint_rot"] * ief_loss
+                    ief_total = ief_total + w * loss_weights["joint_rot"] * ief_loss
 
                 if body_targets.get("betas") is not None and loss_weights.get("betas", 0) > 0:
                     mask = body_targets.get("betas_mask")
                     if mask is not None and mask.any():
                         ief_loss = F.mse_loss(iter_betas[mask], body_targets["betas"][mask])
-                        total_loss = total_loss + w * loss_weights["betas"] * ief_loss
+                        ief_total = ief_total + w * loss_weights["betas"] * ief_loss
 
                 if body_targets.get("trans") is not None and loss_weights.get("trans", 0) > 0:
                     mask = body_targets.get("trans_mask")
                     if mask is not None and mask.any():
                         ief_loss = F.mse_loss(iter_trans[mask], body_targets["trans"][mask])
-                        total_loss = total_loss + w * loss_weights["trans"] * ief_loss
+                        ief_total = ief_total + w * loss_weights["trans"] * ief_loss
+
+            total_loss = total_loss + ief_total
+            # Logged like the other components: the loss weight times this value is its share of the total
+            loss_components["ief_intermediate"] = ief_total / ief_w
 
         if return_components:
             return total_loss, loss_components
@@ -1537,7 +1634,15 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         This mirrors the SMAL forward + scaling/trans logic used in `_render_keypoints_with_camera`,
         but returns 3D joints instead of rendering/projecting to 2D.
         """
-        body_params["global_rot"].shape[0]
+        _, joints = self._body_model_world(body_params)
+        return joints[:, config.CANONICAL_MODEL_JOINTS].float()  # (B, J, 3)
+
+    def _body_model_world(self, body_params: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """One SMAL forward with the scaling/translation every keypoint loss uses.
+
+        Returns world-space vertices (B, V, 3) and all model joints (B, J_all, 3); vertices get exactly the
+        transform the joints get (mesh scale about the root joint, then translation).
+        """
 
         # Convert rotations to axis-angle format for SMAL model
         if self.rotation_representation == "6d":
@@ -1577,9 +1682,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                         betas_trans_val = betas_trans_joint
                     except Exception as e:
                         # If conversion fails, log and fall back
-                        print(
-                            f"Warning: Failed to convert PCA weights to joint values in _predict_canonical_joints_3d: {e}"
-                        )
+                        print(f"Warning: Failed to convert PCA weights to joint values in _body_model_world: {e}")
                         betas_logscale = None
                         betas_trans_val = None
                 else:
@@ -1601,18 +1704,201 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
         )
 
         # Apply transformation consistent with `_render_keypoints_with_camera`
+        trans = body_params["trans"].unsqueeze(1)
+        root_joint = joints[:, 0:1, :]
         if self.use_ue_scaling:
-            root_joint = joints[:, 0:1, :]
-            joints = (joints - root_joint) * 10 + body_params["trans"].unsqueeze(1)
+            joints = (joints - root_joint) * 10 + trans
+            verts = (verts - root_joint) * 10 + trans
         elif self.allow_mesh_scaling and "mesh_scale" in body_params:
-            mesh_scale = body_params["mesh_scale"]
-            root_joint = joints[:, 0:1, :]
-            joints = (joints - root_joint) * mesh_scale.unsqueeze(-1) + body_params["trans"].unsqueeze(1)
+            mesh_scale = body_params["mesh_scale"].unsqueeze(-1)
+            joints = (joints - root_joint) * mesh_scale + trans
+            verts = (verts - root_joint) * mesh_scale + trans
         else:
-            joints = joints + body_params["trans"].unsqueeze(1)
+            joints = joints + trans
+            verts = verts + trans
+        return verts, joints
 
-        canonical_joints = joints[:, config.CANONICAL_MODEL_JOINTS]  # (B, J, 3)
-        return canonical_joints.float()
+    # ------------------------------------------------------------------ silhouettes
+    def _silhouette_settings(self) -> Dict[str, Any]:
+        """Render settings for the silhouette loss; the trainer sets ``silhouette_config`` from the config."""
+        cfg = {"render_size": 128, "sigma": 1e-5, "faces_per_pixel": 64, "camera": "gt", "cull_backfaces": False}
+        cfg.update(getattr(self, "silhouette_config", None) or {})
+        if cfg["camera"] not in ("gt", "pred"):
+            raise ValueError(f"silhouette camera must be 'gt' or 'pred', got {cfg['camera']!r}")
+        return cfg
+
+    def _silhouette_rasterizer(self, cfg: Dict[str, Any]):
+        """Cached soft-silhouette rasterizer and shader (kept out of the module registry, so state_dict is unchanged)."""
+        key = (int(cfg["render_size"]), float(cfg["sigma"]), int(cfg["faces_per_pixel"]), bool(cfg["cull_backfaces"]))
+        cache = self.__dict__.get("_silhouette_cache")
+        if cache is None or cache[0] != key:
+            settings = RasterizationSettings(
+                image_size=key[0],
+                blur_radius=float(np.log(1.0 / 1e-4 - 1.0) * key[1]),
+                faces_per_pixel=key[2],
+                bin_size=0,  # naive rasterization: coarse-to-fine bins overflow on this dense mesh
+                cull_backfaces=key[3],
+            )
+            cache = (
+                key,
+                MeshRasterizer(raster_settings=settings),
+                SoftSilhouetteShader(BlendParams(sigma=key[1], gamma=1e-4)),
+            )
+            self.__dict__["_silhouette_cache"] = cache
+        return cache[1], cache[2]
+
+    def _render_silhouette_alpha(
+        self, meshes: Meshes, cameras: FoVPerspectiveCameras, cfg: Dict[str, Any]
+    ) -> torch.Tensor:
+        """Soft silhouettes (N, S, S), always in fp32: the PyTorch3D rasterizer has no half-precision kernel, and
+        under autocast (use_mixed_precision) its camera transform would hand it fp16 vertices."""
+        rasterizer, shader = self._silhouette_rasterizer(cfg)
+        with torch.autocast(device_type=meshes.device.type, enabled=False):
+            return shader(rasterizer(meshes, cameras=cameras), meshes, cameras=cameras)[..., 3]
+
+    @staticmethod
+    def _soft_iou_loss(
+        pred: torch.Tensor, target: torch.Tensor, valid: torch.Tensor, eps: float = 1e-6
+    ) -> torch.Tensor:
+        """Per-view 1 - soft IoU over valid pixels; (N, S, S) inputs in [0, 1] -> (N,). Empty prediction and
+        target count as a perfect match."""
+        inter = (pred * target * valid).flatten(1).sum(1)
+        union = ((pred + target - pred * target) * valid).flatten(1).sum(1)
+        iou = torch.where(union > eps, inter / union.clamp_min(eps), torch.ones_like(union))
+        return 1.0 - iou
+
+    def _compute_silhouette_loss(
+        self,
+        predicted_params: Dict[str, Any],
+        target_data: List[Dict[str, Any]],
+        num_views: int,
+        view_mask: Optional[torch.Tensor],
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Masked soft-IoU between the rendered mesh and per-view silhouette targets.
+
+        Targets come from ``y_data["silhouette_target"]`` (num_views, R, R) uint8 (0 background, 1 animal,
+        255 ignore) with ``y_data["silhouette_valid"]`` (num_views,) bool, in the same view order as the images.
+        All valid views of the batch are rendered in one call. With camera 'gt' the calibrated cameras are used
+        (the camera heads get no silhouette gradient); 'pred' uses the predicted cameras, detached.
+        Returns (mean loss, mean IoU detached), or (None, None) when the batch has no usable target.
+        """
+        cfg = self._silhouette_settings()
+        size = int(cfg["render_size"])
+        pairs, targets = [], []
+        for b, td in enumerate(target_data):
+            tgt, valid = td.get("silhouette_target"), td.get("silhouette_valid")
+            if tgt is None or valid is None:
+                continue
+            for v in range(min(num_views, len(valid))):
+                if bool(valid[v]) and (view_mask is None or bool(view_mask[b, v])):
+                    pairs.append((b, v))
+                    targets.append(np.asarray(tgt[v]))
+        if not pairs:
+            return None, None
+
+        gt_cam = self._collect_all_view_camera_data(target_data, num_views)
+        if cfg["camera"] == "gt":
+            if gt_cam is None:
+                return None, None
+            keep = [i for i, (b, v) in enumerate(pairs) if bool(gt_cam["mask"][b, v])]
+            pairs, targets = [pairs[i] for i in keep], [targets[i] for i in keep]
+            if not pairs:
+                return None, None
+            fov, rot, trans = gt_cam["fov"], gt_cam["cam_rot"], gt_cam["cam_trans"]
+        else:
+            batch = len(target_data)
+            fov = torch.stack([f.reshape(batch) for f in predicted_params["fov_per_view"]], 1).detach()
+            rot = torch.stack(predicted_params["cam_rot_per_view"], 1).detach()
+            trans = torch.stack(predicted_params["cam_trans_per_view"], 1).detach()
+        aspect = gt_cam["aspect_ratio"] if gt_cam is not None else torch.ones_like(fov)
+        bi = torch.tensor([b for b, _ in pairs], device=self.device)
+        vi = torch.tensor([v for _, v in pairs], device=self.device)
+
+        verts, _ = self._body_model_world(predicted_params)  # (B, nV, 3)
+        faces = self.smal_model.faces
+        meshes = Meshes(verts=verts[bi].float(), faces=faces.unsqueeze(0).expand(len(pairs), -1, -1))
+        cameras = FoVPerspectiveCameras(
+            device=self.device,
+            R=rot[bi, vi].float(),
+            T=trans[bi, vi].float(),
+            fov=fov[bi, vi].float(),
+            aspect_ratio=aspect[bi, vi].float(),
+            znear=self.renderer.DEFAULT_ZNEAR if hasattr(self.renderer, "DEFAULT_ZNEAR") else 0.001,
+            zfar=self.renderer.DEFAULT_ZFAR if hasattr(self.renderer, "DEFAULT_ZFAR") else 1000.0,
+        )
+        alpha = self._render_silhouette_alpha(meshes, cameras, cfg)  # (N, S, S)
+
+        tgt = torch.from_numpy(np.stack(targets)).to(self.device)  # (N, R, R) uint8
+        animal = (tgt == 1).float().unsqueeze(1)
+        ignore = (tgt == 255).float().unsqueeze(1)
+        if tgt.shape[-1] != size:
+            animal = F.interpolate(animal, size=(size, size), mode="area")
+            ignore = F.adaptive_max_pool2d(ignore, (size, size))
+        per_view = self._soft_iou_loss(alpha, animal[:, 0], 1.0 - ignore[:, 0])
+        return per_view.mean(), (1.0 - per_view.detach()).mean()
+
+    # ------------------------------------------------------------------ shape regularisation
+    def _lr_joint_pairs(self) -> List[Tuple[int, int]]:
+        """(left, right) joint index pairs from the model joint names ('_L' / '_R' tokens)."""
+        pairs = self.__dict__.get("_lr_pairs")
+        if pairs is None:
+            idx = {n: i for i, n in enumerate(config.joint_names)}
+            pairs = []
+            for name, i in idx.items():
+                tokens = name.split("_")
+                if "L" in tokens:
+                    partner = "_".join("R" if t == "L" else t for t in tokens)
+                    if partner in idx:
+                        pairs.append((i, idx[partner]))
+            self.__dict__["_lr_pairs"] = pairs
+        return pairs
+
+    def _scale_consistency_loss(
+        self,
+        log_scales: torch.Tensor,
+        log_mesh_scale: Optional[torch.Tensor],
+        sessions: List[str],
+        momentum: float = 0.99,
+        bound: float = 10.0,
+    ) -> torch.Tensor:
+        """One animal has one set of proportions: penalise each frame's per-joint log scales (and log mesh scale)
+        for deviating from a running per-session mean. The means are detached EMA state, created and updated in
+        training mode only (validation measures against them, or against its own batch mean for an unseen session)
+        and not saved with the model (they restart from the first batch after a reload). Frames with a non-finite
+        or out-of-range (|log| >= bound) scale are left out of the term and the mean, so one diverged prediction
+        cannot poison the mean for the rest of the run."""
+        # In fp32: under autocast an MLP head's scales are fp16, where a 1% EMA update rounds away and the mean stalls
+        log_scales = log_scales.float()
+        log_mesh_scale = log_mesh_scale.float() if log_mesh_scale is not None else None
+        ema = self.__dict__.setdefault("_scale_ema", {})
+        ok = torch.isfinite(log_scales).all(-1).all(-1) & (log_scales.abs() < bound).all(-1).all(-1)
+        if log_mesh_scale is not None:
+            ok &= torch.isfinite(log_mesh_scale).all(-1) & (log_mesh_scale.abs() < bound).all(-1)
+        terms = []
+        for session in sorted(set(sessions)):
+            sel = torch.tensor([s == session for s in sessions], device=log_scales.device) & ok
+            if not sel.any():
+                continue
+            ls = log_scales[sel]
+            lm = log_mesh_scale[sel] if log_mesh_scale is not None else None
+            mu_s, mu_m = ema.get(session, (None, None))
+            if mu_s is None:  # first batch of this session
+                mu_s = ls.detach().mean(0)
+            if lm is not None and mu_m is None:  # first batch of this session that carries a mesh scale
+                mu_m = lm.detach().mean(0)
+            term = ((ls - mu_s) ** 2).mean()
+            if lm is not None:
+                term = term + ((lm - mu_m) ** 2).mean()
+            terms.append(term * sel.sum())
+            if self.training:
+                with torch.no_grad():
+                    ema[session] = (
+                        momentum * mu_s + (1 - momentum) * ls.mean(0),
+                        momentum * mu_m + (1 - momentum) * lm.mean(0) if lm is not None else mu_m,
+                    )
+        if not terms:
+            return torch.zeros((), device=log_scales.device)
+        return torch.stack(terms).sum() / ok.sum()
 
     def _compute_world_space_joints(self, body_params: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
@@ -2483,7 +2769,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
 
                     sample_view_mask.append(True)
                 else:
-                    # Pad with zeros
+                    # Pad with zeros (forward_multiview skips padded slots in the backbone)
                     dummy_img = torch.zeros(
                         3, self.input_resolution, self.input_resolution, dtype=torch.float32, device=self.device
                     )
