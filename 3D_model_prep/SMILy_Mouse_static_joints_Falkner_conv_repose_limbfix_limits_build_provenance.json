@@ -1,0 +1,192 @@
+{
+ "source_pkl": "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs_limits.pkl",
+ "mode": "build",
+ "author_limits": "from_pkl",
+ "addon_version": [
+  2,
+  2,
+  0
+ ],
+ "blender": "4.2.0",
+ "pivot_plan": {
+  "path": "3D_model_prep/mouse_limbfix/plans/pivot_plan_v5.json",
+  "source_pkl": "3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv_repose_hind_legs_limits.pkl",
+  "pivots": {
+   "Eye_L": [
+    0.10716548461469945,
+    -0.4649640883091234,
+    0.315460652280182
+   ],
+   "Eye_R": [
+    -0.10718120442557486,
+    -0.4649785502011361,
+    0.31546659437921387
+   ],
+   "ulna-radius_L": [
+    0.2426679365068485,
+    -0.014061769814367131,
+    0.17849007716994478
+   ],
+   "tibia_L": [
+    0.21908824145793915,
+    0.5673847794532776,
+    0.21354472637176514
+   ],
+   "humerus_L": [
+    0.15237446352717054,
+    -0.0870385272977521,
+    0.30443618966417163
+   ],
+   "ulna-radius_R": [
+    -0.2426679365068485,
+    -0.014061769814367131,
+    0.17849007716994478
+   ],
+   "tibia_R": [
+    -0.21908824145793915,
+    0.5673847794532776,
+    0.21354472637176514
+   ],
+   "humerus_R": [
+    -0.15237446352717054,
+    -0.0870385272977521,
+    0.30443618966417163
+   ]
+  },
+  "reskin": [
+   {
+    "parent": "humerus_L",
+    "joint": "ulna-radius_L",
+    "child": "paw_L",
+    "half_width": 0.04,
+    "radius": null
+   },
+   {
+    "parent": "tharocic-vertebrae",
+    "joint": "humerus_L",
+    "child": "ulna-radius_L",
+    "half_width": 0.06,
+    "radius": 0.07
+   },
+   {
+    "parent": "femur_L",
+    "joint": "tibia_L",
+    "child": "Foot_L",
+    "half_width": 0.06,
+    "radius": null
+   },
+   {
+    "parent": "humerus_R",
+    "joint": "ulna-radius_R",
+    "child": "paw_R",
+    "half_width": 0.04,
+    "radius": null
+   },
+   {
+    "parent": "tharocic-vertebrae",
+    "joint": "humerus_R",
+    "child": "ulna-radius_R",
+    "half_width": 0.06,
+    "radius": 0.07
+   },
+   {
+    "parent": "femur_R",
+    "joint": "tibia_R",
+    "child": "Foot_R",
+    "half_width": 0.06,
+    "radius": null
+   }
+  ],
+  "max_weights": 3,
+  "rules": {
+   "elbow": "source forearm line, forearm/upper-arm = 0.72 with the source shoulder (t = 0.5653 from the wrist)",
+   "knee": "tibia pivot of 3D_model_prep/SMILy_Mouse_static_joints_Falkner_conv.pkl",
+   "eyes": "Eye_L/R at the centre of the mesh's eyeball (sphere fit around each eye's attached vertices; = _conv eyes)",
+   "shoulder": "centroid of |S-E| = 0.74 x femur (0.1738 u), abduction <= 35.0 deg, retraction (15.0, 55.0) deg, depth (0.01, 0.05) u"
+  },
+  "checks": {
+   "shoulder_L_depth_u": 0.021045092549042285,
+   "shoulder_R_depth_u": 0.021045098138806246,
+   "elbow_L_depth_u": 0.02359621569144446,
+   "knee_L_depth_u": 0.027788027291620093,
+   "humerus_u": 0.17129197776874744,
+   "humerus_over_femur": 0.7291542842371069,
+   "radius_over_femur": 0.6412266798028246,
+   "tibia_over_femur": 1.2209965032273202,
+   "feasible_shoulder_directions": 303,
+   "Eye_L_eyeball_radius_u": 0.04150691293457792,
+   "Eye_L_moved_u": 0.07337233339336617,
+   "Eye_R_eyeball_radius_u": 0.04150039395086381,
+   "Eye_R_moved_u": 0.07321064912984157
+  }
+ },
+ "limbfix": {
+  "humerus_L|ulna-radius_L": {
+   "region_verts": 564,
+   "changed_verts": 334,
+   "hard_assigned_verts": 0,
+   "plane_normal": [
+    0.39911365509033203,
+    -0.0093128252774477,
+    -0.9168541431427002
+   ],
+   "child_radius_units": 0.029818059792434792
+  },
+  "tharocic-vertebrae|humerus_L": {
+   "region_verts": 1237,
+   "changed_verts": 361,
+   "hard_assigned_verts": 87,
+   "plane_normal": [
+    0.6487244963645935,
+    -0.2597619891166687,
+    -0.7153182029724121
+   ],
+   "child_radius_units": 0.07
+  },
+  "femur_L|tibia_L": {
+   "region_verts": 745,
+   "changed_verts": 288,
+   "hard_assigned_verts": 0,
+   "plane_normal": [
+    0.307463675737381,
+    0.12751464545726776,
+    -0.9429773092269897
+   ],
+   "child_radius_units": 0.0678354286644203
+  },
+  "humerus_R|ulna-radius_R": {
+   "region_verts": 552,
+   "changed_verts": 312,
+   "hard_assigned_verts": 0,
+   "plane_normal": [
+    -0.39911264181137085,
+    -0.009313047863543034,
+    -0.9168546199798584
+   ],
+   "child_radius_units": 0.02981811121585245
+  },
+  "tharocic-vertebrae|humerus_R": {
+   "region_verts": 1437,
+   "changed_verts": 357,
+   "hard_assigned_verts": 78,
+   "plane_normal": [
+    -0.6487244367599487,
+    -0.2597620487213135,
+    -0.7153182625770569
+   ],
+   "child_radius_units": 0.07
+  },
+  "femur_R|tibia_R": {
+   "region_verts": 756,
+   "changed_verts": 307,
+   "hard_assigned_verts": 0,
+   "plane_normal": [
+    -0.30746424198150635,
+    0.1275142878293991,
+    -0.9429770708084106
+   ],
+   "child_radius_units": 0.06759982359276555
+  }
+ },
+ "limit_constraints_from_addon_import": 39
+}
