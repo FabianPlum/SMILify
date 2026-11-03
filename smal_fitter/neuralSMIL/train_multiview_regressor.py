@@ -2797,10 +2797,12 @@ def main(config: dict):
             raise FileNotFoundError(f"init_checkpoint not found: {config['init_checkpoint']}")
         if rank == 0:
             print(f"Initialising weights from {config['init_checkpoint']} (fresh optimizer and LR schedule, epoch 0)")
-        init_ckpt = torch.load(config["init_checkpoint"], map_location=device)
+        # On the CPU and freed after loading: a checkpoint (with its optimizer state) left on the GPU stays for the whole run
+        init_ckpt = torch.load(config["init_checkpoint"], map_location="cpu")
         if rank == 0:
             _warn_init_mismatch(init_ckpt, config, model)
         load_checkpoint(config["init_checkpoint"], model, None, None, device, checkpoint=init_ckpt)
+        del init_ckpt
 
     # Training loop
     if rank == 0:
