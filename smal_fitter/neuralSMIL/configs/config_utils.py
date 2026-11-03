@@ -7,7 +7,6 @@ Supports JSON config files with automatic curriculum key conversion.
 
 from typing import Dict, Any, Optional, Union
 import json
-import warnings
 from pathlib import Path
 from dataclasses import asdict, fields, is_dataclass
 
@@ -99,8 +98,8 @@ def resolve_train_sub_sampling_alias(block: Dict[str, Any], prefix: str = "datas
     """Deprecated alias, remove with its tracking issue: dataset_fraction was renamed to train_sub_sampling.
 
     Returns a copy of ``block`` (a JSON dataset block, a legacy flat config or ``vars(args)``) with a set
-    ``dataset_fraction`` moved to ``train_sub_sampling`` and a FutureWarning; an unset (None) one is dropped. Both set
-    raises ValueError. ``prefix`` is how the names appear in the messages ("dataset.", "" or "--").
+    ``dataset_fraction`` moved to ``train_sub_sampling`` and a printed WARNING; an unset (None) one is dropped. Both
+    set raises ValueError. ``prefix`` is how the names appear in the messages ("dataset.", "" or "--").
     """
     if "dataset_fraction" not in block:
         return block
@@ -112,11 +111,9 @@ def resolve_train_sub_sampling_alias(block: Dict[str, Any], prefix: str = "datas
                 f"{prefix}dataset_fraction and {prefix}train_sub_sampling are both set; {prefix}dataset_fraction is "
                 f"the deprecated name of {prefix}train_sub_sampling, keep only {prefix}train_sub_sampling"
             )
-        warnings.warn(
-            f"{prefix}dataset_fraction is deprecated and will be removed; use {prefix}train_sub_sampling "
-            "(same meaning: the fraction of the training split drawn per epoch)",
-            FutureWarning,
-            stacklevel=2,
+        print(
+            f"WARNING: {prefix}dataset_fraction is deprecated and will be removed; use {prefix}train_sub_sampling "
+            "(same meaning: the fraction of the training split drawn per epoch)"
         )
         block["train_sub_sampling"] = value
     return block

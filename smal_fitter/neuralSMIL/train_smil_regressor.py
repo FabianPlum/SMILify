@@ -2383,6 +2383,13 @@ if __name__ == "__main__":
         help="Path to dataset (overrides config default). Can be a directory or HDF5 file.",
     )
     parser.add_argument(
+        "--train_sub_sampling",
+        type=float,
+        default=None,
+        help="Fraction of the training split drawn per epoch (0-1], a fresh random subset each epoch; validation and "
+        "test are never subsampled (default: from config, 1.0). Useful for large datasets.",
+    )
+    parser.add_argument(
         "--config",
         type=str,
         default=None,
@@ -2441,6 +2448,9 @@ if __name__ == "__main__":
         if args.data_path is not None:
             cli_overrides["dataset"] = cli_overrides.get("dataset", {})
             cli_overrides["dataset"]["data_path"] = args.data_path
+        if args.train_sub_sampling is not None:
+            cli_overrides["dataset"] = cli_overrides.get("dataset", {})
+            cli_overrides["dataset"]["train_sub_sampling"] = args.train_sub_sampling
         if split_overrides:
             cli_overrides.setdefault("dataset", {}).update(split_overrides)
         if args.scale_trans_mode is not None:
@@ -2538,6 +2548,8 @@ if __name__ == "__main__":
                 config_override["model_config"] = {"backbone_name": args.backbone}
             if args.data_path is not None:
                 config_override["data_path"] = args.data_path
+        if args.train_sub_sampling is not None:
+            config_override["split_config"] = {"train_sub_sampling": args.train_sub_sampling}
 
         # Apply scale_trans_mode override directly to TrainingConfig
         if args.scale_trans_mode is not None:
