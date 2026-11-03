@@ -555,6 +555,14 @@ def filter_small_components(obj, min_faces=4):
     Removes every connected component (by face adjacency) with fewer than
     min_faces faces and keeps all others.
 
+    Only the faces of the removed components are deleted, together with their
+    edges and those of their vertices that no remaining face uses, so a
+    component that touches a kept one at a single vertex takes none of its
+    faces. Deleting those vertices also deletes the wire edges (edges without
+    faces) that use them. No other vertex is deleted, so a vertex that only
+    such a wire edge used stays as a loose vertex. Wire edges that use none of
+    those vertices stay, also where they touch a kept component.
+
     Args:
         obj (bpy.types.Object): The Blender object to process.
         min_faces (int): Minimum face count required for a component to survive.
@@ -569,7 +577,7 @@ def filter_small_components(obj, min_faces=4):
 
     unvisited = set(bm.faces)
     removed_components = 0
-    verts_to_remove = set()
+    faces_to_remove = []
 
     while unvisited:
         seed = unvisited.pop()
@@ -587,12 +595,18 @@ def filter_small_components(obj, min_faces=4):
 
         if len(component) < min_faces:
             removed_components += 1
-            for face in component:
-                verts_to_remove.update(face.verts)
+            faces_to_remove.extend(component)
 
-    if verts_to_remove:
-        bm.verts.ensure_lookup_table()
-        bmesh.ops.delete(bm, geom=list(verts_to_remove), context="VERTS")
+    if faces_to_remove:
+        removed_verts = {v for face in faces_to_remove for v in face.verts}
+        # Delete faces, not vertices: deleting a vertex also deletes every face of
+        # other components that uses it.
+        bmesh.ops.delete(bm, geom=faces_to_remove, context="FACES")
+        # FACES keeps a vertex that a wire edge (an edge without faces) still uses.
+        # Delete the removed faces' vertices that no face uses, with their wire edges.
+        leftover = [v for v in removed_verts if v.is_valid and not v.link_faces]
+        if leftover:
+            bmesh.ops.delete(bm, geom=leftover, context="VERTS")
         bmesh.update_edit_mesh(obj.data)
 
     bpy.ops.object.mode_set(mode="OBJECT")
