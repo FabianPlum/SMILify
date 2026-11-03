@@ -186,6 +186,7 @@ Example:
 |-------|------|---------|-------------|
 | `base_weights` | dict | *(see below)* | Initial loss weights applied from epoch 0. |
 | `curriculum_stages` | dict | *(see defaults)* | Epoch-to-weight-update mapping. Each stage partially overrides `base_weights` from that epoch onward. |
+| `joint_twist_free_deg` | float | `45.0` | Axial twist (deg) a bone may take before `joint_twist_regularization` applies. |
 
 #### Available loss terms
 
@@ -204,6 +205,8 @@ Example:
 | `keypoint_3d` | 3D keypoint error | 0.25 |
 | `silhouette` | Silhouette overlap loss | 0.0 |
 | `joint_angle_regularization` | Joint angle prior/regularization | 0.001 |
+| `joint_limit_regularization` | Hinge on joint rotations outside the model's authored per-joint limits (issue #56); the model pkl must carry `joint_limits`, else training stops at start-up. 0.15 in the mouse runs. | 0.0 |
+| `joint_twist_regularization` | Hinge on each bone's axial twist about its rest direction beyond `joint_twist_free_deg` (default 45°; keypoints cannot see twist); locked proxy leaves are skipped. 0.15 in the mouse runs. | 0.0 |
 | `limb_scale_regularization` | Limb scale regularization | 0.01 |
 | `limb_trans_regularization` | Limb translation regularization | 1.0 |
 | `triangulation_consistency` | Cross-view triangulation consistency (multi-view). **Disabled by default — see note below.** | 0.0 |

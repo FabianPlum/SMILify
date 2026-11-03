@@ -863,6 +863,7 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
                 "cam_trans": 0.0,
                 "joint_angle_regularization": 0.0001,  # Penalty for large joint angles
                 "joint_limit_regularization": 0.0,  # Issue #56: hinge penalty vs authored per-joint limits (off by default)
+                "joint_twist_regularization": 0.0,  # Hinge on axial bone twist beyond joint_twist_free_deg (labels cannot see it)
                 "limb_scale_regularization": 0.01,  # Penalty for deviations from scale=1 (log_beta_scales)
                 "limb_trans_regularization": 0.1,  # Heavy penalty for translation changes (betas_trans)
                 "triangulation_consistency": 0.0,  # Triangulate GT 2D keypoints with predicted cameras, compare to predicted 3D
@@ -934,6 +935,12 @@ class MultiViewSMILImageRegressor(SMILImageRegressor):
             joint_limit_reg = self._joint_limit_penalty(predicted_params["joint_rot"])
             loss_components["joint_limit_regularization"] = joint_limit_reg
             total_loss = total_loss + loss_weights["joint_limit_regularization"] * joint_limit_reg
+
+        # Axial twist about the rest bone direction: see SMILImageRegressor._joint_twist_penalty.
+        if loss_weights.get("joint_twist_regularization", 0) > 0 and "joint_rot" in predicted_params:
+            joint_twist_reg = self._joint_twist_penalty(predicted_params["joint_rot"])
+            loss_components["joint_twist_regularization"] = joint_twist_reg
+            total_loss = total_loss + loss_weights["joint_twist_regularization"] * joint_twist_reg
 
         # Betas loss
         if body_targets.get("betas") is not None and loss_weights.get("betas", 0) > 0:
