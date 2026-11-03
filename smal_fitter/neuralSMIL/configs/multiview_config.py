@@ -153,8 +153,9 @@ class MultiViewConfig(BaseTrainingConfig):
             "scale_trans_mode": self.scale_trans_beta.mode,
             "allow_mesh_scaling": self.mesh_scaling.allow_mesh_scaling,
             "mesh_scale_init": self.mesh_scaling.init_mesh_scale,
-            # Dataset fraction
-            "dataset_fraction": self.dataset.dataset_fraction,
+            # Training-split sub-sampling per epoch
+            "train_sub_sampling": self.dataset.train_sub_sampling,
+            "train_sub_sampling_by_session": dict(self.dataset.train_sub_sampling_by_session),
             # SMAL model configuration
             "shape_family": (
                 self.smal_model.shape_family

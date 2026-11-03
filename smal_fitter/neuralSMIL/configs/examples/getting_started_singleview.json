@@ -13,7 +13,7 @@
     "test_ratio": 0.1,
     "split_method": "random",
     "holdout_fold": null,
-    "dataset_fraction": 0.2,
+    "train_sub_sampling": 0.2,
 
     "from_multiview": true,
     "frame_convention": "camera_centric",

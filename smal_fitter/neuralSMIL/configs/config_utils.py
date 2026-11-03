@@ -94,6 +94,31 @@ def load_from_json(path: str) -> Dict[str, Any]:
     return config_dict
 
 
+def resolve_train_sub_sampling_alias(block: Dict[str, Any], prefix: str = "dataset.") -> Dict[str, Any]:
+    """Deprecated alias, remove with its tracking issue: dataset_fraction was renamed to train_sub_sampling.
+
+    Returns a copy of ``block`` (a JSON dataset block, a legacy flat config or ``vars(args)``) with a set
+    ``dataset_fraction`` moved to ``train_sub_sampling`` and a printed WARNING; an unset (None) one is dropped. Both
+    set raises ValueError. ``prefix`` is how the names appear in the messages ("dataset.", "" or "--").
+    """
+    if "dataset_fraction" not in block:
+        return block
+    block = dict(block)
+    value = block.pop("dataset_fraction")
+    if value is not None:
+        if block.get("train_sub_sampling") is not None:
+            raise ValueError(
+                f"{prefix}dataset_fraction and {prefix}train_sub_sampling are both set; {prefix}dataset_fraction is "
+                f"the deprecated name of {prefix}train_sub_sampling, keep only {prefix}train_sub_sampling"
+            )
+        print(
+            f"WARNING: {prefix}dataset_fraction is deprecated and will be removed; use {prefix}train_sub_sampling "
+            "(same meaning: the fraction of the training split drawn per epoch)"
+        )
+        block["train_sub_sampling"] = value
+    return block
+
+
 def _deep_merge_into_dataclass(target, overrides: Dict[str, Any]):
     """
     Recursively merge override dict into a dataclass instance.
@@ -181,6 +206,8 @@ def load_config(
     # Merge JSON overrides
     if json_config:
         clean = {k: v for k, v in json_config.items() if k != "mode"}
+        if isinstance(clean.get("dataset"), dict):
+            clean["dataset"] = resolve_train_sub_sampling_alias(clean["dataset"])
         _deep_merge_into_dataclass(config, clean)
 
     # Merge CLI overrides (highest priority)

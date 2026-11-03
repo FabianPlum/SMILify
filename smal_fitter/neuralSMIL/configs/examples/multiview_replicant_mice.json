@@ -19,7 +19,7 @@
     "train_ratio": 0.85,
     "val_ratio": 0.05,
     "test_ratio": 0.1,
-    "dataset_fraction": 1.0
+    "train_sub_sampling": 1.0
   },
 
   "model": {

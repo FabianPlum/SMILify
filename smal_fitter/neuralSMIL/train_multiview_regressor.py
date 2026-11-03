@@ -77,6 +77,7 @@ from smal_fitter.neuralSMIL.data_splits import (
     add_split_args,
     check_resume_split,
     fold_tag,
+    read_session_names,
     split_args_to_overrides,
     split_dataset,
     tag_output_dir,
@@ -91,6 +92,7 @@ from smal_fitter.neuralSMIL.configs import (
     save_config_json,
     apply_smal_file_override,
 )
+from smal_fitter.neuralSMIL.configs.config_utils import resolve_train_sub_sampling_alias
 from smal_fitter.neuralSMIL.multiview_visualization import (
     create_multiview_visualization,
     print_joint_scale_diagnostics,
@@ -264,6 +266,42 @@ def cleanup_ddp():
         dist.destroy_process_group()
 
 
+def _per_sample_fractions(train_set, by_session, default):
+    """(fraction, group) per training-set position from each sample's session name (first matching key wins;
+    group = that key, or "" for unmatched sessions, which take `default`)."""
+    base, idx = train_set, None
+    if isinstance(train_set, torch.utils.data.Subset):
+        base, idx = train_set.dataset, np.asarray(train_set.indices)
+    names = read_session_names(base.hdf5_path, "dataset.train_sub_sampling_by_session")
+    names = np.asarray(names, dtype=object) if idx is None else np.asarray(names, dtype=object)[idx]
+    out = np.full(len(names), float(default))
+    group = np.full(len(names), "", dtype=object)
+    for i, n in enumerate(names):
+        for key, f in by_session.items():
+            if key in str(n):
+                out[i], group[i] = float(f), key
+                break
+    return out, group
+
+
+def _check_fraction_by_session(train_set, by_session):
+    """Raise ValueError naming every train_sub_sampling_by_session entry that cannot apply as written: an empty key,
+    a key that takes no training session (no match, or an earlier key takes its matches) or a fraction outside
+    (0, 1]."""
+    _, groups = _per_sample_fractions(train_set, dict.fromkeys(by_session, 1.0), 1.0)  # groups depend on the keys only
+    taken = set(groups.tolist())
+    bad = []
+    for key, f in by_session.items():
+        if not key:
+            bad.append("'' is empty (train_sub_sampling covers the sessions no key matches)")
+        elif key not in taken:
+            bad.append(f"{key!r} matches no training session (or only ones an earlier key takes)")
+        if not (isinstance(f, (int, float)) and 0 < f <= 1):
+            bad.append(f"{key!r}: {f!r} is not in (0, 1]")
+    if bad:
+        raise ValueError("dataset.train_sub_sampling_by_session: " + "; ".join(bad))
+
+
 def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distributed: bool, collate_fn) -> DataLoader:
     """
     Create a DataLoader that samples a fraction of the training dataset.
@@ -276,7 +314,7 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
         train_set: The full training dataset (or Subset)
         epoch: Current epoch number (used for deterministic sampling seed)
         config: Training configuration dictionary containing:
-            - 'dataset_fraction': Fraction of data to use (0 < fraction <= 1)
+            - 'train_sub_sampling': Fraction of the training split to use (0 < fraction <= 1)
             - 'seed': Base random seed
             - 'batch_size': Batch size
             - 'num_workers': Number of data loading workers
@@ -287,9 +325,41 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
     Returns:
         DataLoader configured with the fractional subset for this epoch
     """
-    dataset_fraction = config.get("dataset_fraction", 1.0)
+    train_sub_sampling = config.get("train_sub_sampling", 1.0)
+    by_session = config.get("train_sub_sampling_by_session") or {}
 
-    if dataset_fraction >= 1.0:
+    if by_session:
+        # Per-source fractions: a fresh deterministic subset of each source per epoch (same seed on every DDP rank).
+        fractions, groups = _per_sample_fractions(train_set, by_session, train_sub_sampling)
+        rng = torch.Generator()
+        rng.manual_seed(config["seed"] + epoch)
+        all_indices = []
+        for g in [""] + list(by_session):  # each source drawn on its own, in a fixed order
+            members = np.flatnonzero(groups == g)
+            if not len(members):
+                continue
+            f = float(fractions[members[0]])
+            if f >= 1.0:
+                all_indices.extend(members.tolist())
+            else:
+                n = max(1, int(len(members) * f))
+                all_indices.extend(members[torch.randperm(len(members), generator=rng)[:n].numpy()].tolist())
+        epoch_subset = torch.utils.data.Subset(train_set, sorted(all_indices))
+        sampler = DistributedSampler(epoch_subset, shuffle=True) if is_distributed else None
+        if sampler is not None:
+            sampler.set_epoch(epoch)
+        return DataLoader(
+            epoch_subset,
+            batch_size=config["batch_size"],
+            shuffle=(sampler is None),
+            sampler=sampler,
+            num_workers=config["num_workers"],
+            pin_memory=config["pin_memory"],
+            collate_fn=collate_fn,
+            drop_last=True,
+        )
+
+    if train_sub_sampling >= 1.0:
         # Use full dataset - create standard sampler
         if is_distributed:
             sampler = DistributedSampler(train_set, shuffle=True)
@@ -316,7 +386,7 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
 
     # Compute number of samples to use
     full_size = len(train_set)
-    n_samples = max(1, int(full_size * dataset_fraction))
+    n_samples = max(1, int(full_size * train_sub_sampling))
 
     # Generate random permutation and take first n_samples indices
     all_indices = torch.randperm(full_size, generator=rng)[:n_samples].tolist()
@@ -482,8 +552,8 @@ class MultiViewTrainingConfig:
         merged["allow_mesh_scaling"] = mesh_scaling_config.get("allow_mesh_scaling", False)
         merged["mesh_scale_init"] = mesh_scaling_config.get("init_mesh_scale", 1.0)
 
-        # Dataset fraction for large datasets (fraction of training data per epoch)
-        merged["dataset_fraction"] = TrainingConfig.get_dataset_fraction()
+        # Training-split sub-sampling for large datasets (fraction of the training split per epoch)
+        merged["train_sub_sampling"] = TrainingConfig.get_train_sub_sampling()
 
         # Optional GT camera initialization (predict deltas around GT if available)
         merged["use_gt_camera_init"] = TrainingConfig.use_gt_camera_init
@@ -524,6 +594,8 @@ class MultiViewTrainingConfig:
         """
         with open(config_path, "r") as f:
             file_config = json.load(f)
+        # Before the merge: the defaults below already set train_sub_sampling
+        file_config = resolve_train_sub_sampling_alias(file_config, prefix="")
 
         # Start with merged config
         merged_config = cls.get_config()
@@ -2567,9 +2639,11 @@ def main(config: dict):
         seed=config["seed"],
         holdout_fold=config.get("holdout_fold"),
     )
+    if config.get("train_sub_sampling_by_session"):  # checked on every rank, before the model is built
+        _check_fraction_by_session(train_set, config["train_sub_sampling_by_session"])
 
-    # Get dataset fraction config
-    dataset_fraction = config.get("dataset_fraction", 1.0)
+    # Get training-split sub-sampling config
+    train_sub_sampling = config.get("train_sub_sampling", 1.0)
 
     if rank == 0:
         print("\nDataset split:")
@@ -2578,9 +2652,23 @@ def main(config: dict):
         print(f"  Train: {len(train_set)}")
         print(f"  Val: {len(val_set)}")
         print(f"  Test: {len(test_set)}")
-        if dataset_fraction < 1.0:
-            samples_per_epoch = max(1, int(len(train_set) * dataset_fraction))
-            print(f"\n  Dataset fraction: {dataset_fraction:.1%}")
+        if config.get("train_sub_sampling_by_session"):
+            by_session = config["train_sub_sampling_by_session"]
+            fr, groups = _per_sample_fractions(train_set, by_session, train_sub_sampling)
+            names = read_session_names(train_set.dataset.hdf5_path, "dataset.train_sub_sampling_by_session")
+            names = np.asarray(names, dtype=object)[np.asarray(train_set.indices)]
+            # Per key, as drawn: the sessions under one key share one random draw.
+            print(f"\n  Train sub-sampling by session (default {train_sub_sampling:.1%}):")
+            for g in [*by_session, ""]:
+                m = groups == g
+                if m.any():
+                    n, f, label = int(m.sum()), float(fr[m][0]), repr(g) if g else "no key"
+                    print(f"    {label}: {f:.1%} of {n} -> {n if f >= 1 else max(1, int(n * f))} per epoch")
+                    for s in dict.fromkeys(names[m].tolist()):
+                        print(f"      {s} ({int((names == s).sum())})")
+        elif train_sub_sampling < 1.0:
+            samples_per_epoch = max(1, int(len(train_set) * train_sub_sampling))
+            print(f"\n  Train sub-sampling: {train_sub_sampling:.1%}")
             print(f"  Samples per epoch: {samples_per_epoch} (of {len(train_set)} total)")
             print("  Note: Different random subset sampled each epoch for diversity")
         if aug_enabled:
@@ -2825,7 +2913,7 @@ def main(config: dict):
 
     for epoch in range(start_epoch, config["num_epochs"]):
         # Create train_loader for this epoch (supports fractional dataset sampling)
-        # This ensures DDP processes use the same random subset when dataset_fraction < 1
+        # This ensures DDP processes use the same random subset when train_sub_sampling < 1
         train_loader = create_fractional_train_loader(
             train_set=train_set,
             epoch=epoch,
@@ -3145,11 +3233,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", type=int, default=None, help="Random seed (default: from config)")
     parser.add_argument(
-        "--dataset_fraction",
+        "--train_sub_sampling",
         type=float,
         default=None,
-        help="Fraction of training data to use per epoch (0-1, default: from config). "
-        "Useful for large datasets - samples different subset each epoch.",
+        help="Fraction of the training split drawn per epoch (0-1], a fresh random subset each epoch; validation and "
+        "test are never subsampled (default: from config, 1.0). Useful for large datasets.",
+    )
+    parser.add_argument(  # deprecated alias, remove with its tracking issue
+        "--dataset_fraction", type=float, default=None, help="Deprecated alias of --train_sub_sampling."
     )
     add_split_args(parser)
 
@@ -3239,6 +3330,8 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    # --dataset_fraction -> --train_sub_sampling (deprecated alias, remove with its tracking issue)
+    args = argparse.Namespace(**resolve_train_sub_sampling_alias(vars(args), prefix="--"))
     split_overrides = split_args_to_overrides(parser, args)
 
     # ---------------------------------------------------------------
@@ -3275,6 +3368,9 @@ if __name__ == "__main__":
             if args.dataset_path is not None:
                 cli_overrides["dataset"] = cli_overrides.get("dataset", {})
                 cli_overrides["dataset"]["data_path"] = args.dataset_path
+            if args.train_sub_sampling is not None:
+                cli_overrides["dataset"] = cli_overrides.get("dataset", {})
+                cli_overrides["dataset"]["train_sub_sampling"] = args.train_sub_sampling
             if split_overrides:
                 cli_overrides.setdefault("dataset", {}).update(split_overrides)
             if args.backbone_name is not None:

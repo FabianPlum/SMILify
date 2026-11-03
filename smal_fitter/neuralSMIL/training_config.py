@@ -124,14 +124,14 @@ class TrainingConfig:
         "test_size": 0.1,  # 10% for testing
         "val_size": 0.05,  # 5% for validation
         # Training size is automatically: 1 - test_size - val_size = 0.85 (85%)
-        # Dataset fraction for large datasets: fraction of training data to use per epoch
+        # Training-split sub-sampling for large datasets: fraction of the training split to use per epoch
         # If 1.0, use full training dataset each epoch (default behavior)
         # If < 1.0 (e.g., 0.1), randomly sample that fraction of training examples at the
         # start of each epoch. Different samples are drawn each epoch for diversity.
         # Validation and test sets are NOT affected - they always use full data.
         # Note: The random sampling is deterministic per epoch (uses epoch as seed),
         # ensuring all DDP processes use the same subset.
-        "dataset_fraction": 0.5,
+        "train_sub_sampling": 1.0,
     }
 
     # Training hyperparameters (AniMer-style conservative settings)
@@ -671,14 +671,14 @@ class TrainingConfig:
         return cls.IGNORED_JOINT_LOCATIONS_CONFIG.get("ignored_joint_names", [])
 
     @classmethod
-    def get_dataset_fraction(cls) -> float:
+    def get_train_sub_sampling(cls) -> float:
         """
-        Get the fraction of training data to use per epoch.
+        Get the fraction of the training split to use per epoch.
 
         Returns:
-            Float between 0 and 1 (1.0 = full dataset)
+            Float between 0 and 1 (1.0 = full training split)
         """
-        return cls.SPLIT_CONFIG.get("dataset_fraction", 1.0)
+        return cls.SPLIT_CONFIG.get("train_sub_sampling", 1.0)
 
     @classmethod
     def is_multi_dataset_enabled(cls) -> bool:
