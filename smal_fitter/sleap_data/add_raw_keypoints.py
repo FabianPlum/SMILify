@@ -108,6 +108,12 @@ def build_sidecar(
     for r, names in enumerate(camera_names):
         if len(names) != int(view_mask[r].sum()) or not view_mask[r, : len(names)].all():
             raise ValueError(f"Row {r}: camera_names {names} do not match view_mask {view_mask[r].tolist()}")
+    staged = [s for s in dict.fromkeys(sessions.tolist()) if (Path(sessions_dir) / s / "frame_map.npz").exists()]
+    if staged and video_frames is None:
+        raise ValueError(
+            f"{staged} have a frame_map.npz, but {hdf5_path} has no auxiliary/video_frame_idx: its frame_idx is a "
+            "timeline index, and the raw labels would be read at the wrong video frames"
+        )
 
     pre = SLEAPMultiViewPreprocessor(
         target_resolution=target_resolution,

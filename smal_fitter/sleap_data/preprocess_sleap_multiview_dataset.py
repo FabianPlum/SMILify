@@ -170,7 +170,6 @@ class SLEAPMultiViewPreprocessor:
         # and static keypoints (extra_keypoints.json); recorded in the output only when a session uses them.
         self._frame_map: Optional[Dict[str, np.ndarray]] = None
         self._frame_map_used = False
-        self._views_excluded_no_video_frame = 0
         self._extra_keypoint_names: List[str] = []
 
     def _load_frame_map(self, session_path: str) -> Optional[Dict[str, np.ndarray]]:
@@ -669,10 +668,10 @@ class SLEAPMultiViewPreprocessor:
                 else:
                     cam_idx = len(self.canonical_camera_order)  # Unknown camera
 
-                # Video frame for this timeline frame (identity without a frame map)
+                # Video frame for this timeline frame (identity without a frame map). Discovery already drops the
+                # views without one (_discover_multiview_frames), so this is only a defensive check.
                 video_frame_idx = self._video_frame_index(camera_name, frame_idx)
                 if video_frame_idx < 0:
-                    self._views_excluded_no_video_frame += 1
                     continue
 
                 # Read video frame with optimized sequential reading
@@ -1909,7 +1908,6 @@ class SLEAPMultiViewPreprocessor:
             metadata_group.attrs["views_reprojected"] = self.stats["views_reprojected"]
             if self._frame_map_used:
                 metadata_group.attrs["frame_map_used"] = True
-                metadata_group.attrs["views_excluded_no_video_frame"] = self._views_excluded_no_video_frame
             if self._extra_keypoint_names:
                 metadata_group.attrs["extra_keypoints"] = json.dumps(self._extra_keypoint_names)
 

@@ -29,15 +29,14 @@ Usage:
 
 import argparse
 import json
-import os
-import subprocess
 import time
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import h5py
 import numpy as np
 
+from smal_fitter.sleap_data.add_raw_keypoints import _git_commit  # HEAD, "-dirty" with modified tracked files
 from smal_fitter.sleap_data.triangulate_3d_points import generate_reprojections_h5, load_calibration
 
 _NAN_SENTINEL = -1.0e9
@@ -102,11 +101,13 @@ def align_timeline_to_video(
     return fmap
 
 
-def _load_slp_video_xy(slp_path: Path) -> Tuple[np.ndarray, str]:
-    """Per-video-frame predicted keypoints (N, K, 2) (NaN = invisible / no instance) and the video basename."""
+def _load_slp_video_xy(slp_path: Path) -> Tuple[np.ndarray, str, List[str]]:
+    """Per-video-frame predicted keypoints (N, K, 2) (NaN = invisible / no instance), the video basename and the
+    skeleton's node names in pred_points order (as SLEAPDataLoader reads them)."""
     with h5py.File(slp_path, "r") as f:
         md = json.loads(f["metadata"].attrs["json"])
         n_nodes = len(md["skeletons"][0]["nodes"])
+        node_names = [md["nodes"][n["id"]]["name"] for n in md["skeletons"][0]["nodes"]]
         frames, instances, pts = f["frames"][:], f["instances"][:], f["pred_points"][:]
         videos = json.loads(f["videos_json"][0])
     n = int(frames["frame_idx"].max()) + 1
@@ -126,14 +127,15 @@ def _load_slp_video_xy(slp_path: Path) -> Tuple[np.ndarray, str]:
             v[~p["visible"].astype(bool)] = np.nan
             xy[int(fi), : len(v)] = v
     video = videos["backend"]["filename"] if isinstance(videos, dict) else videos[0]["backend"]["filename"]
-    return xy, Path(video.replace("\\", "/")).name
+    return xy, Path(video.replace("\\", "/")).name, node_names
 
 
-def _git_commit() -> str:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=os.path.dirname(__file__), text=True).strip()
-    except Exception:
-        return "unknown"
+def _find_one(folder: Path, pattern: str) -> Path:
+    """First match of ``pattern`` in ``folder``, or a FileNotFoundError naming both."""
+    match = next(folder.glob(pattern), None)
+    if match is None:
+        raise FileNotFoundError(f"no {pattern} in {folder}")
+    return match
 
 
 def _symlink(src: Path, dst: Path) -> None:
@@ -151,10 +153,19 @@ def stage_session(
     points3d_dataset: str = "points3d",
 ) -> Dict:
     session_dir, out = Path(session_dir), Path(out_dir)
+    names = []
+    if static_keypoints:  # read first: each camera's skeleton is checked against the names below
+        with open(static_keypoints) as fh:
+            sk = json.load(fh)
+        names = list(sk["names"])
     out.mkdir(parents=True, exist_ok=True)
-    pose_dir = next(session_dir.glob("*_pose_estimation"))
-    cams_dir = next(session_dir.glob("*_cameras"))
+    pose_dir = _find_one(session_dir, "*_pose_estimation")
+    cams_dir = _find_one(session_dir, "*_cameras")
     cameras = load_calibration(calibration)
+    if static_keypoints:
+        unknown = sorted({c for cams in sk["visible_cameras"].values() for c in cams} - set(cameras))
+        if unknown:
+            raise ValueError(f"visible_cameras {unknown} are not cameras of {calibration}: {sorted(cameras)}")
     _symlink(Path(calibration), out / "calibration.toml")
 
     with h5py.File(points3d, "r") as f:
@@ -165,17 +176,30 @@ def stage_session(
     frame_maps = {}
     for cam_dir in sorted(p for p in pose_dir.iterdir() if p.is_dir() and p.name in cameras):
         cam = cam_dir.name
-        slp = next(cam_dir.glob("*.predictions.slp"))
-        video_xy, video_name = _load_slp_video_xy(slp)
-        with h5py.File(next(cam_dir.glob("*.analysis.h5")), "r") as f:
+        slp = _find_one(cam_dir, "*.predictions.slp")
+        video_xy, video_name, node_names = _load_slp_video_xy(slp)
+        with h5py.File(_find_one(cam_dir, "*.analysis.h5"), "r") as f:
             timeline_xy = f["tracks"][0].transpose(2, 1, 0)  # (T, K, 2)
-        assert len(timeline_xy) == T, f"{cam}: analysis.h5 has {len(timeline_xy)} frames, points3d {T}"
+        # The loader indexes the static points after the .slp nodes: the 3D must hold exactly the skeleton's nodes
+        if timeline_xy.shape[1] != len(node_names) or tracks.shape[2] != len(node_names):
+            raise ValueError(
+                f"{cam}: the .slp skeleton has {len(node_names)} nodes, analysis.h5 {timeline_xy.shape[1]} and "
+                f"--points3d {tracks.shape[2]}; both must hold the skeleton's nodes in the skeleton's order"
+            )
+        if set(names) & set(node_names):
+            raise ValueError(f"{cam}: static keypoint names {sorted(set(names) & set(node_names))} are .slp node names")
+        if len(timeline_xy) != T:
+            raise ValueError(f"{cam}: analysis.h5 has {len(timeline_xy)} frames, points3d {T}")
         fmap = align_timeline_to_video(timeline_xy, video_xy)
         m = fmap >= 0
-        assert np.all(np.diff(fmap[m]) > 0), f"{cam}: frame map not strictly increasing"
+        if not m.any():
+            raise ValueError(f"{cam}: no analysis.h5 row matches a frame of {slp.name} exactly (same camera?)")
+        if not np.all(np.diff(fmap[m]) > 0):
+            raise RuntimeError(f"{cam}: frame map not strictly increasing")
         frame_maps[cam] = fmap.astype(np.int32)
         video = cams_dir / video_name
-        assert video.exists(), f"{cam}: video {video} not found"
+        if not video.exists():
+            raise FileNotFoundError(f"{cam}: video {video} not found")
         (out / cam).mkdir(exist_ok=True)
         _symlink(slp, out / cam / slp.name)
         _symlink(video, out / cam / video_name)
@@ -189,21 +213,17 @@ def stage_session(
             "offset_t_minus_f_range": [int(off.min()), int(off.max())],
         }
         print(f"{cam}: {report['cameras'][cam]}", flush=True)
+    if not frame_maps:
+        raise FileNotFoundError(f"no camera folder in {pose_dir} is named as a camera of {calibration}")
     np.savez(out / "frame_map.npz", **frame_maps)
 
-    names = []
     visible = {}
     if static_keypoints:
-        sk = json.load(open(static_keypoints))
-        names = list(sk["names"])
         static = np.array([sk["points"][n] for n in names], dtype=tracks.dtype)  # (S, 3)
         tracks = np.concatenate([tracks, np.broadcast_to(static, (T, tracks.shape[1], len(names), 3))], axis=2)
         visible = sk["visible_cameras"]
-        json.dump(
-            {"names": names, "source": str(Path(static_keypoints).resolve())},
-            open(out / "extra_keypoints.json", "w"),
-            indent=1,
-        )
+        with open(out / "extra_keypoints.json", "w") as fh:
+            json.dump({"names": names, "source": str(Path(static_keypoints).resolve())}, fh, indent=1)
     with h5py.File(out / "points3d.h5", "w") as f:
         f.create_dataset("tracks", data=tracks)
         f["tracks"].attrs["Description"] = (
@@ -231,7 +251,8 @@ def stage_session(
         git_commit=_git_commit(),
         created=time.strftime("%Y-%m-%dT%H:%M:%S"),
     )
-    json.dump(report, open(out / "staging_provenance.json", "w"), indent=1)
+    with open(out / "staging_provenance.json", "w") as fh:
+        json.dump(report, fh, indent=1)
     return report
 
 
