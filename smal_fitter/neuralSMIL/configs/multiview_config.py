@@ -5,7 +5,7 @@ Extends BaseTrainingConfig with parameters specific to multi-view
 SMIL regression training with cross-view attention.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional
 
 from .base_config import BaseTrainingConfig, OutputConfig
@@ -24,12 +24,38 @@ class MultiViewOutputConfig(OutputConfig):
 
 
 @dataclass
+class SilhouetteConfig:
+    """Rendering for the multi-view silhouette loss (loss weight 'silhouette' > 0, dataset.silhouette_path set).
+
+    All valid views are rendered with a soft silhouette shader and compared to the targets with a masked soft IoU.
+    """
+
+    render_size: int = 128  # square render resolution; targets are area-resampled to it
+    # Soft-rasterizer edge width. The soft edge makes the render slightly larger than the hard silhouette, so the
+    # IoU optimum sits about 2-3% (up to 4% in some views) below the true mesh scale at 1e-5, about 3% at 3e-5;
+    # 1e-5 still renders the dense mouse mesh without holes at faces_per_pixel 64.
+    sigma: float = 1e-5
+    faces_per_pixel: int = 64
+    camera: str = (
+        "gt"  # "gt": calibrated cameras (camera heads get no silhouette gradient); "pred": predicted, detached
+    )
+    cull_backfaces: bool = False
+
+    def validate(self):
+        if self.camera not in ("gt", "pred"):
+            raise ValueError(f"silhouette.camera must be 'gt' or 'pred', got {self.camera!r}")
+
+
+@dataclass
 class MultiViewConfig(BaseTrainingConfig):
     """Configuration for multi-view training."""
 
     # Multi-view specific parameters
-    num_views_to_use: Optional[int] = None  # None = use all available views
+    num_views_to_use: Optional[int] = None  # Training only: at most N random views per sample (None = all)
     min_views_per_sample: int = 2
+    # Temporary (issue #134): True reproduces the pre-#132 handling of padded view slots (backbone runs on the zero
+    # padding, decoder attends to it). Only for legacy checkpoints, until they are replaced.
+    legacy_view_padding: bool = False
 
     # Cross-attention configuration
     cross_attention_layers: int = 2
@@ -39,8 +65,12 @@ class MultiViewConfig(BaseTrainingConfig):
     # Override output defaults for multi-view
     output: MultiViewOutputConfig = field(default_factory=MultiViewOutputConfig)
 
+    # Silhouette loss rendering
+    silhouette: SilhouetteConfig = field(default_factory=SilhouetteConfig)
+
     def validate(self):
         super().validate()
+        self.silhouette.validate()
         if self.min_views_per_sample < 1:
             raise ValueError("min_views_per_sample must be >= 1")
 
@@ -63,6 +93,7 @@ class MultiViewConfig(BaseTrainingConfig):
             "seed": self.training.seed,
             "rotation_representation": self.training.rotation_representation,
             "resume_checkpoint": self.training.resume_checkpoint,
+            "init_checkpoint": self.training.init_checkpoint,
             "num_workers": self.training.num_workers,
             "pin_memory": self.training.pin_memory,
             "gradient_clip_norm": self.optimizer.gradient_clip_norm,
@@ -88,6 +119,7 @@ class MultiViewConfig(BaseTrainingConfig):
             "dataset_path": self.dataset.data_path,
             "num_views_to_use": self.num_views_to_use,
             "min_views_per_sample": self.min_views_per_sample,
+            "legacy_view_padding": self.legacy_view_padding,
             "cross_attention_layers": self.cross_attention_layers,
             "cross_attention_heads": self.cross_attention_heads,
             "cross_attention_dropout": self.cross_attention_dropout,
@@ -112,6 +144,11 @@ class MultiViewConfig(BaseTrainingConfig):
             "keypoint_source": self.dataset.keypoint_source,
             "raw_keypoint_min_confidence": self.dataset.raw_keypoint_min_confidence,
             "allow_split_change": self.dataset.allow_split_change,
+            # Silhouettes
+            "silhouette_path": self.dataset.silhouette_path,
+            "silhouette_exclude_label_flag": self.dataset.silhouette_exclude_label_flag,
+            "silhouette_min_score": self.dataset.silhouette_min_score,
+            "silhouette_config": asdict(self.silhouette),
             # Scale/trans
             "scale_trans_mode": self.scale_trans_beta.mode,
             "allow_mesh_scaling": self.mesh_scaling.allow_mesh_scaling,
@@ -145,6 +182,7 @@ class MultiViewConfig(BaseTrainingConfig):
                 "ignored_joint_names": list(self.ignored_joint_locations.ignored_joint_names),
             },
             "loss_curriculum_config": {
+                "joint_twist_free_deg": self.loss_curriculum.joint_twist_free_deg,
                 "base_weights": dict(self.loss_curriculum.base_weights),
                 "curriculum_stages": [
                     (epoch, dict(updates)) for epoch, updates in sorted(self.loss_curriculum.curriculum_stages.items())

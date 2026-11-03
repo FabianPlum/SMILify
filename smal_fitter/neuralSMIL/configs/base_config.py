@@ -55,6 +55,13 @@ class DatasetConfig:
     # Resume only: continue when the split settings differ from the resumed
     # checkpoint's (a deliberate fine-tune on a new split). Off: such a resume stops.
     allow_split_change: bool = False
+    # Multi-view only: sidecar HDF5 with per-view silhouette targets aligned to data_path
+    # (smal_fitter/sleap_data/generate_silhouettes_sam2.py); used by loss weight 'silhouette'.
+    silhouette_path: Optional[str] = None
+    # Views whose stored labels disagree with the raw SLEAP detections (sidecar label_flag) get no target.
+    silhouette_exclude_label_flag: bool = True
+    # Views whose SAM score is below this get no target.
+    silhouette_min_score: float = 0.0
 
     # ── Single-view-from-multiview sampling ──────────────────────────────
     # Draw single-view training items from a multi-view HDF5. When enabled the
@@ -226,6 +233,9 @@ class OptimizerConfig:
 class LossCurriculumConfig:
     """Loss weights and curriculum stages for progressive training."""
 
+    # Axial twist (deg) a bone may take before joint_twist_regularization applies
+    joint_twist_free_deg: float = 45.0
+
     # Base loss weights (applied throughout training)
     base_weights: Dict[str, float] = field(
         default_factory=lambda: {
@@ -244,10 +254,16 @@ class LossCurriculumConfig:
             "joint_angle_regularization": 0.001,
             "limb_scale_regularization": 0.01,
             "limb_trans_regularization": 1,
+            # Hinge on each bone's axial twist about its rest direction beyond 45 deg (keypoints cannot see twist).
+            "joint_twist_regularization": 0.0,
             # Hinge penalty against authored per-joint rotation limits from the
             # model's 'joint_limits' (issue #56). Off by default; enabling it
             # requires a model file with usable (non-wide-open) limits.
             "joint_limit_regularization": 0.0,
+            # Multi-view: per-session constant per-joint scales and mesh scale (one animal per session),
+            # and left/right paired joints sharing their scales. Off by default.
+            "scale_consistency": 0.0,
+            "scale_symmetry": 0.0,
         }
     )
 
@@ -558,6 +574,10 @@ class TrainingHyperparameters:
     pin_memory: bool = True
     prefetch_factor: int = 4
     resume_checkpoint: Optional[str] = None
+    # Weights-only start (fine-tuning on a new dataset/rig): epoch 0, fresh optimizer and LR schedule, architecture
+    # from the dataset; checkpoint tensors whose shape differs (e.g. per-camera embeddings) keep their fresh init.
+    # Multiview only; ignored when resume_checkpoint is set.
+    init_checkpoint: Optional[str] = None
     reset_ief_token_embedding: bool = False
     use_gt_camera_init: bool = True
     use_mixed_precision: bool = False
@@ -614,6 +634,8 @@ class BaseTrainingConfig:
         self.dataset.validate()
         self.model.validate()
         self.scale_trans_beta.validate()
+        if not 0.0 <= self.loss_curriculum.joint_twist_free_deg < 180.0:
+            raise ValueError("loss_curriculum.joint_twist_free_deg must be in [0, 180)")
         if self.training.rotation_representation not in ("6d", "axis_angle"):
             raise ValueError(f"Invalid rotation_representation '{self.training.rotation_representation}'")
 
@@ -713,6 +735,7 @@ class BaseTrainingConfig:
                 "verbose_ignored_joints": self.ignored_joints.verbose,
             },
             "loss_curriculum": {
+                "joint_twist_free_deg": self.loss_curriculum.joint_twist_free_deg,
                 "base_weights": dict(self.loss_curriculum.base_weights),
                 "curriculum_stages": [
                     (epoch, dict(updates)) for epoch, updates in sorted(self.loss_curriculum.curriculum_stages.items())
