@@ -241,6 +241,9 @@ def bridge_nearby_islands(
     max_bridge_hops edges, its vertices and patch_rings rings of neighbours are
     added to vertices_to_keep, restoring existing faces of the original mesh.
 
+    Islands are formed in face-index order and boundary vertices are searched
+    in vertex-index order, so the same input gives the same result in every run.
+
     Args:
         bm (BMesh): The complete mesh before any vertices are deleted.
         vertices_to_keep (set): Set of vertex indices marked to survive;
@@ -261,10 +264,15 @@ def bridge_nearby_islands(
     bm.edges.ensure_lookup_table()
 
     kept_faces = [f for f in bm.faces if all(v.index in vertices_to_keep for v in f.verts)]
+    # Seed islands in face-index order: the iteration order of a set of BMesh
+    # elements changes from run to run, and the island order decides from which
+    # island of a pair the bridge search starts, and so which pairs get bridged.
     unvisited = set(kept_faces)
     islands = []
-    while unvisited:
-        seed = unvisited.pop()
+    for seed in kept_faces:
+        if seed not in unvisited:
+            continue
+        unvisited.remove(seed)
         island_faces = {seed}
         to_visit = [seed]
         while to_visit:
@@ -294,7 +302,11 @@ def bridge_nearby_islands(
                     result.update(edge.verts)
         return result if result else verts
 
-    real_islands = [(verts, boundary_verts(verts, faces)) for verts, faces in real_islands]
+    # Boundary vertices in index order, so that ties in the closest-vertex search
+    # below resolve the same way in every run.
+    real_islands = [
+        (verts, sorted(boundary_verts(verts, faces), key=lambda v: v.index)) for verts, faces in real_islands
+    ]
 
     edge_lengths = sorted(e.calc_length() for e in bm.edges)
     median_edge = edge_lengths[len(edge_lengths) // 2] if edge_lengths else 1.0
