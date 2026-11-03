@@ -6,7 +6,6 @@ drift apart; routing it through ``ddp_forward`` must give every rank the average
 """
 
 import os
-from contextlib import nullcontext
 from datetime import timedelta
 from functools import partial
 
@@ -30,7 +29,7 @@ class _Net(nn.Module):
         torch.manual_seed(0)
         self.a = nn.Linear(4, 3)
         self.b = nn.Linear(3, 1)
-        self.unused = nn.Linear(2, 2)  # unused, as the regressors' leftover parameters; sporadic in step(use_extra)
+        self.unused = nn.Linear(2, 2)  # unused, as the regressors' leftover parameters; sporadic in the "extra" kind
 
     def forward(self, x):
         return self.b(torch.tanh(self.a(x)))
@@ -42,10 +41,11 @@ class _Net(nn.Module):
         return loss + self.unused(batch[0]["x"][:, :2]).sum() if use_extra else loss
 
     def loss(self, batch, kind):
-        """step's loss ("real"), or one that reaches no parameter, as the regressors' losses do when every target is
-        missing: a placeholder leaf ("leaf"), or placeholders summed into a graph ("graph")."""
-        if kind == "real":
-            return self.step(batch)
+        """step's loss ("real"), the same with the sporadic parameter ("extra"), or one that reaches no parameter, as
+        the regressors' losses do when every target is missing: a placeholder leaf ("leaf"), or placeholders summed into
+        a graph ("graph")."""
+        if kind in ("real", "extra"):
+            return self.step(batch, use_extra=kind == "extra")
         eps = torch.tensor(1e-8, requires_grad=True)
         return eps if kind == "leaf" else torch.zeros((), requires_grad=True) + 0.5 * eps
 
@@ -152,24 +152,7 @@ def _worker(rank, store_uri, queue, exit_barrier):
     ga = _gather(net.a.weight.grad.reshape(-1).clone())
     res["unfrozen_synced_after_rewrap"] = torch.allclose(ga[0], ga[1])
 
-    # 7. Gradient accumulation over two mini-batches; one parameter is used only by rank 0's first mini-batch. With
-    # model.no_sync() on the first one it keeps rank 0's local gradient on torch < 2.4 (fixed in 2.4,
-    # pytorch/pytorch#124193), so the trainers sync every mini-batch.
-    def extra_grad(use_no_sync):
-        m = DDP(_Net(), find_unused_parameters=True)
-        with m.no_sync() if use_no_sync else nullcontext():
-            ddp_forward(m, lambda mod, b: mod.step(b, use_extra=rank == 0), batch).backward()
-        ddp_forward(m, lambda mod, b: mod.step(b), batch).backward()
-        grad = m.module.unused.weight.grad
-        return _gather(torch.zeros(2, 2) if grad is None else grad.clone())
-
-    if torch.__version__ < (2, 4):
-        g = extra_grad(use_no_sync=True)
-        res["no_sync_leaves_sporadic_parameter_unsynced"] = not torch.allclose(g[0], g[1])
-    g = extra_grad(use_no_sync=False)
-    res["sync_every_batch_syncs_sporadic_parameter"] = torch.allclose(g[0], g[1]) and bool(g[0].abs().sum() > 0)
-
-    # 8. A loss that reaches no parameter fires no gradient hook, so that rank would skip the all-reduce. Both trainers'
+    # 7. A loss that reaches no parameter fires no gradient hook, so that rank would skip the all-reduce. Both trainers'
     # _training_step backpropagate zero_loss instead, as for a missing prediction. (Imported in the worker processes:
     # importing the trainers changes CUDA_VISIBLE_DEVICES and socket.getaddrinfo.)
     from smal_fitter.neuralSMIL import train_multiview_regressor, train_smil_regressor
@@ -196,16 +179,25 @@ def _worker(rank, store_uri, queue, exit_barrier):
             )
             guarded.zero_grad(set_to_none=True)
 
-    # 9. Both trainers' train_epoch over 5 batches whose kinds differ per rank. A rank without a prediction, or whose
+    # 8. Both trainers' train_epoch over 7 batches whose kinds differ per rank. A rank without a prediction, or whose
     # loss reaches no parameter, still joins every all-reduce, and any_rank gives both ranks the same optimizer steps:
     # single-view after each batch with a real loss on some rank, multi-view (2 accumulation steps, clipping) after
-    # each window with one.
-    kinds = [["none", "leaf", "real", "graph", "real"], ["graph", "none", "leaf", "leaf", "real"]][rank]
+    # each window with one. Window [4, 5] uses a parameter only in rank 0's first mini-batch and has a real loss in its
+    # last mini-batch on both ranks: with model.no_sync() on the first mini-batch (master before #119) that parameter
+    # keeps rank 0's local gradient on torch < 2.4 (pytorch/pytorch#124193) and the replicas drift apart. (In the
+    # other windows zero_loss touches every parameter in the synchronised mini-batch, which would hide it.)
+    kinds = [
+        ["none", "leaf", "real", "graph", "extra", "real", "real"],
+        ["graph", "none", "leaf", "leaf", "real", "real", "real"],
+    ][rank]
     common = {"device": "cpu", "epoch": 0, "is_distributed": True, "rank": rank}
     mv_config = {"gradient_accumulation_steps": 2, "gradient_clip_norm": 0.5}
     train_epochs = {  # trainer: (train_epoch(model, loader, optimizer), the batches after which both ranks step)
-        "singleview": (partial(train_smil_regressor.train_epoch, criterion=None, loss_weights={}, **common), [2, 4]),
-        "multiview": (partial(train_multiview_regressor.train_epoch, training_config=mv_config, **common), [3, 4]),
+        "singleview": (
+            partial(train_smil_regressor.train_epoch, criterion=None, loss_weights={}, **common),
+            [2, 4, 5, 6],
+        ),
+        "multiview": (partial(train_multiview_regressor.train_epoch, training_config=mv_config, **common), [3, 5, 6]),
     }
     for trainer, (train_epoch, expected_steps) in train_epochs.items():
         model = DDP(_Net(), find_unused_parameters=True)

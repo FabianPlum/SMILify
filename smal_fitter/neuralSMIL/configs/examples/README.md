@@ -45,7 +45,7 @@ python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/
 python -m smal_fitter.neuralSMIL.train_multiview_regressor --config smal_fitter/neuralSMIL/configs/examples/getting_started_blocked.json --holdout_fold 0
 ```
 
-With `--config`, the multi-view trainer applies only these CLI flags on top of the JSON: `--dataset_path`, `--checkpoint_dir`, `--resume_checkpoint`, `--batch_size`, `--learning_rate`, `--weight_decay`, `--num_epochs`, `--gradient_accumulation_steps`, `--seed`, `--num_views_to_use`, `--backbone_name`, `--cross_attention_layers` / `--cross_attention_heads`, `--use_gt_camera_init`, `--reset_ief_token_embedding` and the split flags. Others, such as `--use_mixed_precision`, are ignored; set them in the JSON instead (e.g. `"training": {"use_mixed_precision": true}`).
+With `--config`, the multi-view trainer applies only these CLI flags on top of the JSON: `--dataset_path`, `--checkpoint_dir`, `--resume_checkpoint`, `--init_checkpoint`, `--batch_size`, `--learning_rate`, `--weight_decay`, `--num_epochs`, `--gradient_accumulation_steps`, `--seed`, `--num_views_to_use`, `--backbone_name`, `--cross_attention_layers` / `--cross_attention_heads`, `--use_gt_camera_init`, `--reset_ief_token_embedding` and the split flags. Others, such as `--use_mixed_precision`, are ignored; set them in the JSON instead (e.g. `"training": {"use_mixed_precision": true}`).
 
 Copy an example to your project and edit; keep the `mode` field so the loader and legacy bridge continue to work.
 

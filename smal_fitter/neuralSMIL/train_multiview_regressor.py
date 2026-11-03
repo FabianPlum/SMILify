@@ -62,7 +62,7 @@ import random
 import json
 import math
 from tqdm import tqdm
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import timedelta
 import argparse
 import gc
@@ -80,6 +80,7 @@ from smal_fitter.neuralSMIL.data_splits import (
     split_args_to_overrides,
     split_dataset,
     tag_output_dir,
+    warn_init_split,
 )
 from smal_fitter.neuralSMIL.ddp_utils import any_rank, check_replicas, ddp_forward, reaches_parameters, zero_loss
 from smal_fitter.fitter import SMALFitter
@@ -342,6 +343,22 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
     )
 
 
+@contextmanager
+def training_sampling(dataset: SLEAPMultiViewDataset, augment: bool, num_views_to_use: Optional[int]):
+    """Training-only sampling inside the block: ``augment``, and ``num_views_to_use`` random views of each sample that
+    has more (None: all). Outside the block, where validation and the visualizations read the val loader, the dataset
+    returns every view of each sample, unaugmented.
+
+    DataLoader workers copy the dataset when they start, so each loader has to start iterating in the phase it serves:
+    the train loader inside the block, the val loader outside it.
+    """
+    dataset.augment, dataset.num_views_to_use = augment, num_views_to_use
+    try:
+        yield
+    finally:
+        dataset.augment, dataset.num_views_to_use = False, None
+
+
 def _print_component_metrics(train_components: dict, val_components: dict, indent: str = "    "):
     """
     Print a stable, readable table of per-loss component metrics.
@@ -375,8 +392,9 @@ class MultiViewTrainingConfig:
     MULTIVIEW_DEFAULTS = {
         # Multi-view specific data settings
         "dataset_path": None,  # Required - path to multi-view HDF5
-        "num_views_to_use": None,  # None = use all available views
+        "num_views_to_use": None,  # Training only: at most N random views per sample (None = all)
         "min_views_per_sample": 2,
+        "legacy_view_padding": False,  # temporary, see MultiViewConfig.legacy_view_padding
         # Cross-attention settings (multi-view specific)
         "cross_attention_layers": 2,
         "cross_attention_heads": 8,
@@ -726,7 +744,8 @@ def train_epoch(
                     skipped_steps += 1
                     if rank == 0 and (skipped_steps <= 5 or skipped_steps % 50 == 0):
                         print(
-                            f"Warning: non-finite gradients, optimizer step {batch_idx} skipped ({skipped_steps} this epoch)"
+                            f"Warning: non-finite gradients after mini-batch {batch_idx}, optimizer step skipped"
+                            f" ({skipped_steps} this epoch)"
                         )
             if loss_components is None:
                 continue
@@ -757,7 +776,8 @@ def train_epoch(
             traceback.print_exc()
             if is_distributed:
                 # Skipping the batch on this rank only would leave the other ranks waiting in (or pair them with the
-                # wrong) gradient all-reduce. Stop instead; training resumes from the last checkpoint.
+                # wrong) gradient all-reduce. Stop instead; relaunch with resume_checkpoint to continue from the last saved
+                # checkpoint.
                 raise
             # Clean up GPU memory after OOM to prevent cascading failures.
             # Without this, the failed forward pass's GPU tensors stay alive
@@ -2082,15 +2102,43 @@ def save_checkpoint(model, optimizer, scheduler, epoch, config, metrics, filepat
     print(f"Checkpoint saved: {filepath}")
 
 
-def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cuda"):
+def _warn_init_mismatch(checkpoint, config, model):
+    """Warnings for an init_checkpoint start that loads into a different body model, backbone or split."""
+    ckpt_config = checkpoint.get("config") or {}
+    path = config["init_checkpoint"]
+    warn_init_split(ckpt_config, config, path)
+    old_smal, new_smal = ckpt_config.get("smal_file"), config.get("smal_file")
+    saved = checkpoint.get("model_state_dict", {})
+    current = (model.module if hasattr(model, "module") else model).state_dict()
+    pose_key = "transformer_head.pose_head.weight"
+    pose_differs = pose_key in saved and pose_key in current and saved[pose_key].shape != current[pose_key].shape
+    if pose_differs or (old_smal and new_smal and os.path.basename(old_smal) != os.path.basename(new_smal)):
+        print(
+            f"WARNING: init_checkpoint was trained with body model {os.path.basename(old_smal or '?')}, this run uses "
+            f"{os.path.basename(new_smal or '?')}"
+            + (
+                " with a different joint count: the pose head (global rotation included) starts fresh."
+                if pose_differs
+                else ". Per-joint tensors load by joint index, so a reordered joint set gets mismatched pose rows."
+            )
+        )
+    backbone = [k for k in current if k.startswith("backbone.")]
+    if backbone and not any(k in saved and saved[k].shape == current[k].shape for k in backbone):
+        print(
+            "WARNING: no backbone tensor of init_checkpoint fits this model's backbone: it keeps its pretrained init."
+        )
+
+
+def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cuda", checkpoint=None):
     """
     Load training checkpoint.
 
-    Note: The model architecture should already match the checkpoint (max_views, etc.)
-    since model creation uses checkpoint config when resuming. This function just loads
-    the state dict and optimizer/scheduler states.
+    Tensors whose shape differs from the model's keep their fresh init (reported), so a checkpoint of another
+    architecture loads partially (init_checkpoint). On resume, model creation already follows the checkpoint's
+    config (max_views, etc.). ``checkpoint``: the already loaded checkpoint dict, to skip reading ``filepath`` again.
     """
-    checkpoint = torch.load(filepath, map_location=device)
+    if checkpoint is None:
+        checkpoint = torch.load(filepath, map_location=device)
 
     # Load model state dict, skipping keys whose shapes changed between
     # architecture versions (e.g. token_embedding after IEF feedback fix).
@@ -2111,7 +2159,7 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
     }
 
     filtered_state = {}
-    skipped = []
+    skipped = {}  # key -> report line
     resized = []
     for key, param in saved_state.items():
         if key in current_state and param.shape != current_state[key].shape:
@@ -2128,7 +2176,7 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
                 filtered_state[key] = adapted
                 resized.append(f"  {key}: {param.shape} -> {adapted.shape} (batch dim adapted)")
             else:
-                skipped.append(f"  {key}: checkpoint {param.shape} vs model {cur_shape}")
+                skipped[key] = f"  {key}: checkpoint {param.shape} vs model {cur_shape}"
         else:
             filtered_state[key] = param
 
@@ -2138,10 +2186,17 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
             print(r)
     if skipped:
         print(f"Skipped {len(skipped)} mismatched keys (will use fresh init):")
-        for s in skipped:
+        for s in skipped.values():
             print(s)
 
-    current_model.load_state_dict(filtered_state, strict=False)
+    incompatible = current_model.load_state_dict(filtered_state, strict=False)
+    fresh = [k for k in incompatible.missing_keys if k not in skipped]
+    if skipped or fresh or incompatible.unexpected_keys:
+        print(
+            f"Loaded {len(filtered_state) - len(incompatible.unexpected_keys)} checkpoint tensors; {len(skipped)} "
+            f"shape-skipped and {len(fresh)} model keys not in the checkpoint keep their fresh init; "
+            f"{len(incompatible.unexpected_keys)} checkpoint keys unused"
+        )
 
     if optimizer and "optimizer_state_dict" in checkpoint:
         if skipped:
@@ -2165,7 +2220,7 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None, device="cud
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
     epoch = 0 if skipped else checkpoint.get("epoch", 0)
-    if skipped:
+    if skipped and optimizer is not None:  # only a resume passes the optimizer and uses the returned epoch
         print(f"Epoch counter reset to 0 (was {checkpoint.get('epoch', 0)}) so LR warmup applies to new layers.")
     return epoch, checkpoint.get("metrics", {})
 
@@ -2369,7 +2424,11 @@ def main(config: dict):
         print(f"Distributed: {is_distributed} (world_size={world_size})")
         print(f"Dataset: {config['dataset_path']}")
         print(f"Backbone: {config['backbone_name']}")
-        print(f"Num views to use: {config.get('num_views_to_use', 'all')}")
+        n_views = config.get("num_views_to_use")
+        train_views = f"up to {n_views} (random subset)" if n_views else "all"
+        print(f"Views per sample: training {train_views}, validation all")
+        if config.get("legacy_view_padding"):
+            print("legacy_view_padding: on (pre-#132 padded views, for legacy checkpoints only)")
         print(f"Cross-attention layers: {config['cross_attention_layers']}")
         print(f"{'=' * 60}\n")
 
@@ -2399,7 +2458,7 @@ def main(config: dict):
     dataset = SLEAPMultiViewDataset(
         hdf5_path=config["dataset_path"],
         rotation_representation=config["rotation_representation"],
-        num_views_to_use=config.get("num_views_to_use"),
+        num_views_to_use=None,  # all views; training_sampling() applies num_views_to_use around train_epoch
         random_view_sampling=True,
         augment=False,  # Toggled on/off around train vs val; see training loop
         augmentation_config=aug_config if aug_enabled else None,
@@ -2423,11 +2482,19 @@ def main(config: dict):
     # CRITICAL: The model architecture must match the checkpoint, not the dataset.
     # The model can still handle samples with fewer views than max_views via view_mask.
     resume_checkpoint_path = config.get("resume_checkpoint")
-    if resume_checkpoint_path and os.path.exists(resume_checkpoint_path):
+    if resume_checkpoint_path and not os.path.exists(resume_checkpoint_path):
+        # Without this a mistyped or stale path silently trained from scratch (and skipped init_checkpoint)
+        raise FileNotFoundError(f"resume_checkpoint not found: {resume_checkpoint_path}")
+    if resume_checkpoint_path:
         if rank == 0:
             print("\nResuming from checkpoint - inferring model architecture from checkpoint...")
         checkpoint = torch.load(resume_checkpoint_path, map_location="cpu")  # Load on CPU first
         ckpt_config = checkpoint.get("config", {})
+        if ckpt_config.get("legacy_view_padding") and not config.get("legacy_view_padding"):
+            # A resumed run continues as it was trained; init_checkpoint is the way to switch a legacy model over
+            config["legacy_view_padding"] = True
+            if rank == 0:
+                print("Resumed checkpoint was trained with legacy_view_padding: continuing with it")
         # Before splitting: a resume must not move the checkpoint's held-out frames into training
         check_resume_split(
             ckpt_config,
@@ -2601,6 +2668,7 @@ def main(config: dict):
         use_gt_camera_init=config.get("use_gt_camera_init", False),
         transformer_config=config.get("transformer_config", {}),
         backbone_chunk_size=config.get("backbone_chunk_size", None),
+        legacy_view_padding=bool(config.get("legacy_view_padding", False)),
         # Max curriculum weight of the issue-#56 penalty; > 0 triggers fail-fast
         # validation of the model's joint_limits at construction (see above).
         joint_limit_regularization=joint_limit_reg_weight,
@@ -2667,6 +2735,7 @@ def main(config: dict):
     # Load checkpoint if specified
     start_epoch = 0
     best_val_loss = float("inf")
+    epochs_not_saved_nonfinite = 0  # epochs whose validation beat the best but had non-finite batches
 
     if config.get("resume_checkpoint"):
         if os.path.exists(config["resume_checkpoint"]):
@@ -2700,6 +2769,16 @@ def main(config: dict):
                             "reset_ief_token_embedding: token_embedding weights and "
                             "optimizer state reset. Set flag to false for subsequent runs."
                         )
+    elif config.get("init_checkpoint"):
+        # Weights-only start for fine-tuning: keep epoch 0, the fresh optimizer/LR schedule and best_val_loss = inf.
+        if not os.path.exists(config["init_checkpoint"]):
+            raise FileNotFoundError(f"init_checkpoint not found: {config['init_checkpoint']}")
+        if rank == 0:
+            print(f"Initialising weights from {config['init_checkpoint']} (fresh optimizer and LR schedule, epoch 0)")
+        init_ckpt = torch.load(config["init_checkpoint"], map_location=device)
+        if rank == 0:
+            _warn_init_mismatch(init_ckpt, config, model)
+        load_checkpoint(config["init_checkpoint"], model, None, None, device, checkpoint=init_ckpt)
 
     # Training loop
     if rank == 0:
@@ -2757,26 +2836,25 @@ def main(config: dict):
         optimizer.param_groups[0]["lr"] = curriculum_lr  # head
         optimizer.param_groups[1]["lr"] = curriculum_lr * backbone_lr_multiplier  # backbone
 
-        # Train (with augmentation enabled)
-        dataset.augment = aug_enabled
-        train_metrics = train_epoch(
-            model,
-            train_loader,
-            optimizer,
-            device,
-            epoch,
-            config,
-            scaler=scaler,
-            is_distributed=is_distributed,
-            rank=rank,
-        )
-        dataset.augment = False
+        # Train with augmentation and the training view subset; validation below gets every view, unaugmented
+        with training_sampling(dataset, aug_enabled, config.get("num_views_to_use")):
+            train_metrics = train_epoch(
+                model,
+                train_loader,
+                optimizer,
+                device,
+                epoch,
+                config,
+                scaler=scaler,
+                is_distributed=is_distributed,
+                rank=rank,
+            )
 
         training_history["train_loss"].append(train_metrics["avg_loss"])
         training_history["loss_components"].append(train_metrics["loss_components"])
         training_history["learning_rates"].append(curriculum_lr)
 
-        # Validate (augmentation disabled)
+        # Validate (every view of each sample, augmentation disabled)
         if epoch % config["validate_every_n_epochs"] == 0:
             val_metrics = validate(model, val_loader, device, config, epoch=epoch, rank=rank)
             training_history["val_loss"].append(val_metrics["avg_loss"])
@@ -2804,6 +2882,7 @@ def main(config: dict):
 
             # Save best model; not from an epoch whose validation left out non-finite batches (its average is partial)
             if val_metrics["avg_loss"] < best_val_loss and val_metrics["nonfinite_batches"]:
+                epochs_not_saved_nonfinite += 1
                 if rank == 0:
                     print("  Not saved as best model: validation had non-finite batches")
             elif val_metrics["avg_loss"] < best_val_loss:
@@ -2916,6 +2995,12 @@ def main(config: dict):
 
         print("\nTraining completed!")
         print(f"Best validation loss: {best_val_loss:.4f}")
+        if not math.isfinite(best_val_loss):
+            print(
+                "WARNING: no epoch qualified as best model, so this run wrote no best_model.pth"
+                f" ({epochs_not_saved_nonfinite} epochs were left out for non-finite validation batches)."
+                " Use final_model.pth."
+            )
         print(f"Checkpoints saved to: {config['checkpoint_dir']}")
         print(f"Training plots saved to: {plots_dir}")
 
@@ -3045,7 +3130,18 @@ if __name__ == "__main__":
     add_split_args(parser)
 
     # Multi-view specific
-    parser.add_argument("--num_views_to_use", type=int, default=None, help="Max views to use per sample (None = all)")
+    parser.add_argument(
+        "--num_views_to_use",
+        type=int,
+        default=None,
+        help="Max views per training sample, a random subset (None = all); validation uses all",
+    )
+    parser.add_argument(
+        "--legacy_view_padding",
+        action="store_true",
+        help="Temporary: pre-#132 handling of padded views (backbone on the zero padding, decoder attends to it). "
+        "Only for legacy checkpoints.",
+    )
 
     # Output configuration
     parser.add_argument("--checkpoint_dir", type=str, default=None, help="Checkpoint directory (default: from config)")
@@ -3070,6 +3166,13 @@ if __name__ == "__main__":
 
     # Resume training
     parser.add_argument("--resume_checkpoint", type=str, default=None, help="Path to checkpoint to resume from")
+    parser.add_argument(
+        "--init_checkpoint",
+        type=str,
+        default=None,
+        help="Checkpoint to take initial weights from (fine-tuning): epoch 0, fresh optimizer and LR schedule. "
+        "Ignored when --resume_checkpoint is set.",
+    )
     parser.add_argument(
         "--reset_ief_token_embedding",
         action="store_true",
@@ -3155,6 +3258,8 @@ if __name__ == "__main__":
                 cli_overrides["model"]["backbone_name"] = args.backbone_name
             if args.num_views_to_use is not None:
                 cli_overrides["num_views_to_use"] = args.num_views_to_use
+            if args.legacy_view_padding:
+                cli_overrides["legacy_view_padding"] = True
             if args.cross_attention_layers is not None:
                 cli_overrides["cross_attention_layers"] = args.cross_attention_layers
             if args.cross_attention_heads is not None:
@@ -3165,6 +3270,9 @@ if __name__ == "__main__":
             if args.resume_checkpoint is not None:
                 cli_overrides["training"] = cli_overrides.get("training", {})
                 cli_overrides["training"]["resume_checkpoint"] = args.resume_checkpoint
+            if args.init_checkpoint is not None:
+                cli_overrides["training"] = cli_overrides.get("training", {})
+                cli_overrides["training"]["init_checkpoint"] = args.init_checkpoint
             if args.use_gt_camera_init is not None:
                 cli_overrides["training"] = cli_overrides.get("training", {})
                 cli_overrides["training"]["use_gt_camera_init"] = args.use_gt_camera_init
@@ -3321,9 +3429,6 @@ if __name__ == "__main__":
         print(f"Launching multi-GPU training on {args.num_gpus} GPUs (using mp.spawn)...")
         print(f"Master port: {master_port}")
         print(f"Batch size per GPU: {args.batch_size if args.batch_size else 'from config'}")
-        print(
-            f"Total effective batch size: {args.batch_size * args.num_gpus if args.batch_size else 'config_batch_size * num_gpus'}"
-        )
 
         # Launch multi-GPU training using spawn
         mp.spawn(ddp_main, args=(args.num_gpus, training_config, master_port), nprocs=args.num_gpus, join=True)

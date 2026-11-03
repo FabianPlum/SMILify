@@ -1152,7 +1152,8 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         print(f"N_BETAS: {info['n_betas']}")
         print(f"Min views per sample: {info['min_views_per_sample']}")
         print(f"Canonical camera order: {info['canonical_camera_order']}")
-        print(f"Num views to use: {info['num_views_to_use'] or 'all'}")
+        # The trainer subsamples views only inside training epochs (training_sampling); this is the setting outside them
+        print(f"Num views to use (validation/inference): {info['num_views_to_use'] or 'all'}")
         print("=" * 50)
 
     def __del__(self):

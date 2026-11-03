@@ -567,7 +567,8 @@ def train_epoch(model, train_loader, optimizer, criterion, device, epoch, loss_w
             traceback.print_exc()
             if is_distributed:
                 # Skipping the batch on this rank only would leave the other ranks waiting in (or pair them with the
-                # wrong) gradient all-reduce. Stop instead; training resumes from the last checkpoint.
+                # wrong) gradient all-reduce. Stop instead; relaunch with resume_checkpoint to continue from the last saved
+                # checkpoint.
                 raise
             # Clean up GPU memory after OOM to prevent cascading failures.
             if isinstance(e, torch.cuda.OutOfMemoryError):
