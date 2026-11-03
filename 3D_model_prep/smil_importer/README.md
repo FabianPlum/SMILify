@@ -54,10 +54,11 @@ Open the 3D viewport sidebar (press **N**) and use the **SMIL** and
   as local-space **Limit Rotation** constraints (the exact inverse of the
   export remap), so the constraint panel, the overlay and a re-export match the
   file. Without it, an unchanged import → export opens every joint to ±180°
-  (issue #116). Axes at the wide-open **Default Joint Limit Range** stay
-  unticked. **Import Inference Animation** mutes these constraints on the rig
-  so playback shows the predicted rotations unclamped; unmute them before
-  exporting the model from that scene.
+  (issue #116). **Generate SMIL model from unposed meshes** applies the same
+  option to its base `.pkl`. Axes at the wide-open **Default Joint Limit
+  Range** stay unticked. **Import Inference Animation** mutes these
+  constraints on the rig so playback shows the predicted rotations unclamped;
+  unmute them before exporting the model from that scene.
 
 ## Export options
 
@@ -67,7 +68,10 @@ The export section of the **SMIL** panel exposes, among others:
   stores them in the exported `.pkl` under the `joint_limits` key
   (shape `(J, 3, 2)`, radians, model frame). For each bone the limits come
   from an enabled (non-muted), local-space **Limit Rotation** bone constraint
-  if present, otherwise from the bone's IK rotation limits/locks. See the
+  if present, otherwise from the bone's IK rotation limits/locks. Bones whose
+  Limit Rotation constraints are all muted or at influence 0 (e.g. after
+  **Import Inference Animation**) fall back the same way, and the export shows
+  a warning. See the
   [Joint Limits User Guide](../../docs/joint_limits_user_guide.md).
 - **Default Joint Limit Range** — half-range used for axes with no explicit
   limit; such axes export as `[-value, +value]`. Displayed in degrees (like

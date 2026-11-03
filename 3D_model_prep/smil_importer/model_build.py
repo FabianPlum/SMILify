@@ -515,6 +515,25 @@ def export_smpl_model(obj, export_path, pkl_data=None, report=None):
             default_range=bpy.context.scene.smpl_tool.joint_limit_default_range,
         )[1]
         print("joint_limits:", pkl_data["joint_limits"].shape)
+        # Muted / influence-0 Limit Rotation constraints are skipped by the exporter (e.g. after
+        # Import Inference Animation), so say so in the UI, not only in the console.
+        fallback = [
+            pb.name
+            for pb in armature_obj.pose.bones
+            if any(c.type == "LIMIT_ROTATION" and (c.mute or c.influence == 0.0) for c in pb.constraints)
+            and not any(
+                c.type == "LIMIT_ROTATION" and not c.mute and c.influence > 0.0 and c.owner_space == "LOCAL"
+                for c in pb.constraints
+            )
+        ]
+        if fallback and report is not None:
+            report(
+                {"WARNING"},
+                f"{len(fallback)} bone(s) have muted or influence-0 Limit Rotation constraints "
+                "and no active local-space one "
+                f"(first: {fallback[:3]}); their joint_limits fell back to IK limits / the default range. "
+                "Unmute them and export again to keep the authored limits.",
+            )
     else:
         # Issue #56 (review): pkl_data is the embedded copy of the originally
         # loaded .pkl, so without this a stale 'joint_limits' from that source

@@ -243,7 +243,10 @@ class SMPL_OT_GenerateFromUnposed(bpy.types.Operator):
 
             store_smpl_data(context, data, obj=obj)
 
-            create_armature_and_weights(data, obj, base_name=base_name)
+            armature = create_armature_and_weights(data, obj, base_name=base_name)
+            # Issue #116: same as Import Model, or the generated model exports wide-open limits.
+            if armature is not None and smpl_tool.import_joint_limits:
+                create_limit_constraints_from_data(armature, data, wide_open=smpl_tool.joint_limit_default_range)
 
             # Overwrite the base mesh geometry with the mean shape of the unposed meshes.
             # This is crucial for the shapekeys to be based on the correct average shape.
@@ -452,11 +455,20 @@ class SMPL_OT_ExportModel(bpy.types.Operator):
                 self.report({"ERROR"}, "No valid mesh object selected.")
                 return {"CANCELLED"}
 
-            export_smpl_model(
-                obj, pkl_data=data, export_path=bpy.path.abspath(smpl_tool.pkl_filepath), report=self.report
-            )
+            warnings = []
 
-            self.report({"INFO"}, "SMPL Model exported successfully.")
+            def report(kind, message):
+                # The status bar shows only an operator's last report, so the final one must carry any warning.
+                if "WARNING" in kind:
+                    warnings.append(message)
+                self.report(kind, message)
+
+            export_smpl_model(obj, pkl_data=data, export_path=bpy.path.abspath(smpl_tool.pkl_filepath), report=report)
+
+            if warnings:
+                self.report({"WARNING"}, f"SMPL Model exported with {len(warnings)} warning(s); see the Info editor.")
+            else:
+                self.report({"INFO"}, "SMPL Model exported successfully.")
             return {"FINISHED"}
         except Exception as e:
             self.report({"ERROR"}, f"Failed to export SMPL Model: {str(e)}")
@@ -1161,23 +1173,6 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
             self.report({"ERROR"}, "Select a SMIL mesh or its armature before importing.")
             return {"CANCELLED"}
 
-        # Issue #116: Limit Rotation constraints (recreated on model import) would clamp
-        # the keyed rotations, so playback would no longer show what the network
-        # predicted. Mute them; the exporter reports muted constraints if the model
-        # is exported from this scene later.
-        muted = 0
-        for pb in armature.pose.bones:
-            for con in pb.constraints:
-                if con.type == "LIMIT_ROTATION" and not con.mute:
-                    con.mute = True
-                    muted += 1
-        if muted:
-            self.report(
-                {"INFO"},
-                f"Muted {muted} Limit Rotation constraint(s) so the animation shows the predicted "
-                "rotations unclamped; unmute them before exporting the model from this scene.",
-            )
-
         poses = npz_data["poses"]  # (F, N_JOINTS, 3)
         trans = npz_data["trans"]  # (F, 3)
         betas_avg = npz_data["betas"]  # (N_BETAS,)
@@ -1266,6 +1261,25 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
         # L = trans - s * J0.
         root_joint_rest = np.array(armature.pose.bones[joint_names[0]].bone.head_local, dtype=np.float64)
 
+        # Issue #116: Limit Rotation constraints (recreated on model import) would clamp
+        # the keyed rotations, so playback would no longer show what the network
+        # predicted. Mute them; the exporter warns in the UI if the model is exported
+        # from this scene later, and the final report below repeats the count (the
+        # status bar shows only the last one). Done after validation and setup, just before
+        # keyframing, so a cancelled import leaves the constraints as they were.
+        muted = 0
+        for pb in armature.pose.bones:
+            for con in pb.constraints:
+                if con.type == "LIMIT_ROTATION" and not con.mute:
+                    con.mute = True
+                    muted += 1
+        if muted:
+            self.report(
+                {"INFO"},
+                f"Muted {muted} Limit Rotation constraint(s) so the animation shows the predicted "
+                "rotations unclamped; unmute them before exporting the model from this scene.",
+            )
+
         for f in range(n_frames):
             scene.frame_set(f)
 
@@ -1335,7 +1349,8 @@ class SMPL_OT_ImportAnimation(bpy.types.Operator):
         scene.frame_set(0)
         self.report(
             {"INFO"},
-            f"Imported {n_frames} frames at {fps:.2f} fps (static_shape={'on' if effective_static_shape else 'off'}).",
+            f"Imported {n_frames} frames at {fps:.2f} fps (static_shape={'on' if effective_static_shape else 'off'})"
+            + (f"; {muted} Limit Rotation constraint(s) muted, unmute them before exporting." if muted else "."),
         )
         return {"FINISHED"}
 

@@ -102,20 +102,10 @@ def remap_bounds_to_bone_frame(B, lo, hi):
     Exact for identity / signed-permutation ``B``; a mixed-axis ``B`` returns the
     bounds verbatim, mirroring the exporter, so ``local -> model -> local`` is the
     identity in every case. Used on import to turn a pkl's ``joint_limits`` back
-    into Limit Rotation constraints (issue #116).
+    into Limit Rotation constraints (issue #116). A signed permutation's inverse is
+    its transpose, so this is the forward remap with ``B.T``.
     """
-    B = np.asarray(B, dtype=np.float64)
-    if np.allclose(B, np.eye(3), atol=1e-3) or not is_signed_permutation(B):
-        return list(lo), list(hi)
-    blo = [0.0, 0.0, 0.0]
-    bhi = [0.0, 0.0, 0.0]
-    for m in range(3):
-        k = int(np.argmax(np.abs(B[m])))
-        if B[m, k] >= 0:
-            blo[k], bhi[k] = lo[m], hi[m]
-        else:
-            blo[k], bhi[k] = -hi[m], -lo[m]
-    return blo, bhi
+    return remap_bounds_to_model_frame(np.asarray(B, dtype=np.float64).T, lo, hi, authored=False)
 
 
 def limit_constraint_spec(B, lo, hi, wide_open, atol=1e-4):

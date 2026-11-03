@@ -109,8 +109,8 @@ class SMPLProperties(bpy.types.PropertyGroup):
         description=(
             "Recreate the .pkl's 'joint_limits' as local-space 'Limit Rotation' bone "
             "constraints, so the panel, the viewport overlay and a re-export match the "
-            "file. Axes at the wide-open default range below are left unconstrained. "
-            "Untick to import the rig without constraints"
+            "file. Axes at the wide-open Default Joint Limit Range (export section) are "
+            "left unconstrained. Untick to import the rig without constraints"
         ),
         default=True,
     )
