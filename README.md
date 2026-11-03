@@ -10,11 +10,9 @@
 In taxonomy, a *holotype* is the single specimen a species name is tied to. Here, one rigged template mesh plays that role: the parametric model's shape and pose space is built around it, and fitting estimates each new individual's shape and pose relative to it.
 
 This repository is based on [SMALify](https://github.com/benjiebob/SMALify) with the aim to turn any rigged 3D model into
-a SMAL compatible model. There are Blender files to convert your mesh and lots of code
+a parametric mesh model. There are Blender files to convert your mesh and lots of code
 changes to deal with arbitrary armature configurations, rather than assuming a fixed
 quadruped model.
-
-For now, I'll focus on insects, hence **SMIL**.
 
 > **New here?** Start with the **[Getting Started guide](GETTING_STARTED.md)** — a step-by-step walkthrough from a fresh clone to (1) installing Holotype, (2) benchmarking a model on an example dataset, and (3) training your own from scratch. The sections below are the full reference.
 
