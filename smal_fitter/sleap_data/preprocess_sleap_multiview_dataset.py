@@ -166,6 +166,32 @@ class SLEAPMultiViewPreprocessor:
         # Canonical camera ordering (will be determined from first session)
         self.canonical_camera_order: List[str] = []
 
+        # Optional per-session timeline -> video frame map (frame_map.npz, see stage_timeline_session.py)
+        # and static keypoints (extra_keypoints.json); recorded in the output only when a session uses them.
+        self._frame_map: Optional[Dict[str, np.ndarray]] = None
+        self._frame_map_used = False
+        self._extra_keypoint_names: List[str] = []
+
+    def _load_frame_map(self, session_path: str) -> Optional[Dict[str, np.ndarray]]:
+        """Per-camera timeline -> video frame map from ``frame_map.npz`` in the session, or None (identity)."""
+        path = Path(session_path) / "frame_map.npz"
+        if not path.exists():
+            return None
+        with np.load(path) as z:
+            frame_map = {k: z[k].astype(np.int64) for k in z.files}
+        self._frame_map_used = True
+        print(f"Info: using timeline -> video frame map {path} for {sorted(frame_map)}")
+        return frame_map
+
+    def _video_frame_index(self, camera_name: str, frame_idx: int) -> int:
+        """Video frame of timeline frame ``frame_idx``: identity without a frame map, -1 = no video frame."""
+        if self._frame_map is None:
+            return frame_idx
+        fm = self._frame_map.get(camera_name)
+        if fm is None or frame_idx >= len(fm):
+            return -1
+        return int(fm[frame_idx])
+
     def discover_sleap_sessions(self, sessions_dir: str) -> List[str]:
         """
         Discover all SLEAP session directories.
@@ -273,6 +299,18 @@ class SLEAPMultiViewPreprocessor:
                 print(f"Warning: Failed to get frames for camera {camera_name}: {e}")
                 camera_frames[camera_name] = set()
 
+        # With a frame map the SLEAP annotations are per video frame: move them onto the timeline
+        if self._frame_map is not None:
+            for camera_name, frames in camera_frames.items():
+                fm = self._frame_map.get(camera_name)
+                if fm is None:
+                    print(f"Warning: no frame map for camera {camera_name}, excluding it")
+                    camera_frames[camera_name] = set()
+                    continue
+                t = np.flatnonzero(fm >= 0)
+                annotated = np.fromiter(frames, dtype=np.int64, count=len(frames))
+                camera_frames[camera_name] = set(t[np.isin(fm[t], annotated)].tolist())
+
         # When using reprojections: adjust camera_frames based on reprojection validity.
         # - Cameras absent from reprojections.h5 were excluded from triangulation (bad
         #   calibration) and must be removed so they don't contribute raw SLEAP keypoints.
@@ -302,6 +340,13 @@ class SLEAPMultiViewPreprocessor:
                     f"  Excluded {len(cameras_to_remove)} camera(s) not in reprojections.h5 "
                     f"(not triangulated): {cameras_to_remove}"
                 )
+
+        # With a frame map a view also needs a real video frame (interpolated timeline frames have none)
+        if self._frame_map is not None:
+            for camera_name in camera_frames:
+                fm = self._frame_map.get(camera_name)
+                has_video = set(np.flatnonzero(fm >= 0).tolist()) if fm is not None else set()
+                camera_frames[camera_name] &= has_video
 
         # Find frames that appear in multiple cameras
         all_frames: Set[int] = set()
@@ -371,6 +416,10 @@ class SLEAPMultiViewPreprocessor:
                 shape_betas_path=self.shape_betas_table_path,
                 confidence_threshold=self.confidence_threshold,
             )
+            self._frame_map = self._load_frame_map(session_path)
+            for name in getattr(loader, "extra_keypoint_names", []):
+                if name not in self._extra_keypoint_names:
+                    self._extra_keypoint_names.append(name)
 
             # Try to load 3D data if enabled
             loader_3d = None
@@ -593,6 +642,7 @@ class SLEAPMultiViewPreprocessor:
         view_confidence_raw = []
         view_camera_names = []
         view_camera_indices = []
+        view_video_frames = []  # video frame per view (== frame_idx without a frame map)
         view_camera_intrinsics = []  # K matrices
         view_camera_extrinsics_R = []  # Rotation matrices
         view_camera_extrinsics_t = []  # Translation vectors
@@ -618,21 +668,27 @@ class SLEAPMultiViewPreprocessor:
                 else:
                     cam_idx = len(self.canonical_camera_order)  # Unknown camera
 
+                # Video frame for this timeline frame (identity without a frame map). Discovery already drops the
+                # views without one (_discover_multiview_frames), so this is only a defensive check.
+                video_frame_idx = self._video_frame_index(camera_name, frame_idx)
+                if video_frame_idx < 0:
+                    continue
+
                 # Read video frame with optimized sequential reading
                 # Since frames are processed in sorted order, we can read forward sequentially
                 # which is much faster than seeking
                 current_pos = video_frame_positions.get(camera_name, -1)
 
-                if current_pos == frame_idx:
+                if current_pos == video_frame_idx:
                     # Already at the right position, just read
                     ret, frame = cap.read()
-                elif current_pos < frame_idx:
+                elif current_pos < video_frame_idx:
                     # Target frame is ahead - use optimal strategy based on gap size
-                    gap = frame_idx - current_pos
+                    gap = video_frame_idx - current_pos
                     if gap <= 10:
                         # Small gap: read forward sequentially (very fast, no seeks)
                         # But check for errors during skip reads
-                        # Note: if current_pos=1 and frame_idx=10, gap=9
+                        # Note: if current_pos=1 and video_frame_idx=10, gap=9
                         # We need to skip frames 1-9 (9 reads) then read frame 10
                         skip_failed = False
                         for _ in range(gap):
@@ -643,18 +699,18 @@ class SLEAPMultiViewPreprocessor:
 
                         if skip_failed:
                             # Fallback to seeking if sequential skip failed
-                            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, video_frame_idx)
                             ret, frame = cap.read()
                         else:
-                            # Now positioned at frame_idx, read the target frame
+                            # Now positioned at video_frame_idx, read the target frame
                             ret, frame = cap.read()
                     else:
                         # Large gap: seek is faster than reading many frames
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, video_frame_idx)
                         ret, frame = cap.read()
                 else:
                     # Target frame is behind - must seek backward (slow, but rare if sorted)
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, video_frame_idx)
                     ret, frame = cap.read()
 
                 if not ret:
@@ -664,19 +720,19 @@ class SLEAPMultiViewPreprocessor:
                 # Verify we actually read the correct frame (safety check)
                 # cap.get() returns the next frame to be read, so subtract 1 to get current frame
                 actual_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
-                if actual_pos != frame_idx:
+                if actual_pos != video_frame_idx:
                     print(
-                        f"Warning: Position mismatch for {camera_name}! Expected frame {frame_idx}, got {actual_pos}. Seeking to correct position."
+                        f"Warning: Position mismatch for {camera_name}! Expected frame {video_frame_idx}, got {actual_pos}. Seeking to correct position."
                     )
                     # Try to correct by seeking
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, video_frame_idx)
                     ret, frame = cap.read()
                     if not ret:
                         self.stats["views_excluded_position_correction_failed"] += 1
                         continue
 
                 # Update position after successful read
-                video_frame_positions[camera_name] = frame_idx + 1
+                video_frame_positions[camera_name] = video_frame_idx + 1
 
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -712,7 +768,7 @@ class SLEAPMultiViewPreprocessor:
                         continue
 
                 if not used_reproj:
-                    keypoints_2d, visibility = loader.extract_2d_keypoints(camera_data, frame_idx)
+                    keypoints_2d, visibility = loader.extract_2d_keypoints(camera_data, video_frame_idx)
 
                 if len(keypoints_2d) == 0:
                     self.stats["views_excluded_no_keypoints"] += 1
@@ -755,7 +811,7 @@ class SLEAPMultiViewPreprocessor:
                 # Raw SLEAP labels (confidence-filtered only) in the same crop, stored
                 # beside keypoints_2d (which may be reprojected) for 2D-only training
                 raw_keypoints, raw_visibility, raw_confidence = self.raw_view_keypoints(
-                    loader, camera_data, frame_idx, transform_info, raw_K, raw_distortion
+                    loader, camera_data, video_frame_idx, transform_info, raw_K, raw_distortion
                 )
 
                 # Adjust keypoints
@@ -792,6 +848,7 @@ class SLEAPMultiViewPreprocessor:
                 view_confidence_raw.append(raw_confidence)
                 view_camera_names.append(camera_name)
                 view_camera_indices.append(cam_idx)
+                view_video_frames.append(video_frame_idx)
                 self.stats["total_views_included"] += 1
 
                 # Extract camera parameters if 3D data is available
@@ -852,6 +909,7 @@ class SLEAPMultiViewPreprocessor:
             "keypoint_confidence_raw": np.stack(view_confidence_raw, axis=0),  # (num_views, N_joints)
             "camera_names": view_camera_names,  # List of camera names
             "camera_indices": np.array(view_camera_indices, dtype=np.int32),  # (num_views,)
+            "video_frame_indices": np.array(view_video_frames, dtype=np.int64),  # (num_views,)
             "num_views": len(view_images),
             # Camera parameters (per-view)
             "camera_intrinsics": np.stack(view_camera_intrinsics, axis=0)
@@ -1774,6 +1832,16 @@ class SLEAPMultiViewPreprocessor:
                 compression=self.compression,
                 compression_opts=self.compression_level,
             )
+            if self._frame_map_used:  # frame_idx is a timeline index; record the video frame read per view
+                video_frame_data = np.full((num_samples, max_views), -1, dtype=np.int64)
+                for i, sample in enumerate(samples):
+                    video_frame_data[i, : sample["num_views"]] = sample["video_frame_indices"]
+                auxiliary_group.create_dataset(
+                    "video_frame_idx",
+                    data=video_frame_data,
+                    compression=self.compression,
+                    compression_opts=self.compression_level,
+                )
 
             # Save metadata
             metadata_group.attrs["num_samples"] = num_samples
@@ -1838,6 +1906,10 @@ class SLEAPMultiViewPreprocessor:
             metadata_group.attrs["views_excluded_processing_error"] = self.stats["views_excluded_processing_error"]
             metadata_group.attrs["views_undistorted"] = self.stats["views_undistorted"]
             metadata_group.attrs["views_reprojected"] = self.stats["views_reprojected"]
+            if self._frame_map_used:
+                metadata_group.attrs["frame_map_used"] = True
+            if self._extra_keypoint_names:
+                metadata_group.attrs["extra_keypoints"] = json.dumps(self._extra_keypoint_names)
 
 
 def main():

@@ -181,6 +181,7 @@ class MultiViewConfig(BaseTrainingConfig):
                 "ignored_joint_names": list(self.ignored_joint_locations.ignored_joint_names),
             },
             "loss_curriculum_config": {
+                "joint_twist_free_deg": self.loss_curriculum.joint_twist_free_deg,
                 "base_weights": dict(self.loss_curriculum.base_weights),
                 "curriculum_stages": [
                     (epoch, dict(updates)) for epoch, updates in sorted(self.loss_curriculum.curriculum_stages.items())

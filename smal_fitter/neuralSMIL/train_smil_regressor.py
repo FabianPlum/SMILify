@@ -1931,6 +1931,7 @@ def main(dataset_name=None, checkpoint_path=None, config_override=None):
         # Max curriculum weight of the issue-#56 penalty; > 0 triggers fail-fast
         # validation of the model's joint_limits at construction (see above).
         joint_limit_regularization=joint_limit_reg_weight,
+        joint_twist_free_deg=float(TrainingConfig.LOSS_CURRICULUM.get("joint_twist_free_deg", 45.0)),
     ).to(device)
 
     # Print model configuration

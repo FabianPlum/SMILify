@@ -189,6 +189,7 @@ Example:
 |-------|------|---------|-------------|
 | `base_weights` | dict | *(see below)* | Initial loss weights applied from epoch 0. |
 | `curriculum_stages` | dict | *(see defaults)* | Epoch-to-weight-update mapping. Each stage partially overrides `base_weights` from that epoch onward. |
+| `joint_twist_free_deg` | float | `45.0` | Axial twist (deg) a bone may take before `joint_twist_regularization` applies. |
 
 #### Available loss terms
 
@@ -207,6 +208,8 @@ Example:
 | `keypoint_3d` | 3D keypoint error | 0.25 |
 | `silhouette` | Silhouette overlap loss. Multi-view: masked soft IoU between the rendered mesh and the `dataset.silhouette_path` targets in every valid view (ignore pixels excluded; rendering set by the `silhouette` section) | 0.0 |
 | `joint_angle_regularization` | Joint angle prior/regularization | 0.001 |
+| `joint_limit_regularization` | Hinge on joint rotations outside the model's authored per-joint limits (issue #56); the model pkl must carry `joint_limits`, else training stops at start-up. 0.15 in the mouse runs. | 0.0 |
+| `joint_twist_regularization` | Hinge on each bone's axial twist about its rest direction beyond `joint_twist_free_deg` (default 45°; keypoints cannot see twist); locked proxy leaves are skipped. 0.15 in the mouse runs. | 0.0 |
 | `limb_scale_regularization` | Limb scale regularization | 0.01 |
 | `limb_trans_regularization` | Limb translation regularization | 1.0 |
 | `scale_consistency` | Multi-view: per-joint log scales and log mesh scale stay at a running per-session mean (one animal per session has one set of proportions). Needs per-joint scales (`scale_trans_beta.mode` `"separate"`, without the legacy PCA transformation); training stops at start-up otherwise. Start it with a `curriculum_stages` entry once the scales have settled: at epoch 1 or later in a fine-tune (the running mean, an EMA, starts from the first predictions, so from epoch 0 it pins the mesh scale at the initial checkpoint's value), and later in a from-scratch run (the combined run used epoch 20; not measured). From the epoch it starts, the term is part of the validation loss, so `best_model.pth` compares epochs with and without it. Keep it off for data with several animals per `session_name`, e.g. replicAnt HDF5s (one session per generated dataset). | 0.05 (from a later epoch) |
