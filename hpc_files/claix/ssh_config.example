@@ -1,0 +1,37 @@
+# CLAIX entries for ~/.ssh/config on the workstation. Replace <hpc-user> (your HPC
+# username, e.g. ab123456) and the key path.
+#
+# How the login works (help.itc.rwth-aachen.de, 2026-09-22): the key must be uploaded in
+# RegApp as type "interactive". A key login is only accepted if HPC password + RegApp
+# TOTP were entered within the last 10 hours. So the first `ssh claix` of the day asks
+# for both; within 10 hours the key alone works. Keys expire after 12 months.
+# Do NOT set "PreferredAuthentications publickey": it suppresses the password prompt
+# and locks you out.
+#
+# ControlMaster (not documented by RWTH either way): the first connection becomes a
+# master that later ssh/rsync/VS Code connections to the same host reuse without
+# prompting, including ssh commands run from Claude Code in the local VS Code. Open it
+# once in a terminal (`ssh claix`, then password + TOTP). The Monday 06:00 reboot of the
+# login nodes ends it. Check with `ssh -O check claix`; close with `ssh -O exit claix`.
+
+Host claix claix-gpu claix-copy
+    User <hpc-user>
+    IdentityFile ~/.ssh/id_ed25519_claix
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 10h
+    ServerAliveInterval 60
+
+# General login node: editing, sbatch, squeue (4 cores/user, 20 min CPU, 25% RAM).
+# login23-2 / login23-4 are equivalent; avoid login23-3 (still Rocky 8) and
+# login23-x-* (different CPU architecture from the compute nodes).
+Host claix
+    HostName login23-1.hpc.itc.rwth-aachen.de
+
+# GPU login node for short tests (30 min GPU per process; GPUs 0/1 shared, 2 = MIG, 3 exclusive).
+Host claix-gpu
+    HostName login23-g-1.hpc.itc.rwth-aachen.de
+
+# Data transfer node (2x100 Gbit/s, no Slurm, no modules, not rebooted on Mondays).
+Host claix-copy
+    HostName copy23-1.hpc.itc.rwth-aachen.de
