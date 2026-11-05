@@ -8,11 +8,13 @@ Pipeline (process_stl):
        visible from outside (clean_internal_geometry). Islands separated by sparse ray
        coverage are reconnected along short paths of the original mesh
        (bridge_nearby_islands); components below a minimum face count are removed.
-    4. Edge split, weld, hole filling and limited dissolve (apply_modifiers). The weld distance
-       adapts to the bounding-box size and to the local edge length; a weld that destroys more
-       than a set fraction of faces raises an error.
-    5. Remove small components, decimate to a vertex budget, and align the mesh to its principal
-       axes with legs down, positive Z up and the head along positive X.
+    4. Edge split, removal of the fragments it isolates along edges sharper than the split angle,
+       weld, hole filling and limited dissolve (apply_modifiers). The weld distance adapts to the
+       bounding-box size and to the local edge length; if the fragment removal and the weld
+       together destroy more than a set fraction of the faces, an error is raised.
+    5. Keep every vertex-connected component with at least a set fraction of the largest one's
+       faces, decimate to a vertex budget, and align the mesh to its principal axes with legs
+       down, positive Z up and the head along positive X.
     6. Export a triangulated OBJ and write mesh statistics into the JSON file next to the input.
 
 Usage:
@@ -108,6 +110,21 @@ def _face_islands(faces):
     return islands
 
 
+def _mesh_area(obj):
+    """
+    Computes the total surface area of the object's mesh (faces in object space).
+
+    Args:
+        obj (bpy.types.Object): The Blender object to measure.
+
+    Returns:
+        float: The summed area of all faces.
+    """
+    areas = np.zeros(len(obj.data.polygons), dtype=np.float64)
+    obj.data.polygons.foreach_get("area", areas)
+    return float(areas.sum())
+
+
 def apply_modifiers(
     obj,
     edge_split_angle=1.5708,
@@ -132,14 +149,26 @@ def apply_modifiers(
             operation.
         fill_holes_sides (int): Maximum number of sides a hole may have to be
             filled. 0 means no limit.
-        min_island_faces (int): Connected components with fewer faces than
-            this are removed before welding.
-        max_weld_face_loss_pct (float): A RuntimeError is raised if the Weld
-            step removes more than this percentage of faces.
+        min_island_faces (int): Face-connected components with fewer faces
+            than this are removed right after Edge Split. These are fragments
+            that Edge Split isolated along edges sharper than edge_split_angle,
+            not debris: without this step Weld would join them to the body
+            again.
+        max_weld_face_loss_pct (float): A RuntimeError is raised if the
+            fragment removal and the Weld step together remove more than this
+            percentage of the faces present before Edge Split.
 
     Returns:
-        None
+        dict: Face counts around the steps, and the share of the faces present
+        before Edge Split (in percent) removed by the fragment filter, by Weld
+        and by both together, plus the share of area removed by the fragment
+        filter.
     """
+    # Edge Split adds vertices but no faces, so this is also the face count
+    # that the fragment filter and Weld start from.
+    faces_start = len(obj.data.polygons)
+    area_start = _mesh_area(obj)
+
     if weld_merge_threshold is None:
         # Weld distance: the smaller of a bounding-box-relative and an edge-length-relative bound.
         bbox_size = obj.dimensions
@@ -171,29 +200,58 @@ def apply_modifiers(
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier="EdgeSplit")
 
-    # Remove small components before welding.
-    removed_islands = filter_small_components(obj, min_faces=min_island_faces)
-    print(f"Removed {removed_islands} debris islands (< {min_island_faces} faces) before Weld")
+    if len(obj.data.polygons) != faces_start:
+        raise RuntimeError(
+            f"Edge Split changed the face count ({faces_start} -> {len(obj.data.polygons)}); "
+            "the weld face-loss guard assumes it does not."
+        )
+
+    # Remove fragments that Edge Split isolated along edges sharper than
+    # edge_split_angle. They were part of the surface before Edge Split.
+    removed_fragments = filter_small_components(obj, min_faces=min_island_faces)
+    faces_after_fragments = len(obj.data.polygons)
+    area_after_fragments = _mesh_area(obj)
+    print(
+        f"Removed {removed_fragments} fragments isolated by Edge Split along >"
+        f"{math.degrees(edge_split_angle):.0f} degree edges (< {min_island_faces} faces): "
+        f"{faces_start} -> {faces_after_fragments} faces"
+    )
 
     # Apply Weld modifier
-    face_count_before_weld = len(obj.data.polygons)
     weld = obj.modifiers.new(name="Weld", type="WELD")
     weld.merge_threshold = weld_merge_threshold
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier="Weld")
-    face_count_after_weld = len(obj.data.polygons)
+    faces_after_weld = len(obj.data.polygons)
 
-    if face_count_before_weld > 0:
-        face_loss_pct = 100 * (face_count_before_weld - face_count_after_weld) / face_count_before_weld
-        print(f"Weld: {face_count_before_weld} -> {face_count_after_weld} faces ({face_loss_pct:.1f}% loss)")
-        if face_loss_pct > max_weld_face_loss_pct:
-            raise RuntimeError(
-                f"Weld step destroyed {face_loss_pct:.1f}% of faces "
-                f"({face_count_before_weld} -> {face_count_after_weld}), exceeding the "
-                f"{max_weld_face_loss_pct}% threshold. This indicates that Weld merged "
-                f"vertices across disconnected mesh regions rather than within a single "
-                f"surface. Aborting rather than continuing with a corrupted mesh."
-            )
+    fragment_loss_pct = 100 * (faces_start - faces_after_fragments) / faces_start if faces_start else 0.0
+    weld_loss_pct = 100 * (faces_after_fragments - faces_after_weld) / faces_start if faces_start else 0.0
+    combined_loss_pct = 100 * (faces_start - faces_after_weld) / faces_start if faces_start else 0.0
+    print(
+        f"Weld: {faces_after_fragments} -> {faces_after_weld} faces ({weld_loss_pct:.1f}% of the faces before "
+        f"Edge Split); fragment removal and Weld together: {faces_start} -> {faces_after_weld} faces "
+        f"({combined_loss_pct:.1f}% loss)"
+    )
+    if combined_loss_pct > max_weld_face_loss_pct:
+        raise RuntimeError(
+            f"Fragment removal and Weld together destroyed {combined_loss_pct:.1f}% of faces "
+            f"({faces_start} -> {faces_after_weld}): {fragment_loss_pct:.1f}% by removing fragments "
+            f"isolated by Edge Split and {weld_loss_pct:.1f}% by Weld, exceeding the "
+            f"{max_weld_face_loss_pct}% threshold. This indicates that Weld merged "
+            f"vertices across disconnected mesh regions rather than within a single "
+            f"surface. Aborting rather than continuing with a corrupted mesh."
+        )
+
+    stats = {
+        "faces_start": faces_start,
+        "faces_after_fragments": faces_after_fragments,
+        "faces_after_weld": faces_after_weld,
+        "fragments_removed": removed_fragments,
+        "fragment_loss_pct": fragment_loss_pct,
+        "fragment_area_loss_pct": 100 * (area_start - area_after_fragments) / area_start if area_start else 0.0,
+        "weld_loss_pct": weld_loss_pct,
+        "combined_loss_pct": combined_loss_pct,
+    }
 
     # Switch to Edit Mode for mesh operations
     bpy.ops.object.mode_set(mode="EDIT")
@@ -215,6 +273,7 @@ def apply_modifiers(
     bmesh.update_edit_mesh(obj.data)
     bpy.ops.object.mode_set(mode="OBJECT")
     bm.free()
+    return stats
 
 
 def _bfs_path(start_vert, target_verts, max_hops=60):
@@ -531,9 +590,45 @@ def clean_internal_geometry(
     print(f"Total vertices after island filtering: {len(obj.data.vertices)}")
 
 
+def _vertex_components(bm):
+    """
+    Splits the vertices of a mesh into components connected through edges.
+
+    Components are seeded in vertex-index order, so they come out in the same
+    order in every run. Faces connect their vertices through their edges, so
+    two face-islands that touch at a single vertex belong to one component.
+
+    Args:
+        bm (BMesh): The mesh to split.
+
+    Returns:
+        list[list[BMVert]]: The components, ordered by their lowest vertex index.
+    """
+    bm.verts.ensure_lookup_table()
+    seen = [False] * len(bm.verts)
+    components = []
+    for seed in bm.verts:
+        if seen[seed.index]:
+            continue
+        seen[seed.index] = True
+        component = [seed]
+        to_visit = [seed]
+        while to_visit:
+            current = to_visit.pop()
+            for edge in current.link_edges:
+                neighbor = edge.other_vert(current)
+                if not seen[neighbor.index]:
+                    seen[neighbor.index] = True
+                    component.append(neighbor)
+                    to_visit.append(neighbor)
+        components.append(component)
+    return components
+
+
 def find_largest_component(obj):
     """
-    Retains only the largest connected component of the mesh.
+    Retains only the largest connected component of the mesh (by vertex
+    count; connectivity through edges).
 
     Args:
         obj (bpy.types.Object): The Blender object to process.
@@ -541,43 +636,79 @@ def find_largest_component(obj):
     Returns:
         None
     """
+    bpy.context.view_layer.objects.active = obj
     bpy.ops.object.mode_set(mode="EDIT")
+    bm = bmesh.from_edit_mesh(obj.data)
 
-    mesh = bmesh.from_edit_mesh(obj.data)
-
-    for v in mesh.verts:
-        v.select = False
-    mesh.verts.ensure_lookup_table()
-
-    unvisited = set(mesh.verts)
-    largest_component = set()
-
-    while unvisited:
-        current = unvisited.pop()
-        component = set([current])
-        to_visit = set([current])
-
-        while to_visit:
-            current = to_visit.pop()
-            for edge in current.link_edges:
-                neighbor = edge.other_vert(current)
-                if neighbor in unvisited:
-                    unvisited.remove(neighbor)
-                    component.add(neighbor)
-                    to_visit.add(neighbor)
-
-        if len(component) > len(largest_component):
-            largest_component = component
-
-    for v in largest_component:
-        v.select = True
-
-    bmesh.update_edit_mesh(obj.data)
-
-    bpy.ops.mesh.select_all(action="INVERT")
-    bpy.ops.mesh.delete(type="VERT")
+    components = _vertex_components(bm)
+    if components:
+        largest = max(components, key=len)
+        keep = {v.index for v in largest}
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.index not in keep], context="VERTS")
+        bmesh.update_edit_mesh(obj.data)
 
     bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def filter_components_by_fraction(obj, min_fraction=0.01, min_faces=4):
+    """
+    Keeps every vertex-connected component with at least max(min_faces,
+    min_fraction x the face count of the largest component) faces and removes
+    the others, including vertices that no face uses.
+
+    Connectivity is through edges, like find_largest_component: a piece that
+    touches the body at a single vertex counts as part of the body. Components
+    share no vertices, so deleting a removed component's vertices cannot delete
+    a face of a kept one.
+
+    Args:
+        obj (bpy.types.Object): The Blender object to process.
+        min_fraction (float): Minimum face count of a kept component, as a
+            fraction of the largest component's face count.
+        min_faces (int): Absolute lower bound on the face count of a kept
+            component, whatever min_fraction gives.
+
+    Returns:
+        dict: Number of components kept and removed, the faces and the share of
+        the surface area (in percent) of the removed components, and the number
+        of removed vertices that no face used.
+    """
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode="EDIT")
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+
+    components = _vertex_components(bm)
+    component_of = {}
+    for index, component in enumerate(components):
+        for v in component:
+            component_of[v.index] = index
+    face_counts = [0] * len(components)
+    areas = [0.0] * len(components)
+    for face in bm.faces:
+        index = component_of[face.verts[0].index]
+        face_counts[index] += 1
+        areas[index] += face.calc_area()
+
+    largest_faces = max(face_counts, default=0)
+    threshold = max(min_faces, min_fraction * largest_faces)
+    remove = [i for i, count in enumerate(face_counts) if count < threshold]
+    total_area = sum(areas)
+
+    stats = {
+        "components_kept": len(components) - len(remove),
+        "components_removed": len(remove),
+        "faces_removed": sum(face_counts[i] for i in remove),
+        "area_removed_pct": 100 * sum(areas[i] for i in remove) / total_area if total_area else 0.0,
+        "faces_unused_verts_removed": sum(len(components[i]) for i in remove if face_counts[i] == 0),
+    }
+
+    if remove:
+        bmesh.ops.delete(bm, geom=[v for i in remove for v in components[i]], context="VERTS")
+        bmesh.update_edit_mesh(obj.data)
+
+    bpy.ops.object.mode_set(mode="OBJECT")
+    return stats
 
 
 def filter_small_components(obj, min_faces=4):
@@ -880,6 +1011,7 @@ def process_stl(
     secondary_rays=5,
     random_seed=42,
     min_island_faces=4,
+    min_component_fraction=0.01,
     keep_rings=2,
     min_bridge_island_faces=50,
     max_bridge_hops=20,
@@ -900,7 +1032,11 @@ def process_stl(
             geometry cleaning.
         random_seed (int): Seed for random-number generation.
         min_island_faces (int): Minimum face count of a connected component,
-            used by every small-component filter in the pipeline.
+            used by every small-component filter in the pipeline (including
+            the final one, whatever min_component_fraction gives).
+        min_component_fraction (float): After apply_modifiers, every
+            vertex-connected component with at least this fraction of the
+            largest component's faces is kept; smaller ones are removed.
         keep_rings (int): Number of face rings kept around each ray-hit face.
         min_bridge_island_faces (int): Minimum face count of an island
             considered by bridge_nearby_islands.
@@ -943,15 +1079,23 @@ def process_stl(
 
     # Apply simplification modifiers
     print("Applying simplification modifiers...")
-    apply_modifiers(
+    modifier_stats = apply_modifiers(
         obj,
         fill_holes_sides=0,
         min_island_faces=min_island_faces,
     )
 
-    # Remove small components left by welding and hole filling.
-    removed_islands = filter_small_components(obj, min_faces=min_island_faces)
-    print(f"Removed {removed_islands} debris islands (< {min_island_faces} faces) after apply_modifiers")
+    # Keep the body and every component of at least min_component_fraction of its size.
+    component_stats = filter_components_by_fraction(
+        obj, min_fraction=min_component_fraction, min_faces=min_island_faces
+    )
+    print(
+        f"Kept {component_stats['components_kept']} components, removed "
+        f"{component_stats['components_removed']} (< {min_component_fraction:.2%} of the largest, "
+        f"or < {min_island_faces} faces): {component_stats['faces_removed']} faces, "
+        f"{component_stats['area_removed_pct']:.2f}% of the surface area"
+    )
+    print("[stats] " + json.dumps({"apply_modifiers": modifier_stats, "components": component_stats}))
 
     # Decimate
     remaining_vertices = decimate_mesh(obj, max_vertices)
