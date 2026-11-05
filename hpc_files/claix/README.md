@@ -8,7 +8,7 @@ It was researched on 2026-11-03 from four sources:
 - RWTH's official examples repository
 - Uness's CLAIX runs in September 2026: fork `Uness10/SMILify`, in `hpc_files/rwth/`, `cmnds*.txt` and `logs/`
 
-Nothing here has been run from your account yet. Items marked **(unverified)** need checking on the first login.
+Since 2026-11-04 these scripts have run from your account on project rwth2151: smoke job 5444995 on one node, and the 16-GPU run 5444996 on four. Items still marked **(unverified)** have not been checked yet.
 
 | File | What it does |
 |---|---|
@@ -38,7 +38,7 @@ Check the [status portal](https://maintenance.itc.rwth-aachen.de/incident-change
    - Upload an ed25519 public key and set its type to **interactive**.
 2. **Network.** You can connect directly from:
    - the RWTH network, including RWTH eduroam
-   - DFN-connected networks (most German research institutes; FZ Jülich should qualify, **unverified**)
+   - DFN-connected networks (most German research institutes). FZ Jülich works, also from home through the FZJ VPN's full tunnel (2026-11-04).
    - selected partner universities
 
    From anywhere else, connect to a VPN first: `vpn.rwth-aachen.de` for RWTH members, `vpn.hpc.rwth-aachen.de` for external HPC users. Both use Cisco Secure Client.
@@ -104,7 +104,7 @@ CLAIX-2025 has its own login nodes, `login25-1/-2/-3` and `login25-g-1`. Jobs su
 
 | | Path | Quota (space / files) | Backup | Use |
 |---|---|---|---|---|
-| `$HOME` | `/home/<user>` (GPFS) | 250 GB / 1M | daily, plus snapshots | code, configs |
+| `$HOME` | `/home/<user>` (GPFS) | 150 GB / 1M | daily, plus snapshots | code, configs |
 | `$WORK` | `/work/<user>` (GPFS) | 250 GB / 1M | snapshots only | |
 | `$HPCWORK` | `/hpcwork/<user>` (Lustre, 500 GB/s) | 1 TB / ~1M | **none** | data, runs, environments |
 | Node SSD | `$TMP`, or `$BEEOND` with `#SBATCH --beeond` | c23g 635 GB, c25g 1.6 TB | wiped when the job ends | staging |
@@ -230,13 +230,13 @@ python hpc_files/download_backbone_weights.py --backbones vit_large_patch16_224
 ## Jobs
 
 Code and configs:
-- **Code and scripts.** The repo is public, so a login node can clone it without credentials. Until this folder is merged it lives on branch `claix-hpc`:
+- **Code and scripts.** The repo is public, so a login node can clone it without credentials:
   ```
-  git clone -b claix-hpc https://github.com/FabianPlum/Holotype.git $P/code/<tag>
+  git clone https://github.com/FabianPlum/Holotype.git $P/code/<tag>
   git -C $P/code/<tag> log -1 --format=%h    # note the commit the campaign runs
   ```
 - **Configs.** The run configs live under the untracked `diagnostics/`, so copy them over as well: `rsync -aP diagnostics/long_schedule_PROBE/configs/ claix-copy:$P/code/<tag>/configs_src/`.
-- **Why a pinned checkout per campaign.** Each chain link `cd`s into the submit directory and runs whatever code is there when it starts, which can be hours after you submitted. So don't `git pull` in a checkout with a running chain.
+- **Why a pinned checkout per campaign.** Each chain link `cd`s into the submit directory and runs whatever code is there when it starts, which can be hours after you submitted. So don't `git pull` in a checkout with a running chain. To move a campaign to newer code, clone a new checkout, copy its config over, and submit the next links from there; they resume from the same checkpoint folder, because the config's paths are absolute.
   - If the architecture changes, `load_checkpoint` drops the mismatched tensors and resets the epoch to 0. Its only messages are "Skipped N mismatched keys" and "Epoch counter reset to 0".
 
 **Make cluster configs** on a login node:
@@ -276,7 +276,11 @@ What a healthy run shows:
 
 To time an epoch, compare the checkpoint timestamps: `ls -l --time-style=+%H:%M $P/smoke/ckpt` (`$P/smoke/ckpt_fold<k>` for a blocked split).
 
-**Measured speed** (smoke test, 2026-11-05: one c25g node, 4x H100 80 GB, 4 samples per GPU, 6 views per sample, current input path): 0.675 s per training step, so 562 steps (one epoch of the combined dataset on 16 GPUs) take about 6.3 min plus about 20 s of validation. That is slower than the 0.43 s the AWS report estimated from the workstation; the step is limited by the host CPU, not the GPU.
+**Measured speed**, both before #149 moved the image downscale into the loader workers:
+- Smoke test (2026-11-05: one c25g node, 4x H100 80 GB, 4 samples per GPU, 6 views per sample): 0.675 s per training step, so 562 steps (one epoch of the combined dataset on 16 GPUs) take about 6.3 min plus about 20 s of validation. That is slower than the 0.43 s the AWS report estimated from the workstation; the step is limited by the host CPU, not the GPU.
+- 16-GPU run 5444996 (four c23g nodes, 4 samples per GPU, 12 views per sample): 1.22 s per step, about 13.2 min per epoch including validation. Twice the images per GPU take 1.8× as long, so the step is still host-bound.
+
+Compare runs on newer code against these numbers.
 
 **Real runs.** Each run needs about `ceil(remaining_epochs × hours_per_epoch / 23)` links:
 ```
@@ -294,12 +298,16 @@ CONFIG=configs_claix/combined_fk5.json bash hpc_files/claix/submit_chain.sh 5 \
 - **Walltime.** His 2-node runs were killed at the 24 h limit by SIGTERM, as expected. They saved checkpoints every 2 epochs.
 - **A warning in his logs:** `Applied workaround for CuDNN issue, install nvrtc.so`. It affects performance only.
 
-## Open questions for the first login
+## Your project (rwth2151, checked 2026-11-04)
 
-- **Project limits.** Your project's ID, type, GPU-h budget, max walltime and max cores per job (`r_wlm_usage -q -p`). A per-job cap of 96 cores would block 2-node jobs.
-- **SSH.** Whether the 10-hour key window is per node or cluster-wide, and whether ControlMaster connection sharing works as expected. RWTH doesn't document either.
-- **Node topology.** NVLink layout and number of InfiniBand cards per c23g node: run `nvidia-smi topo -m` and `ibstat` inside a job.
-- **Shared memory.** The size of `/dev/shm` inside a job, which the DataLoader workers use.
+- **Limits** (`r_wlm_usage -q -p rwth2151`): a WestAI project; partitions c23g and c25g; 24 h max walltime; at most 384 cores per job, so at most 4 c23g nodes (16 GPUs) per job.
+- **SSH.** The shared connection from `ssh_config.example` works: after one password and TOTP login, later `ssh` and `rsync` calls to the same host connect without a prompt.
+- **Inter-node traffic.** The 16-GPU run's NCCL log shows `NET/IB` with GPUDirect RDMA.
+
+Still open:
+- Whether the 10-hour key window is per node or cluster-wide. RWTH doesn't document it.
+- NVLink layout and number of InfiniBand cards per c23g node: run `nvidia-smi topo -m` and `ibstat` inside a job.
+- The size of `/dev/shm` inside a job, which the DataLoader workers use.
 
 ## Trainer issues found along the way (not fixed)
 
