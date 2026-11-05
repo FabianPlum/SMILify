@@ -15,6 +15,7 @@ Nothing here has been run from your account yet. Items marked **(unverified)** n
 | `train.sbatch` | Runs one wall-clock link of a multi-view DDP run on 1 or more c23g nodes. It resumes from the newest complete `checkpoint_epoch_*.pth` and exits at once if `final_model.pth` exists. |
 | `submit_chain.sh` | Submits N links, each with `--dependency=afterany` on the previous one. |
 | `rebase_config.py` | Rewrites a config's local absolute paths for CLAIX, sets keys with `--set`, and checks that all input files exist. |
+| `environment_claix.yml` | The conda env recipe validated on CLAIX: channel-pinned torch/pytorch3d and pip pins matching the workstation (see [Software](#software)). |
 | `ssh_config.example` | `~/.ssh/config` entries for the login, GPU-login and copy nodes, with connection sharing. |
 
 ## Cluster status when this was written (2026-11-03)
@@ -193,7 +194,12 @@ The default Lustre layout already spreads files over 1 GiB across 4 storage targ
 
 ## Software
 
-**Conda channels.** Use Miniforge. The firewall blocks repo.anaconda.com (Anaconda's `defaults` channel) but not anaconda.org. `environment.yml` only uses the `pytorch`, `nvidia`, `pytorch3d` and `conda-forge` channels, all hosted on anaconda.org. Uness's env on CLAIX (torch 2.3.1, CUDA 11.8) worked.
+**Conda channels.** Use Miniforge. The firewall blocks repo.anaconda.com (Anaconda's `defaults` channel) but not anaconda.org, which hosts the `pytorch`, `nvidia`, `pytorch3d` and `conda-forge` channels.
+
+**Build from `environment_claix.yml`, not the repo's `environment.yml`.** Under Miniforge the repo file builds a broken env (2026-11-04):
+- **Wrong torch.** Miniforge's flexible channel priority installs conda-forge's torch 2.3.1. Its C++ ABI doesn't match the pytorch3d channel's 0.7.8 build, so `from pytorch3d import _C` fails with `undefined symbol: _ZN3c105ErrorC2ENS_14SourceLocationESs`. The recipe pins `pytorch::pytorch`, `pytorch::torchvision` and `pytorch3d::pytorch3d`.
+- **Drifting pip packages.** The unpinned pip section installs numpy 2.2 and opencv 5.0. The recipe pins the workstation's versions (numpy 1.26.4, opencv-python 4.10.0.84, timm 1.0.20, ...), and `diagnostics/claix_env_PROBE` found the dataset decode byte-identical to the workstation with them.
+- **MKL.** It pins `mkl<2024.1`; newer conda-forge MKL breaks pytorch-channel torch 2.3.1 (`iJIT_NotifyEvent`).
 
 **H100 support.** The cu118 builds run natively on H100: `cuobjdump` shows sm_90 code in both cached packages, `pytorch-2.3.1-py3.10_cuda11.8_cudnn8.7.0_0` and `pytorch3d-0.7.8-py310_cu118_pyt231`. torch bundles NCCL 2.20.5.
 
@@ -206,12 +212,11 @@ bash Miniforge3-Linux-x86_64.sh -b -p $HPCWORK/miniforge3
 source $HPCWORK/miniforge3/etc/profile.d/conda.sh
 conda config --set auto_activate_base false
 cd /hpcwork/<project-id>/code/<tag>
-mamba env create -f environment.yml
+CONDA_OVERRIDE_CUDA=11.8 mamba env create -f hpc_files/claix/environment_claix.yml
 conda activate pytorch3d
-python -c "import torch, pytorch3d; print(torch.__version__, torch.cuda.is_available())"
+python -c "import torch, pytorch3d; from pytorch3d import _C; print(torch.__version__, torch.version.cuda)"
 ```
-
-**If the import fails** with `undefined symbol: iJIT_NotifyEvent`, conda-forge's MKL 2024.1 or newer was installed. Fix it with `mamba install -n pytorch3d "mkl<2024.1"`. This is inferred from pytorch issue #123097; your local env has MKL 2020.4.
+Deleting an old env on `$HPCWORK` takes several minutes (about 117k files).
 
 **Backbone weights.** Compute nodes have no internet: Uness's runs show this, and RWTH's own examples download on login nodes. Fetch the weights on a login node:
 ```
@@ -246,6 +251,8 @@ Set the checkpoint cadence in the config. The trainer ignores `--save_every_n_ep
 
 For the combined run, upload e99 into the run's own `checkpoint_dir`. `train.sbatch` then resumes from e99, because it is the newest checkpoint there; the config's own `resume_checkpoint` points at run 1's e49 and is no longer used.
 
+**Blocked splits write to `*_fold<k>` folders.** With `split_method: blocked` the trainer appends `_fold<k>` to `checkpoint_dir`, `visualizations_dir` and `plots_dir` (k = `holdout_fold`, or the last fold when it is null: 4 with the 0.80/0.05/0.15 ratios), so the outputs of `.../checkpoints` land in `.../checkpoints_fold2`. `train.sbatch` resolves the folder the same way when it looks for the checkpoint to resume from.
+
 **Smoke tests** need their own `checkpoint_dir`. Otherwise the smoke run's checkpoint becomes the real run's resume point.
 ```
 python hpc_files/claix/rebase_config.py configs_claix/combined_fk5.json configs_claix/smoke.json \
@@ -267,7 +274,9 @@ What a healthy run shows:
 - No `Skipped` or `Epoch counter reset` lines.
 - `DDP replicas after epoch N: identical`.
 
-To time an epoch, compare the checkpoint timestamps: `ls -l --time-style=+%H:%M $P/smoke/ckpt`.
+To time an epoch, compare the checkpoint timestamps: `ls -l --time-style=+%H:%M $P/smoke/ckpt` (`$P/smoke/ckpt_fold<k>` for a blocked split).
+
+**Measured speed** (smoke test, 2026-11-05: one c25g node, 4x H100 80 GB, 4 samples per GPU, 6 views per sample, current input path): 0.675 s per training step, so 562 steps (one epoch of the combined dataset on 16 GPUs) take about 6.3 min plus about 20 s of validation. That is slower than the 0.43 s the AWS report estimated from the workstation; the step is limited by the host CPU, not the GPU.
 
 **Real runs.** Each run needs about `ceil(remaining_epochs × hours_per_epoch / 23)` links:
 ```

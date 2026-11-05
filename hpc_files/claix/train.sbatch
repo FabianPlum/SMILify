@@ -27,8 +27,8 @@
 # More GPUs: add --nodes=2 (8 ranks). batch_size is PER RANK under DDP, so the
 # effective batch grows with the rank count; adjust the config if that matters.
 # c25g (CLAIX-2025) is a pilot as of 2026-10-28: NHR/WestAI projects only, ML jobs
-# 1 node max, limited storage bandwidth. If your project may use it, 1-node jobs can
-# take --partition=c23g,c25g (Slurm starts the job where a node frees first).
+# 1 node max, limited storage bandwidth. Name one partition: RWTH's sbatch wrapper
+# rejects lists such as --partition=c23g,c25g.
 #
 # Env:
 #   CONFIG      multi-view training config JSON (required; paths valid on CLAIX and
@@ -60,10 +60,18 @@ source "$CONDA_BASE/etc/profile.d/conda.sh"
 conda activate "$ENV_PREFIX"
 
 # --- resume point --------------------------------------------------------------
+# Resolve the checkpoint dir exactly as the trainer does: a blocked split writes to
+# <checkpoint_dir>_fold<k> (data_splits.fold_tag; k = holdout_fold, or the last fold when null).
+# Reading output.checkpoint_dir alone would find no checkpoint there, and a chained
+# link would restart the run from scratch. Loader messages go to stderr.
 read -r CKPT_DIR NUM_EPOCHS < <(python - "$CONFIG" <<'PY'
-import json, sys
-cfg = json.load(open(sys.argv[1]))
-print(cfg["output"]["checkpoint_dir"], cfg["training"]["num_epochs"])
+import contextlib, sys
+with contextlib.redirect_stdout(sys.stderr):
+    from smal_fitter.neuralSMIL.configs import load_config
+    from smal_fitter.neuralSMIL.data_splits import fold_tag, tag_output_dir
+    cfg = load_config(sys.argv[1]).to_multiview_legacy_dict()
+    tag = fold_tag(cfg.get("split_method", "random"), cfg.get("holdout_fold"), cfg["val_ratio"], cfg["test_ratio"])
+print(tag_output_dir(cfg["checkpoint_dir"], tag), cfg["num_epochs"])
 PY
 )
 if [[ -f "$CKPT_DIR/final_model.pth" ]]; then
