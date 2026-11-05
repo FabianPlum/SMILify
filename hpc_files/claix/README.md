@@ -288,6 +288,11 @@ CONFIG=configs_claix/combined_fk5.json bash hpc_files/claix/submit_chain.sh 5 \
     -A <project-id> --export=ALL,CONFIG hpc_files/claix/train.sbatch
 ```
 
+**A diverged run stops; cancel its remaining links.**
+- After 20 optimizer steps in a row are skipped for non-finite gradients, the trainer raises `TrainingDiverged` and the job ends with an error.
+- An `afterany` link starts anyway. It resumes from the newest checkpoint, or starts from scratch when there is none, so it diverges again. A link that starts from scratch also overwrites `best_model.pth`.
+- So `scancel` the remaining links, and restart from a `checkpoint_epoch_*.pth` written before the divergence, usually with a lower learning rate.
+
 **Effective batch** is per-rank batch × ranks × gradient-accumulation steps. The combined run used 4 × 2 × 2 = 16. One node keeps 16 with `EXTRA_ARGS="--gradient_accumulation_steps 1"` (this CLI override is honoured for new-style configs). Two nodes at 16 would mean a batch of 2 per GPU. This is your decision; the scripts don't change it.
 
 ## From Uness's runs (September 2026, account rwth2151)

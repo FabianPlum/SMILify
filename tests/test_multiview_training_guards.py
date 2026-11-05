@@ -123,3 +123,58 @@ def test_ranks_agree_on_component_keys_and_on_skipping_a_nan_step(tmp_path):
     for rank, res in enumerate(results):
         failed = [k for k, ok in res.items() if not ok]
         assert not failed, f"rank {rank}: {failed}"
+
+
+class _FakeMultiView(nn.Module):
+    """Enough of MultiViewSMILImageRegressor for train_epoch: one weight and a loss of factor * w on mini-batch i
+    (factor factors[i], default 1), so the step's gradient norm is |factor|. The loss is NaN on the mini-batches in
+    `bad`, so their gradients are NaN and _step_if_finite skips the step."""
+
+    def __init__(self, bad=(), factors=None):
+        super().__init__()
+        self.w = nn.Parameter(torch.ones(1))
+        self.bad, self.factors = set(bad), factors or {}
+
+    def predict_from_multiview_batch(self, x_data_batch, y_data_batch):
+        return {"batch": x_data_batch}, None, None
+
+    def compute_multiview_batch_loss(self, predicted, y_data_batch, loss_weights=None, return_components=True):
+        i = predicted["batch"]
+        loss = self.w.sum() * (float("nan") if i in self.bad else self.factors.get(i, 1.0))
+        return loss, {"keypoint_2d": loss.detach()}
+
+
+def _epoch(trainer, bad=(), factors=None, n=10, skip_streak=0, rank=0):
+    model = _FakeMultiView(bad, factors)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.1)
+    loader = [(i, None) for i in range(n)]  # mini-batch i is "x_data_batch" i
+    config = {"gradient_clip_norm": 1.0, "gradient_accumulation_steps": 1, "loss_weights": {}}
+    metrics = trainer.train_epoch(model, loader, optimizer, "cpu", 0, config, rank=rank, skip_streak=skip_streak)
+    return metrics, optimizer
+
+
+def test_a_diverged_run_stops_after_the_consecutive_skip_limit(trainer, monkeypatch):
+    assert trainer.MAX_CONSECUTIVE_SKIPPED_STEPS >= 20  # far above the isolated skips that healthy runs survive
+    monkeypatch.setattr(trainer, "MAX_CONSECUTIVE_SKIPPED_STEPS", 3)
+    # Every step skipped: every rank stops at the third mini-batch, through the per-batch error handling
+    for rank in (0, 1):
+        with pytest.raises(trainer.TrainingDiverged, match="3 optimizer steps in a row.*mini-batch 2"):
+            _epoch(trainer, bad=range(10), rank=rank)
+    # The streak is carried across epochs: two skips at the end of one epoch and one at the start of the next
+    metrics, _ = _epoch(trainer, bad={8, 9})
+    assert metrics["skip_streak"] == 2 and metrics["skipped_steps"] == 2
+    with pytest.raises(trainer.TrainingDiverged, match="mini-batch 0"):
+        _epoch(trainer, bad={0}, skip_streak=metrics["skip_streak"])
+    # Isolated skips never stop a run, and a taken step resets the streak
+    metrics, optimizer = _epoch(trainer, bad={0, 1, 3, 4, 6, 7})
+    assert metrics["skipped_steps"] == 6 and metrics["skip_streak"] == 0
+    assert optimizer.state  # the finite steps were taken
+
+
+def test_the_epoch_reports_its_pre_clip_gradient_norms(trainer):
+    # Gradient norms 0.5, 2, 3 and 1 (the default factor), then a skipped step, which has none; clipped at 1.0
+    metrics, _ = _epoch(trainer, bad={4}, factors={0: 0.5, 1: 2.0, 2: -3.0}, n=5)
+    assert metrics["grad_norm_steps"] == 4 and metrics["skipped_steps"] == 1
+    assert metrics["grad_norm_mean"] == pytest.approx((0.5 + 2.0 + 3.0 + 1.0) / 4)
+    assert metrics["grad_norm_max"] == pytest.approx(3.0)
+    assert metrics["clipped_steps"] == 2  # 2 and 3; a norm of exactly 1.0 is not clipped
