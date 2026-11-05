@@ -56,6 +56,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         backbone_name: str = None,
         augment: bool = False,
         augmentation_config: Optional[Dict[str, Any]] = None,
+        image_resolution: Optional[int] = None,
         keypoint_source: str = "reprojected",
         raw_keypoint_min_confidence: Optional[float] = None,
         include_raw_keypoints: bool = False,
@@ -89,6 +90,13 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                               via `item_sample_indices` so no view leaks across
                               splits.
             backbone_name: Backbone name (for compatibility)
+            image_resolution: Side length that larger images are downscaled to before they are returned,
+                            after augmentation. None (default) returns them at the stored resolution. Training
+                            passes the model's input resolution so that the downscale runs in the DataLoader
+                            workers instead of image by image in the training step; smaller images are left to
+                            the trainer to upscale, as before. It is the trainer's own call (cv2.resize of the
+                            float32 image, see SMILImageRegressor.preprocess_image), so the model input stays
+                            bit-identical.
             keypoint_source: 2D labels to return. "reprojected" (default) reads
                             keypoints_2d / keypoint_visibility, the preprocessed
                             labels (reprojected 3D when the HDF5 was built with
@@ -125,6 +133,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         self.camera_centric = camera_centric
         self.expand_all_views = expand_all_views
         self.augment = augment
+        self.image_resolution = image_resolution
         if keypoint_source not in KEYPOINT_SOURCES:
             raise ValueError(f"keypoint_source must be one of {KEYPOINT_SOURCES}, got {keypoint_source!r}")
         if raw_keypoint_min_confidence is not None and keypoint_source != "raw":
@@ -764,6 +773,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
                     y_data["cam_trans_per_view"][vi] = T_p3d
                     y_data["cam_aspect_per_view"][vi, 0] = float(aspect)
 
+        x_data["images"] = [self._resize_for_model(image) for image in x_data["images"]]
         return x_data, y_data
 
     def _get_single_view_sample(
@@ -965,7 +975,20 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         if self.augment:
             x_data["input_image_data"] = self._apply_photometric_augmentation(x_data["input_image_data"])
 
+        x_data["input_image_data"] = self._resize_for_model(x_data["input_image_data"])
         return x_data, y_data
+
+    def _resize_for_model(self, image: np.ndarray) -> np.ndarray:
+        """Downscale to `image_resolution` (no-op when None, or when the image has no more pixels than that).
+
+        Must stay the same operation as the trainer's preprocessing (SMILImageRegressor.preprocess_image and
+        _preprocess_image_batch: cv2.resize with its default INTER_LINEAR on the float32 [0, 1] image), which
+        then finds the image at its input size and passes it through unchanged. Upscaling is left to the
+        trainer: done here it would only make the workers hand over more bytes.
+        """
+        if self.image_resolution is None or image.shape[0] * image.shape[1] <= self.image_resolution**2:
+            return image
+        return cv2.resize(image, (self.image_resolution, self.image_resolution))
 
     def _decode_jpeg_image(self, jpeg_bytes) -> np.ndarray:
         """Decode JPEG bytes to image array."""
@@ -1069,26 +1092,39 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         if shared_params is None:
             shared_params = self._sample_photometric_params()
 
+        # One copy, then every step writes into it, in the same order and with the same rounding steps as
+        # a new array per step would: the result is bit-identical, with far less memory traffic, which is
+        # what limits several DataLoader workers on full-size float32 images.
+        image = image.copy()
+
         # Brightness: additive shift
         if shared_params["brightness_delta"] is not None:
-            image = image + shared_params["brightness_delta"]
+            image += shared_params["brightness_delta"]
 
         # Contrast: scale around the per-view mean, with a shared factor.
         # Keeping the mean local preserves "scale around mean" semantics
         # when views have different overall luminance.
         if shared_params["contrast_factor"] is not None:
             mean = image.mean()
-            image = (image - mean) * shared_params["contrast_factor"] + mean
+            image -= mean
+            image *= shared_params["contrast_factor"]
+            image += mean
 
-        # Saturation: blend with grayscale
+        # Saturation: blend with grayscale, the channel mean. Summing the three channels gives the same
+        # float32 values as image.mean(axis=2), which is several times slower on an HWC array.
         if shared_params["saturation_factor"] is not None:
-            gray = image.mean(axis=2, keepdims=True)
-            image = gray + (image - gray) * shared_params["saturation_factor"]
+            gray = ((image[..., 0] + image[..., 1] + image[..., 2]) / 3)[..., None]
+            image -= gray
+            image *= shared_params["saturation_factor"]
+            image += gray
 
-        # Gaussian noise (per-view realization — physical sensor noise)
+        # Gaussian noise (per-view realization — physical sensor noise). torch's float32 sampler draws
+        # the same N(0, std^2) about 4x faster than np.random.normal in float64. DataLoader workers seed
+        # torch per worker and epoch, as they do numpy.
         if self.aug_gaussian_noise_std > 0:
-            noise = np.random.normal(0, self.aug_gaussian_noise_std, image.shape).astype(np.float32)
-            image = image + noise
+            noise = torch.randn(image.shape, dtype=torch.float32).numpy()
+            noise *= np.float32(self.aug_gaussian_noise_std)
+            image += noise
 
         # Gaussian blur (shared kernel size across views)
         if shared_params["blur_kernel"] is not None:
@@ -1107,7 +1143,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
             x0 = int(erase["x0_frac"] * max(0, w - ew))
             image[y0 : y0 + eh, x0 : x0 + ew] = image.mean()
 
-        return np.clip(image, 0.0, 1.0)
+        return np.clip(image, 0.0, 1.0, out=image)
 
     def _apply_geometric_augmentation(
         self,
@@ -1270,6 +1306,9 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
         print(f"N_BETAS: {info['n_betas']}")
         print(f"Min views per sample: {info['min_views_per_sample']}")
         print(f"Canonical camera order: {info['canonical_camera_order']}")
+        res = self.image_resolution
+        if res is not None and self.target_resolution > res:
+            print(f"Images returned at: {res}x{res} (downscaled after augmentation)")
         # The trainer subsamples views only inside training epochs (training_sampling); this is the setting outside them
         print(f"Num views to use (validation/inference): {info['num_views_to_use'] or 'all'}")
         print("=" * 50)
