@@ -10,8 +10,20 @@ import smal_fitter.neuralSMIL.train_multiview_regressor as trainer
 from smal_fitter.sleap_data.sleap_multiview_dataset import SLEAPMultiViewDataset, multiview_collate_fn
 from tests.multiview_h5 import write_multiview_h5
 
-# Photometric parameters (numpy in the workers) and per-view noise (torch in the workers)
-AUG = {"color_jitter_brightness": 0.1, "gaussian_noise_std": 0.02}
+# One random family each, so that an augmented image shows that family's draws only and the cross-rank checks
+# cover the workers' numpy and torch streams separately. The dataset turns every photometric op on by default.
+_OFF = {
+    "color_jitter_brightness": 0.0,
+    "color_jitter_contrast": 0.0,
+    "color_jitter_saturation": 0.0,
+    "gaussian_noise_std": 0.0,
+    "gaussian_blur_prob": 0.0,
+    "random_erasing_prob": 0.0,
+}
+AUGS = {
+    "photometric": dict(_OFF, color_jitter_brightness=0.1),  # parameters drawn with numpy in the workers
+    "noise": dict(_OFF, gaussian_noise_std=0.02),  # per-view noise drawn with torch in the workers
+}
 CONFIG = {"seed": 0, "batch_size": 2, "num_workers": 2, "pin_memory": False, "train_sub_sampling": 1.0}
 PATHS = {  # the three train loaders of create_fractional_train_loader
     "full": {},
@@ -29,13 +41,13 @@ def _keep_global_rng():
     random.setstate(states[2])
 
 
-@pytest.fixture
-def dataset(tmp_path):
+@pytest.fixture(params=AUGS)
+def dataset(tmp_path, request):
     # Identical mid-gray samples with one view count, so that an augmented image depends on its random draws only.
     # With one view count the ranks' streams stayed in step even before #149.
     path = tmp_path / "multiview.h5"
     write_multiview_h5(path, views_per_sample=[3] * 8, image_size=16, fill=128)
-    return SLEAPMultiViewDataset(str(path), augmentation_config=AUG)
+    return SLEAPMultiViewDataset(str(path), augmentation_config=AUGS[request.param])
 
 
 def _loader(monkeypatch, dataset, rank, epoch=0, world=2, **config):
