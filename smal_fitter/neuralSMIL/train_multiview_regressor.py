@@ -666,12 +666,13 @@ class MultiViewTrainingConfig:
         return TrainingConfig.get_learning_rate_for_epoch(epoch)
 
 
-def _step_if_finite(model, optimizer, clip_norm: float) -> bool:
+def _step_if_finite(model, optimizer, clip_norm: float, grad_norms: Optional[list] = None) -> bool:
     """Clip and take the optimizer step only if the gradients are finite; otherwise drop them.
 
     One non-finite gradient would otherwise turn every weight into NaN (clip_grad_norm_ rescales by the NaN norm).
     Under DDP the gradients are already all-reduced here (every mini-batch syncs, see train_epoch), so every rank
-    sees the same norm and takes the same branch. Returns True when the step was taken.
+    sees the same norm and takes the same branch. Returns True when the step was taken. A finite pre-clip gradient
+    norm is appended to grad_norms when given.
     """
     params = [p for p in model.parameters() if p.grad is not None]
     if not params:
@@ -681,10 +682,41 @@ def _step_if_finite(model, optimizer, clip_norm: float) -> bool:
     else:
         norm = torch.linalg.vector_norm(torch.stack([torch.linalg.vector_norm(p.grad.detach()) for p in params]))
     if torch.isfinite(norm):
+        if grad_norms is not None:
+            grad_norms.append(norm.item())
         optimizer.step()
         return True
     optimizer.zero_grad(set_to_none=True)
     return False
+
+
+# Optimizer steps in a row that may be skipped for non-finite gradients before the run stops. Once a run has diverged,
+# every forward pass overflows: the weights stop changing, and the run only burns GPU time and writes checkpoints of
+# the frozen weights. Run 5444996 skipped every step for 10 epochs on 16 GPUs; healthy runs have not skipped a step.
+MAX_CONSECUTIVE_SKIPPED_STEPS = 20
+
+
+class TrainingDiverged(RuntimeError):
+    """Every one of the last MAX_CONSECUTIVE_SKIPPED_STEPS optimizer steps was skipped for non-finite gradients."""
+
+
+def _update_skip_streak(streak: int, step_taken: bool, epoch: int, batch_idx: int) -> int:
+    """The number of consecutive skipped optimizer steps after this step (0 once a step is taken; the caller carries
+    it across epochs). Raises TrainingDiverged when it reaches MAX_CONSECUTIVE_SKIPPED_STEPS. Under DDP every rank
+    takes the same branch of _step_if_finite, so every rank raises at the same step. Mixed precision is not covered
+    (GradScaler skips such steps itself); the CLAIX configs train in fp32."""
+    if step_taken:
+        return 0
+    streak += 1
+    if streak >= MAX_CONSECUTIVE_SKIPPED_STEPS:
+        raise TrainingDiverged(
+            f"Training diverged: {streak} optimizer steps in a row were skipped because the gradients were not finite"
+            f" (epoch {epoch}, mini-batch {batch_idx}). Stopping instead of training on frozen weights. Restart from a"
+            " checkpoint_epoch_*.pth written before the divergence, usually with a lower learning rate. Checkpoints"
+            " written since the skipping began hold the frozen weights, and so may best_model.pth if the run was"
+            " resumed since then."
+        )
+    return streak
 
 
 def _add_components(sums: dict, counts: dict, components: dict) -> None:
@@ -754,6 +786,7 @@ def train_epoch(
     scaler=None,
     is_distributed: bool = False,
     rank: int = 0,
+    skip_streak: int = 0,
 ) -> dict:
     """
     Train for one epoch.
@@ -768,9 +801,11 @@ def train_epoch(
         scaler: GradScaler for mixed precision (optional)
         is_distributed: Whether using DDP
         rank: Process rank
+        skip_streak: Consecutive skipped optimizer steps at the end of the previous epoch (see _update_skip_streak)
 
     Returns:
-        Dictionary with training metrics
+        Dictionary with training metrics, including the skip_streak to pass to the next epoch. Raises TrainingDiverged
+        when MAX_CONSECUTIVE_SKIPPED_STEPS optimizer steps in a row were skipped.
     """
     model.train()
 
@@ -784,6 +819,7 @@ def train_epoch(
     num_batches = 0
     nonfinite_batches = 0  # batches whose loss was not finite (left out of the epoch averages)
     skipped_steps = 0  # optimizer steps dropped because the gradients were not finite
+    grad_norms = []  # pre-clip gradient norm of every step taken (the epoch summary prints mean, max and clipped steps)
     clip_norm = training_config.get("gradient_clip_norm", 0)
 
     accum_steps = training_config.get("gradient_accumulation_steps", 1)
@@ -832,16 +868,21 @@ def train_epoch(
                 if scaler is not None:
                     if training_config.get("gradient_clip_norm", 0) > 0:
                         scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
+                        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), training_config["gradient_clip_norm"])
+                        if torch.isfinite(norm):  # otherwise GradScaler skips this step
+                            grad_norms.append(norm.item())
                     scaler.step(optimizer)
                     scaler.update()
-                elif not _step_if_finite(model, optimizer, clip_norm):
-                    skipped_steps += 1
-                    if rank == 0 and (skipped_steps <= 5 or skipped_steps % 50 == 0):
-                        print(
-                            f"Warning: non-finite gradients after mini-batch {batch_idx}, optimizer step skipped"
-                            f" ({skipped_steps} this epoch)"
-                        )
+                else:
+                    step_taken = _step_if_finite(model, optimizer, clip_norm, grad_norms)
+                    if not step_taken:
+                        skipped_steps += 1
+                        if rank == 0 and (skipped_steps <= 5 or skipped_steps % 50 == 0):
+                            print(
+                                f"Warning: non-finite gradients after mini-batch {batch_idx}, optimizer step skipped"
+                                f" ({skipped_steps} this epoch)"
+                            )
+                    skip_streak = _update_skip_streak(skip_streak, step_taken, epoch, batch_idx)
             if loss_components is None:
                 continue
 
@@ -864,6 +905,8 @@ def train_epoch(
                     }
                 )
 
+        except TrainingDiverged:
+            raise
         except Exception as e:
             print(f"Error in batch {batch_idx}: {e}")
             import traceback
@@ -912,6 +955,12 @@ def train_epoch(
         "num_batches": num_batches,
         "nonfinite_batches": nonfinite_batches,
         "skipped_steps": skipped_steps,
+        "skip_streak": skip_streak,
+        # Pre-clip gradient norms of the steps taken: spikes before a divergence show up here first
+        "grad_norm_steps": len(grad_norms),
+        "grad_norm_mean": sum(grad_norms) / len(grad_norms) if grad_norms else float("nan"),
+        "grad_norm_max": max(grad_norms, default=float("nan")),
+        "clipped_steps": sum(n > clip_norm for n in grad_norms) if clip_norm and clip_norm > 0 else 0,
         "replica_divergence": divergence,
     }
 
@@ -2934,6 +2983,7 @@ def main(config: dict):
         "learning_rates": [],
     }
 
+    skip_streak = 0  # consecutive skipped optimizer steps, carried across epochs (stops a diverged run, train_epoch)
     for epoch in range(start_epoch, config["num_epochs"]):
         # Create train_loader for this epoch (supports fractional dataset sampling)
         # This ensures DDP processes use the same random subset when train_sub_sampling < 1
@@ -2983,7 +3033,9 @@ def main(config: dict):
                 scaler=scaler,
                 is_distributed=is_distributed,
                 rank=rank,
+                skip_streak=skip_streak,
             )
+        skip_streak = train_metrics["skip_streak"]
 
         training_history["train_loss"].append(train_metrics["avg_loss"])
         training_history["loss_components"].append(train_metrics["loss_components"])
@@ -3001,6 +3053,12 @@ def main(config: dict):
             if rank == 0:
                 print(f"\nEpoch {epoch} Summary:")
                 print(f"  Train Loss: {train_metrics['avg_loss']:.4f}")
+                if train_metrics["grad_norm_steps"]:
+                    print(
+                        f"  Grad norm (pre-clip): mean {train_metrics['grad_norm_mean']:.3g},"
+                        f" max {train_metrics['grad_norm_max']:.3g};"
+                        f" {train_metrics['clipped_steps']} of {train_metrics['grad_norm_steps']} steps clipped"
+                    )
                 print(f"  Val Loss: {val_metrics['avg_loss']:.4f}")
                 _print_component_metrics(
                     train_components=train_metrics.get("loss_components", {}),
