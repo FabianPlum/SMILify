@@ -2525,6 +2525,12 @@ def main(config: dict):
     if rank == 0:
         print("Loading multi-view dataset...")
 
+    # The model's input resolution (also sizes the renderer). The dataset downscales to it in the loader workers.
+    backbone_name = config["backbone_name"]
+    from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
+
+    input_resolution = config.get("input_resolution", BackboneFactory.get_default_input_resolution(backbone_name))
+
     aug_config = config.get("augmentation", {})
     aug_enabled = aug_config.get("enabled", False)
     dataset = SLEAPMultiViewDataset(
@@ -2534,6 +2540,7 @@ def main(config: dict):
         random_view_sampling=True,
         augment=False,  # Toggled on/off around train vs val; see training loop
         augmentation_config=aug_config if aug_enabled else None,
+        image_resolution=input_resolution,
         keypoint_source=config.get("keypoint_source", "reprojected"),
         raw_keypoint_min_confidence=config.get("raw_keypoint_min_confidence"),
         silhouette_path=config.get("silhouette_path"),
@@ -2700,13 +2707,6 @@ def main(config: dict):
     # Create model
     if rank == 0:
         print("\nCreating multi-view model...")
-
-    # Determine input resolution based on backbone
-    # This ensures the renderer is initialized with the correct size
-    backbone_name = config["backbone_name"]
-    from smal_fitter.neuralSMIL.backbone_factory import BackboneFactory
-
-    input_resolution = config.get("input_resolution", BackboneFactory.get_default_input_resolution(backbone_name))
 
     if rank == 0:
         print(f"Using input resolution: {input_resolution}x{input_resolution} (backbone: {backbone_name})")
