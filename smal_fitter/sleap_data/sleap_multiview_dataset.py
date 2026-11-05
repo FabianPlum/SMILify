@@ -1120,7 +1120,7 @@ class SLEAPMultiViewDataset(torch.utils.data.Dataset):
 
         # Gaussian noise (per-view realization — physical sensor noise). torch's float32 sampler draws
         # the same N(0, std^2) about 4x faster than np.random.normal in float64. DataLoader workers seed
-        # torch per worker and epoch, as they do numpy.
+        # torch per worker and epoch, as they do numpy; under multi-view DDP also per rank (#150).
         if self.aug_gaussian_noise_std > 0:
             noise = torch.randn(image.shape, dtype=torch.float32).numpy()
             noise *= np.float32(self.aug_gaussian_noise_std)

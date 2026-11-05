@@ -302,6 +302,23 @@ def _check_fraction_by_session(train_set, by_session):
         raise ValueError("dataset.train_sub_sampling_by_session: " + "; ".join(bad))
 
 
+def _train_loader_generator(config: dict, epoch: int, is_distributed: bool) -> Optional[torch.Generator]:
+    """The generator a train loader's workers take their seeds from: per (seed, epoch, rank) under DDP, else None.
+
+    Each DataLoader iterator draws a base seed from its generator (the default torch generator when it is None) and
+    seeds every worker's torch, numpy and random from it. set_random_seeds seeds the default generator alike on every
+    rank, so without this, worker w of every rank drew the same augmentation and view-subset stream (#150). The
+    sampler and the per-epoch subsets keep their own seeds, which all ranks share. Runs without DDP keep None and draw
+    what they drew before; any torchrun launch counts as DDP, even with one process. With num_workers=0 the dataset
+    draws from the main process's RNGs, which this leaves shared across ranks.
+    """
+    if not is_distributed:
+        return None
+    rank = torch.distributed.get_rank()
+    state = np.random.SeedSequence([config["seed"], epoch, rank]).generate_state(1, np.uint64)[0]
+    return torch.Generator().manual_seed(int(state) & (2**63 - 1))
+
+
 def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distributed: bool, collate_fn) -> DataLoader:
     """
     Create a DataLoader that samples a fraction of the training dataset.
@@ -309,6 +326,8 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
     This function enables efficient training on very large datasets by sampling
     a random subset of training examples at each epoch. The sampling is deterministic
     based on (config['seed'] + epoch), ensuring all DDP processes use the same subset.
+    Under DDP the workers' own random draws (augmentation, view subsets) are seeded
+    per rank as well, see _train_loader_generator.
 
     Args:
         train_set: The full training dataset (or Subset)
@@ -325,6 +344,7 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
     Returns:
         DataLoader configured with the fractional subset for this epoch
     """
+    generator = _train_loader_generator(config, epoch, is_distributed)
     train_sub_sampling = config.get("train_sub_sampling", 1.0)
     by_session = config.get("train_sub_sampling_by_session") or {}
 
@@ -357,6 +377,7 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
             pin_memory=config["pin_memory"],
             collate_fn=collate_fn,
             drop_last=True,
+            generator=generator,
         )
 
     if train_sub_sampling >= 1.0:
@@ -376,6 +397,7 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
             pin_memory=config["pin_memory"],
             collate_fn=collate_fn,
             drop_last=True,
+            generator=generator,
         )
 
     # Fractional sampling: create a deterministic subset for this epoch
@@ -410,6 +432,7 @@ def create_fractional_train_loader(train_set, epoch: int, config: dict, is_distr
         pin_memory=config["pin_memory"],
         collate_fn=collate_fn,
         drop_last=True,
+        generator=generator,
     )
 
 

@@ -5,15 +5,15 @@ import h5py
 import numpy as np
 
 
-def write_multiview_h5(path, views_per_sample, max_views=5, joints=3, image_size=8, textured=False):
+def write_multiview_h5(path, views_per_sample, max_views=5, joints=3, image_size=8, textured=False, fill=0):
     """The first n view slots of each sample valid, camera index = slot, no cameras or 3D.
 
-    Images are blank JPEGs of image_size px, or with textured=True a different random texture per view and
-    sample (fixed seed), so that image operations have something to act on.
+    Images are uniform JPEGs of value fill (default 0, blank) and image_size px, or with textured=True a
+    different random texture per view and sample (fixed seed), so that image operations have something to act on.
     """
     n = len(views_per_sample)
     rng = np.random.default_rng(0)
-    blank = np.zeros((image_size, image_size, 3), np.uint8)
+    blank = np.full((image_size, image_size, 3), fill, np.uint8)
     with h5py.File(path, "w") as f:
         meta = f.create_group("metadata").attrs
         meta.update(num_samples=n, max_views=max_views, n_joints=joints, n_pose=joints - 1, n_betas=1)
